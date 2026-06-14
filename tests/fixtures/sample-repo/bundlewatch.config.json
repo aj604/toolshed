@@ -1,0 +1,5 @@
+{
+  "budgets": [
+    { "path": "dist/bundle.js", "maxKb": 5 }
+  ]
+}
