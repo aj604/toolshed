@@ -83,6 +83,70 @@ template, one excellent example, and type-specific failure modes (e.g., runbooks
 must be copy-pasteable under incident pressure). `agent-context.md` defers to
 `writing-for-llms` for token economy rather than duplicating it.
 
+> **The strategy below supersedes this summary.** `writing-docs` is the load-bearing
+> policy every other skill cites, so its philosophy was designed deliberately rather than
+> derived only from baseline failures. See "writing-docs strategy" before implementing.
+
+## writing-docs strategy (load-bearing)
+
+Grounded in a prior-art research pass (2026-06-13) over Diátaxis, the Google developer
+style guide, Write the Docs, SRE runbook practice, README standards, and Anthropic's
+context-engineering guidance. Four decisions fix the policy's shape.
+
+### Decision 1 — Spine: verifiability
+
+**A doc is a set of claims that must be true of the repo.** This is the principle that
+wins when principles conflict. Unverifiable prose loses to a smaller all-true doc;
+aspirational "should" statements are forbidden (docs describe what *is*). Chosen for
+internal coherence: `writing-docs` mandates verifiable claims, `detecting-doc-drift`
+extracts and verifies those same claims, `doc-sync-automation` re-verifies on every diff —
+one contract, three enforcement points.
+
+### Decision 2 — Two claim classes (handles the verifiability spine's blind spot)
+
+The spine undersells conceptual content (the *why*, tradeoffs). Resolved by splitting
+claims, not softening the spine:
+
+- **VERIFIABLE claims** (default): commands, paths, symbols, behavior, structure. Must be
+  mechanically checkable. The drift engine owns them (Tier 1–3 verification).
+- **RATIONALE claims** (explicitly marked sections): the *why*, tradeoffs, rejected
+  alternatives. Allowed but quarantined to marked sections and **anchored** to a
+  commit/PR/date ("as of `<ref>`"). The drift engine checks the anchor's *relevance*
+  (does the decision still apply? is the code it references still there?), **not** the
+  claim's truth. Automation never silently rewrites rationale.
+
+Net: every line is either mechanically verifiable or explicitly flagged judgment with an
+audit anchor. ADRs remain out of scope, but lightweight rationale is no longer homeless.
+
+### Decision 3 — Taxonomy: artifact-primary, Diátaxis as checklist
+
+Organize guidance by the three artifacts actually shipped (README, runbook, CLAUDE.md),
+one reference file each. Use the four Diátaxis lenses (tutorial / how-to / reference /
+explanation) **only as a coverage checklist** inside each guide — never as page structure
+(literal four-page splits fragment small repos and have no README slot). Mappings:
+runbook → how-to; CLAUDE.md → reference + imperative rules; README → orientation +
+how-to + pointers.
+
+### Decision 4 — One bar, two renderings
+
+The verifiability spine and claim classes govern **all** docs. Audience changes only the
+**rendering** (tone, density, length), a layer on top of the one contract:
+
+- **Human rendering** (README, runbook): orient first, skimmable, some warmth OK.
+- **Agent rendering** (CLAUDE.md, repo maps): maximum token efficiency, pointers over
+  inline, no narrative — **defers to `writing-for-llms`**.
+
+Mental model: same contract, different surface. One spine to teach and to pressure-test.
+
+### What this means for the build
+
+- `writing-docs` SKILL.md leads with the spine + two claim classes + the document-at-all
+  counter-test + the placement table; rendering rules and the lens checklists live in the
+  artifact reference files.
+- The RED baselines (below) still run — they reveal *where agents violate this strategy*
+  naturally, which tells the skill where to spend emphasis and counters. Strategy sets the
+  target; baselines calibrate the aim.
+
 ## Skill 3: detecting-doc-drift
 
 **Core idea:** docs make verifiable claims; drift = a claim the repo no longer backs.
