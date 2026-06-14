@@ -18,11 +18,31 @@ Lifecycle the suite covers: **bootstrap → write → detect drift → auto-sync
 |---|-------|-------|---------|-------------------------------|
 | 1 | writing-docs | ✅ done (GREEN+REFACTOR) | `writing-docs/` | yes |
 | 2 | bootstrapping-docs | ✅ done (GREEN+REFACTOR) | `bootstrapping-docs/` | yes |
-| 3 | detecting-doc-drift | ⬜ not started — NEXT | — | — |
-| 4 | doc-sync-automation | ⬜ not started | — | — |
+| 3 | detecting-doc-drift | ✅ done (GREEN+REFACTOR) | `detecting-doc-drift/` | yes |
+| 4 | doc-sync-automation | ⬜ not started — NEXT | — | — |
 
 Build order is sequential: 3 needs 1+2 working (it rewrites via writing-docs standards);
 4 needs 3 working (it wires 3 into cron/PR triggers).
+
+### Skill 3 outcome (important — reshaped the skill)
+
+RED did **not** fail on recall: 12 baseline agents across full-audit + diff-scoped modes and
+2 model tiers all detected planted drift well (Opus perfectly with evidence; Haiku caught all
+behavioral drift). Capable agents are naturally strong *verifiers* — unlike the *generation*
+failures skills 1–2 targeted. Per Avery's steer ("the point is to declare the shape of this;
+it will be invoked programmatically and trigger updates"), the real, universal RED was on a
+different axis: **all 12 agents emitted free-form prose, not a machine-actionable result** an
+automation could parse to trigger updates. So skill 3 is a **procedural/contract skill**: it
+declares the deterministic extract→verify(tiered)→classify→**emit structured records** shape
+(fixed `kind`/`verdict` enums, evidence mandatory, two modes). GREEN+REFACTOR were run on
+**Haiku** (the realistic automation runner): closed loopholes = prose output, skipped
+UNVERIFIABLE, invented `kind`s, and anchor/line-number over-flagging. Full record:
+`tests/baselines/drift-red/{RED-findings,GREEN-results}.md`.
+
+**This sets up skill 4 (doc-sync-automation):** it consumes skill 3's structured output —
+diff-scoped mode is "what automation calls" — and adds the wiring/guardrails (triggers,
+blast-radius cap, idempotency, never-delete, evidence-in-PR). The drift *contract* now lives
+in skill 3; skill 4 is genuinely thin wiring on top, as the design intended.
 
 ## How to resume (next session)
 

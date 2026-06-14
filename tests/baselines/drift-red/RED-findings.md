@@ -80,3 +80,31 @@ Do not write `detecting-doc-drift` as a discipline skill against this evidence. 
 3. **Ship a thin procedural skill** aimed explicitly at cheaper automation runners, RED-
    tested on Haiku (the `make reset` / UNVERIFIABLE gap), scoped to "evidence + full
    coverage," not tiering.
+
+## Reframe (Avery's steer, 2026-06-14)
+
+> "the point is to declare the shape of this. it will be invoked programmatically and
+> trigger updates."
+
+This relocates the RED axis. The skill is **not** a discipline skill for interactive Claude
+and **not** primarily about recall — it is the **declared procedure + output contract** that
+automation (`doc-sync-automation`, skill 4) invokes programmatically to *trigger updates*.
+Tested against that purpose, the baseline DID fail — universally:
+
+- **No machine-actionable output (all 12/12 agents).** Every agent emitted free-form prose
+  for a human ("Not safe to commit", "thumbs up with caveats"), each with a different,
+  unparseable structure. Nothing a downstream trigger could consume: no stable per-claim
+  record of `{claim, kind, tier, verdict, evidence, location, fix}`. An automation calling
+  these agents could not reliably act on the result.
+- **No deterministic procedure.** Each agent improvised its own steps/format. "Declare the
+  shape" means a fixed extract→verify→classify→**emit structured result** pipeline so two
+  runs (or two models) produce the same shape.
+- **Completeness/classification gaps on the realistic runner (Haiku).** Skipped a Tier-1
+  grep-checkable claim (`make reset`) and never emitted UNVERIFIABLE — exactly the kind of
+  silent gap that makes automated triggers miss drift or mis-trigger.
+
+**This is the GREEN target:** a procedural/reference skill that declares (a) the two modes,
+(b) the extract→verify(tiered)→classify→emit pipeline with the evidence-required contract,
+(c) a structured result shape automation can parse to trigger updates, (d) the
+VERIFIED/STALE/UNVERIFIABLE vocabulary. GREEN = re-run the Haiku scenarios WITH the skill
+and confirm a parseable, complete, correctly-classified result.
