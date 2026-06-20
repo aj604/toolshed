@@ -36,6 +36,11 @@ governs *what to create and when to stop*; writing-docs governs *how each doc re
 3. **Operational stubs** — only if real operational knowledge surfaced during exploration;
    otherwise a one-line "runbooks: TODO" and move on.
 
+**Larger repo (more than a handful of services/packages/subsystems)?** The 2-doc set is for
+a single-unit repo. Once there are many units, the same minimal-high-leverage rule scales
+*per unit* into a grouped tree (root `AGENTS.md` router + a scoped doc per unit + generated
+reference) — see **repo-shape.md**. Do not build that structure for a small repo.
+
 ## The high-leverage checklist (what the agent file MUST capture)
 
 Only things an agent burns tokens rediscovering:
