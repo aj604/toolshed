@@ -18,12 +18,16 @@ callers never rely on a hand-counted one.
 """
 
 import json
+import re
 import sys
 
 KINDS = {"command", "path", "symbol", "behavior", "structure", "value"}
 VERDICTS = {"VERIFIED", "STALE", "UNVERIFIABLE"}
 TIERS = {1, 2, 3}
 REQUIRED = ("claim", "location", "kind", "tier", "verdict", "evidence", "fix")
+# location is `file:line` (single line or a range), e.g. CLAUDE.md:24 or worker.js:17-19.
+# It is the only field fixing-doc-drift uses to place an edit, so its shape is enforced.
+LOCATION_RE = re.compile(r"^.+:\d+(-\d+)?$")
 
 
 def load(src):
@@ -62,6 +66,10 @@ def validate_record(i, r):
         errs.append(f"{where}: tier {r.get('tier')!r} not in {sorted(TIERS)}")
     if not nonempty_str(r.get("evidence")):
         errs.append(f"{where}: evidence is mandatory for every verdict (incl. VERIFIED)")
+
+    loc = r.get("location")
+    if nonempty_str(loc) and not LOCATION_RE.match(loc.strip()):
+        errs.append(f"{where}: location {loc!r} must be 'file:line' (e.g. CLAUDE.md:24)")
 
     verdict, fix = r.get("verdict"), r.get("fix")
     if verdict == "STALE":

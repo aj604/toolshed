@@ -1,9 +1,9 @@
-# The Documentation Plugin
+# doc-lifecycle
 
 **Docs that an AI agent can trust — and that a machine can keep honest.**
 
 A suite of composable skills covering the documentation lifecycle —
-**bootstrap → write → detect drift** (with **sync** designed on top) — unified by one rule
+**bootstrap → write → detect → fix** (with **sync** designed on top) — unified by one rule
 strict enough to enforce mechanically: *every line of a doc is a claim that must be true of
 the repo.*
 
@@ -115,7 +115,7 @@ output (`make migrate` → `migrated: wrote .taskflow-state.json (schema 3)`), a
 **This is also the loop closing.** The two stale lines in the problem above —
 `make reset` and `schema 2 … exits 5` — are exactly what these correct lines (`make clean`,
 `schema 3 … exits 4`) decay into when code moves. `detecting-doc-drift` is what catches that
-decay and emits the fix that restores this state.
+decay and drafts the corrected claim; `fixing-doc-drift` lands the draft to restore this state.
 
 ---
 
@@ -151,8 +151,9 @@ right. They fail on subtler things, so the rules target exactly those:
   repo as it *is*.
 - **Rationale must be marked and anchored** to a `file:line`/commit, never woven into prose as
   timeless fact.
-- **Cut what the reader can infer.** A bloated CLAUDE.md makes an agent *ignore* your real
-  instructions (Anthropic's own guidance), so this bites hardest in agent docs.
+- **Cut what the reader can infer.** A bloated CLAUDE.md dilutes the signal an agent acts on —
+  the more inferable filler it wades through, the more it skims past your real instructions — so
+  this bites hardest in agent docs.
 
 ### 3. `detecting-doc-drift` — verdicts backed by evidence, in a format automation parses
 
@@ -227,12 +228,14 @@ The same claim-based language runs through the whole suite:
 ```
 writing-docs        mandates verifiable claims
 detecting-doc-drift extracts and verifies those same claims, with evidence
-doc-sync-automation re-verifies them on every diff and opens a PR
+fixing-doc-drift    lands the drafted fixes, one diff hunk per record
+doc-sync-automation runs detect→fix on every diff and opens a PR    (designed, next addition)
 ```
 
 That's the difference between four tools that fight and one system that composes. `writing-docs`
 makes claims a machine can check; `detecting-doc-drift` checks them and emits a record;
-automation acts on the record. Nothing in the chain has to *guess* whether a doc is honest.
+`fixing-doc-drift` acts on the record. Nothing in the chain has to *guess* whether a doc is
+honest — and the designed automation layer just runs that chain unattended.
 
 ## How it was built (why the rules are the right rules)
 
@@ -246,7 +249,8 @@ in baseline runs, not best-practice folklore:
   presented as real).
 - `detecting-doc-drift` was hardened on **Haiku** (the realistic automation runner) until it
   stopped emitting prose, stopped skipping quality claims, and stopped inventing enum values —
-  final run: 6/6 drift recall, 1/1 unverifiable caught, zero false positives.
+  final REFACTOR run: 6/6 drift recall, 1/1 unverifiable caught, zero false positives
+  (`tests/baselines/drift-red/GREEN-results.md`).
 
 ---
 

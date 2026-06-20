@@ -112,6 +112,15 @@ class FieldRules(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("evidence", r.stderr)
 
+    def test_location_without_line_rejected(self):
+        r = run([rec(location="CLAUDE.md")])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("location", r.stderr)
+
+    def test_location_line_range_accepted(self):
+        r = run([rec(location="services/worker/worker.js:17-19")])
+        self.assertEqual(r.returncode, 0, r.stderr)
+
 
 class FixRule(unittest.TestCase):
     def test_stale_without_fix_rejected(self):

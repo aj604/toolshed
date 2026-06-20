@@ -15,7 +15,7 @@ A personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/clau
 
 **Docs an AI agent can trust — and a machine can keep honest.**
 
-A suite of composable skills covering the documentation lifecycle — **bootstrap → write → detect drift** — unified by one rule strict enough to enforce mechanically: *every line of a doc is a claim that must be true of the repo.*
+A suite of composable skills covering the documentation lifecycle — **bootstrap → write → detect → fix** — unified by one rule strict enough to enforce mechanically: *every line of a doc is a claim that must be true of the repo.*
 
 ## The problem, in two lines
 
@@ -27,7 +27,7 @@ A `CLAUDE.md` says `make reset` resets state and the worker "accepts schema 2, e
 - schema 2 → exits 5           schema 3 → exits 4      (worker bumped)
 ```
 
-`detecting-doc-drift` flags each stale line and emits the fix — because every line was a checkable claim, not prose. [See the full worked example →](docs/PITCH.md)
+`detecting-doc-drift` flags each stale line and drafts the corrected claim; `fixing-doc-drift` lands those drafts surgically — because every line was a checkable claim, not prose. [See the full worked example →](docs/PITCH.md)
 
 ## What's in it
 
@@ -48,10 +48,11 @@ That one contract runs through the whole suite, which is what lets the pieces co
 ```
 writing-docs        mandates verifiable claims
 detecting-doc-drift extracts and verifies those same claims, with evidence
-doc-sync-automation re-verifies them on every diff and opens a PR   (designed, next addition)
+fixing-doc-drift    lands the drafted fixes, one diff hunk per record
+doc-sync-automation runs detect→fix on every diff and opens a PR    (designed, next addition)
 ```
 
-The fourth lifecycle step — `doc-sync-automation`, which turns drift records into an automatic docs-update PR — is the suite's next addition; the drift contract it builds on already lives in `detecting-doc-drift`. [Full rationale and the per-skill breakdown →](docs/PITCH.md)
+The four skills above ship today. The automation layer on top — `doc-sync-automation`, which runs detect→fix unattended on every diff and opens a docs-update PR — is the suite's next addition; it's wiring on top of the contract, which already lives in `detecting-doc-drift` and `fixing-doc-drift`. [Full rationale and the per-skill breakdown →](docs/PITCH.md)
 
 ## Try it locally
 

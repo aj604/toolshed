@@ -12,7 +12,7 @@ Markdown; the only executable code published is a skill helper script
   why this repo lives at `skills/toolshed/` rather than as a subdir of a larger repo.
 - `plugins/doc-lifecycle/` — the one published plugin. `.claude-plugin/plugin.json` is its
   manifest; `skills/` and `agents/` hold its contents.
-- `docs/` — `PITCH.md` (rationale + worked example), `plans/` (design + `HANDOFF.md`). Not published.
+- `docs/` — `PITCH.md` (rationale + worked example), `plans/` (design docs + `HANDOFF.md`). Not published.
 - `tests/` — `fixtures/` (runnable sample repos) and `baselines/` (RED/GREEN skill-test records).
   Not published.
 
@@ -31,7 +31,8 @@ Markdown; the only executable code published is a skill helper script
 - **Skills are built test-first** (RED → GREEN → REFACTOR with subagents) via the
   `superpowers:writing-skills` methodology; test records go under `tests/baselines/<skill>/`.
   Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
-  `docs/plans/2026-06-09-documentation-skills-suite-design.md`.
+  `docs/plans/2026-06-09-documentation-skills-suite-design.md` (suite) and
+  `docs/plans/2026-06-20-reference-doc-containment-design.md` (the `docs/reference/` shape).
 - **The one helper script has unit tests:** run
   `python3 tests/scripts/validate-drift-output_test.py` (stdlib `unittest`, no deps) after
   touching `detecting-doc-drift`'s `validate-drift-output.py` or its output contract.
