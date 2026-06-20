@@ -1,7 +1,9 @@
 # CLAUDE.md
 
-This repo is a **Claude Code plugin marketplace**, not an application. Nothing here builds or
-runs except the sample repos under `tests/fixtures/`; everything published is Markdown.
+This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
+Markdown; the only executable code published is a skill helper script
+(`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`, runs on
+`python3`, no deps). The sample repos under `tests/fixtures/` are the only other runnable code.
 
 ## Layout (pointers, not descriptions)
 
@@ -30,6 +32,9 @@ runs except the sample repos under `tests/fixtures/`; everything published is Ma
   `superpowers:writing-skills` methodology; test records go under `tests/baselines/<skill>/`.
   Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
   `docs/plans/2026-06-09-documentation-skills-suite-design.md`.
+- **The one helper script has unit tests:** run
+  `python3 tests/scripts/validate-drift-output_test.py` (stdlib `unittest`, no deps) after
+  touching `detecting-doc-drift`'s `validate-drift-output.py` or its output contract.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill). Agent-facing docs defer to `writing-for-llms` for
   token economy.

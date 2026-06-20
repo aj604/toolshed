@@ -34,7 +34,11 @@ wires triggers to this skill and acts on its output.
    human eye waves through.
 2. **Verify** each claim against the repo at the appropriate tier (below).
 3. **Classify** each: `VERIFIED` / `STALE` / `UNVERIFIABLE`.
-4. **Emit** the structured result (the contract below).
+4. **Emit** the structured result (the contract below), then **validate it mechanically**
+   before handing it off: pipe it through `scripts/validate-drift-output.py` (reads the JSON
+   on stdin or as a file arg). It enforces the enum/`fix`/`evidence`/summary rules and exits
+   nonzero on any violation — don't emit a result it rejects. It checks *shape*, not whether a
+   verdict is *right*; that judgment is still yours.
 
 ### Verification tiers + escalation rule
 
@@ -99,6 +103,11 @@ Rules: `kind` and `verdict` use the literal enum strings above — no invented v
 `fix` is non-null only for `STALE`. `evidence` is mandatory for **every** verdict, including
 VERIFIED (the grep/command/line that proves it). End with a one-line summary automation can
 gate on: `summary: {verified: N, stale: N, unverifiable: N}`.
+
+`scripts/validate-drift-output.py` enforces all of the above mechanically (run it on the
+result — see step 4). Pass it `{"records": [...], "summary": {...}}` and it also checks the
+summary counts against the records; pass a bare array and it recomputes the authoritative
+summary for you.
 
 ## Modes
 
