@@ -62,7 +62,8 @@ Same cut-test as everywhere else. It must **not**:
   which carry no such verifiability contract.
 
 It **earns its place only when units actually interact.** A repo of genuinely independent units
-needs no cross-unit picture — forcing one is the pyramid "fill-the-layer" trap below. Canonical
+needs no cross-unit picture — forcing one is the completeness-chasing the pyramid section
+below warns against. Canonical
 form: a small dependency/flow sketch (ASCII or mermaid) plus a few lines of prose, kept honest
 the way `writing-docs` governs any example — verifiable against the actual wiring, or omitted.
 
@@ -70,7 +71,7 @@ the way `writing-docs` governs any example — verifiable against the actual wir
 
 1. **One self-contained reference subtree — never colonize `docs/`.** The whole agent doc set
    lives under `docs/reference/`; the rest of `docs/` stays the team's. `docs/` is a shared
-   convention many repos already use their own way, so the agent set borrows one subdir, it
+   convention many repos already use their own way, so the agent set borrows one subdir; it
    doesn't claim the folder.
 2. **Group by domain, not doc-type.** `docs/reference/auth/`, not `docs/reference/guides/`.
    Domain names are grep-discoverable and match how people ask "where's auth." (This governs
@@ -122,7 +123,6 @@ chase completeness, which is the exact failure this skill exists to prevent. Uni
 count; the ratio only flags gaps.
 
 ## Failure modes (watch for)
-
 
 - **Per-unit `CLAUDE.md` files.** Couples layout to lazy subtree loading; rename to
   `overview.md` and route to it from the root.

@@ -135,8 +135,9 @@ scope: it refuses to catalog what an agent can already read.
 | Runtime/toolchain version if non-obvious | Invented sections: badges, changelogs, contributing guides |
 
 The test for every line: **would an agent make a mistake without it?** If not, link to the
-file instead of transcribing it. Output always ends with a `## Not yet documented` note, so
-scope is a recorded decision, not a silent omission.
+file instead of transcribing it. The bootstrap ends with a `## Not yet documented` note, so
+scope is a recorded decision at creation time, not a silent omission — durable tracking of
+unbuilt work then graduates to a planning/handoff doc.
 
 ### 2. `writing-docs` — the quality bar every doc is held to
 
