@@ -45,8 +45,3 @@ runs except the sample repos under `tests/fixtures/`; everything published is Ma
 - **`tests/fixtures/taskflow` needs `make setup` after checkout** before anything runs — it
   relinks npm workspaces (`tests/fixtures/taskflow/Makefile:1`, comment). Then `make migrate`
   before `make dev`/`make test`, or api and worker exit nonzero.
-
-## Not yet documented
-
-- `doc-sync-automation` (4th lifecycle skill) — designed, not built. See `docs/PITCH.md` and
-  `docs/plans/HANDOFF.md`.
