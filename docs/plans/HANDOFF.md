@@ -19,7 +19,8 @@ Lifecycle the suite covers: **bootstrap → write → detect drift → auto-sync
 | 1 | writing-docs | ✅ done (GREEN+REFACTOR) | `writing-docs/` | yes |
 | 2 | bootstrapping-docs | ✅ done (GREEN+REFACTOR) | `bootstrapping-docs/` | yes |
 | 3 | detecting-doc-drift | ✅ done (GREEN+REFACTOR) | `detecting-doc-drift/` | yes |
-| 4 | doc-sync-automation | ⬜ not started — NEXT | — | — |
+| 4 | fixing-doc-drift (the human-invoked fix step) | ✅ done (GREEN+REFACTOR) | `fixing-doc-drift/` | yes |
+| 5 | auto-trigger layer (cron/PR) | ⬜ deferred — non-skill wiring, not started | — | — |
 
 Build order is sequential: 3 needs 1+2 working (it rewrites via writing-docs standards);
 4 needs 3 working (it wires 3 into cron/PR triggers).
@@ -85,6 +86,27 @@ the `llm-doc-writer` agent). The contract is hoisted into the door you already o
   reader — then route" router) + `agent-context.md`; `writing-for-llms/` deleted; dangling refs
   fixed in `CLAUDE.md`, `README.md`, `bootstrapping-docs/SKILL.md`, `PITCH.md`, this design doc.
 - **Deployed:** merged `~/.claude/skills/writing-docs/`; removed `~/.claude/skills/writing-for-llms/`.
+
+## Update 2026-06-20 (later still) — `fixing-doc-drift` built (the fix step)
+
+The "skill 4" fix step is built — but as **`fixing-doc-drift`**, a human-invoked apply step, not
+the auto `doc-sync-automation`. It consumes `detecting-doc-drift`'s structured records and lands
+the fixes. The `auto` (cron/PR triggers, PR packaging, idempotency) is deliberately deferred to
+non-skill wiring (now "skill 5" in the table, ⬜).
+
+- **Built test-first** (RED → GREEN → REFACTOR), records: `tests/baselines/fixing-drift-red/`.
+  Reused the `drift-red` fixture; the fixer's input is the exact record set `detecting-doc-drift`
+  emits (`drift-report.json`). RED axis (tier-independent, writable): **over-reach** — given a
+  report, a baseline (Sonnet) *deleted* the UNVERIFIABLE line, conflating "sync to the report"
+  with "apply the full writing-docs cleanup." Opus held the line by restraint → made it a written
+  rule. GREEN: same Sonnet, with the skill, preserved the line and stayed scoped. REFACTOR: held
+  under authority pressure ("just regenerate the whole doc").
+- **The skill is thin apply-discipline:** act only on STALE fixes; never delete (flag UNVERIFIABLE);
+  no "while I'm here"; land the drafted fix as-is and dispatch `writing-docs` only for structural
+  rewrites; blast-radius stop; evidence travels with the change.
+- **Lifecycle now complete:** bootstrap → write → detect → fix. Refs wired in `detecting-doc-drift`
+  SKILL.md, `README.md`, `PITCH.md`, `marketplace.json` tagline, and the design doc.
+- **Deployed:** `~/.claude/skills/fixing-doc-drift/`.
 
 ## How to resume (next session)
 

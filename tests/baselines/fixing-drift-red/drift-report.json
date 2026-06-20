@@ -1,0 +1,124 @@
+{
+  "doc": "drifted-CLAUDE.md",
+  "repo": "tests/fixtures/taskflow",
+  "records": [
+    {
+      "claim": "Reset state = `make reset`",
+      "location": "drifted-CLAUDE.md:16",
+      "kind": "command",
+      "tier": 1,
+      "verdict": "STALE",
+      "evidence": "Makefile has `clean:`, no `reset:` target",
+      "fix": "Reset state = `make clean`"
+    },
+    {
+      "claim": "api listens on port `3000` by default",
+      "location": "drifted-CLAUDE.md:24",
+      "kind": "value",
+      "tier": 2,
+      "verdict": "STALE",
+      "evidence": "services/api/server.js:21 — `Number(process.env.PORT) || 8080`",
+      "fix": "**api listens on port `8080` by default** (`services/api/server.js:21`); override with `PORT`."
+    },
+    {
+      "claim": "Worker only accepts state schema 2; stale migration exits 5",
+      "location": "drifted-CLAUDE.md:25",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "STALE",
+      "evidence": "services/worker/worker.js:17-19 — `if (schema !== 3) ... process.exit(4)`",
+      "fix": "**Worker only accepts state schema 3.** A stale migration makes it exit `4` (`services/worker/worker.js:17`)."
+    },
+    {
+      "claim": "a successful `POST /tasks` returns `200`",
+      "location": "drifted-CLAUDE.md:32",
+      "kind": "behavior",
+      "tier": 3,
+      "verdict": "STALE",
+      "evidence": "services/api/server.js:49 — `res.writeHead(201, …)`",
+      "fix": "a successful `POST /tasks` returns `201`"
+    },
+    {
+      "claim": "`packages/shared/index.js` exports include `formatTask`",
+      "location": "drifted-CLAUDE.md:34",
+      "kind": "symbol",
+      "tier": 1,
+      "verdict": "STALE",
+      "evidence": "packages/shared/index.js exports only makeId, validateTask, normalizePriority — no formatTask",
+      "fix": "`packages/shared/index.js` — `makeId`, `validateTask`, `normalizePriority`; used by both services."
+    },
+    {
+      "claim": "migrate script is `scripts/setup-db.js`",
+      "location": "drifted-CLAUDE.md:35",
+      "kind": "path",
+      "tier": 1,
+      "verdict": "STALE",
+      "evidence": "scripts/migrate.js exists; scripts/setup-db.js does not",
+      "fix": "`scripts/migrate.js` — stamps `.taskflow-state.json`. `scripts/lint.js` — parse-check only, not eslint."
+    },
+    {
+      "claim": "Install deps = `make setup`",
+      "location": "drifted-CLAUDE.md:9",
+      "kind": "command",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "Makefile `setup: npm install`",
+      "fix": null
+    },
+    {
+      "claim": "`make test` runs `node --test packages/*/test/`",
+      "location": "drifted-CLAUDE.md:18",
+      "kind": "command",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "Makefile `test:` recipe matches",
+      "fix": null
+    },
+    {
+      "claim": "Node `>=20.6.0` required",
+      "location": "drifted-CLAUDE.md:27",
+      "kind": "value",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "package.json engines `>=20.6.0`",
+      "fix": null
+    },
+    {
+      "claim": "api requires `DATABASE_URL` or exits `1`",
+      "location": "drifted-CLAUDE.md:23",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "services/api/server.js:16-18",
+      "fix": null
+    },
+    {
+      "claim": "Missing state file → api & worker exit `3`",
+      "location": "drifted-CLAUDE.md:22",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "server.js:12-14, worker.js:10-12",
+      "fix": null
+    },
+    {
+      "claim": "api routes `/health` and `POST /tasks`",
+      "location": "drifted-CLAUDE.md:32",
+      "kind": "symbol",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "services/api/server.js:25,30",
+      "fix": null
+    },
+    {
+      "claim": "worker is reasonably fast and handles most workloads without tuning",
+      "location": "drifted-CLAUDE.md:28",
+      "kind": "value",
+      "tier": 1,
+      "verdict": "UNVERIFIABLE",
+      "evidence": "no metric or threshold to check against the repo",
+      "fix": null
+    }
+  ],
+  "summary": { "verified": 6, "stale": 6, "unverifiable": 1 }
+}
