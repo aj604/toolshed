@@ -50,5 +50,3 @@ runs except the sample repos under `tests/fixtures/`; everything published is Ma
 
 - `doc-sync-automation` (4th lifecycle skill) — designed, not built. See `docs/PITCH.md` and
   `docs/plans/HANDOFF.md`.
-- Per-skill behavior — read each `SKILL.md`; they are self-describing.
-- Fixture internals — read the fixture's own `Makefile` / `package.json`.
