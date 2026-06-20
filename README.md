@@ -5,11 +5,9 @@ A personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/clau
 ## Install
 
 ```
-/plugin marketplace add averyjones/toolshed
+/plugin marketplace add aj604/toolshed
 /plugin install doc-lifecycle@toolshed
 ```
-
-> Replace `averyjones/toolshed` with this repo's actual `owner/repo` slug (or a full git URL) once it's pushed.
 
 ---
 
@@ -18,6 +16,18 @@ A personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/clau
 **Docs an AI agent can trust — and a machine can keep honest.**
 
 A suite of composable skills covering the documentation lifecycle — **bootstrap → write → detect drift** — unified by one rule strict enough to enforce mechanically: *every line of a doc is a claim that must be true of the repo.*
+
+## The problem, in two lines
+
+A `CLAUDE.md` says `make reset` resets state and the worker "accepts schema 2, exits 5." Code moves; the doc doesn't. Now an agent runs a command that no longer exists and writes an error handler for the wrong exit code:
+
+```diff
+  what the doc claims          the code as of today
+- make reset                   make clean              (target renamed)
+- schema 2 → exits 5           schema 3 → exits 4      (worker bumped)
+```
+
+`detecting-doc-drift` flags each stale line and emits the fix — because every line was a checkable claim, not prose. [See the full worked example →](docs/PITCH.md)
 
 ## What's in it
 
@@ -31,31 +41,22 @@ A suite of composable skills covering the documentation lifecycle — **bootstra
 
 ## The contract: a doc is a set of claims
 
-Every line is exactly one of two kinds:
+Every line is either a **verifiable claim** — a command, path, symbol, behavior, or structure checkable against the repo *as it is now* — or a **rationale claim**, the "why," quarantined to a marked section and **anchored** to a `file:line` ref. Anything else — marketing prose, an aspirational "should," a restatement of the file tree — gets cut. Because the bar is mechanical, tooling enforces it instead of a reviewer's patience.
 
-- **Verifiable claim** — a command, path, symbol, behavior, output, or structure checkable against the repo *as it is now* (`make test`, `config lives in src/config.ts`, `retries 3 times with backoff`).
-- **Rationale claim** — the "why," allowed but quarantined to a marked section and **anchored** to a source ref (`> **Why (as of bin/cli.js:34):** reads the whole buffer because…`).
-
-If a line is neither — marketing prose, an aspirational "should," a restatement of the file tree — it gets cut. Because the bar is mechanical, tooling can enforce it instead of a reviewer's patience.
-
-## Why one contract, three enforcement points
+That one contract runs through the whole suite, which is what lets the pieces compose instead of fight:
 
 ```
 writing-docs        mandates verifiable claims
 detecting-doc-drift extracts and verifies those same claims, with evidence
-doc-sync-automation re-verifies them on every diff and opens a PR   (next addition)
+doc-sync-automation re-verifies them on every diff and opens a PR   (designed, next addition)
 ```
 
-`writing-docs` makes claims a machine can check; `detecting-doc-drift` checks them and emits a record; automation acts on the record. Nothing in the chain has to *guess* whether a doc is honest.
+The fourth lifecycle step — `doc-sync-automation`, which turns drift records into an automatic docs-update PR — is the suite's next addition; the drift contract it builds on already lives in `detecting-doc-drift`. [Full rationale and the per-skill breakdown →](docs/PITCH.md)
 
-The fourth lifecycle step — `doc-sync-automation`, which turns drift records into an automatic docs-update PR — is the suite's next addition; the drift contract it builds on already lives in `detecting-doc-drift`.
-
-For the full rationale and a worked example, see [`docs/PITCH.md`](docs/PITCH.md).
-
-## Try it locally (before publishing)
+## Try it locally
 
 ```
-/plugin marketplace add /Users/averyjones/Repos/skills/toolshed
+/plugin marketplace add /path/to/toolshed
 /plugin install doc-lifecycle@toolshed
 ```
 
@@ -74,3 +75,7 @@ plugins/doc-lifecycle/            # the published plugin
 docs/                             # design, pitch, plans (not published)
 tests/                            # RED/GREEN records + fixtures (not published)
 ```
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).

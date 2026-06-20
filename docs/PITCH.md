@@ -2,9 +2,10 @@
 
 **Docs that an AI agent can trust — and that a machine can keep honest.**
 
-A suite of four composable skills covering the documentation lifecycle —
-**bootstrap → write → detect drift → sync** — unified by one rule strict enough to enforce
-mechanically: *every line of a doc is a claim that must be true of the repo.*
+A suite of composable skills covering the documentation lifecycle —
+**bootstrap → write → detect drift** (with **sync** designed on top) — unified by one rule
+strict enough to enforce mechanically: *every line of a doc is a claim that must be true of
+the repo.*
 
 ---
 
