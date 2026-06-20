@@ -33,12 +33,10 @@ runs except the sample repos under `tests/fixtures/`; everything published is Ma
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill). Agent-facing docs defer to `writing-for-llms` for
   token economy.
-- **Multi-unit repos get a `docs/reference/` convention:** the skill prescribes containing a
-  larger repo's whole agent doc set (cross-unit `architecture.md`, per-unit `overview.md`,
-  generated reference) in one self-contained `docs/reference/` subtree rather than scattering it
-  across `docs/` root (`plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`). This repo
-  is a single-unit marketplace, so its own `docs/` stays flat (`PITCH.md`, `plans/`) — do not add
-  a `docs/reference/` tier here.
+- **This repo's `docs/` stays flat** (`PITCH.md`, `plans/`) — a single-unit marketplace. The
+  `docs/reference/` convention the plugin prescribes for larger repos
+  (`plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`) does not apply here; don't
+  add one.
 
 ## Gotchas
 
