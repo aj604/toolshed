@@ -102,11 +102,24 @@ maintenance. A hand-written index that **lists files** is a cached `ls` that dri
 "directory tree mirroring `ls`" anti-pattern, now with an index-by-omission no one flags.
 
 An index is worth writing only when it carries what `ls` can't: **when-to-read intent.**
+Take the root router's map of the `docs/reference/` tree:
+
+❌ a bare list — a cached `ls` that drifts, cut it:
 
 ```
-❌ ls already shows this — cut it:    ✅ ls can't show this — keep it:
-- auth/oauth2.md                      - oauth2.md — read when tokens expire early
-- auth/jwt.md                         - jwt.md    — token signing/rotation; start here for 401s
+## Map
+- architecture.md
+- auth/overview.md
+- payments/overview.md
+```
+
+✅ the same map carrying when-to-read intent — keep it:
+
+```
+## Map
+- architecture.md      — start here: how auth, payments, and billing fit together
+- auth/overview.md     — token issuing/rotation; start here for 401s
+- payments/overview.md — charge lifecycle; webhook retries and idempotency
 ```
 
 Apply the cut-test per line: would removing it make the reader open the wrong doc? Bare
