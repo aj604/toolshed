@@ -26,6 +26,11 @@ performance in those repos and keeping docs alive automatically.
 
 ## Architecture
 
+> **Update 2026-06-20:** `writing-for-llms` has been **merged into `writing-docs`** — one door
+> that routes by audience (human vs. agent + density) and dispatches the `llm-doc-writer` agent
+> for heavy agent-facing jobs. References to `writing-for-llms` as a separate skill below are
+> historical; see `HANDOFF.md` and `tests/baselines/writing-docs-merge-red/`.
+
 ```
 bootstrapping-docs ──┐
 (bare repo → baseline)│

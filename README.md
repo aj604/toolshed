@@ -34,9 +34,8 @@ A `CLAUDE.md` says `make reset` resets state and the worker "accepts schema 2, e
 | Component | Type | Use it when |
 |-----------|------|-------------|
 | `bootstrapping-docs` | skill | Pointing at an undocumented repo — produces the smallest high-leverage doc set, then deliberately stops. |
-| `writing-docs` | skill | Writing or editing any doc — enforces that every line is a verifiable claim, with rationale marked and anchored. |
+| `writing-docs` | skill | Writing or editing any doc, human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
 | `detecting-doc-drift` | skill | Auditing docs against the code — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
-| `writing-for-llms` | skill | Rewriting docs for LLM consumption — signal-per-token, pointers over inline copies, scannable structure. |
 | `llm-doc-writer` | agent | A dispatchable subagent that produces LLM-optimized documentation with maximum context efficiency. |
 
 ## The contract: a doc is a set of claims

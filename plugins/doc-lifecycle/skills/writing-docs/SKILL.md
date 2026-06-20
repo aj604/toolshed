@@ -1,6 +1,6 @@
 ---
 name: writing-docs
-description: Use when writing or editing any documentation (README, runbook, CLAUDE.md/AGENTS.md, guides), or when tempted to add example output, install steps, or "why" prose to a doc - enforces that every line is a claim verifiable against the repo, with rationale marked and anchored, so docs can be kept honest by drift detection.
+description: Use when writing or editing ANY documentation — README, runbook, CLAUDE.md/AGENTS.md, guides, or agent-facing context packs — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. Covers both human and AI/agent readers (token bloat, context rot); every line must be a claim verifiable against the repo, with rationale marked and anchored so docs stay drift-checkable.
 ---
 
 # Writing Docs
@@ -66,13 +66,35 @@ this? If yes, link to it; don't duplicate it into a doc that will drift.
 | On-call mid-incident, under pressure | runbook | runbooks.md |
 | AI agent starting a session in the repo | CLAUDE.md / AGENTS.md | agent-context.md |
 
-## One bar, two renderings
+## One bar, every reader — then route
 
-The contract above governs **every** doc. Audience changes only the *rendering*:
+The contract above governs **every** doc; verifiability never bends. Audience and job size
+decide only *how dense* and *who writes it* — never *whether it's true*. This is the one door
+for doc writing: don't go looking for a second skill. Two questions, answered once:
 
-- **Human** (README, runbook): orient first, skimmable, some warmth OK.
-- **Agent** (CLAUDE.md): maximum signal-per-token, pointers over inline copies, no
-  narrative. Defers to the `writing-for-llms` skill for token economy.
+**1. Who reads it?**
+
+- **Human** (README, runbook, guide): orient first, skimmable, some warmth OK.
+- **Agent** (CLAUDE.md/AGENTS.md, context pack): **density is mandatory, not optional.**
+  Maximum signal-per-token, pointers over inline copies, no narrative. The reader can read the
+  repo on demand — spend tokens only on what it *can't* reconstruct. This is Rule 4 at full
+  strength: an agent doc that "reads fine" but restates inferable facts has **failed**, even if
+  every line is true.
+
+**2. How big is the job?**
+
+- **A line or a section, and you're already in the repo** → write it inline, applying the bar.
+- **A whole doc, or it needs real repo exploration to verify** → dispatch, so that exploration
+  stays out of your context:
+  - **human-facing** → a generalist subagent carrying this skill.
+  - **agent-facing** → the **`llm-doc-writer` agent** — it owns the densify+verify method and
+    runs in its own context. Pass it: *what to write from* (source path, raw content, or topic +
+    findings), *the repo path* (puts it in verify mode — anchors every claim to `file:line`,
+    runs safe commands), and *the output path*. A one-line agent-doc tweak isn't worth a
+    dispatch — apply the density rule inline.
+
+**Do not stop at the first thing that feels sufficient.** If the reader is an agent, the density
+pass — inline or via `llm-doc-writer` — is part of *this* job, not a separate skill you may skip.
 
 ## Red flags — STOP
 
@@ -80,10 +102,15 @@ The contract above governs **every** doc. Audience changes only the *rendering*:
 - Writing "because…" / "the reason is…" in body prose → move to a marked, anchored section.
 - `npm install <thing>`, "just run X" you haven't confirmed exists → verify or cut.
 - A sentence the reader could get from reading one obvious file → cut it.
+- Reader is an agent and you wrote it like a human doc (narrative, restated-inferable facts) →
+  the density pass is owed; it is not optional.
+- Agent doc that's a whole-doc or needs verification, and you didn't dispatch `llm-doc-writer`
+  → you skipped the specialist that enforces density+anchoring in its own context.
+- "This skill covers it, I'll just start" on an agent doc → you still owe the density half.
 
 ## Reference files
 
 - **readme.md** — README structure, coverage checklist, one verified example, failure modes.
 - **runbooks.md** — runbook structure for 3am usability; copy-pasteable steps, real output.
-- **agent-context.md** — CLAUDE.md/AGENTS.md; the cut-test, pointers-over-inline, defers to
-  `writing-for-llms`.
+- **agent-context.md** — CLAUDE.md/AGENTS.md; the cut-test, pointers-over-inline, when to
+  dispatch the `llm-doc-writer` agent.

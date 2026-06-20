@@ -2,7 +2,10 @@
 
 Reader: an AI agent starting a session in the repo. Maps to the **reference + imperative
 rules** lenses. Agent rendering: maximum signal-per-token, no narrative, pointers over
-inline copies. **Defers to the `writing-for-llms` skill** for token economy — use it.
+inline copies — density is mandatory here, not optional. For a whole-doc or
+verification-heavy job, **dispatch the `llm-doc-writer` agent** (it owns the densify+verify
+method and its own context — see SKILL.md "One bar, every reader — then route"). A one-line
+tweak: apply the density rules below inline.
 
 ## The cut test (the dominant discipline here)
 

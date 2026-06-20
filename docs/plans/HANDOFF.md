@@ -63,6 +63,29 @@ agent MD; the skill is a thin dispatch/entry point). Scoped as a one-off — the
   clean, anchored, verified doc (`agent-e2e.md`). See `GREEN-results.md` "E2E".
 - **Deployed:** `~/.claude/agents/llm-doc-writer.md`, `~/.claude/skills/writing-for-llms/SKILL.md` (reload to pick up).
 
+## Update 2026-06-20 (later) — `writing-for-llms` merged into `writing-docs` (one door)
+
+Reversed the earlier "thin skill + fat agent, one-off" split. The thin `writing-for-llms` skill
+was an intermediary door; the `llm-doc-writer` **agent** (the fat part) stays. Rationale: a user
+shouldn't have to pick between two doc skills — `writing-docs` is now the single door that routes
+by audience (human standard vs. + density) and by job weight (inline vs. dispatch a generalist /
+the `llm-doc-writer` agent). The contract is hoisted into the door you already open.
+
+- **Built test-first** (RED → GREEN → REFACTOR). Records: `tests/baselines/writing-docs-merge-red/`.
+  RED axis (tier-independent, writable): the two-door ecosystem dead-ends the agent — it grabs
+  `writing-docs` (which named CLAUDE.md), "feels complete, ends the search," never reaches the
+  density discipline or dispatches `llm-doc-writer`; and the deferred density bar was under-applied
+  (a baseline *added* inferable facts). Output-density was the WRONG axis (capability masks it —
+  same lesson as the llm-doc RED).
+- **GREEN:** merged door dispatched `llm-doc-writer` and withheld the inferable facts the baseline
+  added. **REFACTOR:** confirmed no over-dispatch on one-line edits ("size gates inline-vs-dispatch;
+  audience only picks the executor"). GREEN-2 caveat: the fix is real only once `writing-for-llms`
+  is gone from the repo AND `~/.claude/skills` — an unrecommended-but-present door still competes.
+- **Changes:** `writing-docs` SKILL.md (description absorbs the LLM triggers; "One bar, every
+  reader — then route" router) + `agent-context.md`; `writing-for-llms/` deleted; dangling refs
+  fixed in `CLAUDE.md`, `README.md`, `bootstrapping-docs/SKILL.md`, `PITCH.md`, this design doc.
+- **Deployed:** merged `~/.claude/skills/writing-docs/`; removed `~/.claude/skills/writing-for-llms/`.
+
 ## How to resume (next session)
 
 1. Read `docs/plans/2026-06-09-documentation-skills-suite-design.md` — especially the
