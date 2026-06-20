@@ -30,6 +30,11 @@ performance in those repos and keeping docs alive automatically.
 > that routes by audience (human vs. agent + density) and dispatches the `llm-doc-writer` agent
 > for heavy agent-facing jobs. References to `writing-for-llms` as a separate skill below are
 > historical; see `HANDOFF.md` and `tests/baselines/writing-docs-merge-red/`.
+>
+> **Also 2026-06-20:** the "skill 4" fix step is built as **`fixing-doc-drift`** — a human-invoked
+> apply step (consume `detecting-doc-drift` records → land fixes surgically; never delete). The
+> `doc-sync-automation` *auto*-trigger layer (cron/PR) described below is **deferred to non-skill
+> wiring**; the fix judgment now lives in `fixing-doc-drift`. See `tests/baselines/fixing-drift-red/`.
 
 ```
 bootstrapping-docs ──┐

@@ -205,10 +205,18 @@ sends the agent to current source). That density discipline lives in `writing-do
 door for every doc — which dispatches the `llm-doc-writer` agent for a whole-doc agent-facing job,
 so the specialist runs in its own context and anchors every claim.
 
-> *The fourth lifecycle step — `doc-sync-automation`, which turns `detecting-doc-drift`'s
-> structured output into an automatic docs-update PR on every merge — is designed on top of
-> the contract above and is the suite's next addition. It is wiring only; the drift contract
-> already lives in `detecting-doc-drift`.*
+### 5. `fixing-doc-drift` — apply the report, and nothing else
+
+The lifecycle closes here: `fixing-doc-drift` consumes `detecting-doc-drift`'s structured records
+and lands the fixes — **surgically**. It applies only the `STALE` records' drafted fixes; leaves
+every `VERIFIED` passage byte-identical; **never deletes** (an `UNVERIFIABLE` line gets flagged
+for a human, not cut); never touches a passage the report didn't flag; and stops to escalate if
+the blast radius is large. That discipline is what keeps an automated sync *reviewable* — every
+edit in the diff maps one-to-one to a record and its evidence.
+
+> *The only remaining piece is an optional auto-trigger layer (cron / PR) that runs detect→fix
+> unattended. That is wiring on top of the contract — not new judgment; the fix discipline already
+> lives in `fixing-doc-drift`.*
 
 ---
 
