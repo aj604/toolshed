@@ -5,13 +5,14 @@ rules** lenses. Agent rendering: maximum signal-per-token, no narrative, pointer
 inline copies — density is mandatory here, not optional. For a whole-doc or
 verification-heavy job, **dispatch the `llm-doc-writer` agent** (it owns the densify+verify
 method and its own context — see SKILL.md "One bar, every reader — then route"). A one-line
-tweak: apply the density rules below inline.
+tweak: apply the density rules below inline. (Those rules are the lite mirror of the agent's
+canonical method; if the two diverge, the agent file wins.)
 
 ## The cut test (the dominant discipline here)
 
-For every line: **would removing it cause the agent to make a mistake?** If not, cut it.
-Anthropic's own guidance: a bloated CLAUDE.md causes the agent to ignore your actual
-instructions. This test bites harder here than anywhere else.
+For every line: **would removing it cause the agent to make a mistake?** If not, cut it. A
+bloated CLAUDE.md dilutes the signal — the more inferable filler the agent wades through, the
+more it skims past your actual instructions. This test bites harder here than anywhere else.
 
 Cut on sight:
 - Anything derivable from the code, types, or file tree (layout tables, "this is ESM",

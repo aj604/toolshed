@@ -5,6 +5,9 @@ Use this once a repo crosses **more than a handful of independently-comprehensib
 (one CLAUDE.md + README) is the right answer — do not build the structure here for a small
 repo; that is just bloat with folders.
 
+**If in doubt, you're a small repo.** Default to the 2-doc set and let this structure emerge
+only when a specific unit visibly needs its own doc — never build the tree pre-emptively.
+
 ## The scaling principle
 
 **The doc set scales with the number of units, not lines of code.** A "unit" is a part of

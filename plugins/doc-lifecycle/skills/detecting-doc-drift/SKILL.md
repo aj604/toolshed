@@ -1,6 +1,6 @@
 ---
 name: detecting-doc-drift
-description: Use when auditing documentation against the code it describes, checking whether a README/CLAUDE.md/runbook is still accurate, or finding which doc passages a code change invalidates — and whenever drift detection is invoked programmatically (by a PR check, nightly sync, or doc-sync-automation) and must emit a structured, parseable result.
+description: Use when auditing documentation against the code it describes, checking whether a README/CLAUDE.md/runbook is still accurate, or finding which doc passages a code change invalidates — and whenever drift detection is invoked programmatically (by a PR check or nightly sync) and must emit a structured, parseable result.
 ---
 
 # Detecting Doc Drift
@@ -21,8 +21,8 @@ Two non-negotiables make the output usable by automation:
 **REQUIRED SUB-SKILL:** Use **writing-docs** for any fix you propose — every `fix` must meet
 its bar (real output, no aspirational claims, marked+anchored rationale). This skill finds
 and classifies drift; writing-docs governs how the correction reads. **`fixing-doc-drift`**
-consumes this skill's records and applies the fixes (an optional auto-trigger layer can wire
-detect→fix to cron/PR).
+consumes this skill's records and applies the fixes (an optional auto-trigger layer, designed
+but not yet built, can wire detect→fix to cron/PR).
 
 ## The engine (run these four steps, in order)
 

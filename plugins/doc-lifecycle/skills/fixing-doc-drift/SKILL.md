@@ -40,14 +40,20 @@ which is the only thing that makes the sync reviewable.
 
 ### 4. Land the fix as-is; rewrite only when needed
 
-The `fix` already meets the writing-docs bar — apply it verbatim. Only when a fix is *structural*
-(a paragraph, not a string) dispatch **writing-docs**, which routes audience/density itself.
+The `fix` already meets the writing-docs bar — apply it verbatim. **The `fix` is the
+authoritative replacement for its `location`: substitute exactly what the record gives you, and
+stop at its boundary.** A `fix` that re-emits a whole line — including clauses the report didn't
+single out — is still in scope: the report drafted that scope, you are *placing* it, not
+extending it. When a `STALE` and a `VERIFIED` claim share one `location`, the `STALE` `fix` is
+the full-line replacement, and "byte-identical" (Rule 1) protects the VERIFIED claim's surviving
+substring — it is not a competing whole-line rule. Only when a fix is *structural* (a paragraph,
+not a string) dispatch **writing-docs**, which routes audience/density itself.
 
 ### 5. Blast-radius stop
 
-If STALE records exceed the cap (default: **~10 passages, or a third of the doc**) or the doc is
-wholesale-wrong, **stop and escalate** — open an issue / tell the human. Do not emit a giant
-rewrite.
+If STALE records exceed the cap (default: **~10 passages, or a third of the doc's extracted
+claims**) or the doc is wholesale-wrong, **stop and escalate** — open an issue / tell the human.
+Do not emit a giant rewrite.
 
 ### 6. Evidence travels with the change
 

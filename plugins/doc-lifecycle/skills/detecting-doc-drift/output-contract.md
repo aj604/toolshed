@@ -36,7 +36,22 @@ non-null only for `STALE`; `evidence` is mandatory for every verdict.
 ]
 ```
 
-End the result with `summary: {verified: N, stale: N, unverifiable: N}`. Validate the whole
-result through `scripts/validate-drift-output.py` before handoff (see SKILL.md step 4) —
-passing `{"records": [...], "summary": {...}}` also checks the summary counts against the
-records; passing a bare array recomputes the authoritative summary for you.
+## The emitted artifact: records wrapped with a summary
+
+The array above is the `records` payload. The canonical artifact automation consumes wraps it
+with the `summary` so the whole thing is one parseable object:
+
+```json
+{
+  "records": [ /* the records above */ ],
+  "summary": { "verified": 0, "stale": 2, "unverifiable": 1 }
+}
+```
+
+Validate the whole result through `scripts/validate-drift-output.py` before handoff (see
+SKILL.md step 4) — passing the wrapped `{"records": [...], "summary": {...}}` object also checks
+the summary counts against the records; passing a bare array recomputes the authoritative
+summary for you.
+
+**`location` must be `file:line`** (e.g. `CLAUDE.md:24`) — it is the only field the downstream
+`fixing-doc-drift` skill uses to place each edit, so the validator rejects any other shape.

@@ -23,7 +23,9 @@ governs *what to create and when to stop*; writing-docs governs *how each doc re
 
 1. **Explore** the repo: read the build/test orchestration (Makefile, package.json scripts,
    CI config), the entry points, and the env/config surface. Run the key commands if you can.
-2. **Write the priority set below, in order.** Stop when the high-leverage facts are captured.
+2. **Write the priority set below, in order**, applying **writing-docs** to each as you go
+   (run-or-omit output, marked+anchored rationale, no aspirational claims). Stop when the
+   high-leverage facts are captured.
 3. **Write a deferred note** listing what you did NOT document and why.
 
 ## Priority order (create in this order; stop early if that's enough)
