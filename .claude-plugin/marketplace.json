@@ -1,0 +1,14 @@
+{
+  "name": "toolshed",
+  "owner": {
+    "name": "Avery Jones",
+    "email": "avery.jones.nyc@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "doc-lifecycle",
+      "source": "./plugins/doc-lifecycle",
+      "description": "Docs an AI agent can trust — and a machine can keep honest. Bootstrap → write → detect drift, with one rule: every line of a doc is a claim verifiable against the repo."
+    }
+  ]
+}

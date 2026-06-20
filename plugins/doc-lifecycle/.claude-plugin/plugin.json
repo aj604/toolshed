@@ -1,0 +1,9 @@
+{
+  "name": "doc-lifecycle",
+  "version": "0.1.0",
+  "description": "A suite of composable skills for the documentation lifecycle: bootstrap → write → detect drift. Every line of a doc is a claim verifiable against the repo, so docs can be kept honest mechanically.",
+  "author": {
+    "name": "Avery Jones",
+    "email": "avery.jones.nyc@gmail.com"
+  }
+}
