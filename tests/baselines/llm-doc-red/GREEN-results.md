@@ -61,6 +61,7 @@ output captured from real runs (`0.1kb`, `actual:145`); no token theater; wrote 
 agent resolves fresh; the by-type dispatch ran the new method.
 
 ## Artifacts
-- RED: `agent1-baseline.md` (Opus), `agent2-baseline.md` (Sonnet), `SOURCE-revised.md` (old agent).
+- RED: `agent1-baseline.md` (Opus), `agent2-baseline.md` (Sonnet). The old agent's RED output was a `SOURCE-revised.md`
+  orphan (the very anti-pattern the rewrite forbids) — deleted; its failures are recorded in `RED-findings.md`.
 - GREEN: `agent-green-verify.md`, `agent-green-densify.md`. REFACTOR: `agent-refactor-verify.md`.
 - Input: `SOURCE.md`. Truth: `tests/fixtures/ANSWER-KEY.md`.
