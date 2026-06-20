@@ -1,7 +1,8 @@
 # Reference-doc containment + cross-unit overview
 
 **Date:** 2026-06-20
-**Status:** approved design, pending implementation
+**Status:** implemented (containment + `architecture.md` in `repo-shape.md`; deferred-note
+softening in `SKILL.md` + `repo-shape.md` — see addendum)
 **File changed:** `plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md` (skill reference doc only — no change to this repo's own `docs/`).
 
 ## Problem
@@ -83,9 +84,35 @@ Constraints (same minimal-high-leverage / cut-test frame as the rest of the skil
 5. Add one failure mode: "architecture.md that restates the per-unit overviews → cut to just
    the relationships."
 
-## Out of scope
+## Out of scope (for the containment + `architecture.md` work)
 
 - Restructuring this repo's own `docs/` (it has no `reference/` tier — it is a marketplace,
   not a multi-unit app).
-- Any change to `bootstrapping-docs/SKILL.md` — the single-unit case has no cross-unit
-  relationships and no reference tree, so neither gap exists there.
+- The `architecture.md` / containment gaps do not exist for the single-unit case, so
+  `SKILL.md` needed no change *for them*. (It was edited separately — see the addendum below
+  — for an unrelated convention change.)
+
+## Addendum (2026-06-20): deferred-note convention softened
+
+Came up after the work above, while trimming this repo's own CLAUDE.md.
+
+**Problem.** The skill mandated a standing `## Not yet documented` section as a hard rule
+(`SKILL.md` "Always end with a deferred note" + a red flag; `repo-shape.md` Rule 7). In an
+always-loaded agent file (CLAUDE.md/AGENTS.md) that section is bootstrap-time process residue
+the agent re-reads every session, and the mandate meant an agent following the skill would
+re-add it after it was removed.
+
+**Decision.** Scope the deferred note to **bootstrap time**: it forces a conscious stop when
+the doc set is created, and is a one-time decision record — not a section every maintained doc
+must carry forever. Durable tracking of unbuilt work graduates to a planning/handoff doc, not a
+standing section in the always-loaded file.
+
+**Edits.**
+- `SKILL.md` — retitled the section "End the bootstrap with a deferred note"; added a paragraph
+  on the one-time/graduates-to-planning-doc framing; reworded the red flag as a bootstrap-time
+  check ("don't lint established docs for a standing section").
+- `repo-shape.md` — Rule 7 reworded to match.
+- `CLAUDE.md` (this repo) — removed the section; its one fact (doc-sync-automation
+  designed-not-built) already lives in `PITCH.md` and `HANDOFF.md`.
+
+Verified nothing else in the plugin (including `detecting-doc-drift`) enforces the section.
