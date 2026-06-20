@@ -1,6 +1,6 @@
 ---
 name: writing-docs
-description: Use when writing or editing ANY documentation — README, runbook, CLAUDE.md/AGENTS.md, guides, or agent-facing context packs — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. Covers both human and AI/agent readers (token bloat, context rot); every line must be a claim verifiable against the repo, with rationale marked and anchored so docs stay drift-checkable.
+description: Use when writing or editing ANY documentation — README, runbook, CLAUDE.md/AGENTS.md, guides, or agent-facing context packs — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. Covers both human and AI/agent readers (token bloat, context rot).
 ---
 
 # Writing Docs

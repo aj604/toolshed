@@ -1,6 +1,6 @@
 ---
 name: detecting-doc-drift
-description: Use when auditing documentation against the code it describes, checking whether a README/CLAUDE.md/runbook is still accurate, or finding which doc passages a code change invalidates - and whenever drift detection is invoked programmatically (by a PR check, nightly sync, or doc-sync-automation) and must emit a structured, parseable result that can trigger updates.
+description: Use when auditing documentation against the code it describes, checking whether a README/CLAUDE.md/runbook is still accurate, or finding which doc passages a code change invalidates — and whenever drift detection is invoked programmatically (by a PR check, nightly sync, or doc-sync-automation) and must emit a structured, parseable result.
 ---
 
 # Detecting Doc Drift
@@ -64,45 +64,18 @@ construct that moved or no longer exists.
 
 ## The output contract (this is the "shape")
 
-Emit one record per extracted claim. STALE and UNVERIFIABLE records are what automation acts
-on; VERIFIED records prove coverage. Use this exact field set:
+Emit one record per extracted claim — STALE and UNVERIFIABLE records are what automation acts
+on; VERIFIED records prove coverage. Each record uses exactly these fields: `claim`,
+`location` (`file:line`), `kind`, `tier`, `verdict`, `evidence`, `fix`.
 
-```json
-[
-  {
-    "claim": "Worker only accepts state schema 2; stale migration exits 5",
-    "location": "CLAUDE.md:24",
-    "kind": "behavior",
-    "tier": 2,
-    "verdict": "STALE",
-    "evidence": "services/worker/worker.js:17-19 — `if (schema !== 3) ... process.exit(4)`",
-    "fix": "Worker only accepts state schema 3; stale migration exits 4"
-  },
-  {
-    "claim": "Reset state = `make reset`",
-    "location": "CLAUDE.md:18",
-    "kind": "command",
-    "tier": 1,
-    "verdict": "STALE",
-    "evidence": "Makefile has `clean:`, no `reset` target",
-    "fix": "Reset state = `make clean`"
-  },
-  {
-    "claim": "worker is reasonably fast and handles most workloads",
-    "location": "CLAUDE.md:26",
-    "kind": "value",
-    "tier": 1,
-    "verdict": "UNVERIFIABLE",
-    "evidence": "no metric/threshold to check; worker body is an empty interval stub",
-    "fix": null
-  }
-]
-```
+Rules: `kind` is one of `command` / `path` / `symbol` / `behavior` / `structure` / `value`;
+`verdict` is one of `VERIFIED` / `STALE` / `UNVERIFIABLE` — literal enum strings, no invented
+values. `fix` is non-null only for `STALE`. `evidence` is mandatory for **every** verdict,
+including VERIFIED (the grep/command/line that proves it). End with a one-line summary
+automation can gate on: `summary: {verified: N, stale: N, unverifiable: N}`.
 
-Rules: `kind` and `verdict` use the literal enum strings above — no invented values.
-`fix` is non-null only for `STALE`. `evidence` is mandatory for **every** verdict, including
-VERIFIED (the grep/command/line that proves it). End with a one-line summary automation can
-gate on: `summary: {verified: N, stale: N, unverifiable: N}`.
+See **output-contract.md** for a worked three-record example (a STALE command, a STALE
+behavior, an UNVERIFIABLE quality claim) with every field populated.
 
 `scripts/validate-drift-output.py` enforces all of the above mechanically (run it on the
 result — see step 4). Pass it `{"records": [...], "summary": {...}}` and it also checks the
