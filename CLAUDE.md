@@ -24,7 +24,7 @@ Markdown; the only executable code published is a skill helper script
 - **Add a plugin:** new `plugins/<name>/` dir with `.claude-plugin/plugin.json`, then add an entry
   to the `plugins` array in `.claude-plugin/marketplace.json`.
 - **Before committing a manifest:** `marketplace.json` and every `plugin.json` must be valid JSON.
-- **Test the marketplace locally:** `/plugin marketplace add /Users/averyjones/Repos/skills/toolshed`.
+- **Test the marketplace locally:** `/plugin marketplace add /path/to/toolshed` (the repo root).
 
 ## Conventions
 

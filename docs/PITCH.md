@@ -229,7 +229,8 @@ The same claim-based language runs through the whole suite:
 writing-docs        mandates verifiable claims
 detecting-doc-drift extracts and verifies those same claims, with evidence
 fixing-doc-drift    lands the drafted fixes, one diff hunk per record
-doc-sync-automation runs detect→fix on every diff and opens a PR    (designed, next addition)
+─── not yet built ───
+doc-sync-automation runs detect→fix on every diff and opens a PR
 ```
 
 That's the difference between four tools that fight and one system that composes. `writing-docs`

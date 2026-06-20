@@ -1,6 +1,6 @@
 ---
 name: bootstrapping-docs
-description: Use when pointing at an undocumented or under-documented repo to create a baseline doc set from scratch (especially to make AI agent sessions productive), or when asked to "document this project" / "add docs" / "set up documentation" - produces the smallest high-leverage doc set and deliberately stops, instead of cataloguing everything.
+description: Use when a repo has no doc set yet (or a bare one) and you need to create the baseline from scratch — "document this project" / "add docs" / "set up documentation" — producing the smallest high-leverage doc set and deliberately stopping, instead of cataloguing everything. This is the whole-repo, what-to-create-and-when-to-stop skill; for writing or editing one individual doc, use writing-docs (this skill routes each doc's quality to it).
 ---
 
 # Bootstrapping Docs

@@ -1,6 +1,6 @@
 ---
 name: writing-docs
-description: Use when writing or editing ANY documentation — README, runbook, CLAUDE.md/AGENTS.md, guides, or agent-facing context packs — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. Covers both human and AI/agent readers (token bloat, context rot).
+description: Use when writing or editing an individual documentation file — README, runbook, CLAUDE.md/AGENTS.md, guide, or agent-facing context pack — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. The one door for doc quality, covering both human and AI/agent readers (token bloat, context rot). To create a baseline doc set from scratch for an undocumented repo, start with bootstrapping-docs; it routes here for each doc.
 ---
 
 # Writing Docs
@@ -81,11 +81,12 @@ for doc writing: don't go looking for a second skill. Two questions, answered on
   strength: an agent doc that "reads fine" but restates inferable facts has **failed**, even if
   every line is true.
 
-**2. How big is the job?**
+**2. Can you verify it without leaving your current context?**
 
-- **A line or a section, and you're already in the repo** → write it inline, applying the bar.
-- **A whole doc, or it needs real repo exploration to verify** → dispatch, so that exploration
-  stays out of your context:
+- **Yes — a self-contained edit** (a line or a short section whose claims you can check from what's
+  already in front of you) → write it inline, applying the bar.
+- **No — you'd have to read code or run commands to verify the claims, or it's more than a few
+  lines** → dispatch, so that exploration stays out of your context:
   - **human-facing** → a generalist subagent carrying this skill.
   - **agent-facing** → the **`llm-doc-writer` agent** — it owns the densify+verify method and
     runs in its own context. Pass it: *what to write from* (source path, raw content, or topic +

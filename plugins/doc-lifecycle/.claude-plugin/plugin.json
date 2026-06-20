@@ -2,6 +2,17 @@
   "name": "doc-lifecycle",
   "version": "0.1.0",
   "description": "A suite of composable skills for the documentation lifecycle: bootstrap → write → detect drift → fix. Every line of a doc is a claim verifiable against the repo, so docs can be kept honest mechanically.",
+  "license": "MIT",
+  "homepage": "https://github.com/aj604/toolshed",
+  "repository": "https://github.com/aj604/toolshed",
+  "keywords": [
+    "documentation",
+    "docs",
+    "doc-drift",
+    "claude-code",
+    "skills",
+    "agents"
+  ],
   "author": {
     "name": "Avery Jones",
     "email": "avery.jones.nyc@gmail.com"
