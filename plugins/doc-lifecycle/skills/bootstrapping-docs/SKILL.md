@@ -67,15 +67,21 @@ These are inferable from the repo and will drift. Cutting them is the whole poin
 Test each line: **would an agent make a mistake without it?** If the agent could get it by
 reading one obvious file, leave it for them to read — link, don't transcribe.
 
-## Always end with a deferred note
+## End the bootstrap with a deferred note
 
-State what you intentionally left undocumented, so scope is a decision, not an omission:
+When you finish bootstrapping, state what you intentionally left undocumented, so scope is a
+decision, not an omission:
 
 ```
 ## Not yet documented
 - Per-endpoint API reference (read services/api/server.js)
 - Operational runbooks (no incident procedures captured yet)
 ```
+
+This is a **one-time bootstrap record**, not a section every doc must carry forever. Once the
+doc set is established, durable tracking of unbuilt work belongs in a planning or handoff doc
+— don't keep a standing `## Not yet documented` section in an always-loaded agent file
+(CLAUDE.md/AGENTS.md), where it becomes maintained residue re-read every session.
 
 ## Red flags — STOP
 
@@ -84,4 +90,5 @@ State what you intentionally left undocumented, so scope is a decision, not an o
 - A directory tree mirroring the filesystem → cut.
 - Adding contributing/changelog/badges nobody asked for → cut.
 - Aiming for "comprehensive" or "complete" → wrong target; aim for minimal-high-leverage.
-- No "Not yet documented" section → you haven't decided scope, you've just stopped.
+- Finishing the bootstrap with no deferred note → you haven't decided scope, you've just
+  stopped. (A bootstrap-time check — don't lint established docs for a standing section.)

@@ -90,7 +90,9 @@ the way `writing-docs` governs any example — verifiable against the actual wir
    help → auto-generate into `docs/reference/generated/`. Hand-written reference is the
    route-catalog bloat SKILL.md forbids; generated reference stays in sync because it has one
    source.
-7. **End with `## Not yet documented`** in the root doc — scope is still a decision.
+7. **End the bootstrap with a deferred note** — scope is a decision, not an omission. It's a
+   one-time bootstrap record, not a standing section the always-loaded root doc must carry
+   forever; durable tracking of unbuilt work graduates to a planning/handoff doc.
 
 ## When a routing index earns its place
 
