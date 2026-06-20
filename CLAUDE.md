@@ -36,8 +36,8 @@ Markdown; the only executable code published is a skill helper script
   `python3 tests/scripts/validate-drift-output_test.py` (stdlib `unittest`, no deps) after
   touching `detecting-doc-drift`'s `validate-drift-output.py` or its output contract.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
-  against the repo (the `writing-docs` skill). Agent-facing docs defer to `writing-for-llms` for
-  token economy.
+  against the repo (the `writing-docs` skill — one door for both human and agent docs; it carries
+  the agent-density bar inline and dispatches the `llm-doc-writer` agent for heavy agent-facing jobs).
 - **This repo's `docs/` stays flat** (`PITCH.md`, `plans/`) — a single-unit marketplace. The
   `docs/reference/` convention the plugin prescribes for larger repos
   (`plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`) does not apply here; don't

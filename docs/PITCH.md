@@ -197,11 +197,13 @@ It runs in two modes: **full audit** (sweep all docs, severity-ordered) and **di
 (input a PR diff → grep *every* doc for the changed symbol → verify just those at Tier 3).
 The run ends with `summary: {verified: N, stale: N, unverifiable: N}` that CI can gate on.
 
-### 4. `writing-for-llms` — token-efficient rendering for agent-facing docs
+### 4. Agent-density, folded in — `writing-docs` + the `llm-doc-writer` agent
 
-Agent docs defer here for token economy: signal-per-token, pointers over inline copies,
-scannable tables over narrative. Inline code snapshots rot; a `file:line` pointer sends the
-agent to current source instead.
+Agent-facing docs need the same verifiable bar *plus* token economy: signal-per-token, pointers
+over inline copies, scannable tables over narrative (inline snapshots rot; a `file:line` pointer
+sends the agent to current source). That density discipline lives in `writing-docs` itself — one
+door for every doc — which dispatches the `llm-doc-writer` agent for a whole-doc agent-facing job,
+so the specialist runs in its own context and anchors every claim.
 
 > *The fourth lifecycle step — `doc-sync-automation`, which turns `detecting-doc-drift`'s
 > structured output into an automatic docs-update PR on every merge — is designed on top of

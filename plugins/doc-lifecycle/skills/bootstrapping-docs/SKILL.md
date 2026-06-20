@@ -29,8 +29,9 @@ governs *what to create and when to stop*; writing-docs governs *how each doc re
 ## Priority order (create in this order; stop early if that's enough)
 
 1. **CLAUDE.md / AGENTS.md — first, always.** Highest leverage for agent performance. It
-   holds only what an agent can't cheaply infer (see checklist). Agent rendering — defer to
-   the `writing-for-llms` skill for token economy.
+   holds only what an agent can't cheaply infer (see checklist). Agent rendering — max
+   signal-per-token, pointers over inline copies; the `writing-docs` skill carries this bar
+   (dispatch the `llm-doc-writer` agent for a whole-doc job).
 2. **README skeleton** — human front door: one-line what-and-why, setup, the run/test
    commands. A skeleton, not a manual.
 3. **Operational stubs** — only if real operational knowledge surfaced during exploration;
