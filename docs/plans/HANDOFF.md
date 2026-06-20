@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-06-14
 **HEAD at handoff:** `a8fb6d3`
-**Repo:** `/Users/averyjones/Repos/skills` (git, branch `main`)
+**Repo:** `toolshed` (git, branch `main`)
 
 ## What this project is
 

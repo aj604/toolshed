@@ -15,7 +15,7 @@ A personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/clau
 
 **Docs an AI agent can trust — and a machine can keep honest.**
 
-A suite of composable skills covering the documentation lifecycle — **bootstrap → write → detect → fix** — unified by one rule strict enough to enforce mechanically: *every line of a doc is a claim that must be true of the repo.*
+A suite of skills covering the documentation lifecycle — **bootstrap → write → detect → fix** — that share one record format and one rule a script can check: *every line of a doc is a claim that must be true of the repo.*
 
 ## The problem, in two lines
 
@@ -49,7 +49,8 @@ That one contract runs through the whole suite, which is what lets the pieces co
 writing-docs        mandates verifiable claims
 detecting-doc-drift extracts and verifies those same claims, with evidence
 fixing-doc-drift    lands the drafted fixes, one diff hunk per record
-doc-sync-automation runs detect→fix on every diff and opens a PR    (designed, next addition)
+─── not yet built ───
+doc-sync-automation runs detect→fix on every diff and opens a PR
 ```
 
 The four skills above ship today. The automation layer on top — `doc-sync-automation`, which runs detect→fix unattended on every diff and opens a docs-update PR — is the suite's next addition; it's wiring on top of the contract, which already lives in `detecting-doc-drift` and `fixing-doc-drift`. [Full rationale and the per-skill breakdown →](docs/PITCH.md)
@@ -73,8 +74,8 @@ plugins/doc-lifecycle/            # the published plugin
   .claude-plugin/plugin.json
   skills/                         # 4 skills
   agents/                         # llm-doc-writer
-docs/                             # design, pitch, plans (not published)
-tests/                            # RED/GREEN records + fixtures (not published)
+docs/                             # design, pitch, plans (not part of the installed plugin)
+tests/                            # RED/GREEN records + fixtures (not part of the installed plugin)
 ```
 
 ## License
