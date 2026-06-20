@@ -44,6 +44,24 @@ diff-scoped mode is "what automation calls" — and adds the wiring/guardrails (
 blast-radius cap, idempotency, never-delete, evidence-in-PR). The drift *contract* now lives
 in skill 3; skill 4 is genuinely thin wiring on top, as the design intended.
 
+## Update 2026-06-20 — llm-doc-writer agent + writing-for-llms refactor
+
+Reshaped the LLM-doc capability into **thin skill + fat agent** (Avery's architecture: method lives in the
+agent MD; the skill is a thin dispatch/entry point). Scoped as a one-off — the other 3 skills stay agentless.
+
+- **`llm-doc-writer` agent** rewritten from a pure densifier (trusted input, no Bash, "use provided info only",
+  token-count theater, `-revised` orphans) into a **hybrid**: *maximize signal-per-token, never assert a specific
+  you haven't backed.* Densify-only when given raw text; densify + verify + anchor when given a repo. Gained `Bash`.
+- **`writing-for-llms` skill** slimmed to a dispatcher (triggers + what to pass + contract). Method has one home
+  (the agent), so it isn't duplicated across the two context windows — net less main-context cost than the old fat skill.
+- **Tested RED → GREEN → REFACTOR at Sonnet tier** (the agent's own model). RED reframe matters: grading on
+  planted-error *recall* is tier-dependent and unfair (Opus wins on horsepower); the real, writable, tier-independent
+  axis is **fabrication / laundering unverified specifics**. Same Sonnet model: without the rule it laundered a false
+  `npm test` and fabricated an API; with the rule it didn't. Records: `tests/baselines/llm-doc-red/`.
+- **Gap (honest):** the skill's *dispatch behavior* (does an orchestrator route to the agent) is not unit-tested —
+  simulating it needs sub-subagent spawning. The discipline is tested where it executes (the agent).
+- **Deployed:** `~/.claude/agents/llm-doc-writer.md`, `~/.claude/skills/writing-for-llms/SKILL.md` (reload to pick up).
+
 ## How to resume (next session)
 
 1. Read `docs/plans/2026-06-09-documentation-skills-suite-design.md` — especially the
