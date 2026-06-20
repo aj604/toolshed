@@ -45,6 +45,21 @@ Re-test `agent-refactor-verify.md` (Sonnet, 18 tool calls — it ran the CLI):
 **Verdict: GREEN+REFACTOR pass on the fair axis at the agent's own tier.** Agent is bulletproof against laundering and
 fabrication; example-output channel closed.
 
+## E2E — dispatch chain (closes the gap flagged at GREEN)
+
+Tested the real chain with deployed components, no injected instructions:
+1. Orchestrator invoked the deployed `writing-for-llms` skill → it returned the dispatch contract (what to pass).
+2. Orchestrator dispatched `llm-doc-writer` **by type** with source + repo + output path (per the skill).
+3. Agent loaded its **own** method from the registry — proving the deployed rewrite is live, not cached-old.
+
+Result (`agent-e2e.md`, 14 tool calls): ran `node bin/cli.js --help` (→ exit 2) and `node --test test/` (2 pass);
+anchored every claim to `file:line`; corrected all planted errors; real exported API with correct arity; example
+output captured from real runs (`0.1kb`, `actual:145`); no token theater; wrote to the instructed path (no new
+`-revised` orphan). Grades clean against `tests/fixtures/ANSWER-KEY.md`.
+
+**Verdict: dispatch behavior PASS end-to-end.** The earlier "registry may be cached-old" caveat was unfounded — the
+agent resolves fresh; the by-type dispatch ran the new method.
+
 ## Artifacts
 - RED: `agent1-baseline.md` (Opus), `agent2-baseline.md` (Sonnet), `SOURCE-revised.md` (old agent).
 - GREEN: `agent-green-verify.md`, `agent-green-densify.md`. REFACTOR: `agent-refactor-verify.md`.

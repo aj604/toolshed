@@ -58,8 +58,9 @@ agent MD; the skill is a thin dispatch/entry point). Scoped as a one-off — the
   planted-error *recall* is tier-dependent and unfair (Opus wins on horsepower); the real, writable, tier-independent
   axis is **fabrication / laundering unverified specifics**. Same Sonnet model: without the rule it laundered a false
   `npm test` and fabricated an API; with the rule it didn't. Records: `tests/baselines/llm-doc-red/`.
-- **Gap (honest):** the skill's *dispatch behavior* (does an orchestrator route to the agent) is not unit-tested —
-  simulating it needs sub-subagent spawning. The discipline is tested where it executes (the agent).
+- **Dispatch chain tested E2E:** orchestrator invoked the deployed `writing-for-llms` skill → dispatched
+  `llm-doc-writer` by type → agent loaded its own method from the registry (deploy is live, not cached) → produced a
+  clean, anchored, verified doc (`agent-e2e.md`). See `GREEN-results.md` "E2E".
 - **Deployed:** `~/.claude/agents/llm-doc-writer.md`, `~/.claude/skills/writing-for-llms/SKILL.md` (reload to pick up).
 
 ## How to resume (next session)
