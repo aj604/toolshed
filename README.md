@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/social-card.png" alt="doc-lifecycle — Reference docs as checkable claims." width="720">
+</p>
+
 # toolshed
 
 A personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins). Its first plugin is **`doc-lifecycle`**.
@@ -12,6 +16,12 @@ A personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/clau
 ---
 
 # doc-lifecycle
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/aj604/toolshed?color=3fb950" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Faj604%2Ftoolshed%2Fmain%2Fplugins%2Fdoc-lifecycle%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=3fb950" alt="version">
+  <a href="https://docs.claude.com/en/docs/claude-code/plugins"><img src="https://img.shields.io/badge/Claude_Code-plugin-da7756" alt="Claude Code plugin"></a>
+</p>
 
 **Reference docs as checkable claims — so when the code moves, the drift surfaces as a record, not a silent surprise.**
 
@@ -76,6 +86,7 @@ plugins/doc-lifecycle/            # the published plugin
   .claude-plugin/plugin.json
   skills/                         # 4 skills
   agents/                         # llm-doc-writer
+assets/                           # social-card.png (README hero + GitHub social preview)
 docs/                             # plans: design docs + handoff (not part of the installed plugin)
 tests/                            # RED/GREEN records + fixtures (not part of the installed plugin)
 ```
