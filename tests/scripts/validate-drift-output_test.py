@@ -98,6 +98,18 @@ class EnumViolations(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("tier", r.stderr)
 
+    def test_bool_tier_rejected(self):
+        # JSON `true` is `True` in Python, and `True == 1` — must not slip through.
+        r = run('[%s]' % json.dumps(rec(tier=True)))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("tier", r.stderr)
+
+    def test_float_tier_rejected(self):
+        # `1.0 == 1` — a float tier must not slip through either.
+        r = run('[%s]' % json.dumps(rec(tier=1.0)))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("tier", r.stderr)
+
 
 class FieldRules(unittest.TestCase):
     def test_missing_required_field_rejected(self):

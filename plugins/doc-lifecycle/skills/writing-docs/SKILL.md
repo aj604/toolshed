@@ -1,15 +1,15 @@
 ---
 name: writing-docs
-description: Use when writing or editing an individual documentation file — README, runbook, CLAUDE.md/AGENTS.md, guide, or agent-facing context pack — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. The one door for doc quality, covering both human and AI/agent readers (token bloat, context rot). To create a baseline doc set from scratch for an undocumented repo, start with bootstrapping-docs; it routes here for each doc.
+description: Use when writing or editing a documentation file whose job is to track the repo — README, runbook, CLAUDE.md/AGENTS.md, reference, or agent-facing context pack — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. The one door for these repo-tracking docs, across human and agent readers (token bloat, context rot). Out of scope: tutorials, conceptual/architecture overviews, and decision records (ADRs) — narrative by design, not line-by-line claims about the repo. To create a baseline doc set from scratch for an undocumented repo, start with bootstrapping-docs; it routes here for each doc.
 ---
 
 # Writing Docs
 
 ## Overview
 
-**A doc is a set of claims that must be true of the repo.** This is the spine: when any
-guideline conflicts with verifiability, verifiability wins. A smaller all-true doc beats a
-complete one with unverifiable parts.
+**A doc whose job is to track the repo is a set of claims that must be true of the repo.**
+This is the spine: when any guideline conflicts with verifiability, verifiability wins. A
+smaller all-true doc beats a complete one with unverifiable parts.
 
 Every line is one of two kinds of claim:
 
@@ -19,6 +19,13 @@ Every line is one of two kinds of claim:
   a marked section and **anchored** to a `file:line`, commit, or date.
 
 If a line is neither, cut it.
+
+**Scope — what this governs.** Docs that exist to *correspond to the current repo*: README,
+runbook, CLAUDE.md/AGENTS.md, reference. It is **not** a universal theory of documentation.
+Tutorials, conceptual/architecture overviews, and decision records (ADRs) are narrative by
+design — sequenced, redundant on purpose, spanning many files, valuable precisely *because*
+they aren't line-by-line claims about the repo. The claim bar would wrongly gut them; don't
+point this skill at them.
 
 ## The rules (these address what agents get wrong)
 
@@ -68,9 +75,9 @@ this? If yes, link to it; don't duplicate it into a doc that will drift.
 
 ## One bar, every reader — then route
 
-The contract above governs **every** doc; verifiability never bends. Audience and job size
-decide only *how dense* and *who writes it* — never *whether it's true*. This is the one door
-for doc writing: don't go looking for a second skill. Two questions, answered once:
+The contract above governs **every repo-tracking doc** (see Scope); verifiability never bends.
+Audience and job size decide only *how dense* and *who writes it* — never *whether it's true*.
+This is the one door for repo-tracking doc writing: don't go looking for a second skill. Two questions, answered once:
 
 **1. Who reads it?**
 

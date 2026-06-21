@@ -2,11 +2,13 @@
 
 Reader: an AI agent starting a session in the repo. Maps to the **reference + imperative
 rules** lenses. Agent rendering: maximum signal-per-token, no narrative, pointers over
-inline copies — density is mandatory here, not optional. For a whole-doc or
-verification-heavy job, **dispatch the `llm-doc-writer` agent** (it owns the densify+verify
-method and its own context — see SKILL.md "One bar, every reader — then route"). A one-line
-tweak: apply the density rules below inline. (Those rules are the lite mirror of the agent's
-canonical method; if the two diverge, the agent file wins.)
+inline copies — density is mandatory here, not optional.
+
+**Ownership.** The full densify+verify method lives in exactly one place — the
+`llm-doc-writer` agent. For a whole-doc or verification-heavy job, **dispatch it** (it runs
+in its own context — see SKILL.md "One bar, every reader — then route"). What follows here is
+the **inline essentials** for a one-line tweak not worth a dispatch: the minimum bar to apply
+in place, a deliberate subset of the agent's method — not a second copy that can drift from it.
 
 ## The cut test (the dominant discipline here)
 

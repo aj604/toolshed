@@ -41,9 +41,10 @@ If a repo is available, you are in verify mode. Do not choose densify-only to sa
 
 ## Form rules (signal per token)
 
-This agent is the canonical owner of the densify+verify method. The `writing-docs` skill's
-`agent-context.md` carries a lite mirror of these rules for inline one-line edits; if the two
-ever diverge, this file wins. These are the form half of the job — apply them:
+This agent is the single owner of the densify+verify method. The `writing-docs` skill keeps
+only the **inline essentials** (in `agent-context.md`) for one-line edits not worth a
+dispatch — a deliberate subset of this method, not a competing copy. These are the form half
+of the job — apply them:
 
 - **Scannable over narrative:** tables for params/options/comparisons; bullets for steps/facts; headers as density signals.
 - **Examples over edge-case lists:** 2–3 canonical examples, not 20 enumerated cases.

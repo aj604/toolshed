@@ -24,7 +24,9 @@ not a string-swap.
 
 Apply each `STALE` record's `fix` at its `location`. `VERIFIED` and `UNVERIFIABLE` are **not
 action items** — they prove coverage / flag a smell, they are not work. VERIFIED passages stay
-**byte-identical**.
+**byte-identical** — *except* a line a VERIFIED claim shares with a STALE one, where the STALE
+`fix` is the full-line replacement and byte-identical protects only the surviving substring
+(see Rule 4).
 
 ### 2. Never delete — flag instead
 
