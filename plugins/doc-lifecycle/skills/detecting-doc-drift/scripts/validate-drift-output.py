@@ -62,8 +62,11 @@ def validate_record(i, r):
         errs.append(f"{where}: kind {r.get('kind')!r} not in {sorted(KINDS)}")
     if r.get("verdict") not in VERDICTS:
         errs.append(f"{where}: verdict {r.get('verdict')!r} not in {sorted(VERDICTS)}")
-    if r.get("tier") not in TIERS:
-        errs.append(f"{where}: tier {r.get('tier')!r} not in {sorted(TIERS)}")
+    tier = r.get("tier")
+    # `bool` is an `int` subclass and `1.0 == 1`, so a bare `in TIERS` would wave through
+    # `tier: true` / `tier: 1.0`. Require a real (non-bool) int.
+    if not (isinstance(tier, int) and not isinstance(tier, bool) and tier in TIERS):
+        errs.append(f"{where}: tier {tier!r} not in {sorted(TIERS)}")
     if not nonempty_str(r.get("evidence")):
         errs.append(f"{where}: evidence is mandatory for every verdict (incl. VERIFIED)")
 

@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateTask } from "@taskflow/shared";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const STATE = resolve(root, ".taskflow-state.json");
@@ -12,15 +13,17 @@ if (!existsSync(STATE)) {
   process.exit(3);
 }
 
-const { schema } = JSON.parse(readFileSync(STATE, "utf8"));
+const { schema, tasks = [] } = JSON.parse(readFileSync(STATE, "utf8"));
 // Gotcha: the worker only understands schema 3. A stale migration breaks it.
 if (schema !== 3) {
   process.stderr.write(`worker: state schema ${schema} unsupported (need 3)\n`);
   process.exit(4);
 }
 
+// Validate queued work against the shared task contract before polling.
+const pending = tasks.filter(validateTask);
 const intervalMs = Number(process.env.WORKER_INTERVAL_MS) || 5000;
-process.stdout.write(`worker: started, polling every ${intervalMs}ms\n`);
+process.stdout.write(`worker: started, polling every ${intervalMs}ms (${pending.length} pending)\n`);
 setInterval(() => {
   // process due tasks here
 }, intervalMs);

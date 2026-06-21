@@ -90,9 +90,14 @@ summary for you.
   (wrong command/behavior before stale prose).
 - **Diff-scoped** (PR check / what automation calls): input is a diff or commit range. For
   each changed file/symbol/value, **grep every doc for passages referencing it** — including
-  command output blocks and examples, not just the obvious gotcha line — then verify those
-  claims at Tier 3. Output only records for touched claims. Completeness is the metric: a
-  changed symbol referenced in five docs must produce five records.
+  command output blocks and examples, not just the obvious gotcha line — then verify each
+  referencing claim, **escalating past Tier 1 to the tier that settles it**. A changed subject
+  in the diff is exactly the `(b)` escalation trigger, so do not stop at a Tier-1 grep that
+  only confirms the name still appears: read the cited line (Tier 2), and read implementing
+  code (Tier 3) for any `behavior`/`value` claim, where the rename-grep gives false comfort. A
+  rename/move/deletion is settled cheaper — don't pay Tier 3 for a claim Tier 1–2 already
+  resolves. Output only records for touched claims. Completeness is the metric: a changed
+  symbol referenced in five docs must produce five records.
 
 ## Red flags — STOP
 
