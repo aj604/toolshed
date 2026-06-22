@@ -4,14 +4,7 @@
 
 # toolshed
 
-A personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins). Its first plugin is **`doc-lifecycle`**.
-
-## Install
-
-```
-/plugin marketplace add aj604/toolshed
-/plugin install doc-lifecycle@toolshed
-```
+A personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins). Today it ships one plugin — **`doc-lifecycle`**: reference docs as checkable claims.
 
 ---
 
@@ -48,6 +41,13 @@ A `CLAUDE.md` says `make reset` resets state and the worker "accepts schema 2, e
 | `detecting-doc-drift` | skill | Auditing docs against the code — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
 | `fixing-doc-drift` | skill | Applying a drift report to the docs — lands each STALE fix surgically, never deletes, never touches what the report didn't flag, stops on a large blast radius. |
 | `llm-doc-writer` | agent | A dispatchable subagent that produces LLM-optimized documentation with maximum context efficiency. |
+
+## Install
+
+```
+/plugin marketplace add aj604/toolshed
+/plugin install doc-lifecycle@toolshed
+```
 
 ## The contract: a doc is a set of claims
 
