@@ -1,6 +1,6 @@
 ---
 name: writing-docs
-description: Use when writing or editing a documentation file whose job is to track the repo — README, runbook, CLAUDE.md/AGENTS.md, reference, or agent-facing context pack — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. The one door for these repo-tracking docs, across human and agent readers (token bloat, context rot). Out of scope: tutorials, conceptual/architecture overviews, and decision records (ADRs) — narrative by design, not line-by-line claims about the repo. To create a baseline doc set from scratch for an undocumented repo, start with bootstrapping-docs; it routes here for each doc.
+description: 'Use when writing or editing a documentation file whose job is to track the repo — README, runbook, CLAUDE.md/AGENTS.md, reference, or agent-facing context pack — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. The one door for these repo-tracking docs, across human and agent readers (token bloat, context rot). Out of scope: tutorials, conceptual/architecture overviews, and decision records (ADRs) — narrative by design, not line-by-line claims about the repo. To create a baseline doc set from scratch for an undocumented repo, start with bootstrapping-docs; it routes here for each doc.'
 ---
 
 # Writing Docs

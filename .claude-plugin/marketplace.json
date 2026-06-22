@@ -1,5 +1,6 @@
 {
   "name": "toolshed",
+  "description": "A personal Claude Code plugin marketplace. Ships doc-lifecycle: reference docs as checkable claims.",
   "owner": {
     "name": "Avery Jones",
     "email": "avery.jones.nyc@gmail.com"
