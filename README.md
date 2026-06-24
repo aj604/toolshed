@@ -51,34 +51,43 @@ A `CLAUDE.md` says `make reset` resets state and the worker "accepts schema 2, e
 
 ## Using it
 
-These skills are **invoked by describing your task, not by typing their names.** Once the
-plugin is installed, Claude Code reads each skill's trigger description and runs the matching
-one when your request fits — you talk in plain language and the right skill loads itself. (You
-can also name one directly: "use `detecting-doc-drift` on the README.")
+Once installed, point Claude Code at a repo and ask for what you want. Three things you'll do
+most:
 
-### First run — bootstrap an undocumented repo
-
-Open Claude Code in a repo with no docs (or a bare one) and ask:
+### Bootstrap docs for a repo that has none
 
 > document this project
 
-That phrase triggers **`bootstrapping-docs`**, which explores the repo and writes the smallest
-high-leverage doc set — a `CLAUDE.md`/`AGENTS.md` first, then a README skeleton — then
-deliberately stops, instead of cataloguing everything. Each doc it writes is held to the
-`writing-docs` bar.
+`bootstrapping-docs` explores the repo and writes the smallest high-leverage doc set — a
+`CLAUDE.md`/`AGENTS.md` first, then a README skeleton — then stops, instead of cataloguing
+everything that's already readable in the code.
 
-### The everyday loop — keep docs honest as code moves
+### Catch docs that drifted from the code
 
-| When you… | Say something like | Skill that runs |
-|-----------|--------------------|-----------------|
-| Write or edit one doc | "write a runbook for the deploy" · "update the README usage" | `writing-docs` |
-| Suspect a doc has gone stale | "check whether CLAUDE.md still matches the code" · "which docs does this change break?" | `detecting-doc-drift` |
-| Have a drift report to apply | "apply the drift report" · "sync the docs to the code" | `fixing-doc-drift` |
+> check whether CLAUDE.md still matches the code
 
-A typical cycle: change code → ask Claude to **detect** drift (it emits a structured record of
-each stale claim with a drafted fix) → ask it to **fix** (it lands only the flagged fixes and
-nothing else). Detect and fix are split on purpose, so the correction diff maps one-to-one to
-the evidence — see the contract below for why that matters.
+`detecting-doc-drift` extracts each claim in the doc, verifies it against the repo, and emits
+one structured record per claim — with a drafted `fix` on every stale one:
+
+```json
+{
+  "claim": "Reset state = `make reset`",
+  "location": "CLAUDE.md:18",
+  "kind": "command",
+  "tier": 1,
+  "verdict": "STALE",
+  "evidence": "Makefile has `clean:`, no `reset` target",
+  "fix": "Reset state = `make clean`"
+}
+```
+
+### Apply the fixes
+
+> sync the docs to the code
+
+`fixing-doc-drift` takes that report and lands only the flagged fixes — here, `make reset` →
+`make clean` at `CLAUDE.md:18` — and touches nothing the report didn't flag, so the diff maps
+one-to-one to the evidence.
 
 ## The contract: a doc is a set of claims
 
