@@ -49,6 +49,37 @@ A `CLAUDE.md` says `make reset` resets state and the worker "accepts schema 2, e
 /plugin install doc-lifecycle@toolshed
 ```
 
+## Using it
+
+These skills are **invoked by describing your task, not by typing their names.** Once the
+plugin is installed, Claude Code reads each skill's trigger description and runs the matching
+one when your request fits — you talk in plain language and the right skill loads itself. (You
+can also name one directly: "use `detecting-doc-drift` on the README.")
+
+### First run — bootstrap an undocumented repo
+
+Open Claude Code in a repo with no docs (or a bare one) and ask:
+
+> document this project
+
+That phrase triggers **`bootstrapping-docs`**, which explores the repo and writes the smallest
+high-leverage doc set — a `CLAUDE.md`/`AGENTS.md` first, then a README skeleton — then
+deliberately stops, instead of cataloguing everything. Each doc it writes is held to the
+`writing-docs` bar.
+
+### The everyday loop — keep docs honest as code moves
+
+| When you… | Say something like | Skill that runs |
+|-----------|--------------------|-----------------|
+| Write or edit one doc | "write a runbook for the deploy" · "update the README usage" | `writing-docs` |
+| Suspect a doc has gone stale | "check whether CLAUDE.md still matches the code" · "which docs does this change break?" | `detecting-doc-drift` |
+| Have a drift report to apply | "apply the drift report" · "sync the docs to the code" | `fixing-doc-drift` |
+
+A typical cycle: change code → ask Claude to **detect** drift (it emits a structured record of
+each stale claim with a drafted fix) → ask it to **fix** (it lands only the flagged fixes and
+nothing else). Detect and fix are split on purpose, so the correction diff maps one-to-one to
+the evidence — see the contract below for why that matters.
+
 ## The contract: a doc is a set of claims
 
 This governs the docs whose job is to track the repo — README, runbooks, agent context, reference. (Tutorials, conceptual overviews, and design-rationale docs are narrative by design and out of scope; the claim bar would wrongly gut them.) For those repo-tracking docs, every line is either a **verifiable claim** — a command, path, symbol, behavior, or structure checkable against the repo *as it is now* — or a **rationale claim**, the "why," quarantined to a marked section and **anchored** to a `file:line` ref. Anything else — marketing prose, an aspirational "should," a restatement of the file tree — gets cut.
