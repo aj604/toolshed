@@ -56,18 +56,22 @@ most:
 
 ### Bootstrap docs for a repo that has none
 
-> document this project
+```
+/doc-lifecycle:bootstrapping-docs
+```
 
-`bootstrapping-docs` explores the repo and writes the smallest high-leverage doc set — a
-`CLAUDE.md`/`AGENTS.md` first, then a README skeleton — then stops, instead of cataloguing
-everything that's already readable in the code.
+Explores the repo and writes the smallest high-leverage doc set — a `CLAUDE.md`/`AGENTS.md`
+first, then a README skeleton — then stops, instead of cataloguing everything that's already
+readable in the code.
 
 ### Catch docs that drifted from the code
 
-> check whether CLAUDE.md still matches the code
+```
+/doc-lifecycle:detecting-doc-drift CLAUDE.md
+```
 
-`detecting-doc-drift` extracts each claim in the doc, verifies it against the repo, and emits
-one structured record per claim — with a drafted `fix` on every stale one:
+Extracts each claim in the doc, verifies it against the repo, and emits one structured record
+per claim — with a drafted `fix` on every stale one:
 
 ```json
 {
@@ -83,11 +87,13 @@ one structured record per claim — with a drafted `fix` on every stale one:
 
 ### Apply the fixes
 
-> sync the docs to the code
+```
+/doc-lifecycle:fixing-doc-drift
+```
 
-`fixing-doc-drift` takes that report and lands only the flagged fixes — here, `make reset` →
-`make clean` at `CLAUDE.md:18` — and touches nothing the report didn't flag, so the diff maps
-one-to-one to the evidence.
+Takes that report and lands only the flagged fixes — here, `make reset` → `make clean` at
+`CLAUDE.md:18` — and touches nothing the report didn't flag, so the diff maps one-to-one to the
+evidence.
 
 ## The contract: a doc is a set of claims
 
