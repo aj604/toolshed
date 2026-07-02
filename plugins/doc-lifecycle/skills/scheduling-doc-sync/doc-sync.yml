@@ -121,7 +121,7 @@ jobs:
             echo "The sync marker was NOT advanced; close this issue after handling to let the nightly resume."
             echo
             echo "## Stale claims"
-            jq -r '.records[] | select(.verdict=="STALE") | "- \`\(.location)\` — \(.claim)\n  - **evidence:** \(.evidence)\n  - **drafted fix:** \(.fix)"' drift-report.json
+            jq -r '.records[] | select(.verdict=="STALE") | "- `\(.location)` — \(.claim)\n  - **evidence:** \(.evidence)\n  - **drafted fix:** \(.fix)"' drift-report.json
           } > "$RUNNER_TEMP/issue-body.md"
           gh issue create --label doc-sync \
             --title "doc-sync: drift exceeds blast-radius cap (${CAP})" \
@@ -144,11 +144,11 @@ jobs:
             echo "Merging this PR advances the sync marker; closing it unmerged leaves the range to be re-checked."
             echo
             echo "## Applied fixes (STALE)"
-            jq -r '.records[] | select(.verdict=="STALE") | "- \`\(.location)\` — \(.claim)\n  - **evidence:** \(.evidence)\n  - **applied fix:** \(.fix)"' "$RUNNER_TEMP/drift-report.json"
+            jq -r '.records[] | select(.verdict=="STALE") | "- `\(.location)` — \(.claim)\n  - **evidence:** \(.evidence)\n  - **applied fix:** \(.fix)"' "$RUNNER_TEMP/drift-report.json"
             if jq -e '[.records[] | select(.verdict=="UNVERIFIABLE")] | length > 0' "$RUNNER_TEMP/drift-report.json" >/dev/null; then
               echo
               echo "## Flagged for a human (UNVERIFIABLE — not edited)"
-              jq -r '.records[] | select(.verdict=="UNVERIFIABLE") | "- \`\(.location)\` — \(.claim) (\(.evidence))"' "$RUNNER_TEMP/drift-report.json"
+              jq -r '.records[] | select(.verdict=="UNVERIFIABLE") | "- `\(.location)` — \(.claim) (\(.evidence))"' "$RUNNER_TEMP/drift-report.json"
             fi
           } > "$RUNNER_TEMP/pr-body.md"
           git config user.name "doc-sync"
