@@ -1,12 +1,12 @@
 # Documentation Skills Suite — Handoff
 
 **Last updated:** 2026-07-02
-**HEAD at handoff:** `2225c6f`
+**HEAD at handoff:** `db561b3`
 **Repo:** `toolshed` (git)
 
 ## What this project is
 
-Built a suite of 4 documentation skills with the `superpowers:writing-skills` TDD
+Built a suite of 5 documentation skills with the `superpowers:writing-skills` TDD
 methodology (RED → GREEN → REFACTOR with subagents). Full design and rationale:
 `docs/plans/2026-06-09-documentation-skills-suite-design.md` (read this first to resume).
 
@@ -20,11 +20,11 @@ Lifecycle the suite covers: **bootstrap → write → detect → fix.**
 | 2 | bootstrapping-docs | ✅ done (GREEN+REFACTOR) | `bootstrapping-docs/` | yes |
 | 3 | detecting-doc-drift | ✅ done (GREEN+REFACTOR) | `detecting-doc-drift/` | yes |
 | 4 | fixing-doc-drift (the human-invoked fix step) | ✅ done (GREEN+REFACTOR) | `fixing-doc-drift/` | yes |
-| 5 | auto-trigger layer (cron/PR) | ⬜ deferred — non-skill wiring, not started | — | — |
+| 5 | auto-trigger layer (cron/PR) | ✅ done | `scheduling-doc-sync/` | yes |
 
 Build order is sequential: 3 needs 1+2 working (it rewrites via writing-docs standards);
 4 needs 3 working (it consumes 3's structured drift report and applies the fixes). The
-cron/PR trigger wiring is row 5, deferred.
+cron/PR trigger wiring is row 5: `scheduling-doc-sync`.
 
 ### Skill 3 outcome (important — reshaped the skill)
 
@@ -42,7 +42,7 @@ UNVERIFIABLE, invented `kind`s, and anchor/line-number over-flagging. Full recor
 `tests/baselines/drift-red/{RED-findings,GREEN-results}.md`.
 
 **This sets up skill 4** (then planned as `doc-sync-automation`; shipped as `fixing-doc-drift`
-plus a deferred auto-trigger layer — see the 2026-06-20 updates below): it consumes skill 3's
+plus the auto-trigger layer, deferred until 2026-07-02 — see the updates below): it consumes skill 3's
 structured output — diff-scoped mode is "what automation calls" — and adds the wiring/guardrails (triggers,
 blast-radius cap, idempotency, never-delete, evidence-in-PR). The drift *contract* now lives
 in skill 3; skill 4 is genuinely thin wiring on top, as the design intended.
@@ -114,21 +114,21 @@ non-skill wiring (now "skill 5" in the table, ⬜).
 
 Resume notes, lifecycle line, dependency notes, and the repo-layout tree below were brought in
 line with what actually shipped: all four skills + the `llm-doc-writer` agent done, auto-trigger
-layer deferred.
+layer deferred (shipped later the same day — see "Row 5 shipped" above).
 
 ## How to resume (next session)
 
-All four skills plus the `llm-doc-writer` agent are done (GREEN+REFACTOR), deployed, and ship
-in `plugins/doc-lifecycle/`. There is no skill left to build. The only open item is row 5 in
-the status table: the deferred auto-trigger layer.
+All five skills plus the `llm-doc-writer` agent are done (GREEN+REFACTOR), deployed, and ship
+in `plugins/doc-lifecycle/`. There is no skill left to build.
 
-## Remaining work: auto-trigger layer (row 5, deferred)
+## Row 5 shipped: auto-trigger layer (`scheduling-doc-sync`, 2026-07-02)
 
-Non-skill wiring, deliberately deferred. It calls `detecting-doc-drift` in diff-scoped mode
-(the mode designed for automation) from cron and/or PR triggers, then hands the structured
-report to `fixing-doc-drift`, with the guardrails the design names: blast-radius cap,
-idempotency, never-delete, evidence-in-PR. Open decisions are in "Not yet decided" below and
-the design doc's "Open items". No RED/GREEN cycle — it's wiring, not agent behavior.
+Built as an installer skill + shipped wiring — nightly GitHub Action calling
+`detecting-doc-drift` in diff-scoped mode, gating through `sync-gate.py`, handing the report
+to `fixing-doc-drift`, opening an evidence PR (blast-radius cap escalates to an issue;
+marker-based idempotency). Built test-first after all (RED axis existed: hand-rolled wiring);
+records in `tests/baselines/doc-sync-setup-red/`, incl. live E2E. Design:
+`2026-07-02-doc-sync-automation-design.md`.
 
 ## Key learnings (carry forward — these shaped skills 1 and 2)
 
@@ -174,7 +174,7 @@ tests/
     ANSWER-KEY.md          grading key for sample-repo
     taskflow/              3-component workspace fixture (runnable; run `make setup` first)
     taskflow-ANSWER-KEY.md grading key for taskflow
-  baselines/             RED/GREEN test records for all four skills + the llm-doc-writer agent
+  baselines/             RED/GREEN test records for all five skills + the llm-doc-writer agent
   scripts/               validate-drift-output_test.py (unit tests for the helper script)
 ```
 
@@ -190,7 +190,9 @@ tests/
 
 ## Not yet decided (deferred to the auto-trigger layer)
 
-- auto-trigger layer (row 5): blast-radius cap N; where the nightly cron runs (cloud routine
-  vs GitHub Action); per-repo trigger config. See design doc "Open items".
-  (detecting-doc-drift's record format and tier surfacing, once open here, are decided —
-  see its `output-contract.md`.)
+**HEAD at handoff:** `db561b3`
+**Repo:** `toolshed` (git)
+
+## What this project is
+
+Built a suite of 5 documentation skills with the `superpowers:writing-skills` TDD

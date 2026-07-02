@@ -1,0 +1,200 @@
+# Nightly documentation drift sync.
+#
+# Unattended job: detects doc claims (CLAUDE.md, README.md) the code no longer backs and
+# opens a PR fixing them, with evidence. Uses the Claude Code CLI headlessly with the
+# doc-lifecycle plugin's `detecting-doc-drift` and `fixing-doc-drift` skills.
+#
+# Setup required (one-time, by a repo admin):
+#   1. Add repo secret ANTHROPIC_API_KEY (Settings > Secrets and variables > Actions).
+#   2. This workflow needs `contents: write` and `pull-requests: write`, granted below.
+#   3. See .github/doc-sync/README.md for the idempotency marker and manual trigger.
+name: doc-drift-sync
+
+on:
+  schedule:
+    # 03:00 UTC nightly.
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: doc-drift-sync
+  cancel-in-progress: false
+
+jobs:
+  drift-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Skip if a sync PR is already open
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          open_count=$(gh pr list --state open --label doc-drift-sync --json number --jq 'length')
+          if [ "$open_count" -gt 0 ]; then
+            echo "An open doc-drift-sync PR already exists; skipping this run."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine diff range since last sync
+        id: range
+        if: steps.pending.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          MARKER_FILE=".github/doc-sync/last-synced-sha"
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ -f "$MARKER_FILE" ]; then
+            BASE_SHA=$(cat "$MARKER_FILE")
+          else
+            # First run ever: no prior marker. Diff against the first commit so the
+            # initial sync checks the whole repo once, then future runs are incremental.
+            BASE_SHA=$(git rev-list --max-parents=0 HEAD | tail -1)
+          fi
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          if [ "$BASE_SHA" = "$HEAD_SHA" ]; then
+            echo "Nothing changed since last sync."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Claude Code CLI
+        if: steps.pending.outputs.skip == 'false' && steps.range.outputs.skip == 'false'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install doc-lifecycle plugin
+        if: steps.pending.outputs.skip == 'false' && steps.range.outputs.skip == 'false'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          claude plugin marketplace add aj604/toolshed
+          claude plugin install doc-lifecycle@toolshed
+
+      - name: Detect doc drift (headless)
+        id: detect
+        if: steps.pending.outputs.skip == 'false' && steps.range.outputs.skip == 'false'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          rm -f drift-report.json
+          claude -p "Use the doc-lifecycle detecting-doc-drift skill in diff-scoped mode over the git commit range ${{ steps.range.outputs.base_sha }}..${{ steps.range.outputs.head_sha }} in this repository. Check every doc claim (CLAUDE.md, README.md) that references anything changed in that range. Write the final structured result as JSON — either a bare array of records or {\"records\": [...], \"summary\": {...}} — to a file named drift-report.json in the repository root. If nothing in the range invalidates any doc claim, write an empty records array." \
+            --allowedTools "Read,Grep,Glob,Write,Bash(git:*)"
+          test -f drift-report.json
+
+      - name: Validate drift report against the output contract
+        id: validate
+        if: steps.pending.outputs.skip == 'false' && steps.range.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          VALIDATOR=$(find ~/.claude -path "*doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py" 2>/dev/null | head -1)
+          if [ -z "$VALIDATOR" ]; then
+            echo "::error::could not locate validate-drift-output.py from the installed plugin"
+            exit 1
+          fi
+          python3 "$VALIDATOR" drift-report.json
+
+      - name: Count stale records
+        id: counts
+        if: steps.pending.outputs.skip == 'false' && steps.range.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          STALE=$(python3 -c '
+          import json
+          data = json.load(open("drift-report.json"))
+          records = data["records"] if isinstance(data, dict) else data
+          print(sum(1 for r in records if r.get("verdict") == "STALE"))
+          ')
+          echo "stale=$STALE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload drift report artifact
+        if: always() && steps.pending.outputs.skip == 'false' && steps.range.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report
+          path: drift-report.json
+          if-no-files-found: ignore
+
+      - name: Apply fixes (headless)
+        id: fix
+        if: steps.pending.outputs.skip == 'false' && steps.range.outputs.skip == 'false' && steps.counts.outputs.stale != '0'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          claude -p "Use the doc-lifecycle fixing-doc-drift skill to apply the drift report at drift-report.json to this repository's documentation. Follow the skill's rules exactly: act only on STALE records, never delete UNVERIFIABLE or VERIFIED passages, land each fix verbatim." \
+            --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git:*)"
+
+      - name: Open pull request with evidence
+        if: steps.pending.outputs.skip == 'false' && steps.range.outputs.skip == 'false' && steps.counts.outputs.stale != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "doc-drift-sync[bot]"
+          git config user.email "doc-drift-sync@users.noreply.github.com"
+
+          BRANCH="doc-drift-sync/$(date -u +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH"
+
+          mkdir -p .github/doc-sync
+          echo "${{ steps.range.outputs.head_sha }}" > .github/doc-sync/last-synced-sha
+
+          git add -A
+          git commit -m "docs: nightly drift sync ($(date -u +%F))"
+          git push -u origin "$BRANCH"
+
+          {
+            echo "Automated nightly documentation drift sync."
+            echo ""
+            echo "Range checked: \`${{ steps.range.outputs.base_sha }}..${{ steps.range.outputs.head_sha }}\`"
+            echo ""
+            echo "## Evidence"
+            echo ""
+            echo '```json'
+            cat drift-report.json
+            echo '```'
+            echo ""
+            echo "Each STALE record above was fixed at its \`location\` by the fixing-doc-drift skill;"
+            echo "each fix is backed by the record's \`evidence\` field. VERIFIED and UNVERIFIABLE"
+            echo "records were left untouched (UNVERIFIABLE claims need a human judgment call)."
+          } > pr-body.md
+
+          gh label create doc-drift-sync --color "0E8A16" --description "Automated nightly doc drift sync PRs" --force
+          gh pr create \
+            --title "docs: nightly drift sync ($(date -u +%F))" \
+            --body-file pr-body.md \
+            --label doc-drift-sync \
+            --base "${{ github.event.repository.default_branch || 'main' }}"
+
+      - name: Advance marker on a clean run (no drift found)
+        if: steps.pending.outputs.skip == 'false' && steps.range.outputs.skip == 'false' && steps.counts.outputs.stale == '0'
+        run: |
+          set -euo pipefail
+          git config user.name "doc-drift-sync[bot]"
+          git config user.email "doc-drift-sync@users.noreply.github.com"
+          mkdir -p .github/doc-sync
+          echo "${{ steps.range.outputs.head_sha }}" > .github/doc-sync/last-synced-sha
+          if ! git diff --quiet -- .github/doc-sync/last-synced-sha; then
+            git add .github/doc-sync/last-synced-sha
+            git commit -m "docs: advance doc-drift-sync marker, no drift found ($(date -u +%F))"
+            git push
+          fi

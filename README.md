@@ -75,6 +75,7 @@ Three properties make this more than a report:
 | `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
 | `detecting-doc-drift` | skill | Auditing docs against the code — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
 | `fixing-doc-drift` | skill | Applying a drift report to the docs — lands each STALE fix surgically, never deletes, never touches what the report didn't flag, stops on a large blast radius. |
+| `scheduling-doc-sync` | skill | Wiring a repo for unattended nightly drift sync — installs the shipped GitHub Action (detect → gate → fix → evidence PR) with marker-based idempotency and a blast-radius stop. |
 | `llm-doc-writer` | agent | A dispatchable subagent that produces LLM-optimized documentation with maximum context efficiency. |
 
 ## Why this works where "keep the docs updated" doesn't
@@ -89,11 +90,10 @@ That one contract runs through the whole suite, which is what lets the pieces co
 writing-docs        mandates verifiable claims
 detecting-doc-drift extracts and verifies those same claims, with evidence
 fixing-doc-drift    lands the drafted fixes, one diff hunk per record
-─── not yet built ───
-doc-sync-automation runs detect→fix on every diff and opens a PR
+scheduling-doc-sync installs the nightly Action that runs detect→fix and opens the PR
 ```
 
-The four skills above ship today. The automation layer on top — `doc-sync-automation`, which runs detect→fix unattended on every diff and opens a docs-update PR — is the suite's next addition; it's wiring on top of the contract, which already lives in `detecting-doc-drift` and `fixing-doc-drift`.
+All of the above ships today. The automation layer — `scheduling-doc-sync` — installs a nightly GitHub Action that runs detect→fix unattended on the commits since the last sync and opens a docs-update PR with the evidence (PR-only; past the blast-radius cap it files an issue instead); it's wiring on top of the contract, which lives in `detecting-doc-drift` and `fixing-doc-drift`.
 
 ## How it was built
 
@@ -114,7 +114,7 @@ Every skill was written test-first — RED (baseline agents fail) → GREEN (ski
 .claude-plugin/marketplace.json   # the toolshed marketplace
 plugins/doc-lifecycle/            # the published plugin
   .claude-plugin/plugin.json
-  skills/                         # 4 skills
+  skills/                         # 5 skills
   agents/                         # llm-doc-writer
 assets/                           # social-card.png (hero + GitHub social preview),
                                   #   drift-audit-demo.svg + demo/make_cast.py (its generator)
