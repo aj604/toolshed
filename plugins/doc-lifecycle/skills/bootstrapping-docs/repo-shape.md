@@ -5,7 +5,7 @@ Use this once a repo crosses **more than a handful of independently-comprehensib
 (one CLAUDE.md + README) is the right answer — do not build the structure here for a small
 repo; that is just bloat with folders.
 
-**If in doubt, you're a small repo.** Default to the 2-doc set and let this structure emerge
+**If in doubt, you're a small repo.** Default to the 2-doc core set and let this structure emerge
 only when a specific unit visibly needs its own doc — never build the tree pre-emptively.
 
 ## The scaling principle
@@ -60,9 +60,10 @@ Same cut-test as everywhere else. It must **not**:
 - **re-describe each unit** — that's the unit's own `overview.md`; link, don't restate. An
   architecture doc that summarizes each unit is just the per-unit docs concatenated, and
   drifts the moment one changes.
-- **become a design-rationale essay** — every line is a *current* relationship verifiable
-  across the units, not aspirational architecture. Rationale belongs in process docs (`plans/`),
-  which carry no such verifiability contract.
+- **become a design-rationale essay** — this file is *claim-style*, governed by `writing-docs`:
+  every line a *current* relationship verifiable across the units, not aspirational
+  architecture. Narrative architecture/conceptual overviews and design rationale sit outside
+  that contract; they belong in process docs (`plans/`), which carry no verifiability bar.
 
 It **earns its place only when units actually interact.** A repo of genuinely independent units
 needs no cross-unit picture — forcing one is the completeness-chasing the pyramid section
