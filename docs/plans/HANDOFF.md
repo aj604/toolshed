@@ -1,12 +1,12 @@
 # Documentation Skills Suite — Handoff
 
-**Last updated:** 2026-06-14
-**HEAD at handoff:** `a8fb6d3`
+**Last updated:** 2026-07-02
+**HEAD at handoff:** `db561b3`
 **Repo:** `toolshed` (git, branch `main`)
 
 ## What this project is
 
-Building a suite of 4 documentation skills with the `superpowers:writing-skills` TDD
+Building a suite of 5 documentation skills with the `superpowers:writing-skills` TDD
 methodology (RED → GREEN → REFACTOR with subagents). Full design and rationale:
 `docs/plans/2026-06-09-documentation-skills-suite-design.md` (read this first to resume).
 
@@ -20,7 +20,7 @@ Lifecycle the suite covers: **bootstrap → write → detect drift → auto-sync
 | 2 | bootstrapping-docs | ✅ done (GREEN+REFACTOR) | `bootstrapping-docs/` | yes |
 | 3 | detecting-doc-drift | ✅ done (GREEN+REFACTOR) | `detecting-doc-drift/` | yes |
 | 4 | fixing-doc-drift (the human-invoked fix step) | ✅ done (GREEN+REFACTOR) | `fixing-doc-drift/` | yes |
-| 5 | auto-trigger layer (cron/PR) | ✅ done | `scheduling-doc-sync/` | — |
+| 5 | auto-trigger layer (cron/PR) | ✅ done | `scheduling-doc-sync/` | yes |
 
 Build order is sequential: 3 needs 1+2 working (it rewrites via writing-docs standards);
 4 needs 3 working (it wires 3 into cron/PR triggers).

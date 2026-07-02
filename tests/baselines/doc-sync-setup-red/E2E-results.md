@@ -52,3 +52,15 @@ artifact hygiene, fail-loud semantics (two red runs, zero half-applied state), b
 idempotency behaviors, stale-branch recovery, and the installer's real-remote preflights.
 Two real defects found and fixed at the source (toolshed `6cd8869`, `c693962`) — both in the
 category local tests could not reach, which is what the E2E was for.
+
+## Template version note
+
+Live runs 1–5 in the table above exercised the template as of toolshed `3b1ff0d`. Two later
+verification runs exercised the `2d6b1a0` upgrade (self-explaining exit states + marker-only-commit
+exclusion): run [28613201558](https://github.com/aj604/doc-sync-e2e/actions/runs/28613201558)
+(detect over the upgrade commit → no drift → marker advance with summary) and run
+[28613304322](https://github.com/aj604/doc-sync-e2e/actions/runs/28613304322) (idle repo →
+pre-gate skip-empty with visible summary and annotation — before `2d6b1a0` this would have run
+detect nightly forever). The git-add marker hardening (this commit's sibling) postdates all live
+runs and is not live-verified (it narrows one git invocation; the step only executes on the
+advance-marker path).
