@@ -1,7 +1,7 @@
 {
   "name": "doc-lifecycle",
-  "version": "0.1.1",
-  "description": "Reference docs as checkable claims: bootstrap → write → detect drift → fix it, with one rule — every line of a repo-tracking doc is a claim verifiable against the code, so drift surfaces as a record.",
+  "version": "0.1.2",
+  "description": "Stop agents from acting on stale docs. Write README/CLAUDE.md/runbooks as checkable claims, audit them against the code with evidence-backed verdicts, and land fixes surgically — bootstrap → write → detect → fix.",
   "license": "MIT",
   "homepage": "https://github.com/aj604/toolshed",
   "repository": "https://github.com/aj604/toolshed",
