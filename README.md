@@ -62,11 +62,10 @@ That one contract runs through the whole suite, which is what lets the pieces co
 writing-docs        mandates verifiable claims
 detecting-doc-drift extracts and verifies those same claims, with evidence
 fixing-doc-drift    lands the drafted fixes, one diff hunk per record
-─── not yet built ───
-doc-sync-automation runs detect→fix on every diff and opens a PR
+scheduling-doc-sync installs the nightly Action that runs detect→fix and opens the PR
 ```
 
-The four skills above ship today. The automation layer on top — `doc-sync-automation`, which runs detect→fix unattended on every diff and opens a docs-update PR — is the suite's next addition; it's wiring on top of the contract, which already lives in `detecting-doc-drift` and `fixing-doc-drift`.
+All of the above ships today. The automation layer — `scheduling-doc-sync` — installs a nightly GitHub Action that runs detect→fix unattended on the commits since the last sync and opens a docs-update PR with the evidence (PR-only; past the blast-radius cap it files an issue instead); it's wiring on top of the contract, which lives in `detecting-doc-drift` and `fixing-doc-drift`.
 
 ## Try it locally
 
@@ -85,7 +84,7 @@ Every skill was written test-first — RED (baseline agents fail) → GREEN (ski
 .claude-plugin/marketplace.json   # the toolshed marketplace
 plugins/doc-lifecycle/            # the published plugin
   .claude-plugin/plugin.json
-  skills/                         # 4 skills
+  skills/                         # 5 skills
   agents/                         # llm-doc-writer
 assets/                           # social-card.png (README hero + GitHub social preview)
 docs/                             # plans: design docs + handoff (not part of the installed plugin)
