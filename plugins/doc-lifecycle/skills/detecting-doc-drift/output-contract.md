@@ -2,7 +2,9 @@
 
 Reference for `detecting-doc-drift`. The field set, enum rules, and validator step live in
 SKILL.md; this file is the worked example. Emit one record per extracted claim. `fix` is
-non-null only for `STALE`; `evidence` is mandatory for every verdict.
+non-null only for `STALE`, and it is the complete replacement text for the line at
+`location` — never an instruction like "change X to Y"; `evidence` is mandatory for every
+verdict.
 
 ```json
 [
@@ -28,7 +30,7 @@ non-null only for `STALE`; `evidence` is mandatory for every verdict.
     "claim": "worker is reasonably fast and handles most workloads",
     "location": "CLAUDE.md:26",
     "kind": "value",
-    "tier": 1,
+    "tier": 3,
     "verdict": "UNVERIFIABLE",
     "evidence": "no metric/threshold to check; worker body is an empty interval stub",
     "fix": null
@@ -48,10 +50,12 @@ with the `summary` so the whole thing is one parseable object:
 }
 ```
 
-Validate the whole result through `scripts/validate-drift-output.py` before handoff (see
-SKILL.md step 4) — passing the wrapped `{"records": [...], "summary": {...}}` object also checks
-the summary counts against the records; passing a bare array recomputes the authoritative
-summary for you.
+Validate the whole result through
+`${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-drift/scripts/validate-drift-output.py` before
+handoff (see SKILL.md step 4) — passing the wrapped `{"records": [...], "summary": {...}}`
+object also checks the summary counts against the records; passing a bare array recomputes
+the authoritative summary for you.
 
-**`location` must be `file:line`** (e.g. `CLAUDE.md:24`) — it is the only field the downstream
-`fixing-doc-drift` skill uses to place each edit, so the validator rejects any other shape.
+**`location` must be a single `file:line`** (e.g. `CLAUDE.md:24`) — one line, numbered from 1,
+no ranges. It is the only field the downstream `fixing-doc-drift` skill uses to place each
+edit, so the validator rejects any other shape.

@@ -28,7 +28,7 @@ one-sentence what-and-why
 ## License
 ```
 
-## One verified example (from the fixture)
+## One verified example
 
 Good — output was produced by running the command:
 

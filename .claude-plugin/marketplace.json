@@ -1,6 +1,6 @@
 {
   "name": "toolshed",
-  "description": "A personal Claude Code plugin marketplace. Ships doc-lifecycle: reference docs as checkable claims.",
+  "description": "A personal Claude Code plugin marketplace. Ships doc-lifecycle: stop agents from acting on stale docs — evidence-backed drift detection, surgical fixes.",
   "owner": {
     "name": "Avery Jones",
     "email": "avery.jones.nyc@gmail.com"
@@ -9,7 +9,7 @@
     {
       "name": "doc-lifecycle",
       "source": "./plugins/doc-lifecycle",
-      "description": "Reference docs as checkable claims: bootstrap → write → detect drift → fix it → schedule it, with one rule — every line of a repo-tracking doc is a claim verifiable against the code, so drift surfaces as a record."
+      "description": "Stop agents from acting on stale docs. Write README/CLAUDE.md/runbooks as checkable claims, audit them against the code with evidence-backed verdicts, and land fixes surgically — bootstrap → write → detect → fix → schedule."
     }
   ]
 }

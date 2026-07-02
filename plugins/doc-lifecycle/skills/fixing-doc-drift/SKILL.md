@@ -13,8 +13,10 @@ a human can no longer tell an evidence-backed correction from your opinion.
 
 **Violating the letter of the report is violating the spirit of the sync.**
 
-Input: a `detecting-doc-drift` record set — `STALE` / `VERIFIED` / `UNVERIFIABLE`, each with
-`evidence`; `STALE` records carry a drafted `fix`. This skill *applies* it; it does not re-audit.
+Input: a `detecting-doc-drift` drift report — `STALE` / `VERIFIED` / `UNVERIFIABLE` records,
+each with `evidence`; `STALE` records carry a single-line `location` (`file:line`) and a `fix`
+that is the complete replacement text for that line — the drift-report contract guarantees the
+shape. This skill *applies* it; it does not re-audit.
 **REQUIRED SUB-SKILL:** use **writing-docs** for any fix that needs real rewriting (a paragraph),
 not a string-swap.
 
@@ -23,10 +25,9 @@ not a string-swap.
 ### 1. Act only on STALE records
 
 Apply each `STALE` record's `fix` at its `location`. `VERIFIED` and `UNVERIFIABLE` are **not
-action items** — they prove coverage / flag a smell, they are not work. VERIFIED passages stay
-**byte-identical** — *except* a line a VERIFIED claim shares with a STALE one, where the STALE
-`fix` is the full-line replacement and byte-identical protects only the surviving substring
-(see Rule 4).
+action items**: VERIFIED records prove coverage; UNVERIFIABLE records are surfaced for human
+review, not edit targets. VERIFIED passages stay **byte-identical** (sole exception: a line
+shared with a STALE claim — Rule 5 owns that case).
 
 ### 2. Never delete — flag instead
 
@@ -40,24 +41,34 @@ Spot a real problem the report didn't flag? **Surface it to the human; do not ed
 out-of-scope fix — however correct — breaks the one-to-one map between the report and the diff,
 which is the only thing that makes the sync reviewable.
 
-### 4. Land the fix as-is; rewrite only when needed
+### 4. Confirm the anchor before you write
 
-The `fix` already meets the writing-docs bar — apply it verbatim. **The `fix` is the
-authoritative replacement for its `location`: substitute exactly what the record gives you, and
-stop at its boundary.** A `fix` that re-emits a whole line — including clauses the report didn't
+Before applying a `fix`, read the line at its `location` and confirm it still contains the
+record's `claim` (detection tolerates a few lines of anchor drift — search the nearby lines if
+the exact line moved). Claim not found → the doc changed after the report was cut: **do not
+apply the fix, do not guess a placement** — stop and re-run `detecting-doc-drift` for a fresh
+report. Applying blind overwrites the wrong line. Two `STALE` records targeting one `location`
+is the same stop: two full-line replacements cannot both hold, so the report is contradictory —
+re-run detection rather than picking one.
+
+### 5. Land the fix as-is; rewrite only when needed
+
+The record's `fix` is the full-line replacement for its `location` — the drift-report contract
+guarantees the shape, and it already meets the writing-docs bar: **apply it verbatim, and stop
+at its boundary.** A `fix` that re-emits a whole line — including clauses the report didn't
 single out — is still in scope: the report drafted that scope, you are *placing* it, not
 extending it. When a `STALE` and a `VERIFIED` claim share one `location`, the `STALE` `fix` is
 the full-line replacement, and "byte-identical" (Rule 1) protects the VERIFIED claim's surviving
 substring — it is not a competing whole-line rule. Only when a fix is *structural* (a paragraph,
 not a string) dispatch **writing-docs**, which routes audience/density itself.
 
-### 5. Blast-radius stop
+### 6. Blast-radius stop
 
-If STALE records exceed the cap (default: **~10 passages, or a third of the doc's extracted
-claims**) or the doc is wholesale-wrong, **stop and escalate** — open an issue / tell the human.
-Do not emit a giant rewrite.
+If the report crosses the cap (default: **~10 STALE records, or more than a third of the
+report's records STALE**) or the doc is wholesale-wrong, **stop and escalate** — open an issue /
+tell the human. Wholesale regeneration is a red flag, not a fix: do not emit a giant rewrite.
 
-### 6. Evidence travels with the change
+### 7. Evidence travels with the change
 
 The commit / PR body maps each edit to its record's `evidence` (`file:line` or command output).
 A reviewer confirms the sync by diffing against the report, not by re-deriving it.
@@ -68,6 +79,8 @@ A reviewer confirms the sync by diffing against the report, not by re-deriving i
 - Editing a passage with no matching `STALE` record → out of scope; surface instead.
 - "The doc contract says cut unverifiable prose, so I'll delete it" → that's a writing-docs
   cleanup, not this sync. Not your mandate here.
+- The line at `location` no longer carries the record's claim → the report is stale; re-run
+  detection, don't guess a placement.
 - Rewording or restructuring a `VERIFIED` passage to "read better" → it stays byte-identical.
 - The report flags most of the doc and you're about to rewrite it all → blast-radius stop.
 

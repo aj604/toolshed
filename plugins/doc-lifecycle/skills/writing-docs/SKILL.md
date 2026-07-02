@@ -1,6 +1,6 @@
 ---
 name: writing-docs
-description: 'Use when writing or editing a documentation file whose job is to track the repo — README, runbook, CLAUDE.md/AGENTS.md, reference, or agent-facing context pack — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. The one door for these repo-tracking docs, across human and agent readers (token bloat, context rot). Out of scope: tutorials, conceptual/architecture overviews, and decision records (ADRs) — narrative by design, not line-by-line claims about the repo. To create a baseline doc set from scratch for an undocumented repo, start with bootstrapping-docs; it routes here for each doc.'
+description: 'Use when writing or editing a documentation file whose job is to track the repo — README, runbook, CLAUDE.md/AGENTS.md, reference (including the claim-style docs/reference/architecture.md that bootstrapping-docs prescribes), or agent-facing context pack — including converting human or marketing docs into dense agent-facing form, or when tempted to add example output, install steps, or "why" prose. The one door for these repo-tracking docs, across human and agent readers (token bloat, context rot). Out of scope: tutorials, narrative architecture/conceptual overviews and design rationale, and decision records (ADRs) — narrative by design, not line-by-line claims about the repo. To create a baseline doc set from scratch for an undocumented repo, start with bootstrapping-docs; it routes here for each doc.'
 ---
 
 # Writing Docs
@@ -13,19 +13,21 @@ smaller all-true doc beats a complete one with unverifiable parts.
 
 Every line is one of two kinds of claim:
 
-- **Verifiable claim** — commands, paths, symbols, behavior, output, structure. Must be
-  mechanically checkable against the repo *as it is now*.
+- **Verifiable claim** — commands, paths, symbols, behavior (output included), structure,
+  values. Must be mechanically checkable against the repo *as it is now*.
 - **Rationale claim** — the "why", tradeoffs, rejected alternatives. Allowed, but only in
   a marked section and **anchored** to a `file:line`, commit, or date.
 
 If a line is neither, cut it.
 
 **Scope — what this governs.** Docs that exist to *correspond to the current repo*: README,
-runbook, CLAUDE.md/AGENTS.md, reference. It is **not** a universal theory of documentation.
-Tutorials, conceptual/architecture overviews, and decision records (ADRs) are narrative by
-design — sequenced, redundant on purpose, spanning many files, valuable precisely *because*
-they aren't line-by-line claims about the repo. The claim bar would wrongly gut them; don't
-point this skill at them.
+runbook, CLAUDE.md/AGENTS.md, reference — including the claim-style
+`docs/reference/architecture.md` that bootstrapping-docs prescribes (every line a current,
+verifiable relationship between units). It is **not** a universal theory of documentation.
+Tutorials, *narrative* architecture/conceptual overviews and design rationale, and decision
+records (ADRs) are narrative by design — sequenced, redundant on purpose, spanning many files,
+valuable precisely *because* they aren't line-by-line claims about the repo. The claim bar
+would wrongly gut them; don't point this skill at them.
 
 ## The rules (these address what agents get wrong)
 
@@ -72,6 +74,7 @@ this? If yes, link to it; don't duplicate it into a doc that will drift.
 | Newcomer evaluating / setting up | README | readme.md |
 | On-call mid-incident, under pressure | runbook | runbooks.md |
 | AI agent starting a session in the repo | CLAUDE.md / AGENTS.md | agent-context.md |
+| Agent reading on demand in a multi-unit repo | `docs/reference/` tree (architecture.md, per-unit overview.md) | bootstrapping-docs' repo-shape.md (shape + routing) |
 
 ## One bar, every reader — then route
 
@@ -94,7 +97,9 @@ This is the one door for repo-tracking doc writing: don't go looking for a secon
   already in front of you) → write it inline, applying the bar.
 - **No — you'd have to read code or run commands to verify the claims, or it's more than a few
   lines** → dispatch, so that exploration stays out of your context:
-  - **human-facing** → a generalist subagent carrying this skill.
+  - **human-facing** → dispatch a general-purpose subagent whose prompt gives the path to
+    this SKILL.md and instructs it to read and apply it, plus the same three inputs the
+    `llm-doc-writer` branch passes: *what to write from*, *the repo path*, and *the output path*.
   - **agent-facing** → the **`llm-doc-writer` agent** — it owns the densify+verify method and
     runs in its own context. Pass it: *what to write from* (source path, raw content, or topic +
     findings), *the repo path* (puts it in verify mode — anchors every claim to `file:line`,

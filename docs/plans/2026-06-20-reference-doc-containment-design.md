@@ -113,6 +113,6 @@ standing section in the always-loaded file.
   check ("don't lint established docs for a standing section").
 - `repo-shape.md` — Rule 7 reworded to match.
 - `CLAUDE.md` (this repo) — removed the section; its one fact (doc-sync-automation
-  designed-not-built) already lives in `PITCH.md` and `HANDOFF.md`.
+  designed-not-built) already lives in `HANDOFF.md`.
 
 Verified nothing else in the plugin (including `detecting-doc-drift`) enforces the section.

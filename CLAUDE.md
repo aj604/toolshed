@@ -11,8 +11,7 @@ plus the GitHub Actions template the scheduling skill installs
 ## Layout (pointers, not descriptions)
 
 - `.claude-plugin/marketplace.json` — marketplace manifest, lists plugins. **Must stay at repo
-  root**: `/plugin marketplace add <owner>/<repo>` only finds `marketplace.json` there, which is
-  why this repo lives at `skills/toolshed/` rather than as a subdir of a larger repo.
+  root**: `/plugin marketplace add <owner>/<repo>` only finds `marketplace.json` there.
 - `plugins/doc-lifecycle/` — the one published plugin. `.claude-plugin/plugin.json` is its
   manifest; `skills/` and `agents/` hold its contents.
 - `docs/` — `plans/` (design docs + `HANDOFF.md`). Not published.
@@ -32,7 +31,10 @@ plus the GitHub Actions template the scheduling skill installs
 ## Conventions
 
 - **Skills are built test-first** (RED → GREEN → REFACTOR with subagents) via the
-  `superpowers:writing-skills` methodology; test records go under `tests/baselines/<skill>/`.
+  `superpowers:writing-skills` methodology; test records live under `tests/baselines/` — one dir
+  per test milestone (`bootstrap-red/`, `bootstrap-green/`, `drift-red/`, `fixing-drift-red/`,
+  `llm-doc-red/`, `writing-docs-merge-red/`), plus the original writing-docs records loose at
+  the `tests/baselines/` root.
   Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
   `docs/plans/2026-06-09-documentation-skills-suite-design.md` (suite) and
   `docs/plans/2026-06-20-reference-doc-containment-design.md` (the `docs/reference/` shape).
@@ -50,6 +52,8 @@ plus the GitHub Actions template the scheduling skill installs
 
 ## Gotchas
 
-- **`tests/fixtures/taskflow` needs `make setup` after checkout** before anything runs — it
-  relinks npm workspaces (`tests/fixtures/taskflow/Makefile:1`, comment). Then `make migrate`
-  before `make dev`/`make test`, or api and worker exit nonzero.
+- **`tests/fixtures/taskflow` needs `make setup` (plain `npm install`) after checkout**, then
+  `make migrate` before `make dev` — migrate creates `.taskflow-state.json`, and api and worker
+  refuse to start without it (`tests/fixtures/taskflow/Makefile:7`, comment). `make test`
+  (`node --test packages/*/test/`) does not need migrate; only `@taskflow/shared` has tests
+  (`Makefile:21`, comment).
