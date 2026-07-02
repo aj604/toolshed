@@ -20,7 +20,7 @@ Lifecycle the suite covers: **bootstrap → write → detect drift → auto-sync
 | 2 | bootstrapping-docs | ✅ done (GREEN+REFACTOR) | `bootstrapping-docs/` | yes |
 | 3 | detecting-doc-drift | ✅ done (GREEN+REFACTOR) | `detecting-doc-drift/` | yes |
 | 4 | fixing-doc-drift (the human-invoked fix step) | ✅ done (GREEN+REFACTOR) | `fixing-doc-drift/` | yes |
-| 5 | auto-trigger layer (cron/PR) | ⬜ deferred — non-skill wiring, not started | — | — |
+| 5 | auto-trigger layer (cron/PR) | ✅ done | `scheduling-doc-sync/` | — |
 
 Build order is sequential: 3 needs 1+2 working (it rewrites via writing-docs standards);
 4 needs 3 working (it wires 3 into cron/PR triggers).
@@ -190,3 +190,13 @@ tests/baselines/         RED/GREEN test records + findings for skills 1 and 2
 - detecting-doc-drift: exact claim-extraction format; how tiers are surfaced to the user.
 - doc-sync-automation: blast-radius cap N; where the nightly cron runs (cloud routine vs
   GitHub Action); per-repo trigger config. See design doc "Open items".
+
+## Update 2026-07-02 — auto-trigger layer shipped (`scheduling-doc-sync`)
+
+Item 5 built as a skill + shipped wiring, per `2026-07-02-doc-sync-automation-design.md`:
+nightly GitHub Action template (`doc-sync.yml`, orchestration only) + unit-tested gate
+(`sync-gate.py`, decision matrix in `tests/scripts/sync-gate_test.py`) + installer skill
+(preflight, knob substitution, marker seeding — never resets an existing marker). Built
+test-first: RED = baseline agent hand-rolls the wiring (records in
+`tests/baselines/doc-sync-setup-red/`); REFACTOR pressure = holds PR-only against
+"commit straight to main". Lifecycle: bootstrap → write → detect → fix → **schedule**.

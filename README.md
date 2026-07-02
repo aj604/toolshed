@@ -18,7 +18,7 @@ A personal [Claude Code plugin marketplace](https://docs.claude.com/en/docs/clau
 
 **Reference docs as checkable claims — so when the code moves, the drift surfaces as a record, not a silent surprise.**
 
-A suite of skills covering the documentation lifecycle — **bootstrap → write → detect → fix** — that share one record format and one rule: *every line of a repo-tracking doc is a claim that must be true of the repo.*
+A suite of skills covering the documentation lifecycle — **bootstrap → write → detect → fix → schedule** — that share one record format and one rule: *every line of a repo-tracking doc is a claim that must be true of the repo.*
 
 ## The problem, in two lines
 
@@ -40,6 +40,7 @@ A `CLAUDE.md` says `make reset` resets state and the worker "accepts schema 2, e
 | `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
 | `detecting-doc-drift` | skill | Auditing docs against the code — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
 | `fixing-doc-drift` | skill | Applying a drift report to the docs — lands each STALE fix surgically, never deletes, never touches what the report didn't flag, stops on a large blast radius. |
+| `scheduling-doc-sync` | skill | Wiring a repo for unattended nightly drift sync — installs the shipped GitHub Action (detect → gate → fix → evidence PR) with marker-based idempotency and a blast-radius stop. |
 | `llm-doc-writer` | agent | A dispatchable subagent that produces LLM-optimized documentation with maximum context efficiency. |
 
 ## Install

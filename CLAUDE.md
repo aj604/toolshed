@@ -1,9 +1,12 @@
 # CLAUDE.md
 
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
-Markdown; the only executable code published is a skill helper script
-(`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`, runs on
-`python3`, no deps). The sample repos under `tests/fixtures/` are the only other runnable code.
+Markdown; the only executable code published is two skill helper scripts
+(`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py` and
+`plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`, both `python3`, no deps)
+plus the GitHub Actions template the scheduling skill installs
+(`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`). The sample repos under
+`tests/fixtures/` are the only other runnable code.
 
 ## Layout (pointers, not descriptions)
 
@@ -33,9 +36,10 @@ Markdown; the only executable code published is a skill helper script
   Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
   `docs/plans/2026-06-09-documentation-skills-suite-design.md` (suite) and
   `docs/plans/2026-06-20-reference-doc-containment-design.md` (the `docs/reference/` shape).
-- **The one helper script has unit tests:** run
-  `python3 tests/scripts/validate-drift-output_test.py` (stdlib `unittest`, no deps) after
-  touching `detecting-doc-drift`'s `validate-drift-output.py` or its output contract.
+- **The helper scripts have unit tests** (stdlib `unittest`, no deps):
+  `python3 tests/scripts/validate-drift-output_test.py` after touching `detecting-doc-drift`'s
+  `validate-drift-output.py` or its output contract; `python3 tests/scripts/sync-gate_test.py`
+  after touching `scheduling-doc-sync`'s `sync-gate.py` or `doc-sync.yml`'s gate wiring.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill — one door for both human and agent docs; it carries
   the agent-density bar inline and dispatches the `llm-doc-writer` agent for heavy agent-facing jobs).
