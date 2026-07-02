@@ -52,7 +52,12 @@ All shipped files are in this skill's base directory (announced when the skill l
    - first night: diff from the seeded marker; no drift → marker-only commit, drift → PR on
      `doc-sync/nightly` with evidence, over-cap → a `doc-sync` issue;
    - run it now with `gh workflow run doc-sync`;
-   - upgrades: re-run this skill (marker preserved; template/scripts refreshed).
+   - upgrades: re-run this skill (marker preserved; template/scripts refreshed);
+   - **sync PRs carry no CI checks by default:** the pipeline pushes with the workflow's
+     `GITHUB_TOKEN`, and GitHub does not retrigger workflows on commits made with that token —
+     so the target repo's CI will not run on `doc-sync/nightly` PRs. Usually tolerable for
+     doc-only diffs; if checks-on-doc-PRs matter, mint the push token from a GitHub App
+     (`actions/create-github-app-token`) instead.
 
 ## Rules
 
