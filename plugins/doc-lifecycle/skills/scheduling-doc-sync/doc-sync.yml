@@ -40,7 +40,9 @@ jobs:
             echo "::error::.github/doc-sync-marker missing — run the scheduling-doc-sync installer"; exit 1; }
           MARKER=$(cat .github/doc-sync-marker)
           HEAD_SHA=$(git rev-parse HEAD)
-          COMMITS=$(git rev-list --count "${MARKER}..HEAD")
+          # Marker-only commits don't count as new work — else each clean run's
+          # marker commit would trigger the next night's detect forever.
+          COMMITS=$(git rev-list --count "${MARKER}..HEAD" -- . ':(exclude).github/doc-sync-marker')
           OPEN_PRS=$(gh pr list --head doc-sync/nightly --state open --json number --jq length)
           OPEN_ISSUES=$(gh issue list --label doc-sync --state open --json number --jq length)
           {
@@ -61,6 +63,18 @@ jobs:
             --open-issues "${{ steps.facts.outputs.open_issues }}")
           echo "pre-gate: ${DECISION}"
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
+          # Every terminal state explains itself on the run page — a reader must
+          # never have to infer why the remaining steps were skipped.
+          case "${DECISION}" in
+            skip-empty)
+              echo "::notice::doc-sync skipped: nothing new since the marker"
+              echo "⏭️ **Skipped — nothing to sync.** No commits (beyond marker bookkeeping) since marker \`${{ steps.facts.outputs.marker }}\`. No model calls were made." >> "$GITHUB_STEP_SUMMARY" ;;
+            skip-pending)
+              echo "::notice::doc-sync skipped: a doc-sync PR/issue awaits a human"
+              echo "⏭️ **Skipped — pending human review.** Open doc-sync PRs: ${{ steps.facts.outputs.open_prs }}, open \`doc-sync\` issues: ${{ steps.facts.outputs.open_issues }}. The nightly resumes after they are merged/closed. No model calls were made." >> "$GITHUB_STEP_SUMMARY" ;;
+            detect)
+              echo "▶️ **Checking ${{ steps.facts.outputs.commits }} commit(s)** for doc drift over \`${{ steps.facts.outputs.marker }}..${{ steps.facts.outputs.head_sha }}\`." >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
 
       - name: Install Claude Code + doc-lifecycle plugin
         if: steps.pre.outputs.decision == 'detect'
@@ -109,7 +123,12 @@ jobs:
           echo "${{ steps.facts.outputs.head_sha }}" > .github/doc-sync-marker
           git commit -am "docs: advance doc-sync marker (no drift in ${{ steps.facts.outputs.commits }} commit(s))"
           # Branch protection may forbid this push; the marker then rides in the next sync PR.
-          git push || echo "::notice::marker push rejected (branch protection?) — marker will advance with the next doc-sync PR"
+          if git push; then
+            echo "✅ **No drift.** ${{ steps.facts.outputs.commits }} commit(s) checked, all doc claims still hold; marker advanced to \`${{ steps.facts.outputs.head_sha }}\`." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::notice::marker push rejected (branch protection?) — marker will advance with the next doc-sync PR"
+            echo "✅ **No drift** (${{ steps.facts.outputs.commits }} commit(s) checked) — but the marker push was rejected (branch protection?); it will advance with the next doc-sync PR." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Open blast-radius issue
         if: steps.post.outputs.decision == 'blast-radius'
@@ -123,9 +142,11 @@ jobs:
             echo "## Stale claims"
             jq -r '.records[] | select(.verdict=="STALE") | "- `\(.location)` — \(.claim)\n  - **evidence:** \(.evidence)\n  - **drafted fix:** \(.fix)"' drift-report.json
           } > "$RUNNER_TEMP/issue-body.md"
-          gh issue create --label doc-sync \
+          STALE=$(jq '[.records[] | select(.verdict=="STALE")] | length' drift-report.json)
+          ISSUE_URL=$(gh issue create --label doc-sync \
             --title "doc-sync: drift exceeds blast-radius cap (${CAP})" \
-            --body-file "$RUNNER_TEMP/issue-body.md"
+            --body-file "$RUNNER_TEMP/issue-body.md")
+          echo "🛑 **Blast-radius stop.** ${STALE} stale claims exceed the cap (${CAP}) — escalated as ${ISSUE_URL} instead of a giant PR. Marker NOT advanced; the nightly resumes when the issue is closed." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Apply fixes (headless)
         if: steps.post.outputs.decision == 'proceed'
@@ -159,7 +180,9 @@ jobs:
           git commit -m "docs: sync with ${{ github.ref_name }} ($(date -u +%F))"
           # --force: a closed-unmerged PR can leave a stale branch behind.
           git push -u origin doc-sync/nightly --force
-          gh pr create \
+          PR_URL=$(gh pr create \
             --title "docs: sync with ${{ github.ref_name }} ($(date -u +%F))" \
             --body-file "$RUNNER_TEMP/pr-body.md" \
-            --base "${{ github.ref_name }}"
+            --base "${{ github.ref_name }}")
+          STALE=$(jq '[.records[] | select(.verdict=="STALE")] | length' "$RUNNER_TEMP/drift-report.json")
+          echo "📝 **Drift found and fixed.** ${STALE} stale claim(s) corrected — review ${PR_URL}. Merging it advances the marker; closing it unmerged re-checks the range next night." >> "$GITHUB_STEP_SUMMARY"
