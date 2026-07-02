@@ -1,6 +1,6 @@
 {
   "name": "doc-lifecycle",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reference docs as checkable claims: bootstrap → write → detect drift → fix it, with one rule — every line of a repo-tracking doc is a claim verifiable against the code, so drift surfaces as a record.",
   "license": "MIT",
   "homepage": "https://github.com/aj604/toolshed",
