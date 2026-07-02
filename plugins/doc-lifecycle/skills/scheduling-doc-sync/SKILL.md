@@ -25,6 +25,13 @@ All shipped files are in this skill's base directory (announced when the skill l
    its first model call without it.
 4. `gh label create doc-sync --force` (idempotent) — the pipeline files blast-radius issues
    under this label, and `gh issue create --label` fails if it doesn't exist.
+5. Actions may create PRs:
+   `gh api repos/{owner}/{repo}/actions/permissions/workflow --jq .can_approve_pull_request_reviews`
+   must be `true` — GitHub blocks Actions-created PRs by default, and the workflow-level
+   `permissions:` block cannot override it (the PR step fails with "GitHub Actions is not
+   permitted to create or approve pull requests"). If `false`: **warn, don't block** — offer
+   `gh api -X PUT repos/{owner}/{repo}/actions/permissions/workflow -F can_approve_pull_request_reviews=true`
+   (needs repo admin; also in Settings → Actions → General).
 
 ## Install
 
