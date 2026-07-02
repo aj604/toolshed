@@ -581,7 +581,7 @@ grep -c "steps.pre.outputs.decision == 'detect'" plugins/doc-lifecycle/skills/sc
 echo OK
 ```
 
-Expected: `3`, `5`, `OK`.
+Expected: `4`, `5`, `OK`.
 
 - [ ] **Step 4: Commit**
 
