@@ -1,20 +1,20 @@
 # Documentation Skills Suite — Handoff
 
-**Last updated:** 2026-06-14
-**HEAD at handoff:** `a8fb6d3`
-**Repo:** `toolshed` (git, branch `main`)
+**Last updated:** 2026-07-02
+**HEAD at handoff:** `2225c6f`
+**Repo:** `toolshed` (git)
 
 ## What this project is
 
-Building a suite of 4 documentation skills with the `superpowers:writing-skills` TDD
+Built a suite of 4 documentation skills with the `superpowers:writing-skills` TDD
 methodology (RED → GREEN → REFACTOR with subagents). Full design and rationale:
 `docs/plans/2026-06-09-documentation-skills-suite-design.md` (read this first to resume).
 
-Lifecycle the suite covers: **bootstrap → write → detect drift → auto-sync.**
+Lifecycle the suite covers: **bootstrap → write → detect → fix.**
 
 ## Status
 
-| # | Skill | State | In repo | Deployed to `~/.claude/skills` |
+| # | Skill | State | In repo (under `plugins/doc-lifecycle/skills/`) | Deployed to `~/.claude/skills` |
 |---|-------|-------|---------|-------------------------------|
 | 1 | writing-docs | ✅ done (GREEN+REFACTOR) | `writing-docs/` | yes |
 | 2 | bootstrapping-docs | ✅ done (GREEN+REFACTOR) | `bootstrapping-docs/` | yes |
@@ -23,7 +23,8 @@ Lifecycle the suite covers: **bootstrap → write → detect drift → auto-sync
 | 5 | auto-trigger layer (cron/PR) | ⬜ deferred — non-skill wiring, not started | — | — |
 
 Build order is sequential: 3 needs 1+2 working (it rewrites via writing-docs standards);
-4 needs 3 working (it wires 3 into cron/PR triggers).
+4 needs 3 working (it consumes 3's structured drift report and applies the fixes). The
+cron/PR trigger wiring is row 5, deferred.
 
 ### Skill 3 outcome (important — reshaped the skill)
 
@@ -40,8 +41,9 @@ declares the deterministic extract→verify(tiered)→classify→**emit structur
 UNVERIFIABLE, invented `kind`s, and anchor/line-number over-flagging. Full record:
 `tests/baselines/drift-red/{RED-findings,GREEN-results}.md`.
 
-**This sets up skill 4 (doc-sync-automation):** it consumes skill 3's structured output —
-diff-scoped mode is "what automation calls" — and adds the wiring/guardrails (triggers,
+**This sets up skill 4** (then planned as `doc-sync-automation`; shipped as `fixing-doc-drift`
+plus a deferred auto-trigger layer — see the 2026-06-20 updates below): it consumes skill 3's
+structured output — diff-scoped mode is "what automation calls" — and adds the wiring/guardrails (triggers,
 blast-radius cap, idempotency, never-delete, evidence-in-PR). The drift *contract* now lives
 in skill 3; skill 4 is genuinely thin wiring on top, as the design intended.
 
@@ -84,7 +86,7 @@ the `llm-doc-writer` agent). The contract is hoisted into the door you already o
   is gone from the repo AND `~/.claude/skills` — an unrecommended-but-present door still competes.
 - **Changes:** `writing-docs` SKILL.md (description absorbs the LLM triggers; "One bar, every
   reader — then route" router) + `agent-context.md`; `writing-for-llms/` deleted; dangling refs
-  fixed in `CLAUDE.md`, `README.md`, `bootstrapping-docs/SKILL.md`, `PITCH.md`, this design doc.
+  fixed in `CLAUDE.md`, `README.md`, `bootstrapping-docs/SKILL.md`, this design doc.
 - **Deployed:** merged `~/.claude/skills/writing-docs/`; removed `~/.claude/skills/writing-for-llms/`.
 
 ## Update 2026-06-20 (later still) — `fixing-doc-drift` built (the fix step)
@@ -105,38 +107,28 @@ non-skill wiring (now "skill 5" in the table, ⬜).
   no "while I'm here"; land the drafted fix as-is and dispatch `writing-docs` only for structural
   rewrites; blast-radius stop; evidence travels with the change.
 - **Lifecycle now complete:** bootstrap → write → detect → fix. Refs wired in `detecting-doc-drift`
-  SKILL.md, `README.md`, `PITCH.md`, `marketplace.json` tagline, and the design doc.
+  SKILL.md, `README.md`, `marketplace.json` tagline, and the design doc.
 - **Deployed:** `~/.claude/skills/fixing-doc-drift/`.
+
+## Update 2026-07-02 — handoff reconciled to shipped state
+
+Resume notes, lifecycle line, dependency notes, and the repo-layout tree below were brought in
+line with what actually shipped: all four skills + the `llm-doc-writer` agent done, auto-trigger
+layer deferred.
 
 ## How to resume (next session)
 
-1. Read `docs/plans/2026-06-09-documentation-skills-suite-design.md` — especially the
-   `detecting-doc-drift` section (tiered verification engine, two modes) and the
-   `writing-docs strategy` section (verifiability spine, two claim classes).
-2. Invoke `superpowers:writing-skills`; create TodoWrite items for its checklist.
-3. Build `detecting-doc-drift` via RED → GREEN → REFACTOR (see "Next skill" below).
+All four skills plus the `llm-doc-writer` agent are done (GREEN+REFACTOR), deployed, and ship
+in `plugins/doc-lifecycle/`. There is no skill left to build. The only open item is row 5 in
+the status table: the deferred auto-trigger layer.
 
-## Next skill: detecting-doc-drift
+## Remaining work: auto-trigger layer (row 5, deferred)
 
-**What it is** (from the design): docs make verifiable claims; drift = a claim the repo no
-longer backs. Engine = extract claims → verify (tiered) → classify VERIFIED/STALE/
-UNVERIFIABLE → fix or report. Two modes: full audit (manual sweep) and diff-scoped (what
-automation calls). Three verification tiers (static grep → safe commands → deep
-read/execute) with an escalation rule so cost concentrates where drift is likely.
-
-**RED setup is easy here — reuse the existing fixtures.** Both fixtures are runnable and
-already have correct baseline docs to mutate:
-- `tests/fixtures/sample-repo/` (bundlewatch CLI) + answer key `tests/fixtures/ANSWER-KEY.md`
-- `tests/fixtures/taskflow/` (3-component workspace) + `tests/fixtures/taskflow-ANSWER-KEY.md`
-- Known-good docs to plant drift into: `tests/baselines/bootstrap-green/agent1/` and
-  `agent2/` (accurate CLAUDE.md/AGENTS.md/README for taskflow).
-
-**Suggested RED:** take a known-good doc, plant N stale claims (rename a command, change a
-flag, alter an exit code, break a `file:line` anchor, change a documented number), then ask
-baseline agents (no skill) "are these docs accurate?" Measure: planted-drift recall +
-false-VERIFIED rate (claims passed without evidence). Predicted failures to confirm:
-evidence-free "looks consistent" passes; missing drift that needs running code; no tiering
-(either over-verifies everything or under-verifies).
+Non-skill wiring, deliberately deferred. It calls `detecting-doc-drift` in diff-scoped mode
+(the mode designed for automation) from cron and/or PR triggers, then hands the structured
+report to `fixing-doc-drift`, with the guardrails the design names: blast-radius cap,
+idempotency, never-delete, evidence-in-PR. Open decisions are in "Not yet decided" below and
+the design doc's "Open items". No RED/GREEN cycle — it's wiring, not agent behavior.
 
 ## Key learnings (carry forward — these shaped skills 1 and 2)
 
@@ -152,8 +144,7 @@ evidence-free "looks consistent" passes; missing drift that needs running code; 
   scope discipline: minimal high-leverage set, agent-file-first, STOP list, deferred note.
 - **Fixtures must be big enough to make the failure show.** sample-repo (tiny) was fine for
   writing-docs but couldn't surface completeness-chasing; taskflow (multi-component) was
-  built for that. detecting-doc-drift likely needs enough claim variety to exercise all 3
-  tiers — both fixtures together should suffice.
+  built for that. detecting-doc-drift reused both (see "Skill 3 outcome" above).
 - **GREEN/REFACTOR pattern that worked:** re-run the exact RED scenario with the skill, then
   one pressure test pushing toward the core failure. Both skills hit the "bulletproof
   signature" (agent refuses under pressure, cites the skill, names the temptation).
@@ -162,17 +153,29 @@ evidence-free "looks consistent" passes; missing drift that needs running code; 
 ## Repo layout
 
 ```
+.claude-plugin/
+  marketplace.json       # marketplace manifest (must stay at repo root)
+plugins/doc-lifecycle/
+  .claude-plugin/plugin.json
+  skills/
+    writing-docs/        SKILL.md + readme.md, runbooks.md, agent-context.md
+    bootstrapping-docs/  SKILL.md + repo-shape.md
+    detecting-doc-drift/ SKILL.md + output-contract.md, scripts/validate-drift-output.py
+    fixing-doc-drift/    SKILL.md
+  agents/
+    llm-doc-writer.md
 docs/plans/
   2026-06-09-documentation-skills-suite-design.md   # full design + writing-docs strategy
+  2026-06-20-reference-doc-containment-design.md    # the docs/reference/ shape
   HANDOFF.md                                         # this file
-writing-docs/            SKILL.md + readme.md, runbooks.md, agent-context.md
-bootstrapping-docs/      SKILL.md
-tests/fixtures/
-  sample-repo/           bundlewatch CLI fixture (runnable)
-  ANSWER-KEY.md          grading key for sample-repo
-  taskflow/              3-component workspace fixture (runnable; run `make setup` first)
-  taskflow-ANSWER-KEY.md grading key for taskflow
-tests/baselines/         RED/GREEN test records + findings for skills 1 and 2
+tests/
+  fixtures/
+    sample-repo/           bundlewatch CLI fixture (runnable)
+    ANSWER-KEY.md          grading key for sample-repo
+    taskflow/              3-component workspace fixture (runnable; run `make setup` first)
+    taskflow-ANSWER-KEY.md grading key for taskflow
+  baselines/             RED/GREEN test records for all four skills + the llm-doc-writer agent
+  scripts/               validate-drift-output_test.py (unit tests for the helper script)
 ```
 
 ## Conventions used in this project
@@ -182,11 +185,12 @@ tests/baselines/         RED/GREEN test records + findings for skills 1 and 2
 - Each skill: build/extend fixture → RED baselines (commit) → write skill + GREEN (verify)
   → REFACTOR pressure test → deploy + commit. Test records live under `tests/baselines/`.
 - Fixtures are committed runnable; `.taskflow-state.json` and `node_modules/` are gitignored
-  (run `make setup` in taskflow after checkout to relink workspaces).
+  (run `make setup` — plain `npm install` — in taskflow after checkout).
 - Commits co-authored; design/skills committed as they pass.
 
-## Not yet decided (deferred to implementation)
+## Not yet decided (deferred to the auto-trigger layer)
 
-- detecting-doc-drift: exact claim-extraction format; how tiers are surfaced to the user.
-- doc-sync-automation: blast-radius cap N; where the nightly cron runs (cloud routine vs
-  GitHub Action); per-repo trigger config. See design doc "Open items".
+- auto-trigger layer (row 5): blast-radius cap N; where the nightly cron runs (cloud routine
+  vs GitHub Action); per-repo trigger config. See design doc "Open items".
+  (detecting-doc-drift's record format and tier surfacing, once open here, are decided —
+  see its `output-contract.md`.)

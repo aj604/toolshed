@@ -14,7 +14,8 @@ Form is aggressive. Confidence is earned. Densifying prose is the easy half and 
 **Run-or-omit.** Every command, flag, path, number, version, API, and example output is a *claim*. For each one, you must either:
 
 1. **Back it** — it is present in your input, OR you confirmed it against the code (read it, or ran a safe command), OR
-2. **Mark it** — write `> UNVERIFIED: <claim>` so a human/automation can check it, OR
+2. **Mark it** — write `> UNVERIFIED: <claim>` so a human/automation can check it
+   (`detecting-doc-drift` extracts marked lines as claims that default to UNVERIFIABLE), OR
 3. **Cut it.**
 
 Never invent a detail to fill a template. A blank section beats a fabricated one.

@@ -1,7 +1,7 @@
 # Writing a runbook
 
 Reader: an on-call engineer, paged, under pressure, possibly unfamiliar with the tool.
-Maps to the **how-to** lens (task-oriented, goal = resolve the incident). Human rendering,
+Maps to the **how-to** lens (see readme.md's lens list; task-oriented, goal = resolve the incident). Human rendering,
 but ruthlessly skimmable. Every command and output is a verifiable claim (see SKILL.md).
 
 ## The 3am test
@@ -47,8 +47,8 @@ FAIL dist/bundle.js  6.2kb / 5.0kb     ← over budget (a real FAIL line, format
 
 ## Failure modes (watch for)
 
-- **Overloaded exit codes documented as clean.** Verify what each code *actually* covers
-  (the fixture's exit 1 = over-budget OR crash). Run the cases; don't assume one-to-one.
+- **Overloaded exit codes documented as clean.** Verify what each code *actually* covers —
+  a single exit 1 can mean over-budget OR crash. Run the cases; don't assume one-to-one.
 - **Steps that assume prior state.** The build-before-run prerequisite must be explicit, or
   the operator hits a misleading error that doesn't match how CI failed.
 - **Invented output.** Reproduce locally and paste real lines; don't illustrate from memory.

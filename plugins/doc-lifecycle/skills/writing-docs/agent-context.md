@@ -1,8 +1,8 @@
 # Writing agent-context docs (CLAUDE.md / AGENTS.md)
 
-Reader: an AI agent starting a session in the repo. Maps to the **reference + imperative
-rules** lenses. Agent rendering: maximum signal-per-token, no narrative, pointers over
-inline copies — density is mandatory here, not optional.
+Reader: an AI agent starting a session in the repo. Maps to the **reference** lens, with
+how-to elements (see readme.md's lens list). Agent rendering: maximum signal-per-token, no
+narrative, pointers over inline copies — density is mandatory here, not optional.
 
 **Ownership.** The full densify+verify method lives in exactly one place — the
 `llm-doc-writer` agent. For a whole-doc or verification-heavy job, **dispatch it** (it runs
@@ -40,6 +40,10 @@ Cut on sight:
 ## Conventions     (only those differing from defaults)
 ## Design notes    (anchored rationale: "as of <file:line> …")
 ```
+
+`# CLAUDE.md` above is shorthand for the canonical agent doc. Per bootstrapping-docs'
+repo-shape.md Rule 4, that's root `AGENTS.md`, with `CLAUDE.md` a one-line pointer to it —
+only a Claude-Code-only repo skips the shim and makes `CLAUDE.md` canonical directly.
 
 ## Pointers over inline copies
 
