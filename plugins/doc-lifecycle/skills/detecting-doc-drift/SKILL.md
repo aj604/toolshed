@@ -22,7 +22,7 @@ Two non-negotiables make the output usable by automation:
 its bar (real output, no aspirational claims, marked+anchored rationale). This skill finds
 and classifies drift; writing-docs governs how the correction reads. **`fixing-doc-drift`**
 consumes this skill's records and applies the fixes (an optional auto-trigger layer, designed
-but not yet built, can wire detect→fix to cron/PR).
+and shipped as the `scheduling-doc-sync` skill, wires detect→fix to cron/PR).
 
 ## The engine (run these four steps, in order)
 
