@@ -32,12 +32,15 @@ but not yet built, can wire detect→fix to cron/PR).
    *sound* factual but name no checkable thing ("robust", "production-ready", "reasonably
    fast", "handles most workloads"). Extract those too, kind `value`: they become
    `UNVERIFIABLE`. Do not skip them — an unbacked quality claim is the most common drift a
-   human eye waves through.
+   human eye waves through. Lines already marked `> UNVERIFIED: <claim>` (the marker
+   llm-doc-writer writes) are extracted like any claim and default to `UNVERIFIABLE` unless
+   the repo now makes them checkable.
 2. **Verify** each claim against the repo at the appropriate tier (below).
 3. **Classify** each: `VERIFIED` / `STALE` / `UNVERIFIABLE`.
-4. **Emit** the structured result (the contract below), then **validate it mechanically**
-   before handing it off: pipe it through `scripts/validate-drift-output.py` (reads the JSON
-   on stdin or as a file arg). It enforces the enum/`fix`/`evidence`/summary rules and exits
+4. **Emit** the drift report (the contract below), then **validate it mechanically**
+   before handing it off: pipe it through
+   `${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-drift/scripts/validate-drift-output.py`
+   (reads the JSON on stdin or as a file arg). It enforces the enum/`fix`/`evidence`/summary rules and exits
    nonzero on any violation — don't emit a result it rejects. It checks *shape*, not whether a
    verdict is *right*; that judgment is still yours.
 
@@ -65,28 +68,33 @@ construct that moved or no longer exists.
 
 ## The output contract (this is the "shape")
 
-Emit one record per extracted claim — STALE and UNVERIFIABLE records are what automation acts
-on; VERIFIED records prove coverage. Each record uses exactly these fields: `claim`,
-`location` (`file:line`), `kind`, `tier`, `verdict`, `evidence`, `fix`.
+The drift report holds one record per extracted claim — STALE records drive fixes;
+UNVERIFIABLE records are surfaced for human review, not edit targets; VERIFIED records prove
+coverage. Each record uses exactly these fields (no extras): `claim`, `location` (a single
+`file:line`, no ranges), `kind`, `tier`, `verdict`, `evidence`, `fix`.
 
 Rules: `kind` is one of `command` / `path` / `symbol` / `behavior` / `structure` / `value`;
 `verdict` is one of `VERIFIED` / `STALE` / `UNVERIFIABLE` — literal enum strings, no invented
-values. `fix` is non-null only for `STALE`. `evidence` is mandatory for **every** verdict,
-including VERIFIED (the grep/command/line that proves it). End with a one-line summary
-automation can gate on: `summary: {verified: N, stale: N, unverifiable: N}`.
+values. `fix` is non-null only for `STALE`, and it is the **complete replacement text** for
+the line at `location` — never an instruction like "change X to Y" — and must meet the
+writing-docs bar. `evidence` is mandatory for **every** verdict, including VERIFIED (the
+grep/command/line that proves it). Emit the canonical wrapped object
+`{"records": [...], "summary": {"verified": N, "stale": N, "unverifiable": N}}`; on success
+the validator prints a `summary:` line as JSON, recomputed from the records, that automation
+can gate on.
 
 See **output-contract.md** for a worked three-record example (a STALE command, a STALE
 behavior, an UNVERIFIABLE quality claim) with every field populated.
 
-`scripts/validate-drift-output.py` enforces all of the above mechanically (run it on the
-result — see step 4). Pass it `{"records": [...], "summary": {...}}` and it also checks the
-summary counts against the records; pass a bare array and it recomputes the authoritative
-summary for you.
+`${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-drift/scripts/validate-drift-output.py` enforces
+all of the above mechanically (run it on the result — see step 4). Pass it
+`{"records": [...], "summary": {...}}` and it also checks the summary counts against the
+records; it accepts a bare array too and recomputes the authoritative summary for you.
 
 ## Modes
 
 - **Full audit** (manual / nightly sweep): extract every claim across the target docs,
-  Tier 1 by default, escalate per the rule. Emit the full record list, severity-ordered
+  Tier 1 by default, escalate per the rule. Emit the full drift report, severity-ordered
   (wrong command/behavior before stale prose).
 - **Diff-scoped** (PR check / what automation calls): input is a diff or commit range. For
   each changed file/symbol/value, **grep every doc for passages referencing it** — including
@@ -102,7 +110,8 @@ summary for you.
 ## Red flags — STOP
 
 - Writing "looks consistent" / "should be fine" without opening the file → not a verdict.
-- Trusting a `file:line` anchor instead of reading that line → anchors don't rot, values do.
+- Trusting a `file:line` anchor instead of reading that line → anchors drift a few lines;
+  read the line and judge the claim (the anchor rule above).
 - Emitting a prose report with no structured records → automation can't trigger on it.
 - A VERIFIED record with an empty `evidence` field → unverified; go get the evidence.
 - Diff-scoped run that checked the one obvious doc → grep ALL docs for the changed subject.

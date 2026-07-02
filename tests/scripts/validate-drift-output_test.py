@@ -73,9 +73,17 @@ class ValidCases(unittest.TestCase):
         ]
         r = run(records)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("'verified': 1", r.stdout)
-        self.assertIn("'stale': 1", r.stdout)
-        self.assertIn("'unverifiable': 1", r.stdout)
+        self.assertIn('summary: {"verified": 1, "stale": 1, "unverifiable": 1}', r.stdout)
+
+    def test_summary_line_is_json_for_wrapped_object(self):
+        payload = {"records": [rec()], "summary": {"verified": 1, "stale": 0, "unverifiable": 0}}
+        r = run(payload)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('summary: {"verified": 1, "stale": 0, "unverifiable": 0}', r.stdout)
+
+    def test_empty_array_passes(self):
+        r = run([])
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_reads_from_file_argument(self):
         r = run([rec()], as_file=True)
@@ -119,19 +127,88 @@ class FieldRules(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("claim", r.stderr)
 
+    def test_missing_field_reported_exactly_once(self):
+        # A missing kind must produce the missing-field violation only,
+        # not a second enum violation for the same field.
+        bad = rec()
+        del bad["kind"]
+        r = run([bad])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("missing required field 'kind'", r.stderr)
+        self.assertIn("FAILED: 1 contract violation(s)", r.stderr)
+
+    def test_missing_fix_key_reported_exactly_once(self):
+        bad = rec()
+        del bad["fix"]
+        r = run([bad])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("missing required field 'fix'", r.stderr)
+        self.assertIn("FAILED: 1 contract violation(s)", r.stderr)
+
+    def test_unknown_extra_field_rejected(self):
+        r = run([rec(severity="high")])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unexpected field 'severity'", r.stderr)
+
+    def test_empty_claim_rejected(self):
+        r = run([rec(claim="")])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("claim", r.stderr)
+
+    def test_null_claim_rejected(self):
+        r = run([rec(claim=None)])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("claim", r.stderr)
+
     def test_empty_evidence_rejected_even_for_verified(self):
         r = run([rec(verdict="VERIFIED", evidence="", fix=None)])
         self.assertEqual(r.returncode, 1)
         self.assertIn("evidence", r.stderr)
+
+    def test_whitespace_only_evidence_rejected(self):
+        r = run([rec(evidence="   ")])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("evidence", r.stderr)
+
+    def test_non_dict_record_rejected(self):
+        r = run([rec(), "not a record"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not a JSON object", r.stderr)
 
     def test_location_without_line_rejected(self):
         r = run([rec(location="CLAUDE.md")])
         self.assertEqual(r.returncode, 1)
         self.assertIn("location", r.stderr)
 
-    def test_location_line_range_accepted(self):
+    def test_empty_location_rejected(self):
+        r = run([rec(location="")])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("location", r.stderr)
+
+    def test_null_location_rejected(self):
+        r = run([rec(location=None)])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("location", r.stderr)
+
+    def test_non_string_location_rejected(self):
+        r = run([rec(location=123)])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("location", r.stderr)
+
+    def test_location_line_zero_rejected(self):
+        r = run([rec(location="README.md:0")])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("location", r.stderr)
+
+    def test_location_line_range_rejected(self):
         r = run([rec(location="services/worker/worker.js:17-19")])
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("location", r.stderr)
+
+    def test_location_reversed_range_rejected(self):
+        r = run([rec(location="a.md:9-3")])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("location", r.stderr)
 
 
 class FixRule(unittest.TestCase):
@@ -150,6 +227,11 @@ class FixRule(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("fix", r.stderr)
 
+    def test_stale_with_non_string_fix_rejected(self):
+        r = run([rec(verdict="STALE", fix=123)])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("fix", r.stderr)
+
 
 class SummaryRule(unittest.TestCase):
     def test_summary_mismatch_rejected(self):
@@ -157,6 +239,28 @@ class SummaryRule(unittest.TestCase):
         r = run(payload)
         self.assertEqual(r.returncode, 1)
         self.assertIn("summary", r.stderr)
+
+    def test_bool_summary_value_rejected(self):
+        # JSON `true` is `True` in Python, and `True == 1` — must not slip through.
+        payload = {"records": [rec()], "summary": {"verified": True, "stale": 0, "unverifiable": 0}}
+        r = run(payload)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("integer", r.stderr)
+
+    def test_float_summary_value_rejected(self):
+        # `1.0 == 1` — a float count must not slip through either.
+        payload = {"records": [rec()], "summary": {"verified": 1.0, "stale": 0, "unverifiable": 0}}
+        r = run(payload)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("integer", r.stderr)
+
+    def test_non_object_summary_exits_2(self):
+        payload = {"records": [rec()], "summary": "1 verified"}
+        r = run(payload)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn(
+            "summary must be an object with integer verified/stale/unverifiable", r.stderr
+        )
 
 
 class BadInput(unittest.TestCase):
@@ -167,6 +271,22 @@ class BadInput(unittest.TestCase):
     def test_wrong_toplevel_shape_exits_2(self):
         r = run({"foo": "bar"})
         self.assertEqual(r.returncode, 2)
+
+    def test_extra_argv_is_usage_error(self):
+        r = subprocess.run(
+            [sys.executable, SCRIPT, "one.json", "two.json"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("usage:", r.stderr)
+
+    def test_nonexistent_file_exits_2(self):
+        r = subprocess.run(
+            [sys.executable, SCRIPT, "/no/such/drift-report.json"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("error:", r.stderr)
 
 
 if __name__ == "__main__":
