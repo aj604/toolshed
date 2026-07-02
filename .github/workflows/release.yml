@@ -1,0 +1,54 @@
+# ci + release for the toolshed marketplace.
+# CI (every PR and push): manifest validation + unit tests — the checks that
+# have historically been run by hand before tagging.
+# Release (pushes to main): when plugins/doc-lifecycle's version has no tag yet,
+# tag vX.Y.Z and publish a GitHub Release. Cutting a release = bumping the
+# version in your PR; the rest is mechanical.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: |
+          set -euo pipefail
+          python3 tests/scripts/validate-drift-output_test.py
+          python3 tests/scripts/sync-gate_test.py
+      - name: Validate plugin manifests
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate .
+
+  release:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag and release if version is new
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r .version plugins/doc-lifecycle/.claude-plugin/plugin.json)
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "⏭️ **No release.** doc-lifecycle is at ${VERSION}, and \`v${VERSION}\` is already tagged — bump the version in plugin.json to cut a release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh release create "v${VERSION}" \
+            --target "${GITHUB_SHA}" \
+            --title "doc-lifecycle v${VERSION}" \
+            --generate-notes
+          echo "🏷️ **Released [doc-lifecycle v${VERSION}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/v${VERSION})** at \`${GITHUB_SHA:0:7}\`." >> "$GITHUB_STEP_SUMMARY"
