@@ -121,7 +121,8 @@ jobs:
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
           echo "${{ steps.facts.outputs.head_sha }}" > .github/doc-sync-marker
-          git commit -am "docs: advance doc-sync marker (no drift in ${{ steps.facts.outputs.commits }} commit(s))"
+          git add .github/doc-sync-marker
+          git commit -m "docs: advance doc-sync marker (no drift in ${{ steps.facts.outputs.commits }} commit(s))"
           # Branch protection may forbid this push; the marker then rides in the next sync PR.
           if git push; then
             echo "✅ **No drift.** ${{ steps.facts.outputs.commits }} commit(s) checked, all doc claims still hold; marker advanced to \`${{ steps.facts.outputs.head_sha }}\`." >> "$GITHUB_STEP_SUMMARY"
