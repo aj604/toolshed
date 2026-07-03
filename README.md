@@ -116,8 +116,8 @@ And the loop is closed in this repo's own history: on its first nightly run here
 .claude-plugin/marketplace.json   # the toolshed marketplace
 plugins/doc-lifecycle/            # the published plugin
   .claude-plugin/plugin.json
-  skills/                         # 5 skills
-  agents/                         # llm-doc-writer
+  skills/                         # 8 skills
+  agents/                         # llm-doc-writer, doc-distiller
 assets/                           # social-card.png (hero + GitHub social preview),
                                   #   drift-audit-demo.svg + demo/make_cast.py (its generator)
 docs/                             # plans: design docs + handoff (not part of the installed plugin)

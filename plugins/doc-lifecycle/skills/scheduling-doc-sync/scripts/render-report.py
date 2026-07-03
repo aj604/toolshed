@@ -14,6 +14,11 @@ Usage:
     render-report.py pr-body --report FILE --marker M --head H
     render-report.py pr-title --report FILE --date YYYY-MM-DD
     render-report.py pr-summary --report FILE --pr-url URL
+    render-report.py bloat-pre-summary --decision {detect|skip-pending}
+    render-report.py bloat-pr-body --report FILE
+    render-report.py bloat-pr-title --report FILE --lane L --date YYYY-MM-DD
+    render-report.py bloat-pr-summary --report FILE --lane L --pr-url URL
+    render-report.py bloat-skip-summary --lane L --reason {skip-empty|skip-pending}
 
 Body subcommands (issue-body, pr-body) print markdown on stdout for --body-file.
 Summary subcommands append to the file named by $GITHUB_STEP_SUMMARY (stdout when
@@ -166,6 +171,51 @@ def render_pr_summary(records, pr_url):
     )
 
 
+def render_bloat_pre_summary(decision):
+    if decision == "detect":
+        return "▶️ **Weekly doc-bloat sweep** — auditing every doc (incl. `docs/plans/`)."
+    if decision == "skip-pending":
+        return ("⏭️ **Skipped — both bloat PRs are open.** `doc-bloat/prune` and "
+                "`doc-bloat/distill` await review; the sweep resumes after they merge/close.")
+    raise ValueError(f"unknown bloat-pre decision: {decision!r}")
+
+
+def render_bloat_pr_body(records):
+    lines = [
+        "Proposed by the weekly doc-bloat sweep — each row is applied in the diff below. "
+        "Draft PR: review, drop any commit you don't want, merge to accept.",
+        "",
+        "| Change (see diff) | Why it's bloat |",
+        "|---|---|",
+    ]
+    for r in records:
+        where = r.get("location") or r.get("doc")
+        lines.append(f"| `{r['verdict']}` @ `{where}` | {md_cell(r['evidence'])} |")
+    return "\n".join(lines)
+
+
+def render_bloat_pr_title(records, lane, date):
+    n = len(records)
+    noun = "change" if n == 1 else "changes"
+    return f"docs: bloat {lane} — {n} {noun} ({date})"
+
+
+def render_bloat_pr_summary(records, lane, pr_url):
+    n = len(records)
+    return (f"🧹 **Bloat sweep — {lane} lane.** {n} proposed change(s) — review {pr_url}. "
+            f"Draft PR: merge to accept, close to discard.")
+
+
+def render_bloat_skip_summary(lane, reason):
+    msgs = {
+        "skip-empty": f"✅ **{lane} lane: nothing to propose.** The sweep found no {lane} findings.",
+        "skip-pending": f"⏭️ **{lane} lane skipped.** An open `doc-bloat/{lane}` PR awaits review.",
+    }
+    if reason not in msgs:
+        raise ValueError(f"unknown skip reason: {reason!r}")
+    return msgs[reason]
+
+
 def nonneg(value):
     n = int(value)
     if n < 0:
@@ -214,6 +264,26 @@ def main():
     prsum.add_argument("--report", required=True)
     prsum.add_argument("--pr-url", required=True)
 
+    bpre = sub.add_parser("bloat-pre-summary")
+    bpre.add_argument("--decision", required=True)
+
+    bbody = sub.add_parser("bloat-pr-body")
+    bbody.add_argument("--report", required=True)
+
+    btitle = sub.add_parser("bloat-pr-title")
+    btitle.add_argument("--report", required=True)
+    btitle.add_argument("--lane", required=True)
+    btitle.add_argument("--date", required=True)
+
+    bsum = sub.add_parser("bloat-pr-summary")
+    bsum.add_argument("--report", required=True)
+    bsum.add_argument("--lane", required=True)
+    bsum.add_argument("--pr-url", required=True)
+
+    bskip = sub.add_parser("bloat-skip-summary")
+    bskip.add_argument("--lane", required=True)
+    bskip.add_argument("--reason", required=True)
+
     args = parser.parse_args()
 
     try:
@@ -221,6 +291,10 @@ def main():
             render_pre_summary(args)
         elif args.mode == "no-drift-summary":
             render_no_drift_summary(args)
+        elif args.mode == "bloat-pre-summary":
+            write_summary(render_bloat_pre_summary(args.decision))
+        elif args.mode == "bloat-skip-summary":
+            write_summary(render_bloat_skip_summary(args.lane, args.reason))
         else:
             records = load_records(args.report)
             if args.mode == "issue-body":
@@ -233,6 +307,12 @@ def main():
                 print(render_pr_title(records, args.date))
             elif args.mode == "pr-summary":
                 write_summary(render_pr_summary(records, args.pr_url))
+            elif args.mode == "bloat-pr-body":
+                print(render_bloat_pr_body(records))
+            elif args.mode == "bloat-pr-title":
+                print(render_bloat_pr_title(records, args.lane, args.date))
+            elif args.mode == "bloat-pr-summary":
+                write_summary(render_bloat_pr_summary(records, args.lane, args.pr_url))
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
         print(f"error: {e!r}", file=sys.stderr)
         return 2

@@ -1,0 +1,216 @@
+# doc-bloat — weekly documentation bloat sweep (detect → propose).
+# Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill; re-run that
+# skill to upgrade this file. Sibling to doc-sync.yml (drift): bloat is detect-and-
+# propose only — fixing-doc-bloat applies a human-approved subset, so each lane opens
+# a DRAFT PR and the merge is the approval.
+# Design: docs/plans/2026-07-03-doc-bloat-nightly-design.md in aj604/toolshed.
+name: doc-bloat
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write   # claude-code-action OAuth token exchange
+
+concurrency:
+  group: doc-bloat
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      prune: ${{ steps.prune.outputs.decision }}
+      distill: ${{ steps.distill.outputs.decision }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gather facts
+        id: facts
+        run: |
+          set -euo pipefail
+          PRUNE_PR=$(gh pr list --head doc-bloat/prune --state open --json number --jq length)
+          DISTILL_PR=$(gh pr list --head doc-bloat/distill --state open --json number --jq length)
+          {
+            echo "prune_pr=${PRUNE_PR}"
+            echo "distill_pr=${DISTILL_PR}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Gate (pre-sweep)
+        id: pre
+        run: |
+          set -euo pipefail
+          DECISION=$(python3 .github/doc-sync/sync-gate.py bloat-pre \
+            --prune-pr-open "${{ steps.facts.outputs.prune_pr }}" \
+            --distill-pr-open "${{ steps.facts.outputs.distill_pr }}")
+          echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
+          python3 .github/doc-sync/render-report.py bloat-pre-summary --decision "${DECISION}"
+
+      - name: Detect bloat (headless, full sweep)
+        if: steps.pre.outputs.decision == 'detect'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugins: doc-lifecycle@toolshed
+          prompt: >-
+            Use the doc-lifecycle:detecting-doc-bloat skill in full-audit mode over every
+            documentation file in this repository, including docs/plans/. Write the wrapped
+            result object ({"records": [...], "summary": {...}}) to bloat-report.json in the
+            repository root. If nothing is bloated, emit an empty records array with a zero summary.
+          claude_args: --allowedTools "Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
+
+      - name: Assert detect produced a report
+        if: steps.pre.outputs.decision == 'detect'
+        run: |
+          test -f bloat-report.json || { echo "::error::detect step produced no bloat-report.json"; exit 1; }
+
+      - name: Validate report (mechanical contract check)
+        if: steps.pre.outputs.decision == 'detect'
+        run: python3 .github/doc-sync/validate-bloat-output.py bloat-report.json
+
+      - name: Upload report artifact
+        if: always() && steps.pre.outputs.decision == 'detect'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bloat-report
+          path: bloat-report.json
+          if-no-files-found: ignore
+
+      - name: Gate (prune lane)
+        if: steps.pre.outputs.decision == 'detect'
+        id: prune
+        run: |
+          set -euo pipefail
+          DECISION=$(python3 .github/doc-sync/sync-gate.py bloat-lane \
+            --report bloat-report.json --lane prune \
+            --pr-open "${{ steps.facts.outputs.prune_pr }}" \
+            --out "$RUNNER_TEMP/prune.json")
+          echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
+          if [ "${DECISION}" != "open" ]; then
+            python3 .github/doc-sync/render-report.py bloat-skip-summary --lane prune --reason "${DECISION}"
+          fi
+
+      - name: Gate (distill lane)
+        if: steps.pre.outputs.decision == 'detect'
+        id: distill
+        run: |
+          set -euo pipefail
+          DECISION=$(python3 .github/doc-sync/sync-gate.py bloat-lane \
+            --report bloat-report.json --lane distill \
+            --pr-open "${{ steps.facts.outputs.distill_pr }}" \
+            --out "$RUNNER_TEMP/distill.json")
+          echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
+          if [ "${DECISION}" != "open" ]; then
+            python3 .github/doc-sync/render-report.py bloat-skip-summary --lane distill --reason "${DECISION}"
+          fi
+
+  prune:
+    needs: detect
+    if: needs.detect.outputs.prune == 'open'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bloat-report
+      - name: Apply (headless)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugins: doc-lifecycle@toolshed
+          prompt: >-
+            Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in
+            bloat-report.json whose verdict is CUT, CONDENSE, or EXTRACT-AND-MOVE — treat
+            exactly those record IDs as the approved subset, and apply nothing else. Follow
+            the skill's rules exactly.
+          claude_args: --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
+      - name: Open draft PR
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%F)
+          python3 .github/doc-sync/sync-gate.py bloat-lane \
+            --report bloat-report.json --lane prune --pr-open 0 \
+            --out "$RUNNER_TEMP/lane.json" >/dev/null
+          rm -f bloat-report.json
+          python3 .github/doc-sync/render-report.py bloat-pr-body \
+            --report "$RUNNER_TEMP/lane.json" > "$RUNNER_TEMP/body.md"
+          TITLE=$(python3 .github/doc-sync/render-report.py bloat-pr-title \
+            --report "$RUNNER_TEMP/lane.json" --lane prune --date "${DATE}")
+          git config user.name "doc-bloat"
+          git config user.email "doc-bloat@users.noreply.github.com"
+          git checkout -b doc-bloat/prune
+          git add -A
+          git commit -m "docs: bloat prune sweep (${DATE})"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-bloat/prune
+          PR_URL=$(gh pr create --draft \
+            --title "${TITLE}" \
+            --body-file "$RUNNER_TEMP/body.md" \
+            --head doc-bloat/prune \
+            --base "${{ github.ref_name }}")
+          python3 .github/doc-sync/render-report.py bloat-pr-summary \
+            --report "$RUNNER_TEMP/lane.json" --lane prune --pr-url "${PR_URL}"
+
+  distill:
+    needs: detect
+    if: needs.detect.outputs.distill == 'open'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bloat-report
+      - name: Apply (headless)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugins: doc-lifecycle@toolshed
+          prompt: >-
+            Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in
+            bloat-report.json whose verdict is MERGE-DOC, RETIRE-DOC, or DISTILL with
+            status "ready" — treat exactly those record IDs as the approved subset, and
+            apply nothing else. DISTILL records dispatch the doc-distiller agent per the
+            skill. Follow the skill's rules exactly.
+          claude_args: --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
+      - name: Open draft PR
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%F)
+          python3 .github/doc-sync/sync-gate.py bloat-lane \
+            --report bloat-report.json --lane distill --pr-open 0 \
+            --out "$RUNNER_TEMP/lane.json" >/dev/null
+          rm -f bloat-report.json
+          python3 .github/doc-sync/render-report.py bloat-pr-body \
+            --report "$RUNNER_TEMP/lane.json" > "$RUNNER_TEMP/body.md"
+          TITLE=$(python3 .github/doc-sync/render-report.py bloat-pr-title \
+            --report "$RUNNER_TEMP/lane.json" --lane distill --date "${DATE}")
+          git config user.name "doc-bloat"
+          git config user.email "doc-bloat@users.noreply.github.com"
+          git checkout -b doc-bloat/distill
+          git add -A
+          git commit -m "docs: bloat distill sweep (${DATE})"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-bloat/distill
+          PR_URL=$(gh pr create --draft \
+            --title "${TITLE}" \
+            --body-file "$RUNNER_TEMP/body.md" \
+            --head doc-bloat/distill \
+            --base "${{ github.ref_name }}")
+          python3 .github/doc-sync/render-report.py bloat-pr-summary \
+            --report "$RUNNER_TEMP/lane.json" --lane distill --pr-url "${PR_URL}"

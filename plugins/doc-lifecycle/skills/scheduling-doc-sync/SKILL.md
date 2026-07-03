@@ -38,25 +38,34 @@ All shipped files are in this skill's base directory (announced when the skill l
 
 ## Install
 
-1. Confirm the two knobs with the user (defaults are fine unattended):
+1. Confirm the knobs with the user (defaults are fine unattended):
    - cron: default `0 3 * * *` (03:00 UTC nightly)
    - blast-radius cap: default `10` (matches fixing-doc-drift's default of ~10 passages)
+   - bloat cron: default `0 4 * * 1` (04:00 UTC Mondays); replaces `{{BLOAT_CRON}}` in doc-bloat.yml
 2. Copy `doc-sync.yml` → `.github/workflows/doc-sync.yml`, replacing the literal placeholders
-   `{{CRON_SCHEDULE}}` and `{{BLAST_RADIUS_CAP}}` with the chosen values.
+   `{{CRON_SCHEDULE}}` and `{{BLAST_RADIUS_CAP}}` with the chosen values. Copy `doc-bloat.yml` →
+   `.github/workflows/doc-bloat.yml`, replacing `{{BLOAT_CRON}}`.
 3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py` and
    `scripts/render-report.py` → `.github/doc-sync/render-report.py`
-   (gate decisions and run-surface rendering both run from the repo, unit-tested upstream).
+   (gate decisions and run-surface rendering both run from the repo, unit-tested upstream — for
+   both `doc-sync.yml` and `doc-bloat.yml`).
 4. Copy `../detecting-doc-drift/scripts/validate-drift-output.py` → `.github/doc-sync/validate-drift-output.py`
-   (the workflow's mechanical contract check runs from the repo, not the plugin cache).
+   and `../detecting-doc-bloat/scripts/validate-bloat-output.py` → `.github/doc-sync/validate-bloat-output.py`
+   (each workflow's mechanical contract check runs from the repo, not the plugin cache).
 5. Seed the marker — **only if absent**:
    `test -f .github/doc-sync-marker || git rev-parse HEAD > .github/doc-sync-marker`
    An existing marker means an existing install: this is an upgrade, and resetting the marker
    would silently skip every commit since the last sync. Never reset it.
 6. Tell the user, concretely:
-   - the five files to commit;
+   - the seven files to commit (`doc-sync.yml`, `doc-bloat.yml`, `sync-gate.py`,
+     `render-report.py`, `validate-drift-output.py`, `validate-bloat-output.py`, and the seeded
+     `doc-sync-marker`);
    - first night: diff from the seeded marker; no drift → marker-only commit, drift → PR on
      `doc-sync/nightly` with evidence, over-cap → a `doc-sync` issue;
-   - run it now with `gh workflow run doc-sync`;
+   - the weekly bloat sweep opens up to two **draft** PRs (`doc-bloat/prune`, `doc-bloat/distill`);
+     a lane with no findings, or whose PR is already open, is skipped with a self-explaining run
+     summary;
+   - run them now with `gh workflow run doc-sync` and `gh workflow run doc-bloat`;
    - upgrades: re-run this skill (marker preserved; template/scripts refreshed);
    - **sync PRs carry no CI checks by default:** the pipeline pushes with the workflow's
      `GITHUB_TOKEN`, and GitHub does not retrigger workflows on commits made with that token —
@@ -72,8 +81,8 @@ All shipped files are in this skill's base directory (announced when the skill l
   the marker-only commit on a no-drift run.
 - **Upgrade preserves the marker** (step 5). Overwrite the yml and scripts freely; the marker
   is state, not wiring.
-- **Don't customize the installed YAML beyond the two knobs.** Real changes belong upstream in
-  the plugin (aj604/toolshed) so every install gets them on next upgrade.
+- **Don't customize the installed YAML beyond the cron/cap/bloat-cron knobs.** Real changes belong
+  upstream in the plugin (aj604/toolshed) so every install gets them on next upgrade.
 - **The drift report is a build artifact, never repo content.** The shipped workflow already
   removes it before the marker-only commit and moves it out of the working tree before the PR
   commit's `git add -A` — don't "simplify" that by dropping the artifact-upload step or letting
