@@ -195,11 +195,13 @@ jobs:
           # --force: a closed-unmerged PR can leave a stale branch behind.
           # Self-authenticate off GH_TOKEN (see advance-marker note): claude-code-action ran
           # just above and drops the checkout-persisted credential. No `-u` — a token-bearing
-          # URL must not persist into .git/config, and gh infers the head from the branch name.
+          # URL must not persist into .git/config. Pushing by URL leaves no upstream tracking
+          # ref, so gh can't infer the head; pass --head explicitly.
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-sync/nightly
           PR_URL=$(gh pr create \
             --title "${TITLE}" \
             --body-file "$RUNNER_TEMP/pr-body.md" \
+            --head doc-sync/nightly \
             --base "${{ github.ref_name }}")
           python3 .github/doc-sync/render-report.py pr-summary \
             --report "$RUNNER_TEMP/drift-report.json" --pr-url "${PR_URL}"
