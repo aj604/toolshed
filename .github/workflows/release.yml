@@ -45,6 +45,7 @@ jobs:
           set -euo pipefail
           python3 tests/scripts/validate-drift-output_test.py
           python3 tests/scripts/sync-gate_test.py
+          python3 tests/scripts/render-report_test.py
       - name: Validate plugin manifests
         run: |
           set -euo pipefail
