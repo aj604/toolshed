@@ -20,6 +20,11 @@ shape. This skill *applies* it; it does not re-audit.
 **REQUIRED SUB-SKILL:** use **writing-docs** for any fix that needs real rewriting (a paragraph),
 not a string-swap.
 
+**Discipline spine:** the generic apply rules are owned by
+`${CLAUDE_PLUGIN_ROOT}/references/apply-discipline.md`; this skill adds their
+drift-specific application. Red flags and the rationalization table below remain
+in force unchanged.
+
 ## The rules (these address what agents get wrong)
 
 ### 1. Act only on STALE records
@@ -37,9 +42,8 @@ cleanup, never a silent side effect of a drift sync.
 
 ### 3. No "while I'm here"
 
-Spot a real problem the report didn't flag? **Surface it to the human; do not edit it.** An
-out-of-scope fix — however correct — breaks the one-to-one map between the report and the diff,
-which is the only thing that makes the sync reviewable.
+Owned by the shared spine — `${CLAUDE_PLUGIN_ROOT}/references/apply-discipline.md`
+§2. Surface out-of-scope problems; never edit them.
 
 ### 4. Confirm the anchor before you write
 
@@ -64,14 +68,14 @@ not a string) dispatch **writing-docs**, which routes audience/density itself.
 
 ### 6. Blast-radius stop
 
-If the report crosses the cap (default: **~10 STALE records, or more than a third of the
-report's records STALE**) or the doc is wholesale-wrong, **stop and escalate** — open an issue /
-tell the human. Wholesale regeneration is a red flag, not a fix: do not emit a giant rewrite.
+Owned by the shared spine — `${CLAUDE_PLUGIN_ROOT}/references/apply-discipline.md`
+§4. Drift parameters: cap is **~10 STALE records, or more than a third of the
+report's records STALE**; wholesale-wrong doc → escalate, never regenerate.
 
 ### 7. Evidence travels with the change
 
-The commit / PR body maps each edit to its record's `evidence` (`file:line` or command output).
-A reviewer confirms the sync by diffing against the report, not by re-deriving it.
+Owned by the shared spine — `${CLAUDE_PLUGIN_ROOT}/references/apply-discipline.md`
+§5. Map each edit to its record's `evidence` in the commit / PR body.
 
 ## Red flags — STOP
 
