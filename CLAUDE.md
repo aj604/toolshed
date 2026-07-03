@@ -34,7 +34,7 @@ plus the GitHub Actions template the scheduling skill installs
 - **Skills are built test-first** (RED → GREEN → REFACTOR with subagents) via the
   `superpowers:writing-skills` methodology; test records live under `tests/baselines/` — one dir
   per test milestone (`bloat-red/`, `bloat-fixing-red/`, `bootstrap-red/`, `bootstrap-green/`,
-  `doc-sync-setup-red/`, `drift-red/`, `fixing-drift-red/`, `growing-red/`, `growing-green/`,
+  `doc-sync-action-regreen/`, `doc-sync-setup-red/`, `drift-red/`, `evidence-brevity-red/`, `fixing-drift-red/`, `growing-red/`, `growing-green/`,
   `llm-doc-red/`, `writing-docs-merge-red/`), plus the original writing-docs records loose at
   the `tests/baselines/` root.
   Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
