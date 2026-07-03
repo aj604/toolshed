@@ -111,7 +111,13 @@ against the records; passing a bare array recomputes the authoritative summary f
 you. On the four-record array above the validator prints `OK: 4 record(s) valid`.
 
 **`location` is `file:line` for passage verdicts** (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`)
-— one line, numbered from 1, no ranges — and **`null` for doc-level verdicts**
-(`RETIRE-DOC`/`MERGE-DOC`/`DISTILL`), which act on a whole doc, not a line. The
-downstream `fixing-doc-bloat` skill uses `location` to place passage edits and
-`proposal`/`payload` to carry the doc-level ones.
+— one line, numbered from 1, no ranges, the first line of the passage — and
+**`null` for doc-level verdicts** (`RETIRE-DOC`/`MERGE-DOC`/`DISTILL`), which act
+on a whole doc, not a line. A passage verdict's `evidence` **opens with the
+passage's full extent** — `file:start-end`, or `file:start` for a one-line
+passage, with `file:start` equal to `location` (B1 above: location
+`README.md:22`, evidence opening `README.md:22-28`). That span is normative: the
+downstream `fixing-doc-bloat` skill edits exactly the passage the span delimits,
+anchored at `location`, and uses `proposal`/`payload` to carry the doc-level
+verdicts. The validator rejects passage evidence that does not open with a span
+matching `location`.

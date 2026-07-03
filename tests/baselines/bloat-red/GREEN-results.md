@@ -283,3 +283,40 @@ natural landing spot for B1's claims and B5's extraction, so it is a
 consolidation target, not bloat itself)" — and no dedup verdict touches
 CLAUDE.md. Read-only discipline intact ("Awaiting approved IDs before any record
 is applied"). **Re-verify passes; skill v5 ships.**
+
+## Post-GREEN edit — 2026-07-03, passage-span-in-evidence contract (fast-follow from whole-branch review)
+
+**What changed (skill v6):** passage extent is now normative, not free-text.
+`detecting-doc-bloat/SKILL.md`'s output-contract table now requires passage-verdict
+`evidence` to **open with the passage's full extent** — `file:start-end`
+(`file:start` if one line), with `file:start` equal to `location` (the anchor =
+first line). `output-contract.md` gained the matching worked note.
+`validate-bloat-output.py` enforces it (`check_evidence_span`): passage evidence
+must open with a span whose start equals `location`, and an end ≥ start; new unit
+tests in `tests/scripts/validate-bloat-output_test.py` (`EvidenceSpan` class, 6
+cases) cover well-formed / missing-span / file-mismatch / start-mismatch /
+end-before-start / doc-level-exempt.
+
+**Why:** whole-branch review Important finding — CONDENSE is multi-line→one-line
+but the contract mandated a single-line `location` with no ranges, so a passage's
+extent lived only in prose. Downstream `fixing-doc-bloat` said "the line at
+location", which under-describes a nine-line CONDENSE and (for the shared-line CUT
+at README.md:19-20) would corrupt the doc if applied literally. Making the span
+normative gives `fixing-doc-bloat` a machine-checkable passage boundary.
+
+**Classification:** contract-tightening (adds a required shape to evidence;
+narrows nothing about which passages may be flagged). The five recorded runs'
+grades are unaffected — their passage records already opened evidence with a
+matching span informally (grep-verified: `green-sonnet` / `green-audience-reverify`
+B1/B2/B3 all open `README.md:19` / `:30-38` / `:40-43`). Per the re-GREEN
+convention, a targeted re-verify follows and ships with this edit.
+
+### Targeted re-verify — 2026-07-03, Sonnet, skill v6 (span contract in force)
+
+Fresh subagent, same fixture, full audit. Verbatim output:
+`span-detect-reverify-output.md`. Validator re-run independently:
+`OK: 6 record(s) valid`, summary matches. No fixture edits. **6/6**, and all three
+passage records' evidence opened with a well-formed span whose start equals
+`location` — the contract text alone produced conforming spans (runner not coached
+on the rule). Precision held (CLAUDE.md not flagged). **Re-verify passes; skill v6
+ships.**

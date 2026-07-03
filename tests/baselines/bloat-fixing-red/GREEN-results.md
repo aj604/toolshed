@@ -169,3 +169,54 @@ exactly, and the stage/commit split was honored (staged as the distiller, commit
 *Grading performed by a stakeless independent agent. The skill's author was uninvolved in this
 grade. Evidence is quoted verbatim from the scratch repo (`…/scratchpad/fixgreen/`), the original
 fixture (`tests/baselines/bloat-red/fixture/`), and the run output record.*
+
+---
+
+## Post-GREEN edit — 2026-07-03, passage-span routing (fast-follow from whole-branch review)
+
+**What changed:** the routing rows in `fixing-doc-bloat/SKILL.md` were reworded
+from "delete/replace **the line** at `location`" to act on **the passage the
+record's evidence delimits, anchored at `location`** (CUT/CONDENSE/EXTRACT rows),
+with a preamble noting `location` is the passage *anchor* and the evidence's
+opening `file:start-end` span is the mandate. Added a red flag ("Editing only the
+single line at `location` when the evidence span is multi-line, or deleting a whole
+boundary line that also carries unflagged text") and a rationalization row
+("`location` names one line, so I'll only touch that line" → the span is the
+mandate). Pairs with the detecting-doc-bloat span contract (its GREEN-results
+"Post-GREEN edit — passage-span-in-evidence contract").
+
+**Why:** whole-branch review Important finding. The original GREEN (approval
+`["B2","B5"]`) never exercised an approved CUT, and its CONDENSE replaced all nine
+lines despite "the line" wording — correct behavior contradicting the normative
+text. The shared-line CUT apply path (README.md:19-20, line 19 shared with another
+sentence's tail) was unexercised; applied literally, "delete the line" corrupts the
+doc.
+
+**Classification:** normative-text alignment (the rows now describe the behavior
+the passing runs already exhibited) plus coverage of the previously-untested
+approved-CUT path. Prior grades unaffected — B2's nine-line CONDENSE and the
+byte-verbatim / one-commit / approved-only disciplines are unchanged.
+
+### RED probe (approved-CUT shared-line) — 2026-07-03
+
+`span-red-probe-output.md`. Sonnet, **skill text UNEDITED (pre-span)**, approval
+`["B1"]`. The predicted corruption did not reproduce — the agent anchor-confirmed,
+deleted only its own sentence, kept the shared-line `message.` tail (commit
+`bbd068e`, `-2/+1`). Confirms the review's "non-blocking, contained by human gate +
+anchor-confirm" judgment, and establishes the real defect: every correct run
+overrides the literal routing text.
+
+### Targeted re-verify — 2026-07-03, Sonnet, span routing in force
+
+`span-green-reverify-output.md`. Fresh subagent, fixture, approval
+`["B1","B2","B3"]` (inputs: `span-reverify-bloat-report.json`,
+`span-reverify-approval.json`). Controller-verified from the scratch commits:
+
+- **B1 CUT (shared line 19-20):** deleted only the restatement sentence; the prior
+  sentence's `message.` tail survives — no corruption (`e8b78ba`, `-2/+1`).
+- **B2 CONDENSE (span 30-38):** all nine lines replaced with the proposal
+  byte-verbatim (`77896c8`, `1 insertion / 9 deletions`).
+- **B3 EXTRACT (span 40-43):** removed from README, landed verbatim in CLAUDE.md,
+  one commit (`84008e1`).
+
+Unapproved B4/B5/B6 untouched; tree clean. **Re-verify passes; edit ships.**
