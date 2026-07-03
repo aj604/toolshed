@@ -9,8 +9,9 @@ description: Use when wiring a repo for automated/unattended documentation drift
 
 Installs the shipped nightly pipeline into a target repo. **You install wiring; you do not
 re-derive it.** Orchestration lives in the shipped `doc-sync.yml`; every gate decision lives in
-the shipped `sync-gate.py`; doc judgment lives in `detecting-doc-drift` / `fixing-doc-drift`,
-which the workflow invokes headlessly by name. Never inline detection or fixing method into
+the shipped `sync-gate.py`; every run-surface string (summaries, notices, issue/PR bodies) lives
+in the shipped `render-report.py`; doc judgment lives in `detecting-doc-drift` /
+`fixing-doc-drift`, which the workflow invokes headlessly by name. Never inline detection or fixing method into
 workflow YAML — that forks the method from its one owner.
 
 All shipped files are in this skill's base directory (announced when the skill loads).
@@ -20,9 +21,11 @@ All shipped files are in this skill's base directory (announced when the skill l
 1. Target repo has a GitHub remote: `git remote get-url origin`. No remote → stop; this
    pipeline is a GitHub Action. (A non-GitHub repo wants a different trigger — tell the user.)
 2. `gh auth status` succeeds.
-3. `gh secret list` shows `ANTHROPIC_API_KEY`. If absent: **warn, don't block** — offer to run
-   `gh secret set ANTHROPIC_API_KEY` with the user pasting the value; the workflow fails red on
-   its first model call without it.
+3. Auth secret: `gh secret list` shows `CLAUDE_CODE_OAUTH_TOKEN` (preferred — created by Claude
+   Code's `/install-github-app`, no key-pasting) or `ANTHROPIC_API_KEY`. The workflow passes
+   both to `anthropics/claude-code-action`; either alone works. If neither: **warn, don't
+   block** — offer `/install-github-app`, or `gh secret set ANTHROPIC_API_KEY` with the user
+   pasting the value; the workflow fails red on its first model call without one.
 4. `gh label create doc-sync --force` (idempotent) — the pipeline files blast-radius issues
    under this label, and `gh issue create --label` fails if it doesn't exist.
 5. Actions may create PRs:
@@ -40,7 +43,9 @@ All shipped files are in this skill's base directory (announced when the skill l
    - blast-radius cap: default `10` (matches fixing-doc-drift's default of ~10 passages)
 2. Copy `doc-sync.yml` → `.github/workflows/doc-sync.yml`, replacing the literal placeholders
    `{{CRON_SCHEDULE}}` and `{{BLAST_RADIUS_CAP}}` with the chosen values.
-3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py`.
+3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py` and
+   `scripts/render-report.py` → `.github/doc-sync/render-report.py`
+   (gate decisions and run-surface rendering both run from the repo, unit-tested upstream).
 4. Copy `../detecting-doc-drift/scripts/validate-drift-output.py` → `.github/doc-sync/validate-drift-output.py`
    (the workflow's mechanical contract check runs from the repo, not the plugin cache).
 5. Seed the marker — **only if absent**:
@@ -48,7 +53,7 @@ All shipped files are in this skill's base directory (announced when the skill l
    An existing marker means an existing install: this is an upgrade, and resetting the marker
    would silently skip every commit since the last sync. Never reset it.
 6. Tell the user, concretely:
-   - the four files to commit;
+   - the five files to commit;
    - first night: diff from the seeded marker; no drift → marker-only commit, drift → PR on
      `doc-sync/nightly` with evidence, over-cap → a `doc-sync` issue;
    - run it now with `gh workflow run doc-sync`;

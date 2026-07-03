@@ -1,12 +1,12 @@
 # CLAUDE.md
 
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
-Markdown; the only executable code published is two skill helper scripts
-(`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py` and
-`plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`, both `python3`, no deps)
+Markdown; the only executable code published is three skill helper scripts
+(`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`, plus
+`scheduling-doc-sync`'s `scripts/sync-gate.py` and `scripts/render-report.py`, all `python3`, no deps)
 plus the GitHub Actions template the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`). The sample repos under
-`tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/validate-drift-output.py`, `workflows/doc-sync.yml`).
+`tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`, `doc-sync/validate-drift-output.py`, `workflows/doc-sync.yml`).
 
 ## Layout (pointers, not descriptions)
 
@@ -41,7 +41,9 @@ plus the GitHub Actions template the scheduling skill installs
 - **The helper scripts have unit tests** (stdlib `unittest`, no deps):
   `python3 tests/scripts/validate-drift-output_test.py` after touching `detecting-doc-drift`'s
   `validate-drift-output.py` or its output contract; `python3 tests/scripts/sync-gate_test.py`
-  after touching `scheduling-doc-sync`'s `sync-gate.py` or `doc-sync.yml`'s gate wiring.
+  after touching `scheduling-doc-sync`'s `sync-gate.py` or `doc-sync.yml`'s gate wiring;
+  `python3 tests/scripts/render-report_test.py` after touching `scheduling-doc-sync`'s
+  `render-report.py` or the run-surface strings it renders.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill — one door for both human and agent docs; it carries
   the agent-density bar inline and dispatches the `llm-doc-writer` agent for heavy agent-facing jobs).

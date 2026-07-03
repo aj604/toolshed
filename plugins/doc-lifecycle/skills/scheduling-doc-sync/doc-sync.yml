@@ -15,6 +15,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  id-token: write   # claude-code-action OAuth token exchange
 
 concurrency:
   group: doc-sync
@@ -24,7 +25,6 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       GH_TOKEN: ${{ github.token }}
       CAP: "{{BLAST_RADIUS_CAP}}"
     steps:
@@ -64,32 +64,40 @@ jobs:
           echo "pre-gate: ${DECISION}"
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
           # Every terminal state explains itself on the run page — a reader must
-          # never have to infer why the remaining steps were skipped.
-          case "${DECISION}" in
-            skip-empty)
-              echo "::notice::doc-sync skipped: nothing new since the marker"
-              echo "⏭️ **Skipped — nothing to sync.** No commits (beyond marker bookkeeping) since marker \`${{ steps.facts.outputs.marker }}\`. No model calls were made." >> "$GITHUB_STEP_SUMMARY" ;;
-            skip-pending)
-              echo "::notice::doc-sync skipped: a doc-sync PR/issue awaits a human"
-              echo "⏭️ **Skipped — pending human review.** Open doc-sync PRs: ${{ steps.facts.outputs.open_prs }}, open \`doc-sync\` issues: ${{ steps.facts.outputs.open_issues }}. The nightly resumes after they are merged/closed. No model calls were made." >> "$GITHUB_STEP_SUMMARY" ;;
-            detect)
-              echo "▶️ **Checking ${{ steps.facts.outputs.commits }} commit(s)** for doc drift over \`${{ steps.facts.outputs.marker }}..${{ steps.facts.outputs.head_sha }}\`." >> "$GITHUB_STEP_SUMMARY" ;;
-          esac
+          # never have to infer why the remaining steps were skipped. Rendering is
+          # owned by render-report.py (one place, unit-tested), never inline YAML.
+          python3 .github/doc-sync/render-report.py pre-summary \
+            --decision "${DECISION}" \
+            --marker "${{ steps.facts.outputs.marker }}" \
+            --head "${{ steps.facts.outputs.head_sha }}" \
+            --commits "${{ steps.facts.outputs.commits }}" \
+            --open-prs "${{ steps.facts.outputs.open_prs }}" \
+            --open-issues "${{ steps.facts.outputs.open_issues }}"
 
-      - name: Install Claude Code + doc-lifecycle plugin
-        if: steps.pre.outputs.decision == 'detect'
-        run: |
-          set -euo pipefail
-          npm install -g @anthropic-ai/claude-code
-          claude plugin marketplace add aj604/toolshed
-          claude plugin install doc-lifecycle@toolshed
-
+      # Model steps run via the official runner (anthropics/claude-code-action) —
+      # it owns Claude Code install, plugin setup, and auth. Auth prefers the OAuth
+      # token (created by /install-github-app); an unset secret renders empty and the
+      # action treats empty as absent, so ANTHROPIC_API_KEY alone also works.
       - name: Detect drift (headless, diff-scoped)
         if: steps.pre.outputs.decision == 'detect'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: https://github.com/aj604/toolshed
+          plugins: doc-lifecycle@toolshed
+          prompt: >-
+            Use the doc-lifecycle:detecting-doc-drift skill in diff-scoped mode over the
+            git commit range ${{ steps.facts.outputs.marker }}..${{ steps.facts.outputs.head_sha }}
+            of this repository. Write the wrapped result object
+            ({"records": [...], "summary": {...}}) to drift-report.json in the repository
+            root. If the diff invalidates nothing, emit an empty records array with a zero
+            summary.
+          claude_args: --allowedTools "Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
+
+      - name: Assert detect produced a report
+        if: steps.pre.outputs.decision == 'detect'
         run: |
-          set -euo pipefail
-          claude -p "Use the doc-lifecycle:detecting-doc-drift skill in diff-scoped mode over the git commit range ${{ steps.facts.outputs.marker }}..${{ steps.facts.outputs.head_sha }} of this repository. Write the wrapped result object ({\"records\": [...], \"summary\": {...}}) to drift-report.json in the repository root. If the diff invalidates nothing, emit an empty records array with a zero summary." \
-            --allowedTools "Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
           test -f drift-report.json || { echo "::error::detect step produced no drift-report.json"; exit 1; }
 
       - name: Validate report (mechanical contract check)
@@ -125,54 +133,54 @@ jobs:
           git commit -m "docs: advance doc-sync marker (no drift in ${{ steps.facts.outputs.commits }} commit(s))"
           # Branch protection may forbid this push; the marker then rides in the next sync PR.
           if git push; then
-            echo "✅ **No drift.** ${{ steps.facts.outputs.commits }} commit(s) checked, all doc claims still hold; marker advanced to \`${{ steps.facts.outputs.head_sha }}\`." >> "$GITHUB_STEP_SUMMARY"
+            python3 .github/doc-sync/render-report.py no-drift-summary \
+              --commits "${{ steps.facts.outputs.commits }}" \
+              --head "${{ steps.facts.outputs.head_sha }}"
           else
-            echo "::notice::marker push rejected (branch protection?) — marker will advance with the next doc-sync PR"
-            echo "✅ **No drift** (${{ steps.facts.outputs.commits }} commit(s) checked) — but the marker push was rejected (branch protection?); it will advance with the next doc-sync PR." >> "$GITHUB_STEP_SUMMARY"
+            python3 .github/doc-sync/render-report.py no-drift-summary \
+              --commits "${{ steps.facts.outputs.commits }}" \
+              --head "${{ steps.facts.outputs.head_sha }}" \
+              --push-rejected
           fi
 
       - name: Open blast-radius issue
         if: steps.post.outputs.decision == 'blast-radius'
         run: |
           set -euo pipefail
-          {
-            echo "Nightly doc-sync found more stale claims than the blast-radius cap (${CAP}) over \`${{ steps.facts.outputs.marker }}..${{ steps.facts.outputs.head_sha }}\`."
-            echo "Per the doc-lifecycle guardrails this is escalated instead of opened as a giant PR."
-            echo "The sync marker was NOT advanced; close this issue after handling to let the nightly resume."
-            echo
-            echo "## Stale claims"
-            jq -r '.records[] | select(.verdict=="STALE") | "- `\(.location)` — \(.claim)\n  - **evidence:** \(.evidence)\n  - **drafted fix:** \(.fix)"' drift-report.json
-          } > "$RUNNER_TEMP/issue-body.md"
-          STALE=$(jq '[.records[] | select(.verdict=="STALE")] | length' drift-report.json)
+          python3 .github/doc-sync/render-report.py issue-body \
+            --report drift-report.json --cap "${CAP}" \
+            --marker "${{ steps.facts.outputs.marker }}" \
+            --head "${{ steps.facts.outputs.head_sha }}" \
+            > "$RUNNER_TEMP/issue-body.md"
           ISSUE_URL=$(gh issue create --label doc-sync \
             --title "doc-sync: drift exceeds blast-radius cap (${CAP})" \
             --body-file "$RUNNER_TEMP/issue-body.md")
-          echo "🛑 **Blast-radius stop.** ${STALE} stale claims exceed the cap (${CAP}) — escalated as ${ISSUE_URL} instead of a giant PR. Marker NOT advanced; the nightly resumes when the issue is closed." >> "$GITHUB_STEP_SUMMARY"
+          python3 .github/doc-sync/render-report.py blast-summary \
+            --report drift-report.json --cap "${CAP}" --issue-url "${ISSUE_URL}"
 
       - name: Apply fixes (headless)
         if: steps.post.outputs.decision == 'proceed'
-        run: |
-          set -euo pipefail
-          claude -p "Use the doc-lifecycle:fixing-doc-drift skill to apply the drift report at drift-report.json to this repository's docs. Follow the skill's rules exactly." \
-            --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: https://github.com/aj604/toolshed
+          plugins: doc-lifecycle@toolshed
+          prompt: >-
+            Use the doc-lifecycle:fixing-doc-drift skill to apply the drift report at
+            drift-report.json to this repository's docs. Follow the skill's rules exactly.
+          claude_args: --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
 
       - name: Open sync PR
         if: steps.post.outputs.decision == 'proceed'
         run: |
           set -euo pipefail
           mv drift-report.json "$RUNNER_TEMP/drift-report.json"
-          {
-            echo "Nightly doc sync over \`${{ steps.facts.outputs.marker }}..${{ steps.facts.outputs.head_sha }}\`."
-            echo "Merging this PR advances the sync marker; closing it unmerged leaves the range to be re-checked."
-            echo
-            echo "## Applied fixes (STALE)"
-            jq -r '.records[] | select(.verdict=="STALE") | "- `\(.location)` — \(.claim)\n  - **evidence:** \(.evidence)\n  - **applied fix:** \(.fix)"' "$RUNNER_TEMP/drift-report.json"
-            if jq -e '[.records[] | select(.verdict=="UNVERIFIABLE")] | length > 0' "$RUNNER_TEMP/drift-report.json" >/dev/null; then
-              echo
-              echo "## Flagged for a human (UNVERIFIABLE — not edited)"
-              jq -r '.records[] | select(.verdict=="UNVERIFIABLE") | "- `\(.location)` — \(.claim) (\(.evidence))"' "$RUNNER_TEMP/drift-report.json"
-            fi
-          } > "$RUNNER_TEMP/pr-body.md"
+          python3 .github/doc-sync/render-report.py pr-body \
+            --report "$RUNNER_TEMP/drift-report.json" \
+            --marker "${{ steps.facts.outputs.marker }}" \
+            --head "${{ steps.facts.outputs.head_sha }}" \
+            > "$RUNNER_TEMP/pr-body.md"
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
           git checkout -b doc-sync/nightly
@@ -185,5 +193,5 @@ jobs:
             --title "docs: sync with ${{ github.ref_name }} ($(date -u +%F))" \
             --body-file "$RUNNER_TEMP/pr-body.md" \
             --base "${{ github.ref_name }}")
-          STALE=$(jq '[.records[] | select(.verdict=="STALE")] | length' "$RUNNER_TEMP/drift-report.json")
-          echo "📝 **Drift found and fixed.** ${STALE} stale claim(s) corrected — review ${PR_URL}. Merging it advances the marker; closing it unmerged re-checks the range next night." >> "$GITHUB_STEP_SUMMARY"
+          python3 .github/doc-sync/render-report.py pr-summary \
+            --report "$RUNNER_TEMP/drift-report.json" --pr-url "${PR_URL}"
