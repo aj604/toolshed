@@ -152,12 +152,12 @@ In `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`, replace the 
             echo "| Fixed (see diff) | Why it was stale |"
             echo "|---|---|"
             # Cells escape | and flatten newlines so evidence can't break its row.
-            jq -r '.records[] | select(.verdict=="STALE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\\\|") | gsub("\n"; " ")) |"' "$RUNNER_TEMP/drift-report.json"
+            jq -r '.records[] | select(.verdict=="STALE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\|") | gsub("\n"; " ")) |"' "$RUNNER_TEMP/drift-report.json"
             if [ "$FLAGGED" -gt 0 ]; then
               echo
               echo "| Flagged for a human — not edited | Why unverifiable |"
               echo "|---|---|"
-              jq -r '.records[] | select(.verdict=="UNVERIFIABLE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\\\|") | gsub("\n"; " ")) |"' "$RUNNER_TEMP/drift-report.json"
+              jq -r '.records[] | select(.verdict=="UNVERIFIABLE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\|") | gsub("\n"; " ")) |"' "$RUNNER_TEMP/drift-report.json"
             fi
           } > "$RUNNER_TEMP/pr-body.md"
           if [ "$STALE" -eq 1 ]; then TITLE="docs: nightly sync — 1 fix"; else TITLE="docs: nightly sync — ${STALE} fixes"; fi
@@ -216,12 +216,12 @@ FLAGGED=$(jq '[.records[] | select(.verdict=="UNVERIFIABLE")] | length' drift-re
   echo
   echo "| Fixed (see diff) | Why it was stale |"
   echo "|---|---|"
-  jq -r '.records[] | select(.verdict=="STALE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\\\|") | gsub("\n"; " ")) |"' drift-report.json
+  jq -r '.records[] | select(.verdict=="STALE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\|") | gsub("\n"; " ")) |"' drift-report.json
   if [ "$FLAGGED" -gt 0 ]; then
     echo
     echo "| Flagged for a human — not edited | Why unverifiable |"
     echo "|---|---|"
-    jq -r '.records[] | select(.verdict=="UNVERIFIABLE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\\\|") | gsub("\n"; " ")) |"' drift-report.json
+    jq -r '.records[] | select(.verdict=="UNVERIFIABLE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\|") | gsub("\n"; " ")) |"' drift-report.json
   fi
 } > pr-body.md
 if [ "$STALE" -eq 1 ]; then TITLE="docs: nightly sync — 1 fix"; else TITLE="docs: nightly sync — ${STALE} fixes"; fi
