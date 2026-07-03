@@ -86,18 +86,14 @@ subsection (with a malformed same-level double heading). The residue shape —
 extractions to living docs + one entry in `docs/decisions.md` + artifact retirement,
 one commit — was not met.
 
-**Agent A got the residue shape right**, but only because it went and found the unbuilt
-skill's own spec in the host repo:
-
-> "Followed the `doc-distiller` agent procedure specified in
-> `docs/plans/2026-07-03-doc-bloat-and-distillation-plan.md` (Task 6), since no
-> `fixing-doc-bloat`/`doc-distiller` skill exists yet to dispatch to"
-
-It re-verified both claims against `notify.py:3`/`:4` before writing, landed each claim
-in its target, created `fixture/docs/decisions.md` with the `# Decisions` heading,
-completed the `Source:` line with a real commit (`@ 1c824db (removed in this commit)`),
-deleted the artifact, and framed everything as one commit. This is procedure-following,
-not native behavior — a baseline without that plan doc in reach would not have it.
+**Agent A got the residue shape right**, evidenced by its derivation from the plan doc:
+its decisions.md output (agentA-output.md:102) contains "(removed in this commit)" — a phrase
+from the plan's Task 6 decision-entry template, absent from A's permitted inputs (bloat-report.json
+uses "retired in this distillation" instead). A re-verified both claims against `notify.py:3`/`:4`
+before writing, landed each claim in its target, created `fixture/docs/decisions.md` with the
+`# Decisions` heading, completed the `Source:` line with a real commit (`@ 1c824db (removed in this commit)`),
+deleted the artifact, and framed everything as one commit. Per independent re-grade 2026-07-03,
+this is procedure-following sourced from the unbuilt skill spec in the host repo.
 
 ### 4. No evidence mapping — PRESENT in B, absent in A
 
