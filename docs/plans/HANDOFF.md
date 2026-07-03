@@ -1,7 +1,7 @@
 # Documentation Skills Suite — Handoff
 
 **Last updated:** 2026-07-03
-**HEAD at handoff:** `8b9700a` + review fixes (see `git log`)
+**HEAD at handoff:** `8b9700a` + review fixes + bloat/distillation suite merge (see `git log`)
 **Repo:** `toolshed` (git)
 
 ## What this project is
@@ -22,6 +22,9 @@ Lifecycle the suite covers: **bootstrap → write → grow → detect → fix.**
 | 4 | fixing-doc-drift (the human-invoked fix step) | ✅ done (GREEN+REFACTOR) | `fixing-doc-drift/` | yes |
 | 5 | auto-trigger layer (cron/PR) | ✅ done | `scheduling-doc-sync/` | yes |
 | 6 | growing-docs (demand-driven growth) | ✅ done (GREEN; REFACTOR no-op + review fixes) | `growing-docs/` | no (not yet re-deployed) |
+| 7 | detecting-doc-bloat | ✅ done (GREEN; tier boundary documented) | `detecting-doc-bloat/` | no |
+| 8 | fixing-doc-bloat | ✅ done (GREEN, independently graded) | `fixing-doc-bloat/` | no |
+| 9 | doc-distiller (agent, dispatched by fixing-doc-bloat) | ✅ done (GREEN, independently graded) | `agents/doc-distiller.md` | no |
 
 ### Skill 6 outcome (2026-07-03)
 
@@ -48,7 +51,10 @@ Skill 6 follow-ups (from code review, 2026-07-03):
 
 Build order is sequential: 3 needs 1+2 working (it rewrites via writing-docs standards);
 4 needs 3 working (it consumes 3's structured drift report and applies the fixes). The
-cron/PR trigger wiring is row 5: `scheduling-doc-sync`.
+cron/PR trigger wiring is row 5: `scheduling-doc-sync`. Rows 7–9 are a separate pair
+(bloat/distillation, the value axis) built after row 5; they share `fixing-doc-drift`'s
+apply-discipline spine (see the "spine extraction" update below) but not its build
+dependency chain.
 
 ### Skill 3 outcome (important — reshaped the skill)
 
@@ -156,6 +162,45 @@ records in `tests/baselines/doc-sync-setup-red/`, incl. live E2E. Design:
 `anthropics/claude-code-action@v1` and extracted run-surface rendering to a shipped
 `render-report.py`; targeted re-GREEN of the affected install/upgrade scenario:
 `tests/baselines/doc-sync-action-regreen/`.
+
+## Rows 7–9: bloat/distillation suite (2026-07-03)
+
+Second pair on the drift pair's shape, covering the **value axis** (drift covers
+accuracy): `detecting-doc-bloat` (contract skill, read-only, emits `CUT` /
+`CONDENSE` / `EXTRACT-AND-MOVE` / `RETIRE-DOC` / `MERGE-DOC` / `DISTILL` records)
+and `fixing-doc-bloat` (applies a human-approved record-ID subset; dispatches the
+new `doc-distiller` agent for `DISTILL` records). Design:
+`docs/plans/2026-07-03-doc-bloat-and-distillation-design.md`; plan:
+`docs/plans/2026-07-03-doc-bloat-and-distillation-plan.md`. Test records:
+`tests/baselines/bloat-red/` (detecting) and `tests/baselines/bloat-fixing-red/`
+(fixing + distiller). Not yet deployed to `~/.claude` (see status table).
+
+**Spine extraction + re-GREEN of `fixing-doc-drift`:** the apply-only rules common
+to both fix skills (authorized-records-only, no "while I'm here", evidence
+travels with the change, etc.) were extracted into
+`plugins/doc-lifecycle/references/apply-discipline.md`, the single owner both
+`fixing-doc-drift` and `fixing-doc-bloat` cite instead of each restating them.
+`fixing-doc-drift`'s SKILL.md was edited to cite the spine; it was targeted
+re-GREENed afterward (`tests/baselines/fixing-drift-red/REGREEN-after-spine-extraction.md`)
+per the re-GREEN convention (behavior-affecting edits to a shipped GREEN skill
+get a targeted re-verify note in that skill's baseline dir).
+
+**Tier boundary (detecting-doc-bloat, full-audit completeness):** four Haiku
+runs against the bloat fixture each missed exactly one of six planted findings,
+rotating which one; a Sonnet run on the identical fixture and skill text hit
+6/6. Recorded as a capacity limit, not a teaching gap:
+`tests/baselines/bloat-red/GREEN-results.md` ("Tier boundary (measured,
+final)"). Operational consequence for future scheduling wiring: a full-audit
+invocation at automation tier should run on Sonnet (or run Haiku repeatedly and
+union the records); Haiku is adequate for diff-scoped/single-doc checks.
+
+**Audience-split precision guard (post-GREEN, user steer):** `detecting-doc-bloat`
+gained a guard against flagging CLAUDE.md/AGENTS.md lines as redundant merely
+because README states the same fact — cross-audience duplication (human doc vs.
+agent doc) is deliberate placement, not bloat; dedup verdicts require
+same-audience overlap. Added after GREEN shipped, then targeted-re-verified
+(6/6, no regression) per the re-GREEN convention:
+`tests/baselines/bloat-red/GREEN-results.md` ("Post-GREEN edit").
 
 ## Key learnings (carry forward — these shaped skills 1 and 2)
 
