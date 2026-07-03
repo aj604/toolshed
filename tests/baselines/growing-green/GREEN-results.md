@@ -80,3 +80,20 @@ defects, fixed after GREEN (reader-comprehension failures, not behavior failures
 4. writing-docs Rule 5 twin read as the *same reader* burned twice; growing-docs counts
    across people/sessions → "a fact derived the hard way twice — by anyone, across
    sessions".
+
+## Re-verify on shipped text (2026-07-03, post-fix) — 2/2 pass
+
+The four fixes above changed skill text after the 6-agent GREEN, so two targeted agents
+re-ran the affected flows against the final wording:
+
+- **b3 (bootstrap):** with the inline format fragment removed, the agent followed the
+  by-reference pointer and took the record format from growing-docs' own section
+  (cited it by line range) — full structure correct (title, format comment, signed
+  Deferred, Done). The single-owner joint holds without the local copy.
+- **a3 (growth, no existing record):** created `docs/doc-scope.md` and quoted the new
+  wording as the reason ("update it — create it if absent" + the red flag). Gap/drift
+  split, named signal, and smallest artifacts all held.
+
+repo-shape.md Rule 7's rewrite has no scenario coverage (no multi-unit fixture); it now
+states the same contract the GREEN-tested SKILL.md ending does, verified by read-review
+only.
