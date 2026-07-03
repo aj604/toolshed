@@ -3,8 +3,10 @@
 
 The contract lives in ../SKILL.md ("The output contract"). Enforces the
 mechanical rules an agent self-checks unreliably: enum values, per-verdict
-proposal/location/status/payload rules, unique ids, mandatory evidence, and
-summary counts. It does NOT judge whether a verdict is *correct*.
+proposal/location/status/payload rules, unique ids, mandatory evidence (for
+passage verdicts, evidence must open with the passage span 'file:start-end'
+anchored at location), and summary counts. It does NOT judge whether a
+verdict is *correct*.
 
 Usage:
     validate-bloat-output.py [FILE]        # reads FILE, or stdin if omitted
@@ -30,6 +32,7 @@ REQUIRED = ("id", "doc", "location", "verdict", "evidence",
 SUMMARY_KEYS = ("cut", "condense", "extract_and_move",
                 "retire_doc", "merge_doc", "distill")
 LOCATION_RE = re.compile(r"^.+:[1-9]\d*$")
+SPAN_RE = re.compile(r"^(\S+):([1-9]\d*)(?:-([1-9]\d*))?")
 
 
 def load(src):
@@ -74,6 +77,23 @@ def check_proposal(where, verdict, proposal, errs):
     else:  # CUT / RETIRE-DOC / DISTILL
         if proposal is not None:
             errs.append(f"{where}: proposal must be null for {verdict}")
+
+
+def check_evidence_span(where, verdict, location, evidence, errs):
+    """Passage-verdict evidence must open with the passage's extent —
+    'file:start-end' ('file:start' if one line) — anchored at location."""
+    m = SPAN_RE.match(evidence.strip())
+    if not m:
+        errs.append(f"{where}: {verdict} evidence must open with the passage "
+                    f"span 'file:start-end' ('file:start' if one line)")
+        return
+    file, start, end = m.group(1), int(m.group(2)), m.group(3)
+    if f"{file}:{start}" != location.strip():
+        errs.append(f"{where}: evidence span opens {file}:{start} but the "
+                    f"passage's anchor (location) is {location!r} — the span "
+                    f"must start at location")
+    if end is not None and int(end) < start:
+        errs.append(f"{where}: evidence span end {end} precedes start {start}")
 
 
 def check_distill(where, status, payload, errs):
@@ -130,6 +150,8 @@ def validate_record(i, r):
             if not (isinstance(loc, str) and LOCATION_RE.match(loc.strip())):
                 errs.append(f"{where}: {verdict} requires location 'file:line' "
                             f"(single line, no ranges); got {loc!r}")
+            elif nonempty_str(r.get("evidence")):
+                check_evidence_span(where, verdict, loc, r["evidence"], errs)
         elif loc is not None:
             errs.append(f"{where}: location must be null for doc-level {verdict}")
 

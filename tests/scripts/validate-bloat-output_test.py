@@ -27,7 +27,7 @@ def rec(**over):
         "doc": "README.md",
         "location": "README.md:12",
         "verdict": "CUT",
-        "evidence": "restates src/notify.py:3 verbatim",
+        "evidence": "README.md:12 restates src/notify.py:3 verbatim",
         "proposal": None,
         "status": None,
         "payload": None,
@@ -81,8 +81,10 @@ class ValidCases(unittest.TestCase):
         records = [
             rec(),
             rec(id="B2", location="README.md:20", verdict="CONDENSE",
+                evidence="README.md:20-24 — five lines carry one fact: make test runs the suite",
                 proposal="Run `make test` (only @taskflow/shared has tests)."),
             rec(id="B3", location="README.md:30", verdict="EXTRACT-AND-MOVE",
+                evidence="README.md:30-31 — operational gotcha in a user-facing doc",
                 proposal={"target": "CLAUDE.md", "text": "api refuses to start without .state.json"}),
             rec(id="B4", doc="SETUP.md", location=None, verdict="RETIRE-DOC"),
             rec(id="B5", doc="SETUP.md", location=None, verdict="MERGE-DOC",
@@ -163,6 +165,41 @@ class InvalidRecords(unittest.TestCase):
         bad = distill_ready()
         bad["payload"]["claims"] = []
         self.assert_fails([bad], "claims")
+
+
+class EvidenceSpan(unittest.TestCase):
+    """Passage-verdict evidence must open with the passage's extent:
+    'file:start-end' ('file:start' if one line), anchored at location."""
+
+    def assert_fails(self, payload, fragment):
+        r = run(payload)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(fragment, r.stderr)
+
+    def test_multiline_span_valid(self):
+        r = run([rec(evidence="README.md:12-20 — nine lines restate src/notify.py:3")])
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_evidence_without_leading_span_fails(self):
+        self.assert_fails(
+            [rec(evidence="restates src/notify.py:3 verbatim")], "span")
+
+    def test_span_file_must_match_location(self):
+        self.assert_fails(
+            [rec(evidence="INSTALL.md:12 restates src/notify.py:3")], "location")
+
+    def test_span_start_must_match_location_line(self):
+        self.assert_fails(
+            [rec(evidence="README.md:13-20 restates src/notify.py:3")], "location")
+
+    def test_span_end_before_start_fails(self):
+        self.assert_fails(
+            [rec(evidence="README.md:12-9 restates src/notify.py:3")], "span")
+
+    def test_doclevel_evidence_needs_no_span(self):
+        r = run([rec(id="B4", doc="SETUP.md", location=None, verdict="RETIRE-DOC",
+                     evidence="carries nothing README.md:6-14 lacks")])
+        self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class SummaryAndInput(unittest.TestCase):

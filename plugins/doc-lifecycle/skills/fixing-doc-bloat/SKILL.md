@@ -32,14 +32,17 @@ table here are in force unchanged.
 
 ## The routing table (the bloat-specific rules)
 
-Apply each **approved** record by its verdict. `location` is a single `file:line` for the
-passage verdicts; the doc verdicts carry `location: null` and act on the whole doc.
+Apply each **approved** record by its verdict. For the passage verdicts, `location` is the
+passage's **anchor** (its first line) and the record's `evidence` opens with the passage's
+full extent — `file:start-end` (`file:start` if one line). **The edit's mandate is the
+passage that span delimits, anchored at `location`** — not mechanically the anchor line.
+The doc verdicts carry `location: null` and act on the whole doc.
 
 | Verdict | Applied as |
 |---|---|
-| `CUT` | delete the line at `location` (anchor-confirm first, per spine §3) |
-| `CONDENSE` | replace the line at `location` with `proposal`, **byte-verbatim** — the report drafted that text to the writing-docs bar; you place it, you do not touch it |
-| `EXTRACT-AND-MOVE` | land `proposal.text` in `proposal.target` (writing-docs bar), delete the source line at `location` — **one commit** |
+| `CUT` | delete the passage the record's evidence delimits, anchored at `location` (anchor-confirm first, per spine §3). On a boundary line the passage shares with unflagged text, delete only the passage's own text — the neighboring sentence's words stay |
+| `CONDENSE` | replace the passage the record's evidence delimits — every line of its span — with `proposal`, **byte-verbatim** — the report drafted that text to the writing-docs bar; you place it, you do not touch it |
+| `EXTRACT-AND-MOVE` | land `proposal.text` in `proposal.target` (writing-docs bar), delete the source passage the record's evidence delimits — **one commit** |
 | `RETIRE-DOC` | delete the doc; **approval of this ID is the deletion authorization** — no second confirmation needed |
 | `MERGE-DOC` | move the content not already in `proposal.target` into it, then delete the merged doc — **one commit** |
 | `DISTILL` (`status: "ready"` only) | dispatch **doc-lifecycle:doc-distiller** with the record; commit its staged result. `pending-implementation` is **never actionable** — skip it with a note even if it was approved |
@@ -105,6 +108,9 @@ collision note through to the human; never re-edit the landed result** to "recon
   right" → unapproved = not your mandate; surface it, don't apply it.
 - Folding an adjacent (approved or unapproved) record's content into an approved record's edit
   → that adjacent record is a separate action item; its boundary is its own.
+- Editing only the single line at `location` when the evidence span is multi-line, or deleting
+  a whole boundary line that also carries unflagged text → the mandate is the span'd passage
+  exactly: all of it, nothing beside it.
 - Rewording, extending, or blending a `CONDENSE` proposal or a `DISTILL` claim → it lands
   byte-verbatim at its own boundary; adding to it re-introduces the bloat you're removing.
 - Distilling the artifact inline instead of dispatching the distiller → the distiller owns the
@@ -126,6 +132,7 @@ collision note through to the human; never re-edit the landed result** to "recon
 |--------|---------|
 | "The CUT is unapproved but trivial / obviously right" | Unapproved = not your mandate. Surface it; the human decides. |
 | "This unapproved record is right next to my approved edit — I'll just include it" | Its boundary is its own location/proposal, not your approved record's. Absorbing it is applying an unapproved record. |
+| "`location` names one line, so I'll only touch that line" | `location` is the anchor; the evidence's opening `file:start-end` span is the mandate. A CONDENSE of a nine-line passage replaces nine lines. |
 | "The proposal reads thin — I'll round it out with the adjacent claim" | Land it byte-verbatim, stop at its boundary. Blending it in adds redundancy and breaks "applied as given." |
 | "I'll just distill inline — dispatching is overhead" | The distiller owns the method (single owner). Inlining drops re-verify, dedup, the decision log, and the single-commit shape. |
 | "The decision entry fits fine in CLAUDE.md" | The decision log is `docs/decisions.md`, a repo-level file the distiller owns. |

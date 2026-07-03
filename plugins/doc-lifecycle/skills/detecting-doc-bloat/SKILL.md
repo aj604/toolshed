@@ -135,9 +135,9 @@ and `fixing-doc-bloat` applies exactly those.
 |---|---|
 | `id` | non-empty string, unique within the report (e.g. `"B1"`) — approval is by ID |
 | `doc` | path of the judged doc, non-empty string |
-| `location` | passage verdicts (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`): `file:line`, single line, no ranges. Doc verdicts (`RETIRE-DOC`/`MERGE-DOC`/`DISTILL`): must be `null` |
+| `location` | passage verdicts (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`): `file:line`, single line, no ranges — the **first line of the passage** (its anchor; the full extent opens `evidence`). Doc verdicts (`RETIRE-DOC`/`MERGE-DOC`/`DISTILL`): must be `null` |
 | `verdict` | one of `CUT` / `CONDENSE` / `EXTRACT-AND-MOVE` / `RETIRE-DOC` / `MERGE-DOC` / `DISTILL` — literal enum, no invented values |
-| `evidence` | mandatory non-empty string for **every** verdict (the code line, quoted overlap, or grep that proves the finding) |
+| `evidence` | mandatory non-empty string for **every** verdict (the code line, quoted overlap, or grep that proves the finding). Passage verdicts: must **open with the passage's full extent** — `file:start-end` (`file:start` if the passage is one line), where `file:start` equals `location` — then the proof. The span is normative: it is what `fixing-doc-bloat` deletes or replaces |
 | `proposal` | `CONDENSE`: non-empty string, the complete replacement line. `EXTRACT-AND-MOVE`: `{"target": <doc>, "text": <text to land>}`, both non-empty. `MERGE-DOC`: `{"target": <survivor doc>}`. All others (`CUT`/`RETIRE-DOC`/`DISTILL`): `null` |
 | `status` | `DISTILL` only: `"pending-implementation"` or `"ready"`. All other verdicts: `null` |
 | `payload` | non-null **iff** `DISTILL` + `ready`: `{"claims": [{"claim","target","evidence"}, …] (≥1, all non-empty), "decision_entry": <non-empty draft log entry>}`. Otherwise (`pending-implementation`, and every non-DISTILL verdict): `null` |

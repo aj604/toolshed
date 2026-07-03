@@ -1,7 +1,7 @@
 # Documentation Skills Suite — Handoff
 
 **Last updated:** 2026-07-03
-**HEAD at handoff:** `8b9700a` + review fixes + bloat/distillation suite merge (see `git log`)
+**HEAD at handoff:** `8b9700a` + review fixes + bloat/distillation suite merge + bloat passage-span contract (see `git log`)
 **Repo:** `toolshed` (git)
 
 ## What this project is
@@ -201,6 +201,21 @@ agent doc) is deliberate placement, not bloat; dedup verdicts require
 same-audience overlap. Added after GREEN shipped, then targeted-re-verified
 (6/6, no regression) per the re-GREEN convention:
 `tests/baselines/bloat-red/GREEN-results.md` ("Post-GREEN edit").
+
+**Passage-span-in-evidence contract (post-GREEN, whole-branch review fast-follow):**
+passage extent is now normative. `detecting-doc-bloat` requires a passage verdict's
+`evidence` to open with the passage's full extent (`file:start-end`, or `file:start`
+for one line) whose start equals `location` (the anchor = first line);
+`validate-bloat-output.py` enforces it (`check_evidence_span`; new `EvidenceSpan`
+unit tests). `fixing-doc-bloat`'s CUT/CONDENSE/EXTRACT routing rows reworded from
+"the line at `location`" to "the passage the record's evidence delimits, anchored at
+`location`". Closes the review's one Important finding: CONDENSE is multi-line→one-line
+but the old contract carried extent only in prose, and the shared-line CUT apply path
+(README.md:19-20) was untested and would corrupt on a literal "delete the line".
+Targeted re-verified both skills at Sonnet (detect 6/6 with well-formed spans; fixing
+applied the shared-line CUT + nine-line CONDENSE + EXTRACT with no corruption):
+`tests/baselines/bloat-red/GREEN-results.md` and
+`tests/baselines/bloat-fixing-red/GREEN-results.md` ("Post-GREEN edit — passage-span…").
 
 ## Key learnings (carry forward — these shaped skills 1 and 2)
 
