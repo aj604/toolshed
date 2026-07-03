@@ -1,0 +1,89 @@
+{
+  "records": [
+    {
+      "id": "B1",
+      "doc": "fixture/README.md",
+      "location": "fixture/README.md:19",
+      "verdict": "CUT",
+      "evidence": "fixture/README.md:19 \"The `send_alert` function takes a channel and a message and delivers the message to that channel.\" restates fixture/src/notify.py:7 `def send_alert(channel, msg):`, one line away from the doc's own usage example (README.md:23) — no information beyond the signature.",
+      "proposal": null,
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B2",
+      "doc": "fixture/README.md",
+      "location": "fixture/README.md:30",
+      "verdict": "CONDENSE",
+      "evidence": "fixture/README.md:30-38 spends four sentences / nine lines of narrative (\"Delivery failures are not always permanent...\" through \"...raises `AlertFailed` so the caller knows delivery ultimately did not succeed.\") on one checkable fact: retries happen automatically, capped at a fixed count, then raise. The constants are fixture/src/notify.py:3 `MAX_RETRIES = 3` and the raise is `AlertFailed` (notify.py:8 docstring).",
+      "proposal": "Retries up to `MAX_RETRIES` (3) times before raising `AlertFailed` (`src/notify.py:3`).",
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B3",
+      "doc": "fixture/README.md",
+      "location": "fixture/README.md:40",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "fixture/README.md:40-43 (\"One quirk worth knowing about: alerts can silently drop if `TIMEOUT_S` exceeds the receiving channel's flush interval...\") is an operational gotcha addressed to an operator/agent, not usage documentation for a caller — it belongs alongside fixture/CLAUDE.md's other accurate, dense lines about this module rather than in the user-facing README.",
+      "proposal": {
+        "target": "fixture/CLAUDE.md",
+        "text": "Alerts silently drop if `TIMEOUT_S` exceeds the receiving channel's flush interval — the channel may discard buffered messages before the next send attempt writes to it."
+      },
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B4",
+      "doc": "fixture/SETUP.md",
+      "location": null,
+      "verdict": "MERGE-DOC",
+      "evidence": "fixture/SETUP.md:1-9 duplicates fixture/README.md:6-14 near-verbatim: both open with \"Clone the repo, then install the package in editable mode:\", both carry the identical ```\\npip install -e .\\n``` block, and both end with \"No environment variables are required to run the test suite locally.\" No standalone reason for two docs to carry the same setup instructions.",
+      "proposal": { "target": "fixture/README.md" },
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B5",
+      "doc": "fixture/docs/plans/2026-01-10-notify-retry-design.md",
+      "location": null,
+      "verdict": "DISTILL",
+      "evidence": "Implementation landed and matches the design: fixture/src/notify.py:3 `MAX_RETRIES = 3` and notify.py:4 `TIMEOUT_S = 10` correspond to the design's Decision section (lines 37-38 settle on three attempts, lines 39-40 settle on a ten-second per-attempt timeout). The Problem, three considered Options, and the Sketch (lines 46-55, duplicating notify.py's actual retry loop) are scaffolding superseded by the shipped code.",
+      "proposal": null,
+      "status": "ready",
+      "payload": {
+        "claims": [
+          {
+            "claim": "`send_alert` retries a fixed 3 times (`MAX_RETRIES`) before raising `AlertFailed` — a deliberate choice of fixed retries over backoff, sized to ride out a typical few-second blip without hanging the caller on a dead channel.",
+            "target": "fixture/README.md",
+            "evidence": "fixture/src/notify.py:3 `MAX_RETRIES = 3`"
+          },
+          {
+            "claim": "Each delivery attempt times out after 10 seconds (`TIMEOUT_S`) — enough headroom for a slow channel to respond without letting one hung request block the whole retry loop.",
+            "target": "fixture/CLAUDE.md",
+            "evidence": "fixture/src/notify.py:4 `TIMEOUT_S = 10`"
+          }
+        ],
+        "decision_entry": "## 2026-01-10 — Retry behavior for `send_alert`\n- Decided: fixed 3 retries (not exponential backoff or a caller-supplied policy), 10s timeout per attempt.\n- Still binds: revisit backoff only if a channel starts showing retry storms in practice; the fixed-retry choice was sized for a small internal alerting library, not high-volume distributed retry logic.\n- Code: fixture/src/notify.py (MAX_RETRIES, TIMEOUT_S, send_alert).\n- Source: fixture/docs/plans/2026-01-10-notify-retry-design.md (retired in this distillation)."
+      }
+    },
+    {
+      "id": "B6",
+      "doc": "fixture/docs/plans/2026-07-01-batching-design.md",
+      "location": null,
+      "verdict": "DISTILL",
+      "evidence": "No implementation: `grep -rn \"send_batch|batch\" fixture/src/` returns nothing. The design's `send_batch(channel, msgs)` helper (line 11) does not exist anywhere in fixture/src/, which contains only notify.py exposing send_alert. Describes unbuilt code.",
+      "proposal": null,
+      "status": "pending-implementation",
+      "payload": null
+    }
+  ],
+  "summary": {
+    "cut": 1,
+    "condense": 1,
+    "extract_and_move": 1,
+    "retire_doc": 0,
+    "merge_doc": 1,
+    "distill": 2
+  }
+}
