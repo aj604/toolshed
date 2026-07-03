@@ -9,7 +9,7 @@
     {
       "name": "doc-lifecycle",
       "source": "./plugins/doc-lifecycle",
-      "description": "Stop agents from acting on stale docs. Write README/CLAUDE.md/runbooks as checkable claims, audit them against the code with evidence-backed verdicts, and land fixes surgically — bootstrap → write → detect → fix → schedule."
+      "description": "Stop agents from acting on stale docs. Write README/CLAUDE.md/runbooks as checkable claims, grow the doc set only on demand signals, audit against the code with evidence-backed verdicts, and land fixes surgically — bootstrap → write → grow → detect → fix → schedule."
     }
   ]
 }

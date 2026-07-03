@@ -1,16 +1,16 @@
 # Documentation Skills Suite — Handoff
 
 **Last updated:** 2026-07-03
-**HEAD at handoff:** `db561b3`
+**HEAD at handoff:** `8b9700a` + review fixes + bloat/distillation suite merge (see `git log`)
 **Repo:** `toolshed` (git)
 
 ## What this project is
 
-Built a suite of 5 documentation skills with the `superpowers:writing-skills` TDD
+Built a suite of documentation skills with the `superpowers:writing-skills` TDD
 methodology (RED → GREEN → REFACTOR with subagents). Full design and rationale:
 `docs/plans/2026-06-09-documentation-skills-suite-design.md` (read this first to resume).
 
-Lifecycle the suite covers: **bootstrap → write → detect → fix.**
+Lifecycle the suite covers: **bootstrap → write → grow → detect → fix.**
 
 ## Status
 
@@ -21,13 +21,37 @@ Lifecycle the suite covers: **bootstrap → write → detect → fix.**
 | 3 | detecting-doc-drift | ✅ done (GREEN+REFACTOR) | `detecting-doc-drift/` | yes |
 | 4 | fixing-doc-drift (the human-invoked fix step) | ✅ done (GREEN+REFACTOR) | `fixing-doc-drift/` | yes |
 | 5 | auto-trigger layer (cron/PR) | ✅ done | `scheduling-doc-sync/` | yes |
-| 6 | detecting-doc-bloat | ✅ done (GREEN; tier boundary documented) | `detecting-doc-bloat/` | no |
-| 7 | fixing-doc-bloat | ✅ done (GREEN, independently graded) | `fixing-doc-bloat/` | no |
-| 8 | doc-distiller (agent, dispatched by fixing-doc-bloat) | ✅ done (GREEN, independently graded) | `agents/doc-distiller.md` | no |
+| 6 | growing-docs (demand-driven growth) | ✅ done (GREEN; REFACTOR no-op + review fixes) | `growing-docs/` | no (not yet re-deployed) |
+| 7 | detecting-doc-bloat | ✅ done (GREEN; tier boundary documented) | `detecting-doc-bloat/` | no |
+| 8 | fixing-doc-bloat | ✅ done (GREEN, independently graded) | `fixing-doc-bloat/` | no |
+| 9 | doc-distiller (agent, dispatched by fixing-doc-bloat) | ✅ done (GREEN, independently graded) | `agents/doc-distiller.md` | no |
+
+### Skill 6 outcome (2026-07-03)
+
+Added after Avery's steer that the suite was too aggressive about not creating docs, with
+no path back from bootstrapping's permanent deferral. Design:
+`docs/plans/2026-07-02-growing-docs-design.md`. RED (6 agents, 3 scenarios ×2) showed the
+predicted "won't document" failure did NOT materialize — capable agents document well when
+a false claim gives them a drift path; what actually failed: no pure-gap path (drift only
+audits existing claims), demand signals never named, bootstrap's deferred note chat-only
+with no owner, and the narrative carve-out a dead-end resolved by per-agent improvisation
+(0/2 staleness anchors). GREEN 6/6; records `tests/baselines/growing-red|green/`.
+Companion edits: bootstrapping-docs now exits by writing `docs/doc-scope.md` (format
+single-owned by growing-docs) and handing growth over; writing-docs Rule 5 gained its
+positive twin and the carve-out now routes to growing-docs; repo-shape.md Rule 7 updated
+(continuity review caught it still prescribing the old deferred-note ending).
+
+Skill 6 follow-ups (from code review, 2026-07-03):
+- **Natural-triggering check after re-deploy** — GREEN agents were pointed at the SKILL.md
+  files (plugin cache served pre-edit versions), so description-based routing was never
+  exercised; run one demand-signal prompt against the installed plugin.
+- **Nightly promotion-signal flagging** — design's out-of-scope note: the doc-sync nightly
+  could flag `docs/doc-scope.md` items whose promote-when signal has fired. Narrative-doc
+  `> As of` anchors are a hook for this; today's drift skills don't audit narrative docs.
 
 Build order is sequential: 3 needs 1+2 working (it rewrites via writing-docs standards);
 4 needs 3 working (it consumes 3's structured drift report and applies the fixes). The
-cron/PR trigger wiring is row 5: `scheduling-doc-sync`. Rows 6–8 are a separate pair
+cron/PR trigger wiring is row 5: `scheduling-doc-sync`. Rows 7–9 are a separate pair
 (bloat/distillation, the value axis) built after row 5; they share `fixing-doc-drift`'s
 apply-discipline spine (see the "spine extraction" update below) but not its build
 dependency chain.
@@ -134,9 +158,12 @@ Built as an installer skill + shipped wiring — nightly GitHub Action calling
 to `fixing-doc-drift`, opening an evidence PR (blast-radius cap escalates to an issue;
 marker-based idempotency). Built test-first after all (RED axis existed: hand-rolled wiring);
 records in `tests/baselines/doc-sync-setup-red/`, incl. live E2E. Design:
-`2026-07-02-doc-sync-automation-design.md`.
+`2026-07-02-doc-sync-automation-design.md`. PR #10 (2026-07-03) moved the detect/fix steps onto
+`anthropics/claude-code-action@v1` and extracted run-surface rendering to a shipped
+`render-report.py`; targeted re-GREEN of the affected install/upgrade scenario:
+`tests/baselines/doc-sync-action-regreen/`.
 
-## Rows 6–8: bloat/distillation suite (2026-07-03)
+## Rows 7–9: bloat/distillation suite (2026-07-03)
 
 Second pair on the drift pair's shape, covering the **value axis** (drift covers
 accuracy): `detecting-doc-bloat` (contract skill, read-only, emits `CUT` /

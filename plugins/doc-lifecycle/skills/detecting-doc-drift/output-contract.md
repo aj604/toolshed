@@ -4,7 +4,8 @@ Reference for `detecting-doc-drift`. The field set, enum rules, and validator st
 SKILL.md; this file is the worked example. Emit one record per extracted claim. `fix` is
 non-null only for `STALE`, and it is the complete replacement text for the line at
 `location` — never an instruction like "change X to Y"; `evidence` is mandatory for every
-verdict.
+verdict and is one line — pointer + fact, as every example below models. Narrative history
+(prior PRs, how the drift arose) does not belong in `evidence`.
 
 ```json
 [
