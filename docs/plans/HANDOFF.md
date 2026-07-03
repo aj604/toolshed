@@ -1,6 +1,6 @@
 # Documentation Skills Suite — Handoff
 
-**Last updated:** 2026-07-02
+**Last updated:** 2026-07-03
 **HEAD at handoff:** `db561b3`
 **Repo:** `toolshed` (git)
 
