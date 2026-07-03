@@ -1,7 +1,7 @@
 {
   "name": "doc-lifecycle",
-  "version": "0.3.1",
-  "description": "Stop agents from acting on stale docs. Write README/CLAUDE.md/runbooks as checkable claims, grow the doc set only on demand signals, audit against the code with evidence-backed verdicts, and land fixes surgically — bootstrap → write → grow → detect → fix → schedule.",
+  "version": "0.3.2",
+  "description": "Stop agents from acting on stale docs. Write README/CLAUDE.md/runbooks as checkable claims, grow the doc set only on demand signals, audit against the code with evidence-backed verdicts, and land fixes surgically \u2014 bootstrap \u2192 write \u2192 grow \u2192 detect \u2192 fix \u2192 schedule.",
   "license": "MIT",
   "homepage": "https://github.com/aj604/toolshed",
   "repository": "https://github.com/aj604/toolshed",
