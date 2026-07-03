@@ -6,7 +6,7 @@ Markdown; the only executable code published is two skill helper scripts
 `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`, both `python3`, no deps)
 plus the GitHub Actions template the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`). The sample repos under
-`tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/validate-drift-output.py`, `workflows/doc-sync.yml`).
+`tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/validate-drift-output.py`, `workflows/doc-sync.yml`) and the ci+release workflow (`workflows/release.yml`).
 
 ## Layout (pointers, not descriptions)
 
