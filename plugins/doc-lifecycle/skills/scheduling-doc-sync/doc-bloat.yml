@@ -120,8 +120,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      LANE: prune
-      VERDICTS: "CUT, CONDENSE, or EXTRACT-AND-MOVE"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
