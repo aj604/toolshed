@@ -1,6 +1,6 @@
 ---
 name: bootstrapping-docs
-description: Use when a repo has no doc set yet (or a bare one) and you need to create the baseline from scratch — "document this project" / "add docs" / "set up documentation" — producing the smallest high-leverage doc set and deliberately stopping, instead of cataloguing everything. This is the whole-repo, what-to-create-and-when-to-stop skill; for writing or editing one individual doc, use writing-docs (this skill routes each doc's quality to it).
+description: 'Use when a repo has no doc set yet (or a bare one) and you need to create the baseline from scratch — "document this project" / "add docs" / "set up documentation" — producing the smallest high-leverage doc set and deliberately stopping, instead of cataloguing everything. This is the whole-repo, what-to-create-and-when-to-stop skill; for writing or editing one individual doc, use writing-docs (this skill routes each doc''s quality to it). Ends by writing the docs/doc-scope.md scope record, handing growth to growing-docs.'
 ---
 
 # Bootstrapping Docs
@@ -26,7 +26,8 @@ governs *what to create and when to stop*; writing-docs governs *how each doc re
 2. **Write the priority set below, in order**, applying **writing-docs** to each as you go
    (run-or-omit output, marked+anchored rationale, no aspirational claims). Stop when the
    high-leverage facts are captured.
-3. **Write a deferred note** listing what you did NOT document and why.
+3. **Write `docs/doc-scope.md`** (format owned by **growing-docs**) listing what you
+   deliberately did NOT document, each with the demand signal that would promote it.
 
 ## Priority order (create in this order; stop early if that's enough)
 
@@ -71,21 +72,17 @@ These are inferable from the repo and will drift. Cutting them is the whole poin
 Test each line: **would an agent make a mistake without it?** If the agent could get it by
 reading one obvious file, leave it for them to read — link, don't transcribe.
 
-## End the bootstrap with a deferred note
+## End the bootstrap with a scope record
 
-When you finish bootstrapping, state what you intentionally left undocumented, so scope is a
-decision, not an omission:
+When you finish bootstrapping, write `docs/doc-scope.md` — format owned by **growing-docs**;
+follow it — so scope is a decision that survives the session, not a chat-only note. List what
+you intentionally left undocumented, each item with the demand signal that would promote it.
+Deferral is *deferred until a signal*, not permanent; when a signal fires, **growing-docs**
+owns the promotion.
 
-```
-## Not yet documented
-- Per-endpoint API reference (read services/api/server.js)
-- Operational runbooks (no incident procedures captured yet)
-```
-
-This is a **one-time bootstrap record**, not a section every doc must carry forever. Once the
-doc set is established, durable tracking of unbuilt work belongs in a planning or handoff doc
-— don't keep a standing `## Not yet documented` section in an always-loaded agent file
-(CLAUDE.md/AGENTS.md), where it becomes maintained residue re-read every session.
+The record is a **file**, read on demand — don't keep a standing `## Not yet documented`
+section in an always-loaded agent file (CLAUDE.md/AGENTS.md), where it becomes maintained
+residue re-read every session. A pointer line to `docs/doc-scope.md` is fine.
 
 ## Red flags — STOP
 
@@ -94,5 +91,6 @@ doc set is established, durable tracking of unbuilt work belongs in a planning o
 - A directory tree mirroring the filesystem → cut.
 - Adding contributing/changelog/badges nobody asked for → cut.
 - Aiming for "comprehensive" or "complete" → wrong target; aim for minimal-high-leverage.
-- Finishing the bootstrap with no deferred note → you haven't decided scope, you've just
-  stopped. (A bootstrap-time check — don't lint established docs for a standing section.)
+- Finishing the bootstrap with no scope record (`docs/doc-scope.md`) → you haven't decided
+  scope, you've just stopped — and the decision dies with the session. (A bootstrap-time
+  check — don't lint established docs for a standing section.)
