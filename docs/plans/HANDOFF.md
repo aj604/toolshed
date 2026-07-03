@@ -124,7 +124,7 @@ the `llm-doc-writer` agent). The contract is hoisted into the door you already o
 The "skill 4" fix step is built — but as **`fixing-doc-drift`**, a human-invoked apply step, not
 the auto `doc-sync-automation`. It consumes `detecting-doc-drift`'s structured records and lands
 the fixes. The `auto` (cron/PR triggers, PR packaging, idempotency) is deliberately deferred to
-non-skill wiring (now "skill 5" in the table, ⬜).
+non-skill wiring (later shipped as row 5 in the table — see "Row 5 shipped" below).
 
 - **Built test-first** (RED → GREEN → REFACTOR), records: `tests/baselines/fixing-drift-red/`.
   Reused the `drift-red` fixture; the fixer's input is the exact record set `detecting-doc-drift`
@@ -144,12 +144,14 @@ non-skill wiring (now "skill 5" in the table, ⬜).
 
 Resume notes, lifecycle line, dependency notes, and the repo-layout tree below were brought in
 line with what actually shipped: all four skills + the `llm-doc-writer` agent done, auto-trigger
-layer deferred (shipped later the same day — see "Row 5 shipped" above).
+layer deferred (shipped later the same day — see "Row 5 shipped" below).
 
 ## How to resume (next session)
 
-All five skills plus the `llm-doc-writer` agent are done (GREEN+REFACTOR), deployed, and ship
-in `plugins/doc-lifecycle/`. There is no skill left to build.
+All eight skills plus the `llm-doc-writer` and `doc-distiller` agents are built and GREEN
+(per-row state in the status table) and ship in `plugins/doc-lifecycle/`. With the
+bloat/distillation suite (rows 7–9) landed, no designed skill is left to build; open items
+are the "Skill 6 follow-ups" above and the not-yet-deployed rows in the status table.
 
 ## Row 5 shipped: auto-trigger layer (`scheduling-doc-sync`, 2026-07-02)
 
@@ -227,6 +229,9 @@ same-audience overlap. Added after GREEN shipped, then targeted-re-verified
 ```
 .claude-plugin/
   marketplace.json       # marketplace manifest (must stay at repo root)
+.github/                 # dogfooded row-5 install (live instance of scheduling-doc-sync)
+  doc-sync/              sync-gate.py, render-report.py, validate-drift-output.py
+  workflows/             doc-sync.yml, release.yml
 plugins/doc-lifecycle/
   .claude-plugin/plugin.json
   skills/
@@ -234,11 +239,22 @@ plugins/doc-lifecycle/
     bootstrapping-docs/  SKILL.md + repo-shape.md
     detecting-doc-drift/ SKILL.md + output-contract.md, scripts/validate-drift-output.py
     fixing-doc-drift/    SKILL.md
+    scheduling-doc-sync/ SKILL.md + doc-sync.yml, scripts/sync-gate.py, scripts/render-report.py
+    growing-docs/        SKILL.md
+    detecting-doc-bloat/ SKILL.md + output-contract.md, scripts/validate-bloat-output.py
+    fixing-doc-bloat/    SKILL.md
   agents/
     llm-doc-writer.md
+    doc-distiller.md
+  references/
+    apply-discipline.md  # shared apply-only spine cited by both fix skills
 docs/plans/
   2026-06-09-documentation-skills-suite-design.md   # full design + writing-docs strategy
   2026-06-20-reference-doc-containment-design.md    # the docs/reference/ shape
+  2026-07-02-doc-sync-automation-design.md (+ -plan.md)
+  2026-07-02-growing-docs-design.md
+  2026-07-03-doc-bloat-and-distillation-design.md (+ -plan.md)
+  2026-07-03-doc-sync-pr-body-tightening-design.md (+ -plan.md)
   HANDOFF.md                                         # this file
 tests/
   fixtures/
@@ -246,8 +262,10 @@ tests/
     ANSWER-KEY.md          grading key for sample-repo
     taskflow/              3-component workspace fixture (runnable; run `make setup` first)
     taskflow-ANSWER-KEY.md grading key for taskflow
-  baselines/             RED/GREEN test records for all five skills + the llm-doc-writer agent
-  scripts/               validate-drift-output_test.py (unit tests for the helper script)
+  baselines/             RED/GREEN test records for all eight skills + both agents
+                         (incl. bloat-red/ and bloat-fixing-red/ for rows 7–9)
+  scripts/               unit tests for the four helper scripts (validate-drift-output,
+                         validate-bloat-output, sync-gate, render-report)
 ```
 
 ## Conventions used in this project
@@ -259,12 +277,3 @@ tests/
 - Fixtures are committed runnable; `.taskflow-state.json` and `node_modules/` are gitignored
   (run `make setup` — plain `npm install` — in taskflow after checkout).
 - Commits co-authored; design/skills committed as they pass.
-
-## Not yet decided (deferred to the auto-trigger layer)
-
-**HEAD at handoff:** `db561b3`
-**Repo:** `toolshed` (git)
-
-## What this project is
-
-Built a suite of 5 documentation skills with the `superpowers:writing-skills` TDD
