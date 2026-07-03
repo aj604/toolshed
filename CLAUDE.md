@@ -6,7 +6,7 @@ Markdown; the only executable code published is two skill helper scripts
 `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`, both `python3`, no deps)
 plus the GitHub Actions template the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`). The sample repos under
-`tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/validate-drift-output.py`, `workflows/doc-sync.yml`).
+`tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/validate-drift-output.py`, `workflows/doc-sync.yml`) and the ci+release workflow (`workflows/release.yml`).
 
 ## Layout (pointers, not descriptions)
 
@@ -32,8 +32,9 @@ plus the GitHub Actions template the scheduling skill installs
 
 - **Skills are built test-first** (RED → GREEN → REFACTOR with subagents) via the
   `superpowers:writing-skills` methodology; test records live under `tests/baselines/` — one dir
-  per test milestone (`bootstrap-red/`, `bootstrap-green/`, `drift-red/`, `fixing-drift-red/`,
-  `llm-doc-red/`, `writing-docs-merge-red/`), plus the original writing-docs records loose at
+  per test milestone (`bootstrap-red/`, `bootstrap-green/`, `doc-sync-setup-red/`, `drift-red/`,
+  `fixing-drift-red/`, `growing-red/`, `growing-green/`, `llm-doc-red/`,
+  `writing-docs-merge-red/`), plus the original writing-docs records loose at
   the `tests/baselines/` root.
   Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
   `docs/plans/2026-06-09-documentation-skills-suite-design.md` (suite) and

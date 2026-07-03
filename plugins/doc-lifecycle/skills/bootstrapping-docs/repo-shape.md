@@ -95,9 +95,10 @@ the way `writing-docs` governs any example — verifiable against the actual wir
    help → auto-generate into `docs/reference/generated/`. Hand-written reference is the
    route-catalog bloat SKILL.md forbids; generated reference stays in sync because it has one
    source.
-7. **End the bootstrap with a deferred note** — scope is a decision, not an omission. It's a
-   one-time bootstrap record, not a standing section the always-loaded root doc must carry
-   forever; durable tracking of unbuilt work graduates to a planning/handoff doc.
+7. **End the bootstrap with the scope record** (`docs/doc-scope.md`, format owned by
+   growing-docs) — scope is a decision, not an omission. Each deferred item carries the
+   demand signal that would promote it; when one fires, growing-docs owns the promotion.
+   Not a standing section the always-loaded root doc must carry — a pointer line is fine.
 
 ## When a routing index earns its place
 
