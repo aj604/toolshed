@@ -1,6 +1,7 @@
 # ci + release for the toolshed marketplace.
-# CI (every PR and push): manifest validation + unit tests — the checks that
-# have historically been run by hand before tagging.
+# CI (every PR and push): version-bump guard (PRs only, doc-sync/nightly exempt) +
+# manifest validation + unit tests — the checks that have historically been run
+# by hand before tagging.
 # Release (pushes to main): when plugins/doc-lifecycle's version has no tag yet,
 # tag vX.Y.Z and publish a GitHub Release. Cutting a release = bumping the
 # version in your PR; the rest is mechanical.
@@ -16,6 +17,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version guard diffs against the PR base
+      # Installed plugin content must ship under a new version — an unbumped change
+      # means installers keep getting the old release. doc-sync/nightly is exempt:
+      # its doc fixes may touch skill text without warranting a release.
+      - name: Require version bump when plugin content changes
+        if: github.event_name == 'pull_request' && github.head_ref != 'doc-sync/nightly'
+        run: |
+          set -euo pipefail
+          BASE="origin/${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "$(git merge-base "$BASE" HEAD)" HEAD -- plugins/doc-lifecycle/)
+          if [ -z "$CHANGED" ]; then
+            echo "✅ **Version guard:** no plugin content changed — no bump required." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          BASE_VERSION=$(git show "${BASE}:plugins/doc-lifecycle/.claude-plugin/plugin.json" | jq -r .version)
+          HEAD_VERSION=$(jq -r .version plugins/doc-lifecycle/.claude-plugin/plugin.json)
+          if [ "$BASE_VERSION" = "$HEAD_VERSION" ]; then
+            echo "::error file=plugins/doc-lifecycle/.claude-plugin/plugin.json::plugin content changed but version is still ${HEAD_VERSION} — installers would get a stale release; bump the version"
+            echo "🛑 **Version guard:** plugin content changed ($(echo "$CHANGED" | wc -l | tr -d ' ') file(s)) but version is still \`${HEAD_VERSION}\` — bump plugins/doc-lifecycle/.claude-plugin/plugin.json." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "✅ **Version guard:** plugin content changed and version bumped \`${BASE_VERSION}\` → \`${HEAD_VERSION}\`." >> "$GITHUB_STEP_SUMMARY"
       - name: Unit tests
         run: |
           set -euo pipefail
