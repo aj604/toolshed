@@ -234,3 +234,52 @@ fact per the drift-baselines precedent for tier differences.
 
 **Verdict: GREEN passes on the sonnet boundary record; haiku passage-sweep
 completeness documented as the tier-bound residual (Runs 1–4).**
+
+## Post-GREEN edit — 2026-07-03, audience-split precision guard (user steer)
+
+**What changed (skill v5):** the precision guard gained an audience clause —
+"**And redundancy is judged within one audience.** CLAUDE.md/AGENTS.md is a
+distinct doc *type* — tribal knowledge inherited by every agent session — not a
+second README. Dedup verdicts (`CUT` as restatement, `MERGE-DOC`) require
+*same-audience* redundancy: a fact carried in both README (for humans) and
+CLAUDE.md (for agents) is deliberate placement across the audience split, not
+bloat. writing-docs owns that split and is the yardstick for where a claim
+belongs." — plus a matching red flag: "About to `CUT` or `MERGE-DOC` a
+CLAUDE.md/AGENTS.md line because README says it too → different audience, not
+redundancy; dedup requires same-audience overlap."
+
+**Why:** user steer after reading the baseline outputs. The RED agents' CLAUDE.md
+merge suggestions exposed a gap the v1–v4 guard only half-covered: it protected
+CLAUDE.md as a consolidation *target*, so a runner could still `MERGE-DOC` a
+CLAUDE.md on README-overlap in a repo where no other finding points into it.
+Cross-audience duplication is deliberate placement, not redundancy.
+
+**Classification:** precision-tightening in the safe direction (narrows what may
+be flagged; grants no new flagging power). The five recorded runs' grades are
+unaffected — the fixture CLAUDE.md was never a plant, and false-flagging it was
+already graded a failure under the old guard (RED precision section; every GREEN
+run's precision check). Per the re-GREEN convention (post-GREEN edits require
+targeted re-verification of affected scenarios), a targeted re-verify run
+follows; its grade is recorded below before this edit ships.
+
+### Targeted re-verify — 2026-07-03, Sonnet, skill v5 (audience guard in force)
+
+Fresh subagent, same fixture. Verbatim output:
+`green-audience-reverify-output.md`. Validator re-run independently:
+`OK: 6 record(s) valid`, summary matches. No fixture edits.
+
+| Plant | Re-verify | Result |
+|-------|-----------|--------|
+| P1 | B2 `RETIRE-DOC`, quotes the shared lines, cites both files' ranges | ✅ HIT |
+| P2 | B3 `CUT README.md:19`, quotes the sentence, cites `src/notify.py:7-8` | ✅ HIT |
+| P3 | B4 `CONDENSE README.md:30` (correct anchor), replacement citing `MAX_RETRIES` | ✅ HIT |
+| P4 | B5 `EXTRACT-AND-MOVE README.md:40` → `{"target": "CLAUDE.md", "text": ...}` | ✅ HIT |
+| P5 | B1 `DISTILL ready`, both decisions as separate code-cited claims, rich decision_entry | ✅ HIT (same recorded caveat as the boundary run: the timeout claim carries a silent-drop clause overlapping B5's extraction) |
+| P6 | B6 `DISTILL pending-implementation`, `payload: null`, grep evidence | ✅ HIT |
+
+**6/6 — no regression.** The audience guard is applied *consciously*: the human
+summary states "Not flagged: CLAUDE.md (4 lines, dense, no restatement — the
+natural landing spot for B1's claims and B5's extraction, so it is a
+consolidation target, not bloat itself)" — and no dedup verdict touches
+CLAUDE.md. Read-only discipline intact ("Awaiting approved IDs before any record
+is applied"). **Re-verify passes; skill v5 ships.**

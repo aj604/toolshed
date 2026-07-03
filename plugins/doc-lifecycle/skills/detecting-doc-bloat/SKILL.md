@@ -116,6 +116,14 @@ the `MERGE-DOC` survivor, a `DISTILL` claim's target — is where value is being
 doing its job, not bloating; adding cross-reference boilerplate to "clarify" two
 docs is a bloat audit that *increases* line count — never propose it.
 
+**And redundancy is judged within one audience.** CLAUDE.md/AGENTS.md is a
+distinct doc *type* — tribal knowledge inherited by every agent session — not a
+second README. Dedup verdicts (`CUT` as restatement, `MERGE-DOC`) require
+*same-audience* redundancy: a fact carried in both README (for humans) and
+CLAUDE.md (for agents) is deliberate placement across the audience split, not
+bloat. writing-docs owns that split and is the yardstick for where a claim
+belongs.
+
 ## The output contract (this is the "shape")
 
 The bloat report holds one record per finding. Each record uses exactly these
@@ -192,6 +200,8 @@ receives — nothing you present as a summary is authorization on its own.
   to a code comment / deletion → value ≠ placement; move it to the right doc intact.
 - Flagging the *target* of an extraction/merge, or a short dense doc, as bloat → the
   precision guard above; consolidation targets are where value concentrates.
+- About to `CUT` or `MERGE-DOC` a CLAUDE.md/AGENTS.md line because README says it
+  too → different audience, not redundancy; dedup requires same-audience overlap.
 - Proposing to *add* cross-reference or "clarifying" lines → a bloat audit does not
   increase line count.
 - Proposing an edit as an instruction ("change X to Y"), or making any edit → this
