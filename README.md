@@ -99,6 +99,8 @@ All of the above ships today. The automation layer — `scheduling-doc-sync` —
 
 Every skill was written test-first — RED (baseline agents fail) → GREEN (skill fixes it) → REFACTOR (pressure-test for loopholes). Rules target failures that actually showed up in baseline runs, not best-practice folklore. Test records live under [`tests/`](tests/). This README follows the plugin's own contract — every line above is a claim you can check against this repo.
 
+And the loop is closed in this repo's own history: on its first nightly run here (2026-07-02), `doc-sync` caught two stale claims in these very docs — one falsified by the commit that installed it — and opened [the evidence PR](https://github.com/aj604/toolshed/pull/5) that fixed them. Full record: [`tests/baselines/doc-sync-setup-red/DOGFOOD-first-catch.md`](tests/baselines/doc-sync-setup-red/DOGFOOD-first-catch.md).
+
 ## Try it locally
 
 ```
