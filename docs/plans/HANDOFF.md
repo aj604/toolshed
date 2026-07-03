@@ -1,7 +1,7 @@
 # Documentation Skills Suite — Handoff
 
 **Last updated:** 2026-07-03
-**HEAD at handoff:** `097e862`
+**HEAD at handoff:** `8b9700a` + review fixes (see `git log`)
 **Repo:** `toolshed` (git)
 
 ## What this project is
@@ -37,6 +37,14 @@ Companion edits: bootstrapping-docs now exits by writing `docs/doc-scope.md` (fo
 single-owned by growing-docs) and handing growth over; writing-docs Rule 5 gained its
 positive twin and the carve-out now routes to growing-docs; repo-shape.md Rule 7 updated
 (continuity review caught it still prescribing the old deferred-note ending).
+
+Skill 6 follow-ups (from code review, 2026-07-03):
+- **Natural-triggering check after re-deploy** — GREEN agents were pointed at the SKILL.md
+  files (plugin cache served pre-edit versions), so description-based routing was never
+  exercised; run one demand-signal prompt against the installed plugin.
+- **Nightly promotion-signal flagging** — design's out-of-scope note: the doc-sync nightly
+  could flag `docs/doc-scope.md` items whose promote-when signal has fired. Narrative-doc
+  `> As of` anchors are a hook for this; today's drift skills don't audit narrative docs.
 
 Build order is sequential: 3 needs 1+2 working (it rewrites via writing-docs standards);
 4 needs 3 working (it consumes 3's structured drift report and applies the fixes). The

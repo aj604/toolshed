@@ -79,7 +79,8 @@ Read on demand; never a standing section in an always-loaded agent file (CLAUDE.
 
 1. **First line under the title, always:**
    `> As of <YYYY-MM-DD> (<commit or file:line anchors current at writing>)`
-   — the staleness anchor readers and drift tooling hook onto.
+   — the staleness anchor readers can check against; a hook for future drift tooling
+   (today's drift skills audit repo-tracking claims, not narrative docs).
 2. **Every command, path, symbol, and output inside the narrative is true of the repo now
    and was actually run.** Narrative structure is exempt from the claim bar; fabrication
    is not.

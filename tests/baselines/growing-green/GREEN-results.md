@@ -94,6 +94,9 @@ re-ran the affected flows against the final wording:
   wording as the reason ("update it — create it if absent" + the red flag). Gap/drift
   split, named signal, and smallest artifacts all held.
 
+Artifacts: agent-a3/ and agent-b3/ (added post-review — the code reviewer correctly
+flagged that this section initially shipped as prose with no evidence).
+
 repo-shape.md Rule 7's rewrite has no scenario coverage (no multi-unit fixture); it now
 states the same contract the GREEN-tested SKILL.md ending does, verified by read-review
 only.

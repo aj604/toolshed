@@ -38,7 +38,7 @@ governs *what to create and when to stop*; writing-docs governs *how each doc re
 2. **README skeleton** — human front door: one-line what-and-why, setup, the run/test
    commands. A skeleton, not a manual.
 3. **Operational stubs** — only if real operational knowledge surfaced during exploration;
-   otherwise a one-line "runbooks: TODO" and move on.
+   otherwise defer it in the scope record (`- runbook: … — promote when: <signal>`) and move on.
 
 **Larger repo (more than a handful of services/packages/subsystems)?** The 2-doc core set
 (plus the conditional third) is for a single-unit repo. Once there are many units, the same minimal-high-leverage rule scales
