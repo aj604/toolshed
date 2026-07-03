@@ -78,7 +78,10 @@ Rules: `kind` is one of `command` / `path` / `symbol` / `behavior` / `structure`
 values. `fix` is non-null only for `STALE`, and it is the **complete replacement text** for
 the line at `location` — never an instruction like "change X to Y" — and must meet the
 writing-docs bar. `evidence` is mandatory for **every** verdict, including VERIFIED (the
-grep/command/line that proves it). Emit the canonical wrapped object
+grep/command/line that proves it) — and it is **one line: pointer + fact**. The `file:line`
+or command, and the fact it shows. No history (prior PRs, how the drift arose), no restated
+command output, no reasoning narrative — the verdict carries the conclusion; evidence
+carries only what proves it. Emit the canonical wrapped object
 `{"records": [...], "summary": {"verified": N, "stale": N, "unverifiable": N}}`; on success
 the validator prints a `summary:` line as JSON, recomputed from the records, that automation
 can gate on.
@@ -121,3 +124,5 @@ records; it accepts a bare array too and recomputes the authoritative summary fo
 - A record with an invented `kind` (e.g. `schema_mismatch`) → use the six enum values only.
 - Marking an anchor STALE for being off by a line, or emitting a `fix` that only changes a
   line number → not drift. The anchor is metadata, not its own claim.
+- Evidence that tells a story — prior fixes, what re-staled the line, pasted command output →
+  one line, pointer + fact. History lives in git; the record proves, it doesn't narrate.

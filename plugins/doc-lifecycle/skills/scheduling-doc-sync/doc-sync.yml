@@ -161,18 +161,25 @@ jobs:
         run: |
           set -euo pipefail
           mv drift-report.json "$RUNNER_TEMP/drift-report.json"
+          STALE=$(jq '[.records[] | select(.verdict=="STALE")] | length' "$RUNNER_TEMP/drift-report.json")
+          FLAGGED=$(jq '[.records[] | select(.verdict=="UNVERIFIABLE")] | length' "$RUNNER_TEMP/drift-report.json")
           {
-            echo "Nightly doc sync over \`${{ steps.facts.outputs.marker }}..${{ steps.facts.outputs.head_sha }}\`."
-            echo "Merging this PR advances the sync marker; closing it unmerged leaves the range to be re-checked."
+            echo "Nightly doc sync over \`${{ steps.facts.outputs.marker }}..${{ steps.facts.outputs.head_sha }}\` — merge to advance the marker, close to re-check next run."
             echo
-            echo "## Applied fixes (STALE)"
-            jq -r '.records[] | select(.verdict=="STALE") | "- `\(.location)` — \(.claim)\n  - **evidence:** \(.evidence)\n  - **applied fix:** \(.fix)"' "$RUNNER_TEMP/drift-report.json"
-            if jq -e '[.records[] | select(.verdict=="UNVERIFIABLE")] | length > 0' "$RUNNER_TEMP/drift-report.json" >/dev/null; then
+            echo "| Fixed (see diff) | Why it was stale |"
+            echo "|---|---|"
+            # Cells escape | and flatten newlines so evidence can't break its row.
+            jq -r '.records[] | select(.verdict=="STALE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\|") | gsub("\n"; " ")) |"' "$RUNNER_TEMP/drift-report.json"
+            if [ "$FLAGGED" -gt 0 ]; then
               echo
-              echo "## Flagged for a human (UNVERIFIABLE — not edited)"
-              jq -r '.records[] | select(.verdict=="UNVERIFIABLE") | "- `\(.location)` — \(.claim) (\(.evidence))"' "$RUNNER_TEMP/drift-report.json"
+              echo "| Flagged for a human — not edited | Why unverifiable |"
+              echo "|---|---|"
+              jq -r '.records[] | select(.verdict=="UNVERIFIABLE") | "| `\(.location)` | \(.evidence | gsub("\\|"; "\\|") | gsub("\n"; " ")) |"' "$RUNNER_TEMP/drift-report.json"
             fi
           } > "$RUNNER_TEMP/pr-body.md"
+          if [ "$STALE" -eq 1 ]; then TITLE="docs: nightly sync — 1 fix"; else TITLE="docs: nightly sync — ${STALE} fixes"; fi
+          if [ "$FLAGGED" -gt 0 ]; then TITLE="${TITLE}, ${FLAGGED} flagged"; fi
+          TITLE="${TITLE} ($(date -u +%F))"
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
           git checkout -b doc-sync/nightly
@@ -182,8 +189,7 @@ jobs:
           # --force: a closed-unmerged PR can leave a stale branch behind.
           git push -u origin doc-sync/nightly --force
           PR_URL=$(gh pr create \
-            --title "docs: sync with ${{ github.ref_name }} ($(date -u +%F))" \
+            --title "$TITLE" \
             --body-file "$RUNNER_TEMP/pr-body.md" \
             --base "${{ github.ref_name }}")
-          STALE=$(jq '[.records[] | select(.verdict=="STALE")] | length' "$RUNNER_TEMP/drift-report.json")
           echo "📝 **Drift found and fixed.** ${STALE} stale claim(s) corrected — review ${PR_URL}. Merging it advances the marker; closing it unmerged re-checks the range next night." >> "$GITHUB_STEP_SUMMARY"
