@@ -132,7 +132,9 @@ jobs:
           git add .github/doc-sync-marker
           git commit -m "docs: advance doc-sync marker (no drift in ${{ steps.facts.outputs.commits }} commit(s))"
           # Branch protection may forbid this push; the marker then rides in the next sync PR.
-          if git push; then
+          # Self-authenticate off GH_TOKEN: claude-code-action drops the checkout-persisted
+          # credential from git config, so a bare `git push` goes out unauthenticated.
+          if git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:${{ github.ref_name }}; then
             python3 .github/doc-sync/render-report.py no-drift-summary \
               --commits "${{ steps.facts.outputs.commits }}" \
               --head "${{ steps.facts.outputs.head_sha }}"
@@ -191,7 +193,10 @@ jobs:
           git add -A
           git commit -m "docs: sync with ${{ github.ref_name }} (${DATE})"
           # --force: a closed-unmerged PR can leave a stale branch behind.
-          git push -u origin doc-sync/nightly --force
+          # Self-authenticate off GH_TOKEN (see advance-marker note): claude-code-action ran
+          # just above and drops the checkout-persisted credential. No `-u` — a token-bearing
+          # URL must not persist into .git/config, and gh infers the head from the branch name.
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-sync/nightly
           PR_URL=$(gh pr create \
             --title "${TITLE}" \
             --body-file "$RUNNER_TEMP/pr-body.md" \
