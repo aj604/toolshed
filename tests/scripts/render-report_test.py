@@ -34,6 +34,16 @@ def rec(verdict="STALE", location="README.md:5", claim="README mentions make tes
     }
 
 
+def brec(verdict, location=None, doc="README.md", evidence="seven lines carry one fact"):
+    return {"id": "B1", "doc": doc, "location": location, "verdict": verdict,
+            "evidence": evidence, "proposal": None, "status": None, "payload": None}
+
+
+def run(*cmd):
+    """Run a subprocess command and return the result."""
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
 class RenderReportTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -41,6 +51,7 @@ class RenderReportTest(unittest.TestCase):
         self.summary_path = os.path.join(self.tmp.name, "summary.md")
 
     def run_script(self, *argv, with_summary=True):
+        """Run the script, handling $GITHUB_STEP_SUMMARY."""
         env = dict(os.environ)
         if with_summary:
             env["GITHUB_STEP_SUMMARY"] = self.summary_path
@@ -211,6 +222,61 @@ class RenderReportTest(unittest.TestCase):
                             "--marker", "a", "--head", "b")
         self.assertEqual(r.returncode, 2)
         self.assertIn("error:", r.stderr)
+
+
+def write_report(records):
+    """Write a bloat report (filtered lane file) to a temp JSON file."""
+    fd, path = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump({"records": records}, f)
+    return path
+
+
+class BloatRender(unittest.TestCase):
+    def test_pr_body_lists_each_record(self):
+        report = write_report([brec("CUT", location="README.md:5"),
+                               brec("CONDENSE", location="README.md:22")])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0)
+        self.assertIn("`CUT` @ `README.md:5`", out.stdout)
+        self.assertIn("`CONDENSE` @ `README.md:22`", out.stdout)
+        self.assertIn("| Change (see diff) | Why it's bloat |", out.stdout)
+
+    def test_pr_body_uses_doc_when_location_null(self):
+        report = write_report([brec("RETIRE-DOC", doc="docs/plans/old.md")])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertIn("`RETIRE-DOC` @ `docs/plans/old.md`", out.stdout)
+
+    def test_pr_body_escapes_pipe(self):
+        report = write_report([brec("CUT", location="README.md:5", evidence="a | b")])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertIn("a \\| b", out.stdout)
+
+    def test_pr_title_pluralizes(self):
+        one = write_report([brec("CUT", location="a:1")])
+        many = write_report([brec("CUT", location="a:1"), brec("CUT", location="a:2")])
+        t1 = run(sys.executable, SCRIPT, "bloat-pr-title", "--report", one, "--lane", "prune", "--date", "2026-07-03")
+        tm = run(sys.executable, SCRIPT, "bloat-pr-title", "--report", many, "--lane", "prune", "--date", "2026-07-03")
+        os.unlink(one); os.unlink(many)
+        self.assertEqual(t1.stdout.strip(), "docs: bloat prune — 1 change (2026-07-03)")
+        self.assertEqual(tm.stdout.strip(), "docs: bloat prune — 2 changes (2026-07-03)")
+
+    def test_skip_summary_known_reasons(self):
+        for reason in ("skip-empty", "skip-pending"):
+            out = run(sys.executable, SCRIPT, "bloat-skip-summary", "--lane", "distill", "--reason", reason)
+            self.assertEqual(out.returncode, 0)
+
+    def test_skip_summary_rejects_unknown_reason(self):
+        out = run(sys.executable, SCRIPT, "bloat-skip-summary", "--lane", "prune", "--reason", "bogus")
+        self.assertEqual(out.returncode, 2)
+
+    def test_pre_summary_known_decisions(self):
+        for d in ("detect", "skip-pending"):
+            out = run(sys.executable, SCRIPT, "bloat-pre-summary", "--decision", d)
+            self.assertEqual(out.returncode, 0)
 
 
 if __name__ == "__main__":
