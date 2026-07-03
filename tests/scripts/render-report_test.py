@@ -146,16 +146,17 @@ class RenderReportTest(unittest.TestCase):
 
     # -- pr-body / pr-summary ----------------------------------------------
 
-    def test_pr_body_applied_fixes_no_unverifiable_section(self):
+    def test_pr_body_table_no_unverifiable_section(self):
         report = self.write_report([rec()])
         r = self.run_script("pr-body", "--report", report,
                             "--marker", "abc123", "--head", "def456")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("## Applied fixes (STALE)", r.stdout)
-        self.assertIn("**applied fix:**", r.stdout)
+        self.assertIn("`abc123..def456` — merge to advance the marker", r.stdout)
+        self.assertIn("| Fixed (see diff) | Why it was stale |", r.stdout)
+        self.assertIn("| `README.md:5` | Makefile has `test:` |", r.stdout)
         self.assertNotIn("Flagged for a human", r.stdout)
 
-    def test_pr_body_includes_unverifiable_section_when_present(self):
+    def test_pr_body_includes_unverifiable_table_when_present(self):
         report = self.write_report([
             rec(),
             rec(verdict="UNVERIFIABLE", location="docs/run.md:3",
@@ -164,8 +165,29 @@ class RenderReportTest(unittest.TestCase):
         r = self.run_script("pr-body", "--report", report,
                             "--marker", "abc123", "--head", "def456")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("## Flagged for a human (UNVERIFIABLE — not edited)", r.stdout)
-        self.assertIn("- `docs/run.md:3` — deploy takes 5 minutes (no timing source)", r.stdout)
+        self.assertIn("| Flagged for a human — not edited | Why unverifiable |", r.stdout)
+        self.assertIn("| `docs/run.md:3` | no timing source |", r.stdout)
+
+    def test_pr_body_escapes_pipes_and_flattens_newlines_in_evidence(self):
+        report = self.write_report([
+            rec(evidence="pipe | in\nevidence"),
+        ])
+        r = self.run_script("pr-body", "--report", report,
+                            "--marker", "abc123", "--head", "def456")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("| pipe \\| in evidence |", r.stdout)
+
+    def test_pr_title_singular_plural_and_flagged(self):
+        one = self.write_report([rec()])
+        r = self.run_script("pr-title", "--report", one, "--date", "2026-07-03")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "docs: nightly sync — 1 fix (2026-07-03)")
+
+        many = self.write_report([rec(), rec(), rec(verdict="UNVERIFIABLE")])
+        r = self.run_script("pr-title", "--report", many, "--date", "2026-07-03")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(),
+                         "docs: nightly sync — 2 fixes, 1 flagged (2026-07-03)")
 
     def test_pr_summary_counts_and_url(self):
         report = self.write_report([rec(), rec(verdict="UNVERIFIABLE")])

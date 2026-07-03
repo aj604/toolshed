@@ -12,6 +12,7 @@ Usage:
     render-report.py issue-body --report FILE --cap N --marker M --head H
     render-report.py blast-summary --report FILE --cap N --issue-url URL
     render-report.py pr-body --report FILE --marker M --head H
+    render-report.py pr-title --report FILE --date YYYY-MM-DD
     render-report.py pr-summary --report FILE --pr-url URL
 
 Body subcommands (issue-body, pr-body) print markdown on stdout for --body-file.
@@ -122,25 +123,38 @@ def render_blast_summary(records, cap, issue_url):
     )
 
 
+def md_cell(text):
+    # Cells escape | and flatten newlines so evidence can't break its row.
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
 def render_pr_body(records, marker, head):
     lines = [
-        f"Nightly doc sync over `{marker}..{head}`.",
-        "Merging this PR advances the sync marker; closing it unmerged leaves the range "
-        "to be re-checked.",
+        f"Nightly doc sync over `{marker}..{head}` — merge to advance the marker, "
+        "close to re-check next run.",
         "",
-        "## Applied fixes (STALE)",
+        "| Fixed (see diff) | Why it was stale |",
+        "|---|---|",
     ]
     for r in by_verdict(records, "STALE"):
-        lines.append(f"- `{r['location']}` — {r['claim']}")
-        lines.append(f"  - **evidence:** {r['evidence']}")
-        lines.append(f"  - **applied fix:** {r['fix']}")
+        lines.append(f"| `{r['location']}` | {md_cell(r['evidence'])} |")
     unverifiable = by_verdict(records, "UNVERIFIABLE")
     if unverifiable:
         lines.append("")
-        lines.append("## Flagged for a human (UNVERIFIABLE — not edited)")
+        lines.append("| Flagged for a human — not edited | Why unverifiable |")
+        lines.append("|---|---|")
         for r in unverifiable:
-            lines.append(f"- `{r['location']}` — {r['claim']} ({r['evidence']})")
+            lines.append(f"| `{r['location']}` | {md_cell(r['evidence'])} |")
     return "\n".join(lines)
+
+
+def render_pr_title(records, date):
+    stale = len(by_verdict(records, "STALE"))
+    flagged = len(by_verdict(records, "UNVERIFIABLE"))
+    title = "docs: nightly sync — 1 fix" if stale == 1 else f"docs: nightly sync — {stale} fixes"
+    if flagged > 0:
+        title += f", {flagged} flagged"
+    return f"{title} ({date})"
 
 
 def render_pr_summary(records, pr_url):
@@ -192,6 +206,10 @@ def main():
     prbody.add_argument("--marker", required=True)
     prbody.add_argument("--head", required=True)
 
+    prtitle = sub.add_parser("pr-title")
+    prtitle.add_argument("--report", required=True)
+    prtitle.add_argument("--date", required=True)
+
     prsum = sub.add_parser("pr-summary")
     prsum.add_argument("--report", required=True)
     prsum.add_argument("--pr-url", required=True)
@@ -211,6 +229,8 @@ def main():
                 write_summary(render_blast_summary(records, args.cap, args.issue_url))
             elif args.mode == "pr-body":
                 print(render_pr_body(records, args.marker, args.head))
+            elif args.mode == "pr-title":
+                print(render_pr_title(records, args.date))
             elif args.mode == "pr-summary":
                 write_summary(render_pr_summary(records, args.pr_url))
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:

@@ -176,21 +176,24 @@ jobs:
         run: |
           set -euo pipefail
           mv drift-report.json "$RUNNER_TEMP/drift-report.json"
+          DATE=$(date -u +%F)
           python3 .github/doc-sync/render-report.py pr-body \
             --report "$RUNNER_TEMP/drift-report.json" \
             --marker "${{ steps.facts.outputs.marker }}" \
             --head "${{ steps.facts.outputs.head_sha }}" \
             > "$RUNNER_TEMP/pr-body.md"
+          TITLE=$(python3 .github/doc-sync/render-report.py pr-title \
+            --report "$RUNNER_TEMP/drift-report.json" --date "${DATE}")
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
           git checkout -b doc-sync/nightly
           echo "${{ steps.facts.outputs.head_sha }}" > .github/doc-sync-marker
           git add -A
-          git commit -m "docs: sync with ${{ github.ref_name }} ($(date -u +%F))"
+          git commit -m "docs: sync with ${{ github.ref_name }} (${DATE})"
           # --force: a closed-unmerged PR can leave a stale branch behind.
           git push -u origin doc-sync/nightly --force
           PR_URL=$(gh pr create \
-            --title "docs: sync with ${{ github.ref_name }} ($(date -u +%F))" \
+            --title "${TITLE}" \
             --body-file "$RUNNER_TEMP/pr-body.md" \
             --base "${{ github.ref_name }}")
           python3 .github/doc-sync/render-report.py pr-summary \
