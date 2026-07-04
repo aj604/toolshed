@@ -79,6 +79,11 @@ All shipped files are in this skill's base directory (announced when the skill l
 
 ## Rules
 
+- **Runs as a GitHub Action** (`schedule` + `workflow_dispatch`), not a Claude scheduled task
+  (ties to one user's account) or a local git/session hook (only fires while someone's working).
+- **Idempotency is marker-based, not model discipline.** `.github/doc-sync-marker` advances only
+  on a clean-run (no-drift) direct commit or a merged sync PR; a blast-radius cap escalates to a
+  labeled issue instead of accumulating into one giant PR.
 - **PR-only output.** Never configure the pipeline to commit doc edits directly to the default
   branch — not even if asked ("PRs are annoying"). The reviewable evidence-PR *is* the product;
   a direct-commit pipeline is an unreviewable one. The only direct push the pipeline makes is

@@ -34,3 +34,14 @@
   procedure, not current truth.
 - Code: `.github/workflows/doc-sync.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`
 - Source: docs/plans/2026-07-02-doc-sync-automation-plan.md @ 09f4300 (removed in this commit)
+
+## 2026-07-02 — Doc-sync automation design
+- Decided: Chose a GitHub Action runner over a Claude scheduled task (ties to one user's
+  account) or local git/session hooks (fire only while someone works), with marker-based
+  idempotency and a blast-radius cap that escalates to an issue rather than one giant PR;
+  posture is fail loud, never half-apply.
+- Still binds: nightly sync runs as a GitHub Action (`schedule` + `workflow_dispatch`);
+  `.github/doc-sync-marker` advances only on a clean-run direct commit or a merged sync PR;
+  a blast-radius cap escalates to a labeled issue instead of one giant PR.
+- Code: `.github/workflows/doc-sync.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`
+- Source: docs/plans/2026-07-02-doc-sync-automation-design.md @ 09f4300 (removed in this commit)
