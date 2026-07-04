@@ -146,3 +146,18 @@
   plugins/doc-lifecycle/agents/doc-distiller.md,
   plugins/doc-lifecycle/skills/writing-docs/agent-context.md
 - Source: docs/plans/2026-07-04-durable-narrative-docs-design.md @ d695e25 (removed in this commit)
+
+## 2026-07-02 — Growing docs (demand-driven expansion) design
+- Decided: Added `growing-docs` as a distinct sibling skill rather than extending
+  `bootstrapping-docs` (the two trigger contexts — 'repo has no docs' vs 'docs exist but a demand
+  signal fired' — would fire for neither in one description); growth is demand-triggered via the
+  second-rediscovery rule, one signal → one smallest artifact; `bootstrapping-docs` now exits by
+  writing `docs/doc-scope.md`, whose format `growing-docs` single-owns.
+- Still binds: growth requires a nameable demand signal (never milestones or scheduled review);
+  narrative docs (walkthrough/tutorial/ADR) carry the required `> As of` first-line anchor and
+  stay outside writing-docs' claim bar; bootstrapping-docs' STOP list binds growth too;
+  `docs/doc-scope.md` is read on demand, never a standing section in an always-loaded file.
+- Code: plugins/doc-lifecycle/skills/growing-docs/SKILL.md,
+  plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md,
+  plugins/doc-lifecycle/skills/writing-docs/SKILL.md
+- Source: docs/plans/2026-07-02-growing-docs-design.md @ b9e6f97 (removed in this commit)

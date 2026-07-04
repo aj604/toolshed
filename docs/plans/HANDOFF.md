@@ -30,7 +30,7 @@ Lifecycle the suite covers: **bootstrap → write → grow → detect → fix.**
 
 Added after Avery's steer that the suite was too aggressive about not creating docs, with
 no path back from bootstrapping's permanent deferral. Design:
-`docs/plans/2026-07-02-growing-docs-design.md`. RED (6 agents, 3 scenarios ×2) showed the
+`docs/decisions.md` (2026-07-02 growing-docs entry). RED (6 agents, 3 scenarios ×2) showed the
 predicted "won't document" failure did NOT materialize — capable agents document well when
 a false claim gives them a drift path; what actually failed: no pure-gap path (drift only
 audits existing claims), demand signals never named, bootstrap's deferred note chat-only

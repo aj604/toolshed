@@ -59,3 +59,20 @@ provenance anchor to the text that decided it.
   (multi-line AND plainly narrow-scope AND existing natural target, else no record)
   because placement churn on an always-loaded file costs more than a borderline line.
   (docs/plans/2026-07-04-durable-narrative-docs-design.md @ d695e25)
+
+## Demand-driven growth
+
+- **growing-docs is a sibling skill, not an extension of bootstrapping-docs.** Growth is a
+  distinct lifecycle phase with a distinct trigger context ("repo has no docs" vs. "repo has
+  docs and we keep re-explaining something") — one skill description carrying both would
+  fire for neither.
+  (docs/plans/2026-07-02-growing-docs-design.md @ b9e6f97)
+- **Narrative docs got light guardrails, not a fifth quality skill.** The guardrails are
+  carried inline by growing-docs, and the narrative-docs hole was addressed only as far as
+  growth demands it; recalibrating writing-docs' cut-test (Rules 4–5) was explicitly out of
+  scope — do not read the growth path as a license to loosen the claim bar.
+  (docs/plans/2026-07-02-growing-docs-design.md @ b9e6f97)
+- **Deferred seam, deliberately not wired.** The nightly doc-sync run could flag
+  `docs/doc-scope.md` items whose promote-when signal has fired — growth proposals stay out
+  of the automation pipeline until that follow-up is picked up.
+  (docs/plans/2026-07-02-growing-docs-design.md @ b9e6f97)

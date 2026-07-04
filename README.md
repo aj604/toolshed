@@ -72,6 +72,7 @@ Three properties make this more than a report:
 | Component | Type | Use it when |
 |-----------|------|-------------|
 | `bootstrapping-docs` | skill | Pointing at an undocumented repo — produces the smallest high-leverage doc set, then deliberately stops. |
+| `growing-docs` | skill | Growing a doc set past the bootstrap minimum on a demand signal — a second hard derivation of a fact earns a doc, one signal → one smallest artifact; `bootstrapping-docs` exits by writing `docs/doc-scope.md`, whose format this skill owns. |
 | `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
 | `detecting-doc-drift` | skill | Auditing docs against the code — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
 | `fixing-doc-drift` | skill | Applying a drift report to the docs — lands each STALE fix surgically, never deletes, never touches what the report didn't flag, stops on a large blast radius. |
