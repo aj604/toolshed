@@ -64,11 +64,8 @@ Same cut-test as everywhere else. It must **not**:
 - **become a design-rationale essay** — this file is *claim-style*, governed by `writing-docs`:
   every line a *current* relationship verifiable across the units, not aspirational
   architecture. Narrative architecture/conceptual overviews and design rationale sit outside
-  that contract; they belong in a **durable narrative doc in this same tree** (created on a
-  demand signal via `growing-docs`, first line its `> As of` anchor) — cross-unit narrative
-  beside this file, unit-scoped narrative in the unit's dir. Not in `plans/`: that folder
-  holds retire-on-landing planning artifacts, and the bloat machinery distills them once
-  their implementation lands — a narrative doc parked there gets read as one.
+  that contract — they live in a durable narrative doc in this same tree, never `plans/`;
+  growing-docs' "Where narrative docs live" owns placement and the `> As of` template.
 
 It **earns its place only when units actually interact.** A repo of genuinely independent units
 needs no cross-unit picture — forcing one is the completeness-chasing the pyramid section

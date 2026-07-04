@@ -43,7 +43,7 @@ cleanup, never a silent side effect of a drift sync.
 ### 3. No "while I'm here"
 
 Owned by the shared spine — `${CLAUDE_PLUGIN_ROOT}/references/apply-discipline.md`
-§2. Surface out-of-scope problems; never edit them.
+§2.
 
 ### 4. Confirm the anchor before you write
 
@@ -71,7 +71,7 @@ report's records STALE**; wholesale-wrong doc → escalate, never regenerate.
 ### 7. Evidence travels with the change
 
 Owned by the shared spine — `${CLAUDE_PLUGIN_ROOT}/references/apply-discipline.md`
-§5. Map each edit to its record's `evidence` in the commit / PR body.
+§5.
 
 ## Red flags — STOP
 

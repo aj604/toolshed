@@ -1,10 +1,7 @@
 # Output contract — worked example
 
 Reference for `detecting-doc-bloat`. The field set, enum rules, and validator step
-live in SKILL.md; this file is the worked example. Emit one record per finding.
-`evidence` is mandatory for every verdict; `proposal` is populated only for
-`CONDENSE` / `EXTRACT-AND-MOVE` / `MERGE-DOC`; `status` and `payload` are populated
-only for `DISTILL`. Every `proposal`/`payload` text meets the writing-docs bar.
+live in SKILL.md; this file is the worked example.
 
 The four records below cover the shapes that trip agents up: a `CONDENSE` with
 complete replacement text, a `MERGE-DOC` naming the survivor, a `DISTILL ready`

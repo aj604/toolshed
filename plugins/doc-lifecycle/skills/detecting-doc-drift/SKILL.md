@@ -89,10 +89,7 @@ can gate on.
 See **output-contract.md** for a worked three-record example (a STALE command, a STALE
 behavior, an UNVERIFIABLE quality claim) with every field populated.
 
-`${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-drift/scripts/validate-drift-output.py` enforces
-all of the above mechanically (run it on the result — see step 4). Pass it
-`{"records": [...], "summary": {...}}` and it also checks the summary counts against the
-records; it accepts a bare array too and recomputes the authoritative summary for you.
+The validator (step 4) also cross-checks a wrapped object's `summary` counts against its records, and accepts a bare array, recomputing the authoritative summary for you.
 
 ## Modes
 
