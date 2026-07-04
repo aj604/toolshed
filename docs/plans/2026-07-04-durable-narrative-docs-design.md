@@ -77,6 +77,16 @@ is what needs justification. The EXTRACT lens also runs in reverse (on-demand
 detail accreted in an always-loaded file moves out), and the precision guard is
 scoped to density, not growth.
 
+Calibration (same day, user steer): unprompted-critical is a **scope test** — a
+gotcha most sessions would trip earns its line however short; a one-file/one-task
+edge case never does, however sharp. The scaffolding (when-to-read map,
+architecture.md start-here pointer) is inline content by design. And no
+hypermanagement: the rule governs where new content lands, not a per-sweep
+re-litigation of existing lines — the reverse lens is deliberately conservative
+(multi-line AND plainly narrow-scope AND existing natural target, else no record),
+because placement churn on the always-loaded file costs more than a borderline
+line.
+
 ## Changes
 
 - `detecting-doc-bloat/SKILL.md` — three-kind classification (step 1), narrative

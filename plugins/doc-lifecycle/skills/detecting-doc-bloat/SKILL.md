@@ -82,10 +82,13 @@ records and applies the approved ones, dispatching `DISTILL ready` work to the
      gotcha buried in a README belongs in the doc its audience reads on demand
      (runbook, reference); it lands inline in CLAUDE.md/AGENTS.md **only** when it
      clears agent-context.md's router rule (unprompted-critical, densest one-line
-     form). The same lens runs in reverse: on-demand detail accreted in an
-     always-loaded file — a multi-line convention or procedure no first action
-     trips over — moves *out* to a reference doc named for discovery, leaving at
-     most a when-to-read line. **Value is not placement** — a high-value line can
+     form). The same lens runs in reverse — but **deliberately conservative**:
+     flag an always-loaded passage for extraction only when it is multi-line AND
+     plainly narrow-scope (one file, one task) AND a natural on-demand target
+     already exists; it moves out leaving at most a when-to-read line. A
+     broad-scope gotcha most sessions need stays put however short, and a
+     borderline call yields **no record** — placement churn on the always-loaded
+     file costs more than the line it would relocate. **Value is not placement** — a high-value line can
      still be misplaced; do not "keep" it where it is, and do not delete it.
      `proposal`: `{"target": <right doc>, "text": <the line to land>}`.
    And a *doc* against its neighbors is bloat when it is:

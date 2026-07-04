@@ -36,8 +36,10 @@ Cut on sight:
 ```
 # CLAUDE.md
 ## Commands        (table: task → exact command)
-## Gotchas         (non-inferable, would-cause-mistakes-if-missing)
+## Gotchas         (non-inferable, would-bite-most-sessions-if-missing)
 ## Conventions     (only those differing from defaults)
+## Map             (when-to-read router — multi-unit repos: architecture.md
+                    start-here + the docs/reference/ map, per repo-shape.md)
 ## Design notes    (anchored rationale: "as of <file:line> …")
 ```
 
@@ -49,17 +51,25 @@ only a Claude-Code-only repo skips the shim and makes `CLAUDE.md` canonical dire
 
 **The always-loaded file is a router, not a repository.** Every line costs every session,
 so a line earns *inline* placement only when it is **unprompted-critical** — the agent
-needs it *before it would know to look*: cross-cutting commands, trap gotchas that bite on
-the first action, the when-to-read map. Everything else lives in an on-demand doc **named
-for discovery** (progressive disclosure: `docs/reference/release-checklist.md` routes by
-filename alone) and appears in the always-loaded file as at most one when-to-read line with
-a short snippet — or not at all, when the filename already routes.
+needs it *before it would know to look*. That is a **scope test**: a gotcha whose mistake
+*most sessions* would make (the migrate-before-dev trap, the command that isn't what it
+looks like) earns its line, however short; an edge case scoped to one file or one task does
+not, however sharp — it lives in that domain's on-demand doc. Everything on-demand lives in
+a doc **named for discovery** (progressive disclosure: `docs/reference/release-checklist.md`
+routes by filename alone) and appears in the always-loaded file as at most one when-to-read
+line with a short snippet — or not at all, when the filename already routes. The scaffolding
+*is* inline content: the when-to-read map and the `architecture.md` start-here pointer are
+the router doing its job.
 
 This rule binds anything that *lands* content, not just hand-editing: an extraction, a
 distilled claim, or a merge aimed at CLAUDE.md/AGENTS.md must either clear the
 unprompted-critical bar in its densest one-line form, or target a reference doc instead.
 Condensing the always-loaded file and correcting its false claims is always in scope;
-growing it is what needs the justification.
+growing it is what needs the justification. **And do not hypermanage it:** this rule sets
+where *new* content lands — it is not a license to re-litigate existing lines every sweep.
+In-or-out placement moves on the always-loaded file should be rare and clear-cut; a
+borderline line stays where it is, because placement churn on this file costs more than
+the line does.
 
 ## Pointers over inline copies
 
