@@ -47,13 +47,9 @@ Owned by the shared spine — `${CLAUDE_PLUGIN_ROOT}/references/apply-discipline
 
 ### 4. Confirm the anchor before you write
 
-Before applying a `fix`, read the line at its `location` and confirm it still contains the
-record's `claim` (detection tolerates a few lines of anchor drift — search the nearby lines if
-the exact line moved). Claim not found → the doc changed after the report was cut: **do not
-apply the fix, do not guess a placement** — stop and re-run `detecting-doc-drift` for a fresh
-report. Applying blind overwrites the wrong line. Two `STALE` records targeting one `location`
-is the same stop: two full-line replacements cannot both hold, so the report is contradictory —
-re-run detection rather than picking one.
+Owned by the shared spine — `${CLAUDE_PLUGIN_ROOT}/references/apply-discipline.md` §3;
+drift-specific: two `STALE` records targeting one `location` is the same stop, since two
+full-line replacements cannot both hold — re-run detection rather than picking one.
 
 ### 5. Land the fix as-is; rewrite only when needed
 

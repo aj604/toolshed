@@ -1,11 +1,7 @@
 # Output contract — worked example
 
-Reference for `detecting-doc-drift`. The field set, enum rules, and validator step live in
-SKILL.md; this file is the worked example. Emit one record per extracted claim. `fix` is
-non-null only for `STALE`, and it is the complete replacement text for the line at
-`location` — never an instruction like "change X to Y"; `evidence` is mandatory for every
-verdict and is one line — pointer + fact, as every example below models. Narrative history
-(prior PRs, how the drift arose) does not belong in `evidence`.
+Reference for `detecting-doc-drift`; the field set, enum rules, and validator step live in
+SKILL.md — this file is the worked example only.
 
 ```json
 [

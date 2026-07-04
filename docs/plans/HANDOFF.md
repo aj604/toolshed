@@ -239,49 +239,7 @@ applied the shared-line CUT + nine-line CONDENSE + EXTRACT with no corruption):
   signature" (agent refuses under pressure, cites the skill, names the temptation).
 - **Deploy step:** copy skill dir to `~/.claude/skills/<name>/` so it loads in new sessions.
 
-## Repo layout
-
-```
-.claude-plugin/
-  marketplace.json       # marketplace manifest (must stay at repo root)
-.github/                 # dogfooded row-5 install (live instance of scheduling-doc-sync)
-  doc-sync/              sync-gate.py, render-report.py, validate-drift-output.py
-  workflows/             doc-sync.yml, release.yml
-plugins/doc-lifecycle/
-  .claude-plugin/plugin.json
-  skills/
-    writing-docs/        SKILL.md + readme.md, runbooks.md, agent-context.md
-    bootstrapping-docs/  SKILL.md + repo-shape.md
-    detecting-doc-drift/ SKILL.md + output-contract.md, scripts/validate-drift-output.py
-    fixing-doc-drift/    SKILL.md
-    scheduling-doc-sync/ SKILL.md + doc-sync.yml, scripts/sync-gate.py, scripts/render-report.py
-    growing-docs/        SKILL.md
-    detecting-doc-bloat/ SKILL.md + output-contract.md, scripts/validate-bloat-output.py
-    fixing-doc-bloat/    SKILL.md
-  agents/
-    llm-doc-writer.md
-    doc-distiller.md
-  references/
-    apply-discipline.md  # shared apply-only spine cited by both fix skills
-docs/plans/
-  2026-06-09-documentation-skills-suite-design.md   # full design + writing-docs strategy
-  2026-06-20-reference-doc-containment-design.md    # the docs/reference/ shape
-  2026-07-02-doc-sync-automation-design.md (+ -plan.md)
-  2026-07-02-growing-docs-design.md
-  2026-07-03-doc-bloat-and-distillation-design.md (+ -plan.md)
-  2026-07-03-doc-sync-pr-body-tightening-design.md (+ -plan.md)
-  HANDOFF.md                                         # this file
-tests/
-  fixtures/
-    sample-repo/           bundlewatch CLI fixture (runnable)
-    ANSWER-KEY.md          grading key for sample-repo
-    taskflow/              3-component workspace fixture (runnable; run `make setup` first)
-    taskflow-ANSWER-KEY.md grading key for taskflow
-  baselines/             RED/GREEN test records for all eight skills + both agents
-                         (incl. bloat-red/ and bloat-fixing-red/ for rows 7–9)
-  scripts/               unit tests for the four helper scripts (validate-drift-output,
-                         validate-bloat-output, sync-gate, render-report)
-```
+Repo layout: see CLAUDE.md's Layout section for top-level shape; run `ls -R plugins/doc-lifecycle/ tests/` for current file-level detail (this hand-maintained tree drifts easily — already stale for `list-docs.py`, `doc-bloat.yml`, and three `docs/plans/` files).
 
 ## Conventions used in this project
 
@@ -289,6 +247,6 @@ tests/
   Iron Law: no skill without a failing test first; no untested edits).
 - Each skill: build/extend fixture → RED baselines (commit) → write skill + GREEN (verify)
   → REFACTOR pressure test → deploy + commit. Test records live under `tests/baselines/`.
-- Fixtures are committed runnable; `.taskflow-state.json` and `node_modules/` are gitignored
-  (run `make setup` — plain `npm install` — in taskflow after checkout).
+- Fixtures are committed runnable; `.taskflow-state.json` and `node_modules/` are gitignored —
+  setup/migrate gotchas are owned by CLAUDE.md's Gotchas section, not restated here.
 - Commits co-authored; design/skills committed as they pass.
