@@ -114,3 +114,15 @@
 - Code: `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/list-docs.py`,
   `.github/doc-sync/audit-scope.json`
 - Source: docs/plans/2026-07-03-doc-bloat-inventory-tool-design.md @ 09f4300 (removed in this commit)
+
+## 2026-06-20 — Reference-doc containment design
+- Decided: `bootstrapping-docs`' `docs/reference/` containment convention marked "implemented"
+  after all five concrete edits landed in `repo-shape.md`/`SKILL.md`, including demoting the
+  standing "Not yet documented" section to a one-time bootstrap-exit record (`docs/doc-scope.md`,
+  owned by `growing-docs`).
+- Still binds: the convention (for repos that opt in) contains the whole agent doc set in one
+  subtree, never scattered at `docs/` root; `architecture.md` is the sole cross-unit doc and must
+  not re-describe any single unit. This repo itself opts out (see CLAUDE.md).
+- Code: `plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`,
+  `plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md`
+- Source: docs/plans/2026-06-20-reference-doc-containment-design.md @ 09f4300 (removed in this commit)

@@ -68,8 +68,10 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
   records stay out of scope for `writing-docs`, routed to `growing-docs` instead.
 - **This repo's `docs/` stays flat** (`plans/`) — a single-unit marketplace. The
   `docs/reference/` convention the plugin prescribes for larger repos
-  (`plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`) does not apply here; don't
-  add one.
+  (`plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`) — one subtree holding the
+  whole agent doc set, never scattered at `docs/` root, with `architecture.md` as the sole
+  cross-unit doc that must not re-describe any single unit — does not apply here; don't add
+  one.
 
 ## Gotchas
 
