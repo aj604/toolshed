@@ -79,3 +79,15 @@
   `render-report_test.py` case, never inline YAML.
 - Code: `.github/doc-sync/render-report.py`, `tests/scripts/render-report_test.py`
 - Source: docs/plans/2026-07-03-doc-sync-pr-body-tightening-plan.md @ 09f4300 (removed in this commit)
+
+## 2026-07-03 — doc-sync PR body tightening design
+- Decided: Tightened doc-sync PR bodies to two compact tables (Fixed/Flagged) with a
+  singular/plural, flagged-count-bearing title, and tightened drift evidence to a one-line
+  pointer+fact bar — both changes reduce PR review noise without changing what's checked.
+- Still binds: drift evidence stays a one-line pointer+fact bar (no history, no restated
+  command output, no reasoning narrative — the verdict carries the conclusion, evidence
+  carries only what proves it); sync PR bodies render as two tables (Fixed/Flagged) with a
+  counts-bearing singular/plural title, no raw-report `<details>` block.
+- Code: `.github/doc-sync/render-report.py`, `plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`
+- Source: docs/plans/2026-07-03-doc-sync-pr-body-tightening-design.md @ 09f4300 (removed in this commit)
