@@ -91,6 +91,9 @@ All shipped files are in this skill's base directory (announced when the skill l
   removes it before the marker-only commit and moves it out of the working tree before the PR
   commit's `git add -A` — don't "simplify" that by dropping the artifact-upload step or letting
   a hand edit reintroduce `drift-report.json`/`pr-body.md` into a commit.
+- **Mechanical gate failures fail the job red, never silently.** A malformed `drift-report.json`
+  makes `validate-drift-output.py` exit nonzero, and the workflow's validate step carries no
+  `continue-on-error` — don't add one.
 
 ## Red flags — STOP
 

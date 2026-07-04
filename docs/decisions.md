@@ -22,3 +22,15 @@
 - Code: `plugins/doc-lifecycle/references/apply-discipline.md`,
   `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py`
 - Source: docs/plans/2026-07-03-doc-bloat-and-distillation-design.md @ 09f4300 (removed in this commit)
+
+## 2026-07-02 — Doc-sync automation plan
+- Decided: Doc-sync automation was built test-first, with RED/GREEN/E2E records under
+  `tests/baselines/doc-sync-setup-red/`.
+- Still binds: mechanical gate failures (a malformed `drift-report.json`) fail the sync-gate job
+  red rather than degrading silently — `validate-drift-output.py` exits nonzero on shape errors
+  and the workflow's validate step carries no `continue-on-error`. The shipped `doc-sync.yml` has
+  since moved past this plan's literal task steps (e.g. onto `anthropics/claude-code-action@v1`,
+  per `docs/plans/HANDOFF.md`'s Row 5 note) — the plan's own code blocks are retired as stale
+  procedure, not current truth.
+- Code: `.github/workflows/doc-sync.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`
+- Source: docs/plans/2026-07-02-doc-sync-automation-plan.md @ 09f4300 (removed in this commit)
