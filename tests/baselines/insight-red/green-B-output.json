@@ -1,0 +1,61 @@
+{
+  "records": [
+    {
+      "id": "B1",
+      "doc": "docs/plans/2026-02-14-worker-queue-design.md",
+      "location": null,
+      "verdict": "DISTILL",
+      "evidence": "implementation landed: src/worker.py:3 `MAX_ATTEMPTS = 5` and src/worker.py:4 `TIMEOUT_S = 30` match the Decision, and src/worker.py:15-20 `handle_failure` matches the Sketch verbatim (increment, drop at MAX_ATTEMPTS, else push_tail); Problem and Sketch sections are superseded scaffolding. Insight walk, section by section: Options §A (dead-letter queue rejected — unattended deploys, unmonitored DLQ grows without bound), §B (exponential backoff rejected — tail re-entry already spaces attempts, explicit backoff would double-delay), §C (per-job-type timeouts rejected — per-type budgets become tuning decisions nobody owns) each carry rationale for a deliberate absence a future maintainer could wrongly 'fix' → 3 insights; Decision section's checkable bounds (5 attempts, 30s) are already carried by README.md:9-10 and CLAUDE.md:3-4, so no new claims to extract",
+      "proposal": null,
+      "status": "ready",
+      "payload": {
+        "claims": [],
+        "insights": [
+          {
+            "insight": "The absence of a dead-letter queue is deliberate: exhausted jobs are dropped, not parked, because this system deploys unattended — an unmonitored DLQ grows without bound and hides failures better than dropping does. Revisit only if an operator rotation ever exists for this service.",
+            "target": "docs/reference/queue-walkthrough.md",
+            "anchor": "docs/plans/2026-02-14-worker-queue-design.md @ 911b9ef"
+          },
+          {
+            "insight": "The absence of an explicit backoff schedule between attempts is deliberate: re-entering at the tail already spaces retries by roughly the queue's drain time, so an explicit backoff would double-delay.",
+            "target": "docs/reference/queue-walkthrough.md",
+            "anchor": "docs/plans/2026-02-14-worker-queue-design.md @ 911b9ef"
+          },
+          {
+            "insight": "The single global `TIMEOUT_S` for all job types is deliberate: per-job-type budgets were rejected because they turn each new job type into a tuning decision nobody owns; fast types wasting budget under the global cap is an accepted cost.",
+            "target": "docs/reference/queue-walkthrough.md",
+            "anchor": "docs/plans/2026-02-14-worker-queue-design.md @ 911b9ef"
+          }
+        ],
+        "decision_entry": "## 2026-02-14 — worker queue failure handling\n- Decided: bounded retries (`MAX_ATTEMPTS = 5`), one global per-attempt timeout (`TIMEOUT_S = 30`), failed jobs re-enter at the tail, drop outright on exhaustion. Rejected: dead-letter queue (unattended deploys — an unmonitored DLQ hides failures), exponential backoff (tail re-entry already spaces attempts; explicit backoff double-delays), per-job-type timeouts (per-type budgets are tuning decisions nobody owns).\n- Still binds: revisit a DLQ only if an operator rotation ever exists for this service.\n- Code: src/worker.py (MAX_ATTEMPTS, TIMEOUT_S, run_attempt, handle_failure).\n- Source: docs/plans/2026-02-14-worker-queue-design.md (retired in this distillation)."
+      }
+    },
+    {
+      "id": "B2",
+      "doc": "docs/plans/2026-03-01-attempts-field-plan.md",
+      "location": null,
+      "verdict": "DISTILL",
+      "evidence": "implementation landed: src/worker.py:15-20 `handle_failure(queue, job)` matches Task 2's code block verbatim, and src/worker.py:16 `job.attempts += 1` presumes Task 1's `attempts` field; Task 3 is a one-off verification step with nothing durable. Insight walk: Task 1 (add the field), Task 2 (wire the failure path), Task 3 (verify) — insight sweep: none — pure implementation recipe. One claim extracted: the `attempts`-counter mechanism, which no living doc currently names (README.md:9-10 and CLAUDE.md:3-4 carry the bounds, not the field)",
+      "proposal": null,
+      "status": "ready",
+      "payload": {
+        "claims": [
+          {
+            "claim": "Each job carries an `attempts` counter (int, starting at 0), incremented once per failure; `handle_failure` drops the job when it reaches `MAX_ATTEMPTS`, otherwise re-enqueues it at the tail (`src/worker.py:15-20`).",
+            "target": "CLAUDE.md",
+            "evidence": "src/worker.py:16 `job.attempts += 1`; src/worker.py:17-20 `if job.attempts >= MAX_ATTEMPTS: queue.drop(job) else: queue.push_tail(job)`"
+          }
+        ],
+        "decision_entry": "## 2026-03-01 — attempts counter on jobs\n- Decided: retry bookkeeping lives on the job record as an `attempts` int (default 0); the worker's single failure path `handle_failure` increments it and branches drop-vs-tail-re-entry.\n- Code: src/worker.py:15-20 (handle_failure).\n- Source: docs/plans/2026-03-01-attempts-field-plan.md (retired in this distillation)."
+      }
+    }
+  ],
+  "summary": {
+    "cut": 0,
+    "condense": 0,
+    "extract_and_move": 0,
+    "retire_doc": 0,
+    "merge_doc": 0,
+    "distill": 2
+  }
+}
