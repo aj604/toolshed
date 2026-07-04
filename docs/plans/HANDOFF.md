@@ -8,7 +8,7 @@
 
 Built a suite of documentation skills with the `superpowers:writing-skills` TDD
 methodology (RED → GREEN → REFACTOR with subagents). Full design and rationale:
-`docs/plans/2026-06-09-documentation-skills-suite-design.md` (read this first to resume).
+`docs/decisions.md` (the 2026-06-09 entry has the durable decisions; the design doc itself was retired).
 
 Lifecycle the suite covers: **bootstrap → write → grow → detect → fix.**
 
@@ -160,7 +160,7 @@ Built as an installer skill + shipped wiring — nightly GitHub Action calling
 to `fixing-doc-drift`, opening an evidence PR (blast-radius cap escalates to an issue;
 marker-based idempotency). Built test-first after all (RED axis existed: hand-rolled wiring);
 records in `tests/baselines/doc-sync-setup-red/`, incl. live E2E. Design:
-`2026-07-02-doc-sync-automation-design.md`. PR #10 (2026-07-03) moved the detect/fix steps onto
+`docs/decisions.md`'s 2026-07-02 entries. PR #10 (2026-07-03) moved the detect/fix steps onto
 `anthropics/claude-code-action@v1` and extracted run-surface rendering to a shipped
 `render-report.py`; targeted re-GREEN of the affected install/upgrade scenario:
 `tests/baselines/doc-sync-action-regreen/`.
@@ -172,8 +172,8 @@ accuracy): `detecting-doc-bloat` (contract skill, read-only, emits `CUT` /
 `CONDENSE` / `EXTRACT-AND-MOVE` / `RETIRE-DOC` / `MERGE-DOC` / `DISTILL` records)
 and `fixing-doc-bloat` (applies a human-approved record-ID subset; dispatches the
 new `doc-distiller` agent for `DISTILL` records). Design:
-`docs/plans/2026-07-03-doc-bloat-and-distillation-design.md`; plan:
-`docs/plans/2026-07-03-doc-bloat-and-distillation-plan.md`. Test records:
+`docs/decisions.md`'s 2026-07-03 doc-bloat-and-distillation entries; plan:
+the same file. Test records:
 `tests/baselines/bloat-red/` (detecting) and `tests/baselines/bloat-fixing-red/`
 (fixing + distiller). Not yet deployed to `~/.claude` (see status table).
 
