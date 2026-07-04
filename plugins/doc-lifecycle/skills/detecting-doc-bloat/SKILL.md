@@ -79,10 +79,15 @@ records and applies the approved ones, dispatching `DISTILL ready` work to the
    - **Is it right content in the wrong doc?** → `EXTRACT-AND-MOVE`: the tell is a
      caveat or gotcha ("quirk", "note that", "silently", "worth knowing") addressed
      to operators or agents but sitting in a user-facing doc — an operational
-     gotcha buried in a README belongs in CLAUDE.md or the runbook. **Value is not
-     placement** — a high-value line can still be misplaced; do not "keep" it where
-     it is, and do not delete it. `proposal`:
-     `{"target": <right doc>, "text": <the line to land>}`.
+     gotcha buried in a README belongs in the doc its audience reads on demand
+     (runbook, reference); it lands inline in CLAUDE.md/AGENTS.md **only** when it
+     clears agent-context.md's router rule (unprompted-critical, densest one-line
+     form). The same lens runs in reverse: on-demand detail accreted in an
+     always-loaded file — a multi-line convention or procedure no first action
+     trips over — moves *out* to a reference doc named for discovery, leaving at
+     most a when-to-read line. **Value is not placement** — a high-value line can
+     still be misplaced; do not "keep" it where it is, and do not delete it.
+     `proposal`: `{"target": <right doc>, "text": <the line to land>}`.
    And a *doc* against its neighbors is bloat when it is:
    - **near-duplicate of another doc** → `MERGE-DOC` (fold the unique remainder
      into the survivor, `proposal: {"target": <survivor>}`) or `RETIRE-DOC` (the
@@ -123,6 +128,9 @@ records and applies the approved ones, dispatching `DISTILL ready` work to the
      each — *if this section vanishes, is there a decision, constraint, or
      deliberate absence a future maintainer could wrongly "fix"?* Every yes
      becomes an insight (or a claim, when a living claim doc is the right home).
+     Claim/insight targets default to on-demand docs (reference, runbook, the
+     narrative doc); an always-loaded target must clear agent-context.md's router
+     rule.
      The record's `evidence` must account for the walk's outcome: name the
      sections that yielded insights, or close with
      `insight sweep: none — pure implementation recipe`. An empty `insights` you
@@ -159,7 +167,10 @@ accurate doc that another finding points *into* — the `EXTRACT-AND-MOVE` targe
 the `MERGE-DOC` survivor, a `DISTILL` claim's or insight's target — is where value
 is being *concentrated*. Do not also flag it as redundant. A short, dense CLAUDE.md is
 doing its job, not bloating; adding cross-reference boilerplate to "clarify" two
-docs is a bloat audit that *increases* line count — never propose it.
+docs is a bloat audit that *increases* line count — never propose it. The guard
+protects *density*, not *growth*: it never licenses landing content into an
+always-loaded file that agent-context.md's router rule would send to a reference
+doc — pick targets so the always-loaded file only ever gets leaner or stays put.
 
 **And redundancy is judged within one audience.** CLAUDE.md/AGENTS.md is a
 distinct doc *type* — tribal knowledge inherited by every agent session — not a
@@ -253,6 +264,9 @@ receives — nothing you present as a summary is authorization on its own.
 - A `DISTILL ready` whose `evidence` doesn't account for the insight walk (sections
   named, or `insight sweep: none — …`) → "no insights" is a conclusion the walk
   earns, never a default; run the per-section walk and say so.
+- An `EXTRACT-AND-MOVE` or claim landing multi-line content in CLAUDE.md/AGENTS.md
+  when a reference doc plus a pointer would do → the always-loaded file is a router
+  (agent-context.md); unprompted-critical, densest form, or a different target.
 - Marking an `EXTRACT-AND-MOVE` candidate "keep as-is" (it's valuable) or sending it
   to a code comment / deletion → value ≠ placement; move it to the right doc intact.
 - Flagging the *target* of an extraction/merge, or a short dense doc, as bloat → the

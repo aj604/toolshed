@@ -40,7 +40,7 @@ lists, directory trees) still binds — a demand signal is not a license to cata
 
 | Signal | Smallest artifact that absorbs it |
 |--------|-----------------------------------|
-| Fact re-explained / re-derived | CLAUDE.md gotcha, README section, or reference entry — whichever the reader would consult first |
+| Fact re-explained / re-derived | CLAUDE.md gotcha, README section, or reference entry — whichever the reader would consult first (always-loaded placement must clear writing-docs' router rule) |
 | Incident with no runbook | runbook (writing-docs' runbooks.md) |
 | Onboarding pain | deepen README setup — or a narrative walkthrough (template below) |
 | Recurring "why is it like this?" | marked+anchored rationale section — or an ADR (template below) |

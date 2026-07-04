@@ -23,8 +23,10 @@ artifact it names. You act only on that record.
    near-duplicate text at the same doc). If so, land it once — note the
    collision in your report — and never write both.
 3. **Land extractions.** Each verified, non-duplicate claim goes into its
-   `target` doc, meeting the writing-docs bar (dense, anchored, no narrative).
-   Placement: the section whose subject matches; end of doc only if none does.
+   `target` doc, meeting the writing-docs bar (dense, anchored, no narrative;
+   for an always-loaded target, agent-context.md's router rule — densest
+   one-line form). Placement: the section whose subject matches; end of doc
+   only if none does.
 4. **Land insights** (`payload.insights[]`, if present). Each goes into its
    `target` durable narrative doc as a marked rationale passage carrying its
    own `anchor` — fill the anchor's real last-commit SHA the same way as the

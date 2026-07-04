@@ -88,7 +88,10 @@ the way `writing-docs` governs any example — verifiable against the actual wir
    containment boundary — "tracks code" vs not — not the doc-type flavoring this rule bans.)
 3. **One always-loaded doc, at the repo root.** Everything else is read on demand. Keep the
    always-on file lean — a bloated always-loaded doc makes the agent ignore your real
-   instructions.
+   instructions. It is a router, not a repository: inline content only when the agent needs
+   it before it would know to look; the rest is a discovery-named reference doc plus at most
+   a when-to-read line (the router rule — writing-docs' agent-context.md owns it, and it
+   binds sweeps and distills, not just hand edits).
 4. **Canonical agent doc = `AGENTS.md` (root), not an invented name.** Cross-tool standard,
    neutral, not coupled to one tool's auto-load. `CLAUDE.md` is a one-line pointer to it.
    (Claude-Code-only repo: skip the shim, let CLAUDE.md be the high-level doc directly.)

@@ -62,6 +62,21 @@ intended change; distilled once landed). Two consequences:
    (docs, skill files, workflow comment headers; frozen `tests/baselines/` records
    excepted) — a retirement that leaves dangling pointers is incomplete.
 
+## Addendum (2026-07-04): the router rule for always-loaded files
+
+The sweep machinery used CLAUDE.md/AGENTS.md as its default landing pad (EXTRACT
+tell, DISTILL claim targets), while the precision guard shielded the target from
+ever being flagged — so distillation systematically grew the most expensive file.
+Decision: **the always-loaded file is a router, not a repository** — inline
+placement only for unprompted-critical content (needed before the agent would know
+to look), everything else a discovery-named reference doc plus at most a
+when-to-read line. Single owner: `writing-docs/agent-context.md`; it binds
+everything that lands content (extractions, claims, merges), not just hand edits.
+Condense/false-claim fixes on the always-loaded file stay fully in scope; growth
+is what needs justification. The EXTRACT lens also runs in reverse (on-demand
+detail accreted in an always-loaded file moves out), and the precision guard is
+scoped to density, not growth.
+
 ## Changes
 
 - `detecting-doc-bloat/SKILL.md` — three-kind classification (step 1), narrative
