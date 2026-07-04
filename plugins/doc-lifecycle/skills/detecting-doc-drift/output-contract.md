@@ -47,12 +47,6 @@ with the `summary` so the whole thing is one parseable object:
 }
 ```
 
-Validate the whole result through
-`${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-drift/scripts/validate-drift-output.py` before
-handoff (see SKILL.md step 4) — passing the wrapped `{"records": [...], "summary": {...}}`
-object also checks the summary counts against the records; passing a bare array recomputes
-the authoritative summary for you.
+Validate before handoff — see SKILL.md step 4 for the command and rules.
 
-**`location` must be a single `file:line`** (e.g. `CLAUDE.md:24`) — one line, numbered from 1,
-no ranges. It is the only field the downstream `fixing-doc-drift` skill uses to place each
-edit, so the validator rejects any other shape.
+`location` is the only field `fixing-doc-drift` uses to place an edit (see SKILL.md for the field's shape).

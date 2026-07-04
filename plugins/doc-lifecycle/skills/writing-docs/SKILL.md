@@ -20,15 +20,7 @@ Every line is one of two kinds of claim:
 
 If a line is neither, cut it.
 
-**Scope — what this governs.** Docs that exist to *correspond to the current repo*: README,
-runbook, CLAUDE.md/AGENTS.md, reference — including the claim-style
-`docs/reference/architecture.md` that bootstrapping-docs prescribes (every line a current,
-verifiable relationship between units). It is **not** a universal theory of documentation.
-Tutorials, *narrative* architecture/conceptual overviews and design rationale, and decision
-records (ADRs) are narrative by design — sequenced, redundant on purpose, spanning many files,
-valuable precisely *because* they aren't line-by-line claims about the repo. The claim bar
-would wrongly gut them; don't point this skill at them. To create one when demand justifies
-it, use growing-docs, which carries the narrative guardrails.
+Scope: as in the frontmatter above — README/runbook/CLAUDE.md/AGENTS.md/reference (incl. claim-style `docs/reference/architecture.md`); not a universal theory of documentation — tutorials/narrative-architecture/ADRs stay narrative (growing-docs), never claim-audited.
 
 ## The rules (these address what agents get wrong)
 
