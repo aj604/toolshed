@@ -45,3 +45,16 @@
   a blast-radius cap escalates to a labeled issue instead of one giant PR.
 - Code: `.github/workflows/doc-sync.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`
 - Source: docs/plans/2026-07-02-doc-sync-automation-design.md @ 09f4300 (removed in this commit)
+
+## 2026-07-03/04 — Doc bloat nightly plan
+- Decided: `doc-bloat.yml` built test-first (`sync-gate_test.py`, `render-report_test.py`
+  extended with bloat-* cases) as a sibling to `doc-sync.yml`, sharing `sync-gate.py`/
+  `render-report.py` rather than forking new scripts; already exercised for real (PR #23,
+  merged 2026-07-04).
+- Still binds: the weekly bloat sweep splits findings into two lanes by verdict — `prune`
+  (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`, passage-level) and `distill` (`MERGE-DOC`/`RETIRE-DOC`, or
+  `DISTILL` with `status: ready`, doc-level); a `DISTILL` `pending-implementation` record belongs
+  to neither lane and is never opened as a PR.
+- Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`
+- Source: docs/plans/2026-07-03-doc-bloat-nightly-plan.md @ 09f4300 (removed in this commit)

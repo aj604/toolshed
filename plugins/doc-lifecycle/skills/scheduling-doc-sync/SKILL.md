@@ -99,6 +99,10 @@ All shipped files are in this skill's base directory (announced when the skill l
 - **Mechanical gate failures fail the job red, never silently.** A malformed `drift-report.json`
   makes `validate-drift-output.py` exit nonzero, and the workflow's validate step carries no
   `continue-on-error` — don't add one.
+- **The weekly bloat sweep splits findings into two lanes by verdict:** `prune`
+  (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`, passage-level) and `distill` (`MERGE-DOC`/`RETIRE-DOC`, or
+  `DISTILL` with `status: ready`, doc-level). A `DISTILL` record still `pending-implementation`
+  belongs to neither lane and is never opened as a PR.
 
 ## Red flags — STOP
 
