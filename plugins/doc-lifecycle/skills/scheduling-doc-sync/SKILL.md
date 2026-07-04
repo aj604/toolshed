@@ -76,6 +76,11 @@ All shipped files are in this skill's base directory (announced when the skill l
 
 ## Rules
 
+- **Runs as a GitHub Action** (`schedule` + `workflow_dispatch`), not a Claude scheduled task
+  (ties to one user's account) or a local git/session hook (only fires while someone's working).
+- **Idempotency is marker-based, not model discipline.** `.github/doc-sync-marker` advances only
+  on a clean-run (no-drift) direct commit or a merged sync PR; a blast-radius cap escalates to a
+  labeled issue instead of accumulating into one giant PR.
 - **PR-only output.** Never configure the pipeline to commit doc edits directly to the default
   branch — not even if asked ("PRs are annoying"). The reviewable evidence-PR *is* the product;
   a direct-commit pipeline is an unreviewable one. The only direct push the pipeline makes is
@@ -84,9 +89,21 @@ All shipped files are in this skill's base directory (announced when the skill l
   is state, not wiring.
 - **Don't customize the installed YAML beyond the cron/cap/bloat-cron knobs.** Real changes belong
   upstream in the plugin (aj604/toolshed) so every install gets them on next upgrade.
-- **The drift report is a build artifact, never repo content** (doc-sync.yml already excludes
-  it from both commit paths) — don't reintroduce it by dropping the artifact-upload step or a
-  hand edit.
+- **The drift report is a build artifact, never repo content.** The shipped workflow already
+  removes it before the marker-only commit and moves it out of the working tree before the PR
+  commit's `git add -A` — don't "simplify" that by dropping the artifact-upload step or letting
+  a hand edit reintroduce `drift-report.json`/`pr-body.md` into a commit.
+- **Mechanical gate failures fail the job red, never silently.** A malformed `drift-report.json`
+  makes `validate-drift-output.py` exit nonzero, and the workflow's validate step carries no
+  `continue-on-error` — don't add one.
+- **The weekly bloat sweep splits findings into two lanes by verdict:** `prune`
+  (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`, passage-level) and `distill` (`MERGE-DOC`/`RETIRE-DOC`, or
+  `DISTILL` with `status: ready`, doc-level). A `DISTILL` record still `pending-implementation`
+  belongs to neither lane and is never opened as a PR.
+- **`doc-bloat.yml` is a separate sibling workflow from `doc-sync.yml`, each with its own
+  concurrency group** — drift's marker-based detect-fix model and bloat's marker-less
+  detect-propose model would tangle if combined. Bloat output is always a **draft PR**, never
+  auto-merged or direct-committed.
 
 ## Red flags — STOP
 
