@@ -1,14 +1,17 @@
 # Decisions
 
 ## 2026-06-09 — Documentation skills suite design
-- Decided: Doc-lifecycle suite built one skill per lifecycle stage
-  (bootstrap/write/grow/detect-drift/fix-drift/schedule, later extended with
-  detect-bloat/fix-bloat) on a shared verifiability contract, rather than a single monolithic
-  doc-writing skill or a Diátaxis-page-per-type split. All 8 skills and both agents
-  (`llm-doc-writer`, `doc-distiller`) named in this design now ship in `plugins/doc-lifecycle/`.
-- Still binds: every doc-lifecycle skill's job maps to exactly one lifecycle stage; the
-  verifiability contract (verifiable claim or marked+anchored rationale claim; ADRs routed to
-  `growing-docs`) is shared across the suite, not owned by any single skill.
+- Decided: Activity-centered suite — one skill per documentation activity, doc-type knowledge
+  in per-artifact reference files — designing four skills (bootstrapping-docs, writing-docs,
+  detecting-doc-drift, doc-sync-automation; its 2026-06-20 updates add `fixing-doc-drift` and
+  merge writing-for-llms into `writing-docs`, dispatching `llm-doc-writer`) on a verifiability
+  spine with two claim classes (verifiable / marked+anchored rationale), rather than a single
+  monolithic doc-writing skill or a Diátaxis-page-per-type split; ADRs explicitly out of scope
+  (YAGNI). The suite has since grown to 8 skills and two agents on the same contract (the
+  2026-07-02/03 entries below).
+- Still binds: every doc-lifecycle skill's job maps to exactly one documentation activity; the
+  verifiability contract (verifiable claim or marked+anchored rationale claim) is shared
+  across the suite, not owned by any single skill.
 - Code: `plugins/doc-lifecycle/skills/`, `plugins/doc-lifecycle/agents/`
 - Source: docs/plans/2026-06-09-documentation-skills-suite-design.md @ 09f4300 (removed in this commit)
 
