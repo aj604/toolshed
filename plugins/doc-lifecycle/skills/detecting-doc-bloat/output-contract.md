@@ -74,12 +74,7 @@ for all six.
 ]
 ```
 
-Note the two `DISTILL` records side by side: `B3`'s code exists, so it is `ready`
-and carries the full payload (claims each verified against the `src/cache.py` line
-their `evidence` cites, plus a `decision_entry`); `B4`'s code does not exist, so it
-is `pending-implementation` with **`payload: null`** — no landed code means no
-claims to extract. Assigning `B4` a `ready` status or any payload is a contract
-violation the validator rejects.
+B3 (`ready`) carries the payload; B4 (`pending-implementation`) carries `payload: null` — assigning it any payload is a contract violation the validator rejects.
 
 ## The emitted artifact: records wrapped with a summary
 
@@ -102,22 +97,6 @@ parseable object:
 ```
 
 A zero in the summary (here `cut: 0`) means the sweep for that verdict class ran
-and found nothing — not that the class was skipped. Validate the whole result
-through
-`python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py`
-before handoff (see SKILL.md step 4) — passing the wrapped
-`{"records": [...], "summary": {...}}` object also checks the summary counts
-against the records; passing a bare array recomputes the authoritative summary for
-you. On the four-record array above the validator prints `OK: 4 record(s) valid`.
+and found nothing — not that the class was skipped. Validate before handoff (SKILL.md step 4); on this four-record array it prints `OK: 4 record(s) valid`.
 
-**`location` is `file:line` for passage verdicts** (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`)
-— one line, numbered from 1, no ranges, the first line of the passage — and
-**`null` for doc-level verdicts** (`RETIRE-DOC`/`MERGE-DOC`/`DISTILL`), which act
-on a whole doc, not a line. A passage verdict's `evidence` **opens with the
-passage's full extent** — `file:start-end`, or `file:start` for a one-line
-passage, with `file:start` equal to `location` (B1 above: location
-`README.md:22`, evidence opening `README.md:22-28`). That span is normative: the
-downstream `fixing-doc-bloat` skill edits exactly the passage the span delimits,
-anchored at `location`, and uses `proposal`/`payload` to carry the doc-level
-verdicts. The validator rejects passage evidence that does not open with a span
-matching `location`.
+location/evidence follow SKILL.md's output-contract table (B1 above: location `README.md:22`, evidence opening `README.md:22-28`).

@@ -71,11 +71,8 @@ All shipped files are in this skill's base directory (announced when the skill l
      summary;
    - run them now with `gh workflow run doc-sync` and `gh workflow run doc-bloat`;
    - upgrades: re-run this skill (marker preserved; template/scripts refreshed);
-   - **sync PRs carry no CI checks by default:** the pipeline pushes with the workflow's
-     `GITHUB_TOKEN`, and GitHub does not retrigger workflows on commits made with that token —
-     so the target repo's CI will not run on `doc-sync/nightly` PRs. Usually tolerable for
-     doc-only diffs; if checks-on-doc-PRs matter, mint the push token from a GitHub App
-     (`actions/create-github-app-token`) instead.
+   - **sync PRs carry no CI checks** (pushed via `GITHUB_TOKEN`, which never retriggers CI);
+     mint a GitHub App token (`actions/create-github-app-token`) instead if CI-on-doc-PRs matters.
 
 ## Rules
 

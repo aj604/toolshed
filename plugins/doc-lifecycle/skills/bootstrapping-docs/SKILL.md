@@ -40,11 +40,7 @@ governs *what to create and when to stop*; writing-docs governs *how each doc re
 3. **Operational stubs** — only if real operational knowledge surfaced during exploration;
    otherwise defer it in the scope record (`- runbook: … — promote when: <signal>`) and move on.
 
-**Larger repo (more than a handful of services/packages/subsystems)?** The 2-doc core set
-(plus the conditional third) is for a single-unit repo. Once there are many units, the same minimal-high-leverage rule scales
-*per unit* into a self-contained `docs/reference/` subtree (root `AGENTS.md` router → a
-cross-unit `architecture.md`, a scoped doc per unit, and generated reference) — see
-**repo-shape.md**. Do not build that structure for a small repo.
+Larger repo (many independently-comprehensible units)? See **repo-shape.md** — it scales this same minimal-high-leverage rule per unit.
 
 ## The high-leverage checklist (what the agent file MUST capture)
 
