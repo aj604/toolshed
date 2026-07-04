@@ -104,7 +104,7 @@ parseable object:
 A zero in the summary (here `cut: 0`) means the sweep for that verdict class ran
 and found nothing — not that the class was skipped. Validate the whole result
 through
-`${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py`
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py`
 before handoff (see SKILL.md step 4) — passing the wrapped
 `{"records": [...], "summary": {...}}` object also checks the summary counts
 against the records; passing a bare array recomputes the authoritative summary for

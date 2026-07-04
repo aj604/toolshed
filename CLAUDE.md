@@ -1,9 +1,10 @@
 # CLAUDE.md
 
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
-Markdown; the only executable code published is four skill helper scripts
+Markdown; the only executable code published is five skill helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
-`plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py`, plus
+`plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
+`.../detecting-doc-bloat/scripts/list-docs.py`, plus
 `scheduling-doc-sync`'s `scripts/sync-gate.py` and `scripts/render-report.py`, all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml` and `doc-bloat.yml`). The sample
@@ -36,7 +37,7 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
 
 - **Skills are built test-first** (RED → GREEN → REFACTOR with subagents) via the
   `superpowers:writing-skills` methodology; test records live under `tests/baselines/` — one dir
-  per test milestone (`bloat-red/`, `bloat-fixing-red/`, `bootstrap-red/`, `bootstrap-green/`,
+  per test milestone (`bloat-red/`, `bloat-fixing-red/`, `bloat-inventory-regreen/`, `bootstrap-red/`, `bootstrap-green/`,
   `doc-sync-action-regreen/`, `doc-sync-setup-red/`, `drift-red/`, `evidence-brevity-red/`, `fixing-drift-red/`, `growing-red/`, `growing-green/`,
   `llm-doc-red/`, `writing-docs-merge-red/`), plus the original writing-docs records loose at
   the `tests/baselines/` root.
@@ -47,6 +48,8 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
   `python3 tests/scripts/validate-drift-output_test.py` after touching `detecting-doc-drift`'s
   `validate-drift-output.py` or its output contract; `python3 tests/scripts/validate-bloat-output_test.py`
   after touching `detecting-doc-bloat`'s `validate-bloat-output.py` or its output contract;
+  `python3 tests/scripts/list-docs_test.py` after touching `detecting-doc-bloat`'s `list-docs.py`
+  or its inventory contract;
   `python3 tests/scripts/sync-gate_test.py` after touching `scheduling-doc-sync`'s `sync-gate.py`
   or `doc-sync.yml`'s gate wiring; `python3 tests/scripts/render-report_test.py` after touching
   `scheduling-doc-sync`'s `render-report.py` or the run-surface strings it renders.
