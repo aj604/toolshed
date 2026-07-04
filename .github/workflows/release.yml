@@ -20,10 +20,15 @@ jobs:
         with:
           fetch-depth: 0   # the version guard diffs against the PR base
       # Installed plugin content must ship under a new version — an unbumped change
-      # means installers keep getting the old release. doc-sync/nightly is exempt:
-      # its doc fixes may touch skill text without warranting a release.
+      # means installers keep getting the old release. The unattended doc pipelines
+      # (doc-sync/*, doc-bloat/*) are exempt: their doc fixes may touch skill text
+      # without warranting a release, and they can't bump the version themselves.
+      # A human cuts the release deliberately by bumping plugin.json in a later PR.
       - name: Require version bump when plugin content changes
-        if: github.event_name == 'pull_request' && github.head_ref != 'doc-sync/nightly'
+        if: >-
+          github.event_name == 'pull_request'
+          && !startsWith(github.head_ref, 'doc-sync/')
+          && !startsWith(github.head_ref, 'doc-bloat/')
         run: |
           set -euo pipefail
           BASE="origin/${{ github.base_ref }}"

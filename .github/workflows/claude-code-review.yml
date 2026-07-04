@@ -36,10 +36,12 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # doc-sync opens its nightly PR as the github-actions bot; without this the
-          # review refuses to run on it ("Workflow initiated by non-human actor").
-          # Use the specific bot rather than '*' to keep other bots (e.g. dependabot) out.
-          allowed_bots: 'github-actions'
+          # The doc pipelines open PRs as a bot; without this the review refuses to run
+          # on them ("Workflow initiated by non-human actor"). Two bots author them:
+          # github-actions (gh pr create off GITHUB_TOKEN) and claude (when the run
+          # authenticates via the Claude GitHub App). List the specific bots rather than
+          # '*' to keep others (e.g. dependabot) out.
+          allowed_bots: 'github-actions,claude'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
