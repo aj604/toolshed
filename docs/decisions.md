@@ -129,3 +129,20 @@
 - Code: `plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`,
   `plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md`
 - Source: docs/plans/2026-06-20-reference-doc-containment-design.md @ 09f4300 (removed in this commit)
+
+## 2026-07-04 — Durable narrative docs + DISTILL insight extraction
+- Decided: Added a third doc kind — the durable narrative doc, marked by growing-docs' first-line
+  `> As of <date> (<anchors>)` anchor (the marker classifies, not the directory) and homed in
+  `docs/reference/` (plain `docs/` until that tree exists, never `docs/plans/`); grew the
+  `DISTILL ready` payload an optional anchored `insights` channel with a mandatory per-section
+  insight walk; made the always-loaded file a router, not a repository (single owner:
+  `writing-docs/agent-context.md`), with unprompted-critical as a scope test.
+- Still binds: an anchored doc is never a planning artifact to distill, wherever it sits; every
+  `ready` record's evidence states its insight-walk outcome (`insight sweep: none — …` when dry);
+  a `ready` payload must carry at least one claim or one insight; anything landing content in
+  CLAUDE.md/AGENTS.md — extraction, claim, or merge — must clear the router rule.
+- Code: plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md,
+  plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py,
+  plugins/doc-lifecycle/agents/doc-distiller.md,
+  plugins/doc-lifecycle/skills/writing-docs/agent-context.md
+- Source: docs/plans/2026-07-04-durable-narrative-docs-design.md @ d695e25 (removed in this commit)
