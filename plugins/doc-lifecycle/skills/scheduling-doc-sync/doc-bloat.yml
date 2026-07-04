@@ -153,8 +153,16 @@ jobs:
           git config user.name "doc-bloat"
           git config user.email "doc-bloat@users.noreply.github.com"
           git checkout -b doc-bloat/prune
+          # Prune verdicts land inline (uncommitted); commit them. A clean index means the
+          # sweep produced no diff — skip cleanly rather than failing on an empty commit.
           git add -A
-          git commit -m "docs: bloat prune sweep (${DATE})"
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: bloat prune sweep (${DATE})"
+          fi
+          if git diff --quiet "${{ github.sha }}" HEAD; then
+            python3 .github/doc-sync/render-report.py bloat-skip-summary --lane prune --reason skip-noop
+            exit 0
+          fi
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-bloat/prune
           PR_URL=$(gh pr create --draft \
             --title "${TITLE}" \
@@ -188,7 +196,7 @@ jobs:
             status "ready" — treat exactly those record IDs as the approved subset, and
             apply nothing else. DISTILL records dispatch the doc-distiller agent per the
             skill. Follow the skill's rules exactly.
-          claude_args: --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
+          claude_args: --allowedTools "Task,Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
       - name: Open draft PR
         run: |
           set -euo pipefail
@@ -204,8 +212,19 @@ jobs:
           git config user.name "doc-bloat"
           git config user.email "doc-bloat@users.noreply.github.com"
           git checkout -b doc-bloat/distill
+          # Inline verdicts (MERGE-DOC/RETIRE-DOC) leave edits uncommitted; the distiller
+          # commits its own DISTILL result. Commit any leftover uncommitted work, but a
+          # clean index is normal here — don't fail on it.
           git add -A
-          git commit -m "docs: bloat distill sweep (${DATE})"
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: bloat distill sweep (${DATE})"
+          fi
+          # Nothing to propose if the branch matches the base commit (github.sha) — skip
+          # cleanly instead of failing on an empty commit or opening an empty PR.
+          if git diff --quiet "${{ github.sha }}" HEAD; then
+            python3 .github/doc-sync/render-report.py bloat-skip-summary --lane distill --reason skip-noop
+            exit 0
+          fi
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-bloat/distill
           PR_URL=$(gh pr create --draft \
             --title "${TITLE}" \
