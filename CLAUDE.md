@@ -40,41 +40,26 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
   `superpowers:writing-skills` methodology; test records live under `tests/baselines/`, one dir
   per test milestone (see the directory for the current set), plus the original writing-docs
   records loose at the root.
-- `detecting-doc-bloat`/`fixing-doc-bloat` were built test-first: RED baselines recorded before
-  the skill existed, GREEN re-runs confirm the skill's discipline, both retained (not discarded
-  once green) at `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/`.
-  Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
-  `docs/decisions.md` (see the 2026-06-09 entry for the suite decision) and
-  the 2026-06-20 entry in the same file (the `docs/reference/` shape).
-- The generic apply-only rules for fix skills (authorized-records-only, no-while-I'm-here,
-  blast-radius stop, evidence-travels-with-the-change) have one owner,
+- `detecting-doc-bloat`/`fixing-doc-bloat` RED/GREEN baselines are retained at
+  `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/`; method, status, and
+  resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md` (2026-06-09 suite entry;
+  2026-06-20 `docs/reference/` shape).
+- The generic apply-only rules for fix skills have one owner,
   `plugins/doc-lifecycle/references/apply-discipline.md`, cited (not restated) by both
   `fixing-doc-drift` and `fixing-doc-bloat`.
-- `DISTILL` records use a closed two-status model: `pending-implementation` forbids any
-  payload; `ready` requires payload = verified claims plus one decision-log entry, plus
-  optional anchored `insights` bound for a durable narrative doc (breadth neither code nor
-  the log can carry) — the mechanism for retiring a landed planning artifact, not a per-line
-  CUT spree. A doc whose first line is growing-docs' `> As of` anchor is a durable narrative
-  doc, never a planning artifact to distill.
 - **The helper scripts have unit tests** (stdlib `unittest`, no deps) at
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
   output contract — `sync-gate_test.py`/`render-report_test.py` also cover `doc-bloat.yml`'s
   gate/render wiring, since both workflows share the two scripts.
-- Sync PR bodies/titles render via `render-report.py`'s `pr-body`/`pr-title` subcommands (two
-  markdown tables — Fixed/Flagged — plus a singular/plural, flagged-count-bearing title), not
+- Sync PR bodies/titles render via `render-report.py`'s `pr-body`/`pr-title` subcommands, never
   inline YAML `jq` — keeping the logic unit-tested and the CI YAML allowlist thin.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill — one door for both human and agent docs; it carries
   the agent-density bar inline and dispatches the `llm-doc-writer` agent for heavy agent-facing jobs).
-- The doc-lifecycle suite's shared contract is verifiability-first: every doc line is a
-  mechanically-checkable verifiable claim, or a marked+anchored rationale claim; ADRs/decision
-  records stay out of scope for `writing-docs`, routed to `growing-docs` instead.
-- **This repo's `docs/` stays flat** (`plans/`) — a single-unit marketplace. The
+- **This repo's `docs/` stays flat** (`plans/`) — a single-unit marketplace; the
   `docs/reference/` convention the plugin prescribes for larger repos
-  (`plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`) — one subtree holding the
-  whole agent doc set, never scattered at `docs/` root, with `architecture.md` as the sole
-  cross-unit doc that must not re-describe any single unit — does not apply here; don't add
-  one.
+  (`plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`) does not apply here —
+  don't add one.
 
 ## Gotchas
 

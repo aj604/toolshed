@@ -93,7 +93,7 @@ fixing-doc-drift    lands the drafted fixes, one diff hunk per record
 scheduling-doc-sync installs the nightly Action that runs detect→fix and opens the PR
 ```
 
-All of the above ships today. The automation layer — `scheduling-doc-sync` — installs a nightly GitHub Action that runs detect→fix unattended on the commits since the last sync and opens a docs-update PR with the evidence (PR-only; past the blast-radius cap it files an issue instead); it's wiring on top of the contract, which lives in `detecting-doc-drift` and `fixing-doc-drift`.
+All of the above ships today; past its blast-radius cap the nightly sync files an issue instead of opening one giant PR.
 
 ## How it was built
 
