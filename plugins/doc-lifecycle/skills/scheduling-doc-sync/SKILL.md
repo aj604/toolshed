@@ -103,6 +103,10 @@ All shipped files are in this skill's base directory (announced when the skill l
   (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`, passage-level) and `distill` (`MERGE-DOC`/`RETIRE-DOC`, or
   `DISTILL` with `status: ready`, doc-level). A `DISTILL` record still `pending-implementation`
   belongs to neither lane and is never opened as a PR.
+- **`doc-bloat.yml` is a separate sibling workflow from `doc-sync.yml`, each with its own
+  concurrency group** — drift's marker-based detect-fix model and bloat's marker-less
+  detect-propose model would tangle if combined. Bloat output is always a **draft PR**, never
+  auto-merged or direct-committed.
 
 ## Red flags — STOP
 

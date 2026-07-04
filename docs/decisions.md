@@ -58,3 +58,16 @@
 - Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`,
   `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`
 - Source: docs/plans/2026-07-03-doc-bloat-nightly-plan.md @ 09f4300 (removed in this commit)
+
+## 2026-07-03 — Doc bloat nightly design
+- Decided: Bloat sweep output is a proposal (draft PR), never an auto-fix, because a bloat
+  verdict is a judgment call, not a mechanically-checkable correction; the merge itself is the
+  human approval gate — chosen over drift's detect→fix pipeline shape.
+- Still binds: `doc-bloat.yml` stays a separate sibling workflow from `doc-sync.yml`, each with
+  its own concurrency group, because drift's marker-based detect-fix model and bloat's
+  marker-less detect-propose model would tangle if combined; bloat output is always a draft PR,
+  never auto-merged or direct-committed, and a lane is skipped if its own draft PR is already
+  open.
+- Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat.yml`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`
+- Source: docs/plans/2026-07-03-doc-bloat-nightly-design.md @ 09f4300 (removed in this commit)
