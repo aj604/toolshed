@@ -71,11 +71,8 @@ All shipped files are in this skill's base directory (announced when the skill l
      summary;
    - run them now with `gh workflow run doc-sync` and `gh workflow run doc-bloat`;
    - upgrades: re-run this skill (marker preserved; template/scripts refreshed);
-   - **sync PRs carry no CI checks by default:** the pipeline pushes with the workflow's
-     `GITHUB_TOKEN`, and GitHub does not retrigger workflows on commits made with that token —
-     so the target repo's CI will not run on `doc-sync/nightly` PRs. Usually tolerable for
-     doc-only diffs; if checks-on-doc-PRs matter, mint the push token from a GitHub App
-     (`actions/create-github-app-token`) instead.
+   - **sync PRs carry no CI checks** (pushed via `GITHUB_TOKEN`, which never retriggers CI);
+     mint a GitHub App token (`actions/create-github-app-token`) instead if CI-on-doc-PRs matters.
 
 ## Rules
 
@@ -87,10 +84,9 @@ All shipped files are in this skill's base directory (announced when the skill l
   is state, not wiring.
 - **Don't customize the installed YAML beyond the cron/cap/bloat-cron knobs.** Real changes belong
   upstream in the plugin (aj604/toolshed) so every install gets them on next upgrade.
-- **The drift report is a build artifact, never repo content.** The shipped workflow already
-  removes it before the marker-only commit and moves it out of the working tree before the PR
-  commit's `git add -A` — don't "simplify" that by dropping the artifact-upload step or letting
-  a hand edit reintroduce `drift-report.json`/`pr-body.md` into a commit.
+- **The drift report is a build artifact, never repo content** (doc-sync.yml already excludes
+  it from both commit paths) — don't reintroduce it by dropping the artifact-upload step or a
+  hand edit.
 
 ## Red flags — STOP
 
