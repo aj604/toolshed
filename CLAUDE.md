@@ -44,8 +44,8 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
   the skill existed, GREEN re-runs confirm the skill's discipline, both retained (not discarded
   once green) at `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/`.
   Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
-  `docs/plans/2026-06-09-documentation-skills-suite-design.md` (suite) and
-  `docs/plans/2026-06-20-reference-doc-containment-design.md` (the `docs/reference/` shape).
+  `docs/decisions.md` (see the 2026-06-09 entry for the suite decision) and
+  the 2026-06-20 entry in the same file (the `docs/reference/` shape).
 - The generic apply-only rules for fix skills (authorized-records-only, no-while-I'm-here,
   blast-radius stop, evidence-travels-with-the-change) have one owner,
   `plugins/doc-lifecycle/references/apply-discipline.md`, cited (not restated) by both
