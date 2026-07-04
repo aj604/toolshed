@@ -51,8 +51,11 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
   `plugins/doc-lifecycle/references/apply-discipline.md`, cited (not restated) by both
   `fixing-doc-drift` and `fixing-doc-bloat`.
 - `DISTILL` records use a closed two-status model: `pending-implementation` forbids any
-  payload; `ready` requires payload = verified claims plus one decision-log entry — the
-  mechanism for retiring a landed planning artifact, not a per-line CUT spree.
+  payload; `ready` requires payload = verified claims plus one decision-log entry, plus
+  optional anchored `insights` bound for a durable narrative doc (breadth neither code nor
+  the log can carry) — the mechanism for retiring a landed planning artifact, not a per-line
+  CUT spree. A doc whose first line is growing-docs' `> As of` anchor is a durable narrative
+  doc, never a planning artifact to distill.
 - **The helper scripts have unit tests** (stdlib `unittest`, no deps) at
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
   output contract — `sync-gate_test.py`/`render-report_test.py` also cover `doc-bloat.yml`'s

@@ -40,7 +40,7 @@ lists, directory trees) still binds — a demand signal is not a license to cata
 
 | Signal | Smallest artifact that absorbs it |
 |--------|-----------------------------------|
-| Fact re-explained / re-derived | CLAUDE.md gotcha, README section, or reference entry — whichever the reader would consult first |
+| Fact re-explained / re-derived | CLAUDE.md gotcha, README section, or reference entry — whichever the reader would consult first (always-loaded placement must clear writing-docs' router rule) |
 | Incident with no runbook | runbook (writing-docs' runbooks.md) |
 | Onboarding pain | deepen README setup — or a narrative walkthrough (template below) |
 | Recurring "why is it like this?" | marked+anchored rationale section — or an ADR (template below) |
@@ -75,12 +75,29 @@ Read on demand; never a standing section in an always-loaded agent file (CLAUDE.
 - **Narrative doc** (walkthrough, tutorial, ADR) → writing-docs scopes these out by design;
   the template below is carried here and is REQUIRED.
 
+### Where narrative docs live
+
+A narrative doc is a **durable** doc — it tracks the current repo, and must never
+be mistaken for a retire-on-landing planning artifact. Its home:
+
+- Repo with a `docs/reference/` tree: **inside it**, domain-grouped like everything
+  else (a unit's walkthrough beside its `overview.md`; cross-unit narrative beside
+  `architecture.md`). One containment subtree holds the whole agent doc set,
+  claim-style and narrative alike.
+- Repo without one: under `docs/` beside the team's docs; it moves into
+  `docs/reference/` if that tree later exists.
+- **Never in `docs/plans/`** — that is where planning artifacts go to be distilled
+  once their implementation lands; a narrative doc placed there will read as one.
+
 ### Narrative doc template (REQUIRED)
 
 1. **First line under the title, always:**
    `> As of <YYYY-MM-DD> (<commit or file:line anchors current at writing>)`
    — the staleness anchor readers can check against; a hook for future drift tooling
-   (today's drift skills audit repo-tracking claims, not narrative docs).
+   (today's drift skills audit repo-tracking claims, not narrative docs). This line
+   is also the doc's **durable-narrative marker**: bloat tooling classifies an
+   anchored doc as narrative — never as a planning artifact to distill — wherever
+   it sits.
 2. **Every command, path, symbol, and output inside the narrative is true of the repo now
    and was actually run.** Narrative structure is exempt from the claim bar; fabrication
    is not.

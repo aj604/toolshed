@@ -1,0 +1,61 @@
+{
+  "records": [
+    {
+      "id": "B1",
+      "doc": "CLAUDE.md",
+      "location": "CLAUDE.md:9",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "CLAUDE.md:9-15 — the entire 'Regenerating the golden files' section: multi-line (7 lines), plainly narrow-scope (one task: regenerating goldens when an export test fails on golden mismatch), and a natural on-demand target already exists (docs/reference/testing.md owns the test commands, testing.md:3 `make test` / `make test-export`). Always-loaded placement fails agent-context.md's router scope test — most sessions never regenerate goldens; it moves out of the always-loaded file.",
+      "proposal": {
+        "target": "docs/reference/testing.md",
+        "text": "- Regenerating goldens: on a golden mismatch, run `python tools/regen-goldens.py --suite export` (it only rewrites, never validates — inspect the `tests/goldens/` diff by hand), then run `make test-export` twice; the first post-regeneration run rebuilds the cache and can pass spuriously, only the second run counts."
+      },
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B2",
+      "doc": "README.md",
+      "location": "README.md:10",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "README.md:10-13 — 'One thing worth knowing: the dev server keeps a port lock file after a crash and then silently binds a random port on the next start — every local workflow hits this after any crash, so delete `.portlock` before restarting.' — an operational gotcha ('worth knowing', 'silently') sitting in the user-facing README. Its stated scope ('every local workflow hits this after any crash') is broad and unprompted-critical (the random-port bind is silent — a session would not know to look), so it clears agent-context.md's router rule for a one-line CLAUDE.md Gotchas entry in densest form. The usage sentence opening line 10 ('Run `exporter run --tenant NAME`.') is not part of the passage and stays.",
+      "proposal": {
+        "target": "CLAUDE.md",
+        "text": "- **After any crash, delete `.portlock` before restarting** — the dev server keeps the port lock file and silently binds a random port on the next start."
+      },
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B3",
+      "doc": "README.md",
+      "location": "README.md:16",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "README.md:16-18 — 'Note that the CSV exporter drops the trailing newline on Windows builds (`src/export.py` opens in binary mode), which only matters if you diff exports across platforms.' — a caveat ('Note that') in the user-facing README, plainly narrow-scope by its own admission ('only matters if you diff exports across platforms'). A natural on-demand target already exists: docs/reference/export.md:4-5 already owns newline handling ('the writer opens files in binary mode (`src/export.py:4`)'); the Windows trailing-newline consequence belongs beside it, not in the README.",
+      "proposal": {
+        "target": "docs/reference/export.md",
+        "text": "- On Windows builds the exporter drops the trailing newline (a consequence of the binary-mode writes above, `src/export.py:4`); relevant only when diffing exports across platforms."
+      },
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B4",
+      "doc": "CLAUDE.md",
+      "location": "CLAUDE.md:7",
+      "verdict": "CUT",
+      "evidence": "CLAUDE.md:7 — 'The API client retries twice on 503 before raising (`src/client.py:3`).' restates the very code line it cites: src/client.py:3 `RETRIES_503 = 2   # retry twice on 503, then raise`. The doc line adds no information beyond the constant and its comment; it is not a gotcha whose removal would cause a mistake — the fact is self-evident from the cited code.",
+      "proposal": null,
+      "status": null,
+      "payload": null
+    }
+  ],
+  "summary": {
+    "cut": 1,
+    "condense": 0,
+    "extract_and_move": 3,
+    "retire_doc": 0,
+    "merge_doc": 0,
+    "distill": 0
+  }
+}

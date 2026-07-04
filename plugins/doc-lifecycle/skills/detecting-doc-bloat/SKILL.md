@@ -50,9 +50,17 @@ records and applies the approved ones, dispatching `DISTILL ready` work to the
    proxy for where to look; it does **not** set record order — records are still
    ordered by verdict class (doc-level/distill before line-level cuts) per step 4
    and the Modes section. In diff-scoped, take only the docs the diff touched.
-   Note which docs are *living*
-   (README, CLAUDE.md, runbooks — track the current repo) and which are *planning
-   artifacts* (`docs/plans/`, design docs, specs — describe an intended change).
+   Classify each doc as one of **three kinds**:
+   - **Living claim-style docs** (README, CLAUDE.md, runbooks, `docs/reference/`
+     claim docs) — track the current repo, line-governed by writing-docs.
+   - **Durable narrative docs** — first line is growing-docs' `> As of <date>
+     (<anchors>)` marker: walkthroughs, ADRs, conceptual/architecture overviews,
+     workflow docs. They also track the current repo, as narrative; growing-docs
+     owns their bar. **The anchor line is the classifier, not the directory** — an
+     anchored doc is narrative wherever it sits, and is never a planning artifact.
+   - **Planning artifacts** (design docs, specs, plans — conventionally
+     `docs/plans/`) — describe an *intended change*. Location is a hint; what the
+     doc does is the test.
 
 2. **Judge passages and docs against the writing-docs bar.** Walk every passage
    of every doc in scope — paragraph by paragraph, not a skim for highlights — and
@@ -71,32 +79,71 @@ records and applies the approved ones, dispatching `DISTILL ready` work to the
    - **Is it right content in the wrong doc?** → `EXTRACT-AND-MOVE`: the tell is a
      caveat or gotcha ("quirk", "note that", "silently", "worth knowing") addressed
      to operators or agents but sitting in a user-facing doc — an operational
-     gotcha buried in a README belongs in CLAUDE.md or the runbook. **Value is not
-     placement** — a high-value line can still be misplaced; do not "keep" it where
-     it is, and do not delete it. `proposal`:
-     `{"target": <right doc>, "text": <the line to land>}`.
+     gotcha buried in a README belongs in the doc its audience reads on demand
+     (runbook, reference); it lands inline in CLAUDE.md/AGENTS.md **only** when it
+     clears agent-context.md's router rule (unprompted-critical, densest one-line
+     form). The same lens runs in reverse — but **deliberately conservative**:
+     flag an always-loaded passage for extraction only when it is multi-line AND
+     plainly narrow-scope (one file, one task) AND a natural on-demand target
+     already exists; it moves out leaving at most a when-to-read line. A
+     broad-scope gotcha most sessions need stays put however short, and a
+     borderline call yields **no record** — placement churn on the always-loaded
+     file costs more than the line it would relocate. **Value is not placement** — a high-value line can
+     still be misplaced; do not "keep" it where it is, and do not delete it.
+     `proposal`: `{"target": <right doc>, "text": <the line to land>}`.
    And a *doc* against its neighbors is bloat when it is:
    - **near-duplicate of another doc** → `MERGE-DOC` (fold the unique remainder
      into the survivor, `proposal: {"target": <survivor>}`) or `RETIRE-DOC` (the
      doc carries nothing the other lacks — delete it). Evidence: quote or cite the
      overlapping passage in *both* docs.
 
+   **Durable narrative docs are judged against their own bar, not the claim
+   bar.** Narrative prose is their job — never `CUT`/`CONDENSE` a walkthrough or
+   overview passage *for being narrative*. What still counts as bloat in one:
+   a passage duplicating another doc's same-audience content, a dead command
+   block its own anchor shows superseded, or whole-doc `MERGE-DOC`/`RETIRE-DOC`
+   with quoted overlap. A stale `> As of` anchor is drift's business, not bloat.
+
 3. **Classify planning artifacts by whether their implementation has landed.**
    This is the verdict unique to this skill; do the check, do not eyeball it. For
    each planning artifact, grep/read the code for the symbols and behavior it
    describes:
+   Durable narrative docs are **exempt from this step** — they track the repo,
+   not an intended change; there is nothing to land. For each true planning
+   artifact:
    - **Implementation landed** (the code the doc designs now exists) →
      `DISTILL`, `status: "ready"`, with a full `payload`. A design/spec/plan whose
      implementation has landed is a **distillation candidate: its value has already
      moved into the code**; what remains in the doc is scaffolding — the problem
-     statement, the rejected options, the code sketch the real code now supersedes.
-     The residue worth keeping is (a) the *durable decisions* — the "we chose X over
-     Y, and here's the constraint that outlives the code" — extracted as `claims`
-     into the living docs (each `claim` **verified against the code its `evidence`
-     cites**, `target` = the living doc it belongs in), and (b) one `decision_entry`
-     for the decision log. Everything else is git history. This is a `DISTILL`, not
-     a per-line `CUT` spree and **not** a "keep it as a historical record" — an ADR
-     kept verbatim forever is exactly the bloat this verdict removes.
+     statement, the code sketch the real code now supersedes. The residue worth
+     keeping is (a) the *durable decisions* — the "we chose X over Y, and here's
+     the constraint that outlives the code" — extracted as `claims` into the
+     living docs (each `claim` **verified against the code its `evidence` cites**,
+     `target` = the living doc it belongs in), (b) the *durable insight* — breadth
+     no living doc carries and code cannot show: rationale for deliberate
+     absences, rejected alternatives with their reasons, deferred-work seams, the
+     system-shape picture — extracted as `insights` into a durable narrative doc
+     (`target`, usually under `docs/reference/`; each `insight` carries an
+     `anchor` naming its provenance — the artifact `path @ SHA`, or a `file:line`
+     / date), and (c) one `decision_entry` for the decision log. Everything else
+     is git history. **The insight walk is mandatory, not a vibe check:** before
+     emitting a `ready` record, walk the artifact section by section and ask of
+     each — *if this section vanishes, is there a decision, constraint, or
+     deliberate absence a future maintainer could wrongly "fix"?* Every yes
+     becomes an insight (or a claim, when a living claim doc is the right home).
+     Claim/insight targets default to on-demand docs (reference, runbook, the
+     narrative doc); an always-loaded target must clear agent-context.md's router
+     rule.
+     The record's `evidence` must account for the walk's outcome: name the
+     sections that yielded insights, or close with
+     `insight sweep: none — pure implementation recipe`. An empty `insights` you
+     can defend is common (most plans are recipe); an empty `insights` because
+     you never walked is a lossy distill. An insight that merely restates a
+     claim or the decision entry is bloat relocated, not breadth preserved.
+     This is a `DISTILL`, not a per-line `CUT` spree and
+     **not** a "keep it as a historical record" — a design doc kept verbatim as a
+     historical record is exactly the bloat this verdict removes: decisions go to
+     the log, breadth to a narrative doc, scaffolding to git history.
    - **Implementation not landed** (the code the doc designs does not exist yet —
      the grep for its symbols returns nothing) → `DISTILL`,
      `status: "pending-implementation"`, **`payload: null`**. There is no landed
@@ -120,10 +167,13 @@ records and applies the approved ones, dispatching `DISTILL ready` work to the
 
 **Precision guard: the target of a consolidation is not itself bloat.** A dense,
 accurate doc that another finding points *into* — the `EXTRACT-AND-MOVE` target,
-the `MERGE-DOC` survivor, a `DISTILL` claim's target — is where value is being
-*concentrated*. Do not also flag it as redundant. A short, dense CLAUDE.md is
+the `MERGE-DOC` survivor, a `DISTILL` claim's or insight's target — is where value
+is being *concentrated*. Do not also flag it as redundant. A short, dense CLAUDE.md is
 doing its job, not bloating; adding cross-reference boilerplate to "clarify" two
-docs is a bloat audit that *increases* line count — never propose it.
+docs is a bloat audit that *increases* line count — never propose it. The guard
+protects *density*, not *growth*: it never licenses landing content into an
+always-loaded file that agent-context.md's router rule would send to a reference
+doc — pick targets so the always-loaded file only ever gets leaner or stays put.
 
 **And redundancy is judged within one audience.** CLAUDE.md/AGENTS.md is a
 distinct doc *type* — tribal knowledge inherited by every agent session — not a
@@ -149,7 +199,7 @@ and `fixing-doc-bloat` applies exactly those.
 | `evidence` | mandatory non-empty string for **every** verdict (the code line, quoted overlap, or grep that proves the finding). Passage verdicts: must **open with the passage's full extent** — `file:start-end` (`file:start` if the passage is one line), where `file:start` equals `location` — then the proof. The span is normative: it is what `fixing-doc-bloat` deletes or replaces |
 | `proposal` | `CONDENSE`: non-empty string, the complete replacement line. `EXTRACT-AND-MOVE`: `{"target": <doc>, "text": <text to land>}`, both non-empty. `MERGE-DOC`: `{"target": <survivor doc>}`. All others (`CUT`/`RETIRE-DOC`/`DISTILL`): `null` |
 | `status` | `DISTILL` only: `"pending-implementation"` or `"ready"`. All other verdicts: `null` |
-| `payload` | non-null **iff** `DISTILL` + `ready`: `{"claims": [{"claim","target","evidence"}, …] (≥1, all non-empty), "decision_entry": <non-empty draft log entry>}`. Otherwise (`pending-implementation`, and every non-DISTILL verdict): `null` |
+| `payload` | non-null **iff** `DISTILL` + `ready`: `{"claims": [{"claim","target","evidence"}, …] (all non-empty), "decision_entry": <non-empty draft log entry>, "insights": [{"insight","target","anchor"}, …] (optional, all non-empty — `target` a durable narrative doc, `anchor` the provenance)}` — at least one claim or one insight. Otherwise (`pending-implementation`, and every non-DISTILL verdict): `null` |
 
 Emit the canonical wrapped object
 `{"records": [...], "summary": {"cut": N, "condense": N, "extract_and_move": N, "retire_doc": N, "merge_doc": N, "distill": N}}`;
@@ -185,7 +235,7 @@ README.md
   [B1] CONDENSE   README.md:22 — 7 lines of eviction narrative → one line citing CACHE_TTL_S (src/cache.py:5)
   [B2] EXTRACT    README.md:31 — cold-start latency gotcha belongs in RUNBOOK.md
 docs/plans/2025-11-02-cache-layer-design.md
-  [B3] DISTILL(ready) — implementation landed (src/cache.py); extract TTL=300s, LRU cap=1024 + log entry
+  [B3] DISTILL(ready) — implementation landed (src/cache.py); 2 claims (TTL=300s, LRU cap=1024) + 1 insight (no-invalidation rationale → docs/reference/caching.md) + log entry
 ```
 
 Then ask for the approved IDs. The approved subset is what `fixing-doc-bloat`
@@ -204,7 +254,22 @@ receives — nothing you present as a summary is authorization on its own.
 - A `payload` on a `pending-implementation` record → forbidden; there is no code to
   verify against. `pending-implementation` carries `payload: null`, always.
 - Treating a landed design doc as a "historical record to keep" → that is the bloat
-  `DISTILL ready` exists to remove; extract the decisions and retire the scaffolding.
+  `DISTILL ready` exists to remove; extract the decisions and insights, retire the
+  scaffolding.
+- Classifying a doc whose first line is the `> As of` anchor as a planning artifact,
+  or proposing `DISTILL` for it → it tracks the current repo as narrative; only its
+  own-bar verdicts (step 2) apply, wherever the file sits.
+- `CUT`/`CONDENSE` on a narrative doc's passage because it is narrative → narrative
+  is that doc's job; flag it only against the narrative doc's own bar.
+- A `DISTILL ready` whose `insights` restate its `claims` or `decision_entry` →
+  bloat relocated, not breadth preserved; insights carry only what neither code nor
+  the log can.
+- A `DISTILL ready` whose `evidence` doesn't account for the insight walk (sections
+  named, or `insight sweep: none — …`) → "no insights" is a conclusion the walk
+  earns, never a default; run the per-section walk and say so.
+- An `EXTRACT-AND-MOVE` or claim landing multi-line content in CLAUDE.md/AGENTS.md
+  when a reference doc plus a pointer would do → the always-loaded file is a router
+  (agent-context.md); unprompted-critical, densest form, or a different target.
 - Marking an `EXTRACT-AND-MOVE` candidate "keep as-is" (it's valuable) or sending it
   to a code comment / deletion → value ≠ placement; move it to the right doc intact.
 - Flagging the *target* of an extraction/merge, or a short dense doc, as bloat → the

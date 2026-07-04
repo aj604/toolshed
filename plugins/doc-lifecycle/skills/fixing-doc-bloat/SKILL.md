@@ -73,14 +73,17 @@ literally true of the bytes you wrote.
 For an approved `DISTILL ready` record, **dispatch the `doc-lifecycle:doc-distiller` agent**
 with that one record; do not distill the artifact yourself. The distiller owns the method
 (single owner): it re-verifies each `payload.claims[]` claim against the code its `evidence`
-cites, dedups against the target, lands each verified claim in its `target` living doc,
-appends **one** entry to `docs/decisions.md` (creating it with an `# Decisions` heading if
-absent — the decision log is a repo-level file, **not** a CLAUDE.md subsection), completes the
-`Source:` line with the artifact's real last-commit SHA, and `git rm`s the artifact — all
-**staged as one commit, which you then commit.** The distiller stages; the dispatcher commits.
-Match your dispatch input to its contract: hand it the record; expect back the claims landed
-(with `target:line`), claims that failed verification, duplicates skipped with the colliding
-record, the log entry as written, and the staged file list.
+cites, dedups against the target, lands each verified claim in its `target` living doc, lands
+each `payload.insights[]` entry in its `target` durable narrative doc (anchored, artifact-true,
+creating the doc with its `> As of` line if absent), appends **one** entry to
+`docs/decisions.md` (creating it with an `# Decisions` heading if absent — the decision log is
+a repo-level file, **not** a CLAUDE.md subsection), completes the `Source:` line with the
+artifact's real last-commit SHA, repoints the artifact's inbound references, and `git rm`s the
+artifact — all **staged as one commit, which you then commit.** The distiller stages; the
+dispatcher commits. Match your dispatch input to its contract: hand it the record; expect back
+the claims and insights landed (with `target:line`), any that failed verification, duplicates
+skipped with the colliding record, references repointed, the log entry as written, and the
+staged file list.
 
 **Distiller failure handling:** if the distiller reports a claim failed verification, that
 claim is simply not landed — **surface the failure to the human; never patch the payload

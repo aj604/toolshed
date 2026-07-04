@@ -1,0 +1,51 @@
+{
+  "records": [
+    {
+      "id": "B1",
+      "doc": "CLAUDE.md",
+      "location": "CLAUDE.md:9",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "CLAUDE.md:9-15 — a seven-line golden-regeneration procedure in the always-loaded file; it is multi-line, plainly narrow-scope (one task: recovering from an export golden mismatch), and not unprompted-critical (the failing test prompts the reader to look), and a natural on-demand target already exists (docs/reference/testing.md, which carries the suite's test commands). Per agent-context.md's router rule it moves out, leaving at most a when-to-read line.",
+      "proposal": {
+        "target": "docs/reference/testing.md",
+        "text": "- Golden mismatch in the export suite: run `python tools/regen-goldens.py --suite export` (it only rewrites `tests/goldens/`, no validation — inspect the diff by hand), then run `make test-export` twice; the first post-regeneration run rebuilds the cache and can pass spuriously, only the second run counts."
+      },
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B2",
+      "doc": "README.md",
+      "location": "README.md:11",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "README.md:11-14 — operational gotcha ('One thing worth knowing: the dev server keeps a port lock file after a crash and then silently binds a random port on the next start') buried in the user-facing Usage section. It clears agent-context.md's router rule for inline CLAUDE.md placement: unprompted-critical (silent failure, hit by every local workflow after any crash — a mistake most sessions would make before knowing to look), landed in densest one-line form. The `exporter run --tenant NAME` usage sentence opening line 11 stays in README.md.",
+      "proposal": {
+        "target": "CLAUDE.md",
+        "text": "- **Delete `.portlock` before restarting the dev server after any crash** — a stale lock file makes the next start silently bind a random port."
+      },
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B3",
+      "doc": "README.md",
+      "location": "README.md:16",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "README.md:16-18 — 'Note that' caveat scoped to one narrow task (diffing exports across platforms), not unprompted-critical, sitting in the user-facing README; the on-demand doc its audience reads already exists and already covers newline handling (docs/reference/export.md:4-5 'the writer opens files in binary mode (`src/export.py:4`)'), so it fails the router bar for CLAUDE.md and lands in the reference doc.",
+      "proposal": {
+        "target": "docs/reference/export.md",
+        "text": "- Windows builds drop the trailing newline (binary-mode writer, `src/export.py:4`) — matters only when diffing exports across platforms."
+      },
+      "status": null,
+      "payload": null
+    }
+  ],
+  "summary": {
+    "cut": 0,
+    "condense": 0,
+    "extract_and_move": 3,
+    "retire_doc": 0,
+    "merge_doc": 0,
+    "distill": 0
+  }
+}

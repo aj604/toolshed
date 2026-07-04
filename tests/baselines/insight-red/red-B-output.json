@@ -1,0 +1,80 @@
+{
+  "records": [
+    {
+      "id": "B1",
+      "doc": "docs/plans/2026-02-14-worker-queue-design.md",
+      "location": null,
+      "verdict": "DISTILL",
+      "evidence": "implementation landed: src/worker.py:3 `MAX_ATTEMPTS = 5` and src/worker.py:4 `TIMEOUT_S = 30` match the Decision section, and src/worker.py:15-20 `handle_failure` matches the Sketch (lines 34-43) line for line; Problem/Options/Sketch sections are superseded scaffolding",
+      "proposal": null,
+      "status": "ready",
+      "payload": {
+        "claims": [
+          {
+            "claim": "Exhausted jobs are dropped, not dead-lettered — a DLQ was rejected because this system deploys unattended and an unmonitored DLQ hides failures; revisit only if an operator rotation ever exists.",
+            "target": "CLAUDE.md",
+            "evidence": "src/worker.py:18 `queue.drop(job)        # dropped outright`"
+          },
+          {
+            "claim": "There is no backoff between attempts — re-entering at the tail already spaces retries by the queue's drain time, so an explicit backoff schedule would double-delay.",
+            "target": "CLAUDE.md",
+            "evidence": "src/worker.py:20 `queue.push_tail(job)   # failed jobs re-enter at the tail`"
+          },
+          {
+            "claim": "One global `TIMEOUT_S` (30s) covers every job type — per-type budgets were rejected because each new job type would become a tuning decision nobody owns; fast types wasting budget under the global cap is accepted.",
+            "target": "CLAUDE.md",
+            "evidence": "src/worker.py:4 `TIMEOUT_S = 30     # one global per-attempt timeout, all job types`"
+          }
+        ],
+        "decision_entry": "## 2026-02-14 — worker queue failure handling\n- Decided: bounded retries (MAX_ATTEMPTS=5), failed jobs re-enter at the tail, drop on exhaustion; one global TIMEOUT_S=30s for all job types.\n- Rejected: dead-letter queue (unattended deploys — an unmonitored DLQ grows without bound and hides failures; revisit only if an operator rotation exists); exponential backoff (tail re-entry already spaces attempts by queue drain time); per-job-type timeouts (each new type becomes a tuning decision nobody owns).\n- Code: src/worker.py (MAX_ATTEMPTS, TIMEOUT_S, handle_failure).\n- Source: docs/plans/2026-02-14-worker-queue-design.md (retired in this distillation)."
+      }
+    },
+    {
+      "id": "B2",
+      "doc": "docs/plans/2026-03-01-attempts-field-plan.md",
+      "location": null,
+      "verdict": "DISTILL",
+      "evidence": "implementation landed: src/worker.py:15-20 `handle_failure(queue, job)` matches Task 2's code block (plan lines 13-18) verbatim, and the `job.attempts` field (Task 1) is in use at src/worker.py:16-17; the task list is superseded scaffolding",
+      "proposal": null,
+      "status": "ready",
+      "payload": {
+        "claims": [
+          {
+            "claim": "`handle_failure` increments `job.attempts` before the `>= MAX_ATTEMPTS` check, so a job is dropped on its fifth failure exactly — attempts count failures, not runs started.",
+            "target": "CLAUDE.md",
+            "evidence": "src/worker.py:16-17 `job.attempts += 1` / `if job.attempts >= MAX_ATTEMPTS:`"
+          }
+        ],
+        "decision_entry": "## 2026-03-01 — attempts counter on jobs\n- Landed: `attempts` (int, default 0) on the job record; `handle_failure` increments it and drops the job at `MAX_ATTEMPTS`, else re-enters it at the tail.\n- Code: src/worker.py:15-20 (handle_failure).\n- Source: docs/plans/2026-03-01-attempts-field-plan.md (retired in this distillation)."
+      }
+    },
+    {
+      "id": "B3",
+      "doc": "docs/reference/queue-walkthrough.md",
+      "location": "docs/reference/queue-walkthrough.md:5",
+      "verdict": "CONDENSE",
+      "evidence": "docs/reference/queue-walkthrough.md:5-8 — four lines of narrative carry one checkable fact: the worker runs the job's `run` method under the global timeout; restates src/worker.py:11-12 `def run_attempt(job): return job.run(timeout=TIMEOUT_S)`, and 'thirty-second timeout' restates src/worker.py:4 `TIMEOUT_S = 30`",
+      "proposal": "The worker pulls a job from the queue head and `run_attempt` runs its `run` method under the global `TIMEOUT_S` (30s) (`src/worker.py:11-12`); a job that returns is done.",
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B4",
+      "doc": "docs/reference/queue-walkthrough.md",
+      "location": "docs/reference/queue-walkthrough.md:10",
+      "verdict": "CONDENSE",
+      "evidence": "docs/reference/queue-walkthrough.md:10-15 — six lines of narrative carry the failure path the code shows at src/worker.py:15-20 (`job.attempts += 1`; `queue.drop(job)` at `MAX_ATTEMPTS`; `queue.push_tail(job)`) plus one rationale (tail re-entry spaces the retry behind the queued backlog, letting transient failures clear)",
+      "proposal": "On `JobError`, `handle_failure` increments `job.attempts` and drops the job once it reaches `MAX_ATTEMPTS` (5), else re-enters it at the tail (`src/worker.py:15-20`) — tail re-entry makes the retry wait behind the queued backlog, so the transient condition has usually cleared by the next run.",
+      "status": null,
+      "payload": null
+    }
+  ],
+  "summary": {
+    "cut": 0,
+    "condense": 2,
+    "extract_and_move": 0,
+    "retire_doc": 0,
+    "merge_doc": 0,
+    "distill": 2
+  }
+}

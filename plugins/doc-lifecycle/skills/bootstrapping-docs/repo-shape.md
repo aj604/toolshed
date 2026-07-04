@@ -32,6 +32,7 @@ docs/
     architecture.md        ← cross-unit picture: how the units relate (start here)
     auth/overview.md       ← scoped to this unit; only its non-inferable commands/gotchas
     payments/overview.md
+    payments/walkthrough.md ← durable narrative (growing-docs: `> As of` anchor first line)
     generated/             ← API/schema/CLI reference — auto-generated, never hand-written
   plans/  guides/ …    ← whatever else the team keeps in docs/ — untouched by the agent set
 ```
@@ -63,7 +64,11 @@ Same cut-test as everywhere else. It must **not**:
 - **become a design-rationale essay** — this file is *claim-style*, governed by `writing-docs`:
   every line a *current* relationship verifiable across the units, not aspirational
   architecture. Narrative architecture/conceptual overviews and design rationale sit outside
-  that contract; they belong in process docs (`plans/`), which carry no verifiability bar.
+  that contract; they belong in a **durable narrative doc in this same tree** (created on a
+  demand signal via `growing-docs`, first line its `> As of` anchor) — cross-unit narrative
+  beside this file, unit-scoped narrative in the unit's dir. Not in `plans/`: that folder
+  holds retire-on-landing planning artifacts, and the bloat machinery distills them once
+  their implementation lands — a narrative doc parked there gets read as one.
 
 It **earns its place only when units actually interact.** A repo of genuinely independent units
 needs no cross-unit picture — forcing one is the completeness-chasing the pyramid section
@@ -83,7 +88,10 @@ the way `writing-docs` governs any example — verifiable against the actual wir
    containment boundary — "tracks code" vs not — not the doc-type flavoring this rule bans.)
 3. **One always-loaded doc, at the repo root.** Everything else is read on demand. Keep the
    always-on file lean — a bloated always-loaded doc makes the agent ignore your real
-   instructions.
+   instructions. It is a router, not a repository: inline content only when the agent needs
+   it before it would know to look; the rest is a discovery-named reference doc plus at most
+   a when-to-read line (the router rule — writing-docs' agent-context.md owns it, and it
+   binds sweeps and distills, not just hand edits).
 4. **Canonical agent doc = `AGENTS.md` (root), not an invented name.** Cross-tool standard,
    neutral, not coupled to one tool's auto-load. `CLAUDE.md` is a one-line pointer to it.
    (Claude-Code-only repo: skip the shim, let CLAUDE.md be the high-level doc directly.)
@@ -146,6 +154,9 @@ count; the ratio only flags gaps.
   `overview.md` and route to it from the root.
 - **The agent set scattered across `docs/` root.** `docs/auth/`, `docs/generated/` sprawled
   beside the team's own docs → contain them under one `docs/reference/` subtree.
+- **Narrative docs parked in `plans/`.** A walkthrough/ADR/conceptual overview filed with the
+  planning artifacts will be classified as one and distilled away → it lives in
+  `docs/reference/` with its `> As of` anchor (growing-docs owns the template).
 - **`architecture.md` that restates the per-unit overviews.** Re-describing each unit drifts
   and duplicates → cut to just the relationships between units.
 - **An index that restates `ls`.** Filenames with no when-to-read intent → cut; it only adds
