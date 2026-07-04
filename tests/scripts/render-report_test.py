@@ -265,7 +265,7 @@ class BloatRender(unittest.TestCase):
         self.assertEqual(tm.stdout.strip(), "docs: bloat prune — 2 changes (2026-07-03)")
 
     def test_skip_summary_known_reasons(self):
-        for reason in ("skip-empty", "skip-pending"):
+        for reason in ("skip-empty", "skip-pending", "skip-noop"):
             out = run(sys.executable, SCRIPT, "bloat-skip-summary", "--lane", "distill", "--reason", reason)
             self.assertEqual(out.returncode, 0)
 

@@ -18,7 +18,7 @@ Usage:
     render-report.py bloat-pr-body --report FILE
     render-report.py bloat-pr-title --report FILE --lane L --date YYYY-MM-DD
     render-report.py bloat-pr-summary --report FILE --lane L --pr-url URL
-    render-report.py bloat-skip-summary --lane L --reason {skip-empty|skip-pending}
+    render-report.py bloat-skip-summary --lane L --reason {skip-empty|skip-pending|skip-noop}
 
 Body subcommands (issue-body, pr-body) print markdown on stdout for --body-file.
 Summary subcommands append to the file named by $GITHUB_STEP_SUMMARY (stdout when
@@ -210,6 +210,8 @@ def render_bloat_skip_summary(lane, reason):
     msgs = {
         "skip-empty": f"✅ **{lane} lane: nothing to propose.** The sweep found no {lane} findings.",
         "skip-pending": f"⏭️ **{lane} lane skipped.** An open `doc-bloat/{lane}` PR awaits review.",
+        "skip-noop": (f"✅ **{lane} lane: no diff to propose.** The approved {lane} records "
+                      f"produced no change — already applied, or every claim failed re-verification."),
     }
     if reason not in msgs:
         raise ValueError(f"unknown skip reason: {reason!r}")
