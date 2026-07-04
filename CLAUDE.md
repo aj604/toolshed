@@ -10,7 +10,8 @@ plus the GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml` and `doc-bloat.yml`). The sample
 repos under `tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync
 install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
-`doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`, `workflows/doc-sync.yml`,
+`doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
+`doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `workflows/doc-sync.yml`,
 `workflows/doc-bloat.yml`) and the ci+release workflow (`workflows/release.yml`).
 
 ## Layout (pointers, not descriptions)

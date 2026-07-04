@@ -91,3 +91,14 @@
 - Code: `.github/doc-sync/render-report.py`, `plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md`,
   `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`
 - Source: docs/plans/2026-07-03-doc-sync-pr-body-tightening-design.md @ 09f4300 (removed in this commit)
+
+## 2026-07-03 — Doc bloat inventory tool design
+- Decided: Replaced ad-hoc find/ls doc enumeration with a tested `list-docs.py` helper
+  (git-ls-files-based, config-driven via `audit-scope.json`), keeping the CI allowlist thin and
+  inventory logic unit-tested (`tests/scripts/list-docs_test.py`) rather than improvised per
+  invocation.
+- Still binds: doc enumeration for the bloat audit goes through `list-docs.py` and
+  `audit-scope.json`'s include/exclude globs, never a hand-rolled `find`/`ls` in CI YAML.
+- Code: `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/list-docs.py`,
+  `.github/doc-sync/audit-scope.json`
+- Source: docs/plans/2026-07-03-doc-bloat-inventory-tool-design.md @ 09f4300 (removed in this commit)
