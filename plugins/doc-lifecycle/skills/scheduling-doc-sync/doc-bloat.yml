@@ -3,7 +3,7 @@
 # skill to upgrade this file. Sibling to doc-sync.yml (drift): bloat is detect-and-
 # propose only — fixing-doc-bloat applies a human-approved subset, so each lane opens
 # a DRAFT PR and the merge is the approval.
-# Design: docs/plans/2026-07-03-doc-bloat-nightly-design.md in aj604/toolshed.
+# Design: docs/decisions.md's 2026-07-03/04 doc-bloat nightly entries in aj604/toolshed.
 name: doc-bloat
 
 on:
