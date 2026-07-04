@@ -52,14 +52,18 @@ All shipped files are in this skill's base directory (announced when the skill l
 4. Copy `../detecting-doc-drift/scripts/validate-drift-output.py` → `.github/doc-sync/validate-drift-output.py`
    and `../detecting-doc-bloat/scripts/validate-bloat-output.py` → `.github/doc-sync/validate-bloat-output.py`
    (each workflow's mechanical contract check runs from the repo, not the plugin cache).
-5. Seed the marker — **only if absent**:
+5. Seed the audit scope — **only if absent**: write `.github/doc-sync/audit-scope.json` with the
+   starter `{"exclude": [], "include": []}` (empty arrays — a valid no-op default the human tunes).
+   This is the doc-bloat full-audit scope config (exclude/include globs `list-docs.py` reads to
+   pick which docs the weekly sweep audits). An existing file is a tuned config — never overwrite it.
+6. Seed the marker — **only if absent**:
    `test -f .github/doc-sync-marker || git rev-parse HEAD > .github/doc-sync-marker`
    An existing marker means an existing install: this is an upgrade, and resetting the marker
    would silently skip every commit since the last sync. Never reset it.
-6. Tell the user, concretely:
-   - the seven files to commit (`doc-sync.yml`, `doc-bloat.yml`, `sync-gate.py`,
-     `render-report.py`, `validate-drift-output.py`, `validate-bloat-output.py`, and the seeded
-     `doc-sync-marker`);
+7. Tell the user, concretely:
+   - the eight files to commit (`doc-sync.yml`, `doc-bloat.yml`, `sync-gate.py`,
+     `render-report.py`, `validate-drift-output.py`, `validate-bloat-output.py`, the seeded
+     `audit-scope.json`, and the seeded `doc-sync-marker`);
    - first night: diff from the seeded marker; no drift → marker-only commit, drift → PR on
      `doc-sync/nightly` with evidence, over-cap → a `doc-sync` issue;
    - the weekly bloat sweep opens up to two **draft** PRs (`doc-bloat/prune`, `doc-bloat/distill`);
@@ -92,6 +96,8 @@ All shipped files are in this skill's base directory (announced when the skill l
 
 - Writing detection or fixing instructions inside a workflow prompt → invoke the skills by name.
 - `git rev-parse HEAD > .github/doc-sync-marker` when the file already exists → upgrade, keep it.
+- Overwriting an existing `.github/doc-sync/audit-scope.json` with the empty starter → it's a tuned
+  config, not wiring; seed it only when absent.
 - Adding a direct-commit mode, or dropping the cap/pending-work gates "to simplify" → the gates
   are the product; see the design doc in aj604/toolshed.
 - Committing `drift-report.json` or `pr-body.md` as repo content → artifact hygiene, not history.

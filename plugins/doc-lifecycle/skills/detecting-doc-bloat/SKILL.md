@@ -40,10 +40,19 @@ records and applies the approved ones, dispatching `DISTILL ready` work to the
 
 ## The engine (run these four steps, in order)
 
-1. **Inventory** the docs in scope (all of them in full-audit; only the docs the
-   diff touched in diff-scoped). Note which docs are *living* (README, CLAUDE.md,
-   runbooks — track the current repo) and which are *planning artifacts*
-   (`docs/plans/`, design docs, specs — describe an intended change).
+1. **Inventory** the docs in scope. In full-audit, get them by running
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/list-docs.py --with-lines`
+   (reads `.github/doc-sync/audit-scope.json` if present, else defaults to
+   git-tracked `*.md`); do **not** enumerate docs with shell `find`/`ls` or shell
+   out to `wc`. `--with-lines` returns each doc's line count, largest first; use
+   it to **plan sweep order** — scan the biggest docs first, where the most tokens
+   (and so the most likely leverage) sit. This is a planning aid only, a rough
+   proxy for where to look; it does **not** set record order — records are still
+   ordered by verdict class (doc-level/distill before line-level cuts) per step 4
+   and the Modes section. In diff-scoped, take only the docs the diff touched.
+   Note which docs are *living*
+   (README, CLAUDE.md, runbooks — track the current repo) and which are *planning
+   artifacts* (`docs/plans/`, design docs, specs — describe an intended change).
 
 2. **Judge passages and docs against the writing-docs bar.** Walk every passage
    of every doc in scope — paragraph by paragraph, not a skim for highlights — and
@@ -103,7 +112,7 @@ records and applies the approved ones, dispatching `DISTILL ready` work to the
    caveat/gotcha whose audience lives in another doc?). One combined read reliably
    drops a lens; three single-lens scans are cheap on doc-sized text. Then
    **validate the result mechanically** before handing it off: pipe it through
-   `${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py`
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py`
    (reads the JSON on stdin or as a file arg). It enforces the enum / per-verdict
    proposal / location / status / payload / evidence / summary rules and exits
    nonzero on any violation — **don't emit a result it rejects.** It checks
