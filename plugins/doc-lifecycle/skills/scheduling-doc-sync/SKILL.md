@@ -85,7 +85,7 @@ All shipped files are in this skill's base directory (announced when the skill l
   branch — not even if asked ("PRs are annoying"). The reviewable evidence-PR *is* the product;
   a direct-commit pipeline is an unreviewable one. The only direct push the pipeline makes is
   the marker-only commit on a no-drift run.
-- **Upgrade preserves the marker** (step 5). Overwrite the yml and scripts freely; the marker
+- **Upgrade preserves the marker** (step 6). Overwrite the yml and scripts freely; the marker
   is state, not wiring.
 - **Don't customize the installed YAML beyond the cron/cap/bloat-cron knobs.** Real changes belong
   upstream in the plugin (aj604/toolshed) so every install gets them on next upgrade.

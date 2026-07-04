@@ -72,6 +72,7 @@ Three properties make this more than a report:
 | Component | Type | Use it when |
 |-----------|------|-------------|
 | `bootstrapping-docs` | skill | Pointing at an undocumented repo — produces the smallest high-leverage doc set, then deliberately stops. |
+| `growing-docs` | skill | Growing a doc set past the bootstrap minimum on a demand signal — a second hard derivation of a fact earns a doc, one signal → one smallest artifact; `bootstrapping-docs` exits by writing `docs/doc-scope.md`, whose format this skill owns. |
 | `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
 | `detecting-doc-drift` | skill | Auditing docs against the code — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
 | `fixing-doc-drift` | skill | Applying a drift report to the docs — lands each STALE fix surgically, never deletes, never touches what the report didn't flag, stops on a large blast radius. |
@@ -93,7 +94,7 @@ fixing-doc-drift    lands the drafted fixes, one diff hunk per record
 scheduling-doc-sync installs the nightly Action that runs detect→fix and opens the PR
 ```
 
-All of the above ships today. The automation layer — `scheduling-doc-sync` — installs a nightly GitHub Action that runs detect→fix unattended on the commits since the last sync and opens a docs-update PR with the evidence (PR-only; past the blast-radius cap it files an issue instead); it's wiring on top of the contract, which lives in `detecting-doc-drift` and `fixing-doc-drift`.
+All of the above ships today; past its blast-radius cap the nightly sync files an issue instead of opening one giant PR.
 
 ## How it was built
 

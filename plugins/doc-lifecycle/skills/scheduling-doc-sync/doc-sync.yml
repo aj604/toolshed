@@ -1,7 +1,7 @@
 # doc-sync — nightly documentation drift sync.
 # Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill; re-run that
 # skill to upgrade this file (it preserves .github/doc-sync-marker).
-# Design: docs/plans/2026-07-02-doc-sync-automation-design.md in aj604/toolshed.
+# Design: docs/decisions.md's 2026-07-02 doc-sync automation entries in aj604/toolshed.
 name: doc-sync
 
 on:

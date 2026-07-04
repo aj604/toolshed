@@ -30,7 +30,7 @@ Lifecycle the suite covers: **bootstrap → write → grow → detect → fix.**
 
 Added after Avery's steer that the suite was too aggressive about not creating docs, with
 no path back from bootstrapping's permanent deferral. Design:
-`docs/plans/2026-07-02-growing-docs-design.md`. RED (6 agents, 3 scenarios ×2) showed the
+`docs/decisions.md` (2026-07-02 growing-docs entry). RED (6 agents, 3 scenarios ×2) showed the
 predicted "won't document" failure did NOT materialize — capable agents document well when
 a false claim gives them a drift path; what actually failed: no pure-gap path (drift only
 audits existing claims), demand signals never named, bootstrap's deferred note chat-only
@@ -155,37 +155,13 @@ are the "Skill 6 follow-ups" above and the not-yet-deployed rows in the status t
 
 ## Row 5 shipped: auto-trigger layer (`scheduling-doc-sync`, 2026-07-02)
 
-Built as an installer skill + shipped wiring — nightly GitHub Action calling
-`detecting-doc-drift` in diff-scoped mode, gating through `sync-gate.py`, handing the report
-to `fixing-doc-drift`, opening an evidence PR (blast-radius cap escalates to an issue;
-marker-based idempotency). Built test-first after all (RED axis existed: hand-rolled wiring);
-records in `tests/baselines/doc-sync-setup-red/`, incl. live E2E. Design:
-`docs/decisions.md`'s 2026-07-02 entries. PR #10 (2026-07-03) moved the detect/fix steps onto
-`anthropics/claude-code-action@v1` and extracted run-surface rendering to a shipped
-`render-report.py`; targeted re-GREEN of the affected install/upgrade scenario:
-`tests/baselines/doc-sync-action-regreen/`.
+Shipped as installer skill + Actions wiring (decisions + still-binding constraints: `docs/decisions.md` 2026-07-02 doc-sync entries); PR #10 (2026-07-03) moved detect/fix onto `anthropics/claude-code-action@v1` and extracted rendering to `render-report.py`; records: `tests/baselines/doc-sync-setup-red/` (incl. live E2E), `tests/baselines/doc-sync-action-regreen/`.
 
 ## Rows 7–9: bloat/distillation suite (2026-07-03)
 
-Second pair on the drift pair's shape, covering the **value axis** (drift covers
-accuracy): `detecting-doc-bloat` (contract skill, read-only, emits `CUT` /
-`CONDENSE` / `EXTRACT-AND-MOVE` / `RETIRE-DOC` / `MERGE-DOC` / `DISTILL` records)
-and `fixing-doc-bloat` (applies a human-approved record-ID subset; dispatches the
-new `doc-distiller` agent for `DISTILL` records). Design:
-`docs/decisions.md`'s 2026-07-03 doc-bloat-and-distillation entries; plan:
-the same file. Test records:
-`tests/baselines/bloat-red/` (detecting) and `tests/baselines/bloat-fixing-red/`
-(fixing + distiller). Not yet deployed to `~/.claude` (see status table).
+Bloat/distillation pair + `doc-distiller`, on the drift pair's shape (decisions + still-binding constraints: `docs/decisions.md` 2026-07-03 doc-bloat entries); records: `tests/baselines/bloat-red/`, `tests/baselines/bloat-fixing-red/`; not yet deployed to `~/.claude` (see status table).
 
-**Spine extraction + re-GREEN of `fixing-doc-drift`:** the apply-only rules common
-to both fix skills (authorized-records-only, no "while I'm here", evidence
-travels with the change, etc.) were extracted into
-`plugins/doc-lifecycle/references/apply-discipline.md`, the single owner both
-`fixing-doc-drift` and `fixing-doc-bloat` cite instead of each restating them.
-`fixing-doc-drift`'s SKILL.md was edited to cite the spine; it was targeted
-re-GREENed afterward (`tests/baselines/fixing-drift-red/REGREEN-after-spine-extraction.md`)
-per the re-GREEN convention (behavior-affecting edits to a shipped GREEN skill
-get a targeted re-verify note in that skill's baseline dir).
+**Spine extraction:** apply-only rules single-owned at `plugins/doc-lifecycle/references/apply-discipline.md`, cited by both fix skills (`docs/decisions.md` 2026-07-03 design entry); `fixing-doc-drift` targeted re-GREEN per the re-GREEN convention (behavior-affecting edits to a shipped GREEN skill get a targeted re-verify note in its baseline dir): `tests/baselines/fixing-drift-red/REGREEN-after-spine-extraction.md`.
 
 **Tier boundary (detecting-doc-bloat, full-audit completeness):** four Haiku
 runs against the bloat fixture each missed exactly one of six planted findings,
@@ -196,28 +172,9 @@ final)"). Operational consequence for future scheduling wiring: a full-audit
 invocation at automation tier should run on Sonnet (or run Haiku repeatedly and
 union the records); Haiku is adequate for diff-scoped/single-doc checks.
 
-**Audience-split precision guard (post-GREEN, user steer):** `detecting-doc-bloat`
-gained a guard against flagging CLAUDE.md/AGENTS.md lines as redundant merely
-because README states the same fact — cross-audience duplication (human doc vs.
-agent doc) is deliberate placement, not bloat; dedup verdicts require
-same-audience overlap. Added after GREEN shipped, then targeted-re-verified
-(6/6, no regression) per the re-GREEN convention:
-`tests/baselines/bloat-red/GREEN-results.md` ("Post-GREEN edit").
+**Audience-split precision guard (post-GREEN, user steer):** dedup verdicts require same-audience overlap — README-vs-CLAUDE.md duplication is deliberate placement (`detecting-doc-bloat/SKILL.md`); targeted re-verified 6/6: `tests/baselines/bloat-red/GREEN-results.md` ("Post-GREEN edit").
 
-**Passage-span-in-evidence contract (post-GREEN, whole-branch review fast-follow):**
-passage extent is now normative. `detecting-doc-bloat` requires a passage verdict's
-`evidence` to open with the passage's full extent (`file:start-end`, or `file:start`
-for one line) whose start equals `location` (the anchor = first line);
-`validate-bloat-output.py` enforces it (`check_evidence_span`; new `EvidenceSpan`
-unit tests). `fixing-doc-bloat`'s CUT/CONDENSE/EXTRACT routing rows reworded from
-"the line at `location`" to "the passage the record's evidence delimits, anchored at
-`location`". Closes the review's one Important finding: CONDENSE is multi-line→one-line
-but the old contract carried extent only in prose, and the shared-line CUT apply path
-(README.md:19-20) was untested and would corrupt on a literal "delete the line".
-Targeted re-verified both skills at Sonnet (detect 6/6 with well-formed spans; fixing
-applied the shared-line CUT + nine-line CONDENSE + EXTRACT with no corruption):
-`tests/baselines/bloat-red/GREEN-results.md` and
-`tests/baselines/bloat-fixing-red/GREEN-results.md` ("Post-GREEN edit — passage-span…").
+**Passage-span contract (post-GREEN, review fast-follow):** passage extent is normative — a passage verdict's `evidence` opens `file:start-end` with start = `location` (`detecting-doc-bloat/SKILL.md`; `validate-bloat-output.py` `check_evidence_span`); both skills targeted re-verified: `tests/baselines/bloat-red/GREEN-results.md`, `tests/baselines/bloat-fixing-red/GREEN-results.md` ("Post-GREEN edit — passage-span…").
 
 ## Key learnings (carry forward — these shaped skills 1 and 2)
 

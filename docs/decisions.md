@@ -1,14 +1,17 @@
 # Decisions
 
 ## 2026-06-09 — Documentation skills suite design
-- Decided: Doc-lifecycle suite built one skill per lifecycle stage
-  (bootstrap/write/grow/detect-drift/fix-drift/schedule, later extended with
-  detect-bloat/fix-bloat) on a shared verifiability contract, rather than a single monolithic
-  doc-writing skill or a Diátaxis-page-per-type split. All 8 skills and both agents
-  (`llm-doc-writer`, `doc-distiller`) named in this design now ship in `plugins/doc-lifecycle/`.
-- Still binds: every doc-lifecycle skill's job maps to exactly one lifecycle stage; the
-  verifiability contract (verifiable claim or marked+anchored rationale claim; ADRs routed to
-  `growing-docs`) is shared across the suite, not owned by any single skill.
+- Decided: Activity-centered suite — one skill per documentation activity, doc-type knowledge
+  in per-artifact reference files — designing four skills (bootstrapping-docs, writing-docs,
+  detecting-doc-drift, doc-sync-automation; its 2026-06-20 updates add `fixing-doc-drift` and
+  merge writing-for-llms into `writing-docs`, dispatching `llm-doc-writer`) on a verifiability
+  spine with two claim classes (verifiable / marked+anchored rationale), rather than a single
+  monolithic doc-writing skill or a Diátaxis-page-per-type split; ADRs explicitly out of scope
+  (YAGNI). The suite has since grown to 8 skills and two agents on the same contract (the
+  2026-07-02/03 entries below).
+- Still binds: every doc-lifecycle skill's job maps to exactly one documentation activity; the
+  verifiability contract (verifiable claim or marked+anchored rationale claim) is shared
+  across the suite, not owned by any single skill.
 - Code: `plugins/doc-lifecycle/skills/`, `plugins/doc-lifecycle/agents/`
 - Source: docs/plans/2026-06-09-documentation-skills-suite-design.md @ 09f4300 (removed in this commit)
 
@@ -126,3 +129,35 @@
 - Code: `plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`,
   `plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md`
 - Source: docs/plans/2026-06-20-reference-doc-containment-design.md @ 09f4300 (removed in this commit)
+
+## 2026-07-04 — Durable narrative docs + DISTILL insight extraction
+- Decided: Added a third doc kind — the durable narrative doc, marked by growing-docs' first-line
+  `> As of <date> (<anchors>)` anchor (the marker classifies, not the directory) and homed in
+  `docs/reference/` (plain `docs/` until that tree exists, never `docs/plans/`); grew the
+  `DISTILL ready` payload an optional anchored `insights` channel with a mandatory per-section
+  insight walk; made the always-loaded file a router, not a repository (single owner:
+  `writing-docs/agent-context.md`), with unprompted-critical as a scope test.
+- Still binds: an anchored doc is never a planning artifact to distill, wherever it sits; every
+  `ready` record's evidence states its insight-walk outcome (`insight sweep: none — …` when dry);
+  a `ready` payload must carry at least one claim or one insight; anything landing content in
+  CLAUDE.md/AGENTS.md — extraction, claim, or merge — must clear the router rule.
+- Code: plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md,
+  plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py,
+  plugins/doc-lifecycle/agents/doc-distiller.md,
+  plugins/doc-lifecycle/skills/writing-docs/agent-context.md
+- Source: docs/plans/2026-07-04-durable-narrative-docs-design.md @ d695e25 (removed in this commit)
+
+## 2026-07-02 — Growing docs (demand-driven expansion) design
+- Decided: Added `growing-docs` as a distinct sibling skill rather than extending
+  `bootstrapping-docs` (the two trigger contexts — 'repo has no docs' vs 'docs exist but a demand
+  signal fired' — would fire for neither in one description); growth is demand-triggered via the
+  second-rediscovery rule, one signal → one smallest artifact; `bootstrapping-docs` now exits by
+  writing `docs/doc-scope.md`, whose format `growing-docs` single-owns.
+- Still binds: growth requires a nameable demand signal (never milestones or scheduled review);
+  narrative docs (walkthrough/tutorial/ADR) carry the required `> As of` first-line anchor and
+  stay outside writing-docs' claim bar; bootstrapping-docs' STOP list binds growth too;
+  `docs/doc-scope.md` is read on demand, never a standing section in an always-loaded file.
+- Code: plugins/doc-lifecycle/skills/growing-docs/SKILL.md,
+  plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md,
+  plugins/doc-lifecycle/skills/writing-docs/SKILL.md
+- Source: docs/plans/2026-07-02-growing-docs-design.md @ b9e6f97 (removed in this commit)
