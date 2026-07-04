@@ -56,6 +56,9 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
   output contract — `sync-gate_test.py`/`render-report_test.py` also cover `doc-bloat.yml`'s
   gate/render wiring, since both workflows share the two scripts.
+- Sync PR bodies/titles render via `render-report.py`'s `pr-body`/`pr-title` subcommands (two
+  markdown tables — Fixed/Flagged — plus a singular/plural, flagged-count-bearing title), not
+  inline YAML `jq` — keeping the logic unit-tested and the CI YAML allowlist thin.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill — one door for both human and agent docs; it carries
   the agent-density bar inline and dispatches the `llm-doc-writer` agent for heavy agent-facing jobs).

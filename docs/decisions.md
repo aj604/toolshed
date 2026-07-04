@@ -71,3 +71,11 @@
 - Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat.yml`,
   `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py`
 - Source: docs/plans/2026-07-03-doc-bloat-nightly-design.md @ 09f4300 (removed in this commit)
+
+## 2026-07-03 — doc-sync PR body tightening plan
+- Decided: PR-body/title rendering moved from inline YAML `jq` (as originally planned) into
+  tested Python (`render-report.py`), the same pattern later reused for the bloat lanes.
+- Still binds: any future PR-body/title change belongs in `render-report.py`, with a
+  `render-report_test.py` case, never inline YAML.
+- Code: `.github/doc-sync/render-report.py`, `tests/scripts/render-report_test.py`
+- Source: docs/plans/2026-07-03-doc-sync-pr-body-tightening-plan.md @ 09f4300 (removed in this commit)
