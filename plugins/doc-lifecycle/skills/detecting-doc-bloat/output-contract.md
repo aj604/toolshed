@@ -43,7 +43,7 @@ for all six.
     "doc": "docs/plans/2025-11-02-cache-layer-design.md",
     "location": null,
     "verdict": "DISTILL",
-    "evidence": "implementation landed: src/cache.py:5 `CACHE_TTL_S = 300`, cache.py:6 `MAX_ENTRIES = 1024`, cache.py:14 `get_or_fill` match the design; Problem/Options/Sketch sections are superseded scaffolding",
+    "evidence": "implementation landed: src/cache.py:5 `CACHE_TTL_S = 300`, cache.py:6 `MAX_ENTRIES = 1024`, cache.py:14 `get_or_fill` match the design; Problem/Sketch sections are superseded scaffolding; insight sweep: Options §'invalidation' carries the no-invalidation rationale → 1 insight",
     "proposal": null,
     "status": "ready",
     "payload": {

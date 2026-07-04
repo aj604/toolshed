@@ -49,6 +49,12 @@ intended change; distilled once landed). Two consequences:
    the residue; an all-empty payload is invalid. Protecting breadth via
    `audit-scope.json` excludes was rejected: excluding `docs/plans/` silently empties
    the distill lane, and excludes protect directories, not content.
+   Recognition is forced, not hoped for: every `ready` record requires a per-section
+   **insight walk** ("if this section vanishes, is there a decision, constraint, or
+   deliberate absence a future maintainer could wrongly 'fix'?") whose outcome the
+   record's `evidence` must state (`insight sweep: none — …` when dry), and the
+   bloat draft-PR body renders each DISTILL row's claim/insight counts so a human
+   reviewer sees `0 insights` and can reject an unexamined distill.
 5. **Distiller hardening.** `doc-distiller` additionally: lands insights (creating the
    narrative target with its `> As of` line if absent, refreshing it if present),
    verifies every historical assertion in the decision entry against the artifact's
@@ -64,7 +70,11 @@ intended change; distilled once landed). Two consequences:
 - `detecting-doc-bloat/scripts/validate-bloat-output.py` (+ dogfooded copy,
   + `tests/scripts/validate-bloat-output_test.py`) — `insights` shape validation;
   claims-or-insights non-empty rule.
-- `detecting-doc-bloat/output-contract.md` — worked example gains an insight.
+- `detecting-doc-bloat/output-contract.md` — worked example gains an insight and
+  the insight-sweep evidence clause.
+- `scheduling-doc-sync/scripts/render-report.py` (+ dogfooded copy,
+  + `tests/scripts/render-report_test.py`) — DISTILL rows in the bloat PR body
+  carry `(N claims, M insights)`.
 - `agents/doc-distiller.md` — insights landing, decision-entry verification,
   inbound-reference sweep, widened touch-list.
 - `fixing-doc-bloat/SKILL.md` — dispatch contract updated to match.

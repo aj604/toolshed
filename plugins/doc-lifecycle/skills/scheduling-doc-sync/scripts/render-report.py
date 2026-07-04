@@ -190,7 +190,17 @@ def render_bloat_pr_body(records):
     ]
     for r in records:
         where = r.get("location") or r.get("doc")
-        lines.append(f"| `{r['verdict']}` @ `{where}` | {md_cell(r['evidence'])} |")
+        change = f"`{r['verdict']}` @ `{where}`"
+        payload = r.get("payload")
+        if r["verdict"] == "DISTILL" and isinstance(payload, dict):
+            # Surface the residue counts so a reviewer sees "0 insights" and can
+            # reject a distill that examined nothing worth keeping.
+            nc = len(payload.get("claims") or [])
+            ni = len(payload.get("insights") or [])
+            claims = f"{nc} claim" + ("" if nc == 1 else "s")
+            insights = f"{ni} insight" + ("" if ni == 1 else "s")
+            change += f" ({claims}, {insights})"
+        lines.append(f"| {change} | {md_cell(r['evidence'])} |")
     return "\n".join(lines)
 
 

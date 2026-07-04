@@ -249,6 +249,35 @@ class BloatRender(unittest.TestCase):
         os.unlink(report)
         self.assertIn("`RETIRE-DOC` @ `docs/plans/old.md`", out.stdout)
 
+    def test_pr_body_distill_row_carries_payload_counts(self):
+        ready = brec("DISTILL", doc="docs/plans/old.md")
+        ready["status"] = "ready"
+        ready["payload"] = {
+            "claims": [{"claim": "c", "target": "README.md", "evidence": "e"}],
+            "insights": [{"insight": "i", "target": "docs/reference/x.md",
+                          "anchor": "docs/plans/old.md @ abc1234"},
+                         {"insight": "j", "target": "docs/reference/x.md",
+                          "anchor": "docs/plans/old.md @ abc1234"}],
+            "decision_entry": "## entry",
+        }
+        report = write_report([ready])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertIn("`DISTILL` @ `docs/plans/old.md` (1 claim, 2 insights)", out.stdout)
+
+    def test_pr_body_distill_row_flags_zero_insights(self):
+        ready = brec("DISTILL", doc="docs/plans/old.md")
+        ready["status"] = "ready"
+        ready["payload"] = {
+            "claims": [{"claim": "c", "target": "README.md", "evidence": "e"},
+                       {"claim": "d", "target": "README.md", "evidence": "e"}],
+            "decision_entry": "## entry",
+        }
+        report = write_report([ready])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertIn("`DISTILL` @ `docs/plans/old.md` (2 claims, 0 insights)", out.stdout)
+
     def test_pr_body_escapes_pipe(self):
         report = write_report([brec("CUT", location="README.md:5", evidence="a | b")])
         out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)

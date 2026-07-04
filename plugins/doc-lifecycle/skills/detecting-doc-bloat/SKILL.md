@@ -118,10 +118,18 @@ records and applies the approved ones, dispatching `DISTILL ready` work to the
      (`target`, usually under `docs/reference/`; each `insight` carries an
      `anchor` naming its provenance — the artifact `path @ SHA`, or a `file:line`
      / date), and (c) one `decision_entry` for the decision log. Everything else
-     is git history. Most plans are pure implementation recipe and carry **no**
-     insights — an empty `insights` is the common case, not a gap to fill; an
-     insight that merely restates a claim or the decision entry is bloat relocated,
-     not breadth preserved. This is a `DISTILL`, not a per-line `CUT` spree and
+     is git history. **The insight walk is mandatory, not a vibe check:** before
+     emitting a `ready` record, walk the artifact section by section and ask of
+     each — *if this section vanishes, is there a decision, constraint, or
+     deliberate absence a future maintainer could wrongly "fix"?* Every yes
+     becomes an insight (or a claim, when a living claim doc is the right home).
+     The record's `evidence` must account for the walk's outcome: name the
+     sections that yielded insights, or close with
+     `insight sweep: none — pure implementation recipe`. An empty `insights` you
+     can defend is common (most plans are recipe); an empty `insights` because
+     you never walked is a lossy distill. An insight that merely restates a
+     claim or the decision entry is bloat relocated, not breadth preserved.
+     This is a `DISTILL`, not a per-line `CUT` spree and
      **not** a "keep it as a historical record" — a design doc kept verbatim as a
      historical record is exactly the bloat this verdict removes: decisions go to
      the log, breadth to a narrative doc, scaffolding to git history.
@@ -213,7 +221,7 @@ README.md
   [B1] CONDENSE   README.md:22 — 7 lines of eviction narrative → one line citing CACHE_TTL_S (src/cache.py:5)
   [B2] EXTRACT    README.md:31 — cold-start latency gotcha belongs in RUNBOOK.md
 docs/plans/2025-11-02-cache-layer-design.md
-  [B3] DISTILL(ready) — implementation landed (src/cache.py); extract TTL=300s, LRU cap=1024 + log entry
+  [B3] DISTILL(ready) — implementation landed (src/cache.py); 2 claims (TTL=300s, LRU cap=1024) + 1 insight (no-invalidation rationale → docs/reference/caching.md) + log entry
 ```
 
 Then ask for the approved IDs. The approved subset is what `fixing-doc-bloat`
@@ -242,6 +250,9 @@ receives — nothing you present as a summary is authorization on its own.
 - A `DISTILL ready` whose `insights` restate its `claims` or `decision_entry` →
   bloat relocated, not breadth preserved; insights carry only what neither code nor
   the log can.
+- A `DISTILL ready` whose `evidence` doesn't account for the insight walk (sections
+  named, or `insight sweep: none — …`) → "no insights" is a conclusion the walk
+  earns, never a default; run the per-section walk and say so.
 - Marking an `EXTRACT-AND-MOVE` candidate "keep as-is" (it's valuable) or sending it
   to a code comment / deletion → value ≠ placement; move it to the right doc intact.
 - Flagging the *target* of an extraction/merge, or a short dense doc, as bloat → the
