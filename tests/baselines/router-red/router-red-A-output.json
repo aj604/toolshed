@@ -1,0 +1,38 @@
+{
+  "records": [
+    {
+      "id": "B1",
+      "doc": "README.md",
+      "location": "README.md:11",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "README.md:11-14 — operational gotcha with the extract tells verbatim ('One thing worth knowing', 'silently binds a random port') addressed to whoever operates the dev server, sitting in the user-facing README Usage section; the gotcha sentence begins mid-line 11 after `Run \\`exporter run --tenant NAME\\`.`, which must stay — only the gotcha moves. `grep -rn portlock` matches only README.md:14, so no agent/operator doc carries the `.portlock` fact today; CLAUDE.md's Gotchas section is its home.",
+      "proposal": {
+        "target": "CLAUDE.md",
+        "text": "- The dev server keeps a `.portlock` file after a crash and silently binds a random port on the next start — delete `.portlock` before restarting."
+      },
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B2",
+      "doc": "README.md",
+      "location": "README.md:16",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "README.md:16-18 — caveat tell verbatim ('Note that') on platform-specific export behavior, addressed to anyone diffing exports across platforms, sitting in the user-facing README. The right doc already exists: docs/reference/export.md:4-5 states 'Newline handling is explicit: the writer opens files in binary mode (`src/export.py:4`)' but lacks the Windows trailing-newline consequence this passage carries; src/export.py:4 comment 'opens in binary mode to control newlines explicitly' backs the mechanism.",
+      "proposal": {
+        "target": "docs/reference/export.md",
+        "text": "- Windows builds drop the trailing newline (binary-mode writer, `src/export.py:4`), so exports diff by one line-ending across platforms."
+      },
+      "status": null,
+      "payload": null
+    }
+  ],
+  "summary": {
+    "cut": 0,
+    "condense": 0,
+    "extract_and_move": 2,
+    "retire_doc": 0,
+    "merge_doc": 0,
+    "distill": 0
+  }
+}

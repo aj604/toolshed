@@ -1,0 +1,38 @@
+{
+  "records": [
+    {
+      "id": "B1",
+      "doc": "README.md",
+      "location": "README.md:11",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "README.md:11-14 — operational gotcha (\"One thing worth knowing\", \"silently binds a random port\") addressed to anyone running the dev server locally after a crash, sitting in the user-facing README's Usage section; CLAUDE.md already has the Gotchas section (CLAUDE.md:3) where this class of tribal knowledge lives. Note: line 11 also opens with the usage sentence 'Run `exporter run --tenant NAME`.', which is not part of the extracted passage and must remain",
+      "proposal": {
+        "target": "CLAUDE.md",
+        "text": "- **Delete `.portlock` before restarting the dev server after any crash** — a stale port lock file makes the next start silently bind a random port."
+      },
+      "status": null,
+      "payload": null
+    },
+    {
+      "id": "B2",
+      "doc": "README.md",
+      "location": "README.md:16",
+      "verdict": "EXTRACT-AND-MOVE",
+      "evidence": "README.md:16-18 — a caveat (\"Note that ... which only matters if you diff exports across platforms\") about export newline behavior sitting in the README's Usage section; the export-behavior claim doc docs/reference/export.md:4-5 already carries the binary-mode claim (`src/export.py:4`, whose comment reads 'opens in binary mode to control newlines explicitly') and is where this consequence belongs",
+      "proposal": {
+        "target": "docs/reference/export.md",
+        "text": "- On Windows builds the exporter drops the trailing newline (binary-mode writer, `src/export.py:4`) — exports diffed across platforms differ by that byte."
+      },
+      "status": null,
+      "payload": null
+    }
+  ],
+  "summary": {
+    "cut": 0,
+    "condense": 0,
+    "extract_and_move": 2,
+    "retire_doc": 0,
+    "merge_doc": 0,
+    "distill": 0
+  }
+}
