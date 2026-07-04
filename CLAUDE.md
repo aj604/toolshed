@@ -36,26 +36,16 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
 ## Conventions
 
 - **Skills are built test-first** (RED → GREEN → REFACTOR with subagents) via the
-  `superpowers:writing-skills` methodology; test records live under `tests/baselines/` — one dir
-  per test milestone (`bloat-red/`, `bloat-fixing-red/`, `bloat-inventory-regreen/`, `bootstrap-red/`, `bootstrap-green/`,
-  `doc-sync-action-regreen/`, `doc-sync-setup-red/`, `drift-red/`, `evidence-brevity-red/`, `fixing-drift-red/`, `growing-red/`, `growing-green/`,
-  `llm-doc-red/`, `writing-docs-merge-red/`), plus the original writing-docs records loose at
-  the `tests/baselines/` root.
+  `superpowers:writing-skills` methodology; test records live under `tests/baselines/`, one dir
+  per test milestone (see the directory for the current set), plus the original writing-docs
+  records loose at the root.
   Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
   `docs/plans/2026-06-09-documentation-skills-suite-design.md` (suite) and
   `docs/plans/2026-06-20-reference-doc-containment-design.md` (the `docs/reference/` shape).
-- **The helper scripts have unit tests** (stdlib `unittest`, no deps):
-  `python3 tests/scripts/validate-drift-output_test.py` after touching `detecting-doc-drift`'s
-  `validate-drift-output.py` or its output contract; `python3 tests/scripts/validate-bloat-output_test.py`
-  after touching `detecting-doc-bloat`'s `validate-bloat-output.py` or its output contract;
-  `python3 tests/scripts/list-docs_test.py` after touching `detecting-doc-bloat`'s `list-docs.py`
-  or its inventory contract;
-  `python3 tests/scripts/sync-gate_test.py` after touching `scheduling-doc-sync`'s `sync-gate.py`
-  or `doc-sync.yml`'s gate wiring; `python3 tests/scripts/render-report_test.py` after touching
-  `scheduling-doc-sync`'s `render-report.py` or the run-surface strings it renders.
-  `sync-gate.py` and `render-report.py` now also gate/render the `doc-bloat.yml` lanes
-  (`bloat-pre`/`bloat-lane` and `bloat-pr-body`/`bloat-pr-title`/etc.) — the same test commands
-  cover both workflows.
+- **The helper scripts have unit tests** (stdlib `unittest`, no deps) at
+  `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
+  output contract — `sync-gate_test.py`/`render-report_test.py` also cover `doc-bloat.yml`'s
+  gate/render wiring, since both workflows share the two scripts.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill — one door for both human and agent docs; it carries
   the agent-density bar inline and dispatches the `llm-doc-writer` agent for heavy agent-facing jobs).
