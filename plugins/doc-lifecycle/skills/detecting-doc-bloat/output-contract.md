@@ -8,9 +8,10 @@ only for `DISTILL`. Every `proposal`/`payload` text meets the writing-docs bar.
 
 The four records below cover the shapes that trip agents up: a `CONDENSE` with
 complete replacement text, a `MERGE-DOC` naming the survivor, a `DISTILL ready`
-whose implementation has landed (payload with two code-verified claims and a
-decision-log entry), and a `DISTILL pending-implementation` whose code does not
-exist yet (null payload — the trap: no claims may be extracted). **This is an
+whose implementation has landed (payload with two code-verified claims, one
+anchored insight bound for a durable narrative doc, and a decision-log entry),
+and a `DISTILL pending-implementation` whose code does not exist yet (null
+payload — the trap: no claims may be extracted). **This is an
 example of record shape, not an inventory of findings** — it shows four of the six
 verdicts against one invented repo (a small caching library); your audit sweeps
 for all six.
@@ -58,6 +59,13 @@ for all six.
           "evidence": "src/cache.py:6 `MAX_ENTRIES = 1024`"
         }
       ],
+      "insights": [
+        {
+          "insight": "The missing invalidation API is deliberate: staleness is bounded by TTL alone, because an invalidation path would reintroduce the cross-worker coherence protocol the design rejected.",
+          "target": "docs/reference/caching.md",
+          "anchor": "docs/plans/2025-11-02-cache-layer-design.md @ 4f3a2b1"
+        }
+      ],
       "decision_entry": "## 2025-11-02 — cache layer\n- Decided: in-process LRU cache, fixed TTL 300s, cap 1024 entries; rejected Redis-backed shared cache (operational overhead disproportionate for single-node deploys).\n- Still binds: revisit a shared cache only if cross-worker hit-rate becomes a measured bottleneck.\n- Code: src/cache.py (CACHE_TTL_S, MAX_ENTRIES, get_or_fill).\n- Source: docs/plans/2025-11-02-cache-layer-design.md (retired in this distillation)."
     }
   },
@@ -74,7 +82,7 @@ for all six.
 ]
 ```
 
-B3 (`ready`) carries the payload; B4 (`pending-implementation`) carries `payload: null` — assigning it any payload is a contract violation the validator rejects.
+B3 (`ready`) carries the payload; B4 (`pending-implementation`) carries `payload: null` — assigning it any payload is a contract violation the validator rejects. B3's `insights` entry shows the shape for durable breadth: a rationale-for-a-deliberate-absence no code line can verify, targeted at a durable narrative doc, anchored to its provenance (`path @ SHA`). Insights are optional — most plans have none.
 
 ## The emitted artifact: records wrapped with a summary
 

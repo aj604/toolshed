@@ -54,6 +54,16 @@ def distill_ready(**over):
     return base
 
 
+def insight(**over):
+    base = {
+        "insight": "No invalidation API is deliberate: staleness is bounded by TTL.",
+        "target": "docs/reference/caching.md",
+        "anchor": "docs/plans/old-design.md @ abc1234",
+    }
+    base.update(over)
+    return base
+
+
 def run(payload, as_file=False):
     text = payload if isinstance(payload, str) else json.dumps(payload)
     if as_file:
@@ -161,10 +171,63 @@ class InvalidRecords(unittest.TestCase):
     def test_distill_ready_needs_payload(self):
         self.assert_fails([distill_ready(payload=None)], "payload")
 
-    def test_distill_payload_claims_nonempty(self):
+    def test_distill_payload_empty_claims_without_insights(self):
         bad = distill_ready()
         bad["payload"]["claims"] = []
-        self.assert_fails([bad], "claims")
+        self.assert_fails([bad], "claim")
+
+    def test_distill_payload_unexpected_key(self):
+        bad = distill_ready()
+        bad["payload"]["notes"] = "x"
+        self.assert_fails([bad], "payload")
+
+    def test_insight_missing_anchor(self):
+        bad = distill_ready()
+        item = insight()
+        del item["anchor"]
+        bad["payload"]["insights"] = [item]
+        self.assert_fails([bad], "insight")
+
+    def test_insight_empty_target(self):
+        bad = distill_ready()
+        bad["payload"]["insights"] = [insight(target="  ")]
+        self.assert_fails([bad], "insight")
+
+    def test_insights_must_be_list(self):
+        bad = distill_ready()
+        bad["payload"]["insights"] = insight()
+        self.assert_fails([bad], "insight")
+
+
+class DistillInsights(unittest.TestCase):
+    """DISTILL ready payload may carry anchored insights bound for a durable
+    narrative doc; claims may be empty only when insights carry the residue."""
+
+    def test_claims_plus_insights_valid(self):
+        good = distill_ready()
+        good["payload"]["insights"] = [insight()]
+        r = run([good])
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_insights_only_valid(self):
+        good = distill_ready()
+        good["payload"]["claims"] = []
+        good["payload"]["insights"] = [insight()]
+        r = run([good])
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_empty_insights_list_with_claims_valid(self):
+        good = distill_ready()
+        good["payload"]["insights"] = []
+        r = run([good])
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_empty_claims_and_empty_insights_fails(self):
+        bad = distill_ready()
+        bad["payload"]["claims"] = []
+        bad["payload"]["insights"] = []
+        r = run([bad])
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
 
 class EvidenceSpan(unittest.TestCase):

@@ -70,6 +70,7 @@ cuts duplication, not demand: a fact derived the hard way twice — by anyone, a
 | On-call mid-incident, under pressure | runbook | runbooks.md |
 | AI agent starting a session in the repo | CLAUDE.md / AGENTS.md | agent-context.md |
 | Agent reading on demand in a multi-unit repo | `docs/reference/` tree (architecture.md, per-unit overview.md) | bootstrapping-docs' repo-shape.md (shape + routing) |
+| Reader needing breadth/why — walkthrough, ADR, conceptual overview | durable narrative doc, also under `docs/reference/` (out of this skill's scope) | growing-docs (template + `> As of` anchor) |
 
 ## One bar, every reader — then route
 

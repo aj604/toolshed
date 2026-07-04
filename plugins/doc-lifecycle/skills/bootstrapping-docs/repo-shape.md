@@ -32,6 +32,7 @@ docs/
     architecture.md        ← cross-unit picture: how the units relate (start here)
     auth/overview.md       ← scoped to this unit; only its non-inferable commands/gotchas
     payments/overview.md
+    payments/walkthrough.md ← durable narrative (growing-docs: `> As of` anchor first line)
     generated/             ← API/schema/CLI reference — auto-generated, never hand-written
   plans/  guides/ …    ← whatever else the team keeps in docs/ — untouched by the agent set
 ```
@@ -63,7 +64,11 @@ Same cut-test as everywhere else. It must **not**:
 - **become a design-rationale essay** — this file is *claim-style*, governed by `writing-docs`:
   every line a *current* relationship verifiable across the units, not aspirational
   architecture. Narrative architecture/conceptual overviews and design rationale sit outside
-  that contract; they belong in process docs (`plans/`), which carry no verifiability bar.
+  that contract; they belong in a **durable narrative doc in this same tree** (created on a
+  demand signal via `growing-docs`, first line its `> As of` anchor) — cross-unit narrative
+  beside this file, unit-scoped narrative in the unit's dir. Not in `plans/`: that folder
+  holds retire-on-landing planning artifacts, and the bloat machinery distills them once
+  their implementation lands — a narrative doc parked there gets read as one.
 
 It **earns its place only when units actually interact.** A repo of genuinely independent units
 needs no cross-unit picture — forcing one is the completeness-chasing the pyramid section
@@ -146,6 +151,9 @@ count; the ratio only flags gaps.
   `overview.md` and route to it from the root.
 - **The agent set scattered across `docs/` root.** `docs/auth/`, `docs/generated/` sprawled
   beside the team's own docs → contain them under one `docs/reference/` subtree.
+- **Narrative docs parked in `plans/`.** A walkthrough/ADR/conceptual overview filed with the
+  planning artifacts will be classified as one and distilled away → it lives in
+  `docs/reference/` with its `> As of` anchor (growing-docs owns the template).
 - **`architecture.md` that restates the per-unit overviews.** Re-describing each unit drifts
   and duplicates → cut to just the relationships between units.
 - **An index that restates `ls`.** Filenames with no when-to-read intent → cut; it only adds

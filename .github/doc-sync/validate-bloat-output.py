@@ -105,16 +105,34 @@ def check_distill(where, status, payload, errs):
             errs.append(f"{where}: pending-implementation forbids payload "
                         f"(no landed code to verify against)")
         return
-    ok = (isinstance(payload, dict) and set(payload) == {"claims", "decision_entry"}
-          and nonempty_str(payload.get("decision_entry"))
-          and isinstance(payload.get("claims"), list) and payload["claims"]
-          and all(isinstance(c, dict) and set(c) == {"claim", "target", "evidence"}
-                  and all(nonempty_str(c[k]) for k in c)
-                  for c in payload["claims"]))
-    if not ok:
+    keys_ok = (isinstance(payload, dict)
+               and set(payload) in ({"claims", "decision_entry"},
+                                    {"claims", "decision_entry", "insights"}))
+    claims_ok = (keys_ok
+                 and nonempty_str(payload.get("decision_entry"))
+                 and isinstance(payload.get("claims"), list)
+                 and all(isinstance(c, dict) and set(c) == {"claim", "target", "evidence"}
+                         and all(nonempty_str(c[k]) for k in c)
+                         for c in payload["claims"]))
+    if not claims_ok:
         errs.append(f"{where}: DISTILL ready requires payload = "
-                    f"{{'claims': [{{claim,target,evidence}}, ...] (>=1), "
-                    f"'decision_entry': text}} — claims all non-empty")
+                    f"{{'claims': [{{claim,target,evidence}}, ...], "
+                    f"'decision_entry': text, 'insights'?: [...]}} — "
+                    f"claims all non-empty")
+        return
+    insights = payload.get("insights", [])
+    insights_ok = (isinstance(insights, list)
+                   and all(isinstance(n, dict)
+                           and set(n) == {"insight", "target", "anchor"}
+                           and all(nonempty_str(n[k]) for k in n)
+                           for n in insights))
+    if not insights_ok:
+        errs.append(f"{where}: DISTILL ready insights must be a list of "
+                    f"{{insight,target,anchor}}, all non-empty")
+        return
+    if not payload["claims"] and not insights:
+        errs.append(f"{where}: DISTILL ready requires at least one claim or "
+                    f"one insight — an empty payload distills nothing")
 
 
 def validate_record(i, r):
