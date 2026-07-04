@@ -7,3 +7,18 @@
   once the skill goes green.
 - Code: `tests/baselines/bloat-red/`, `tests/baselines/bloat-fixing-red/`
 - Source: docs/plans/2026-07-03-doc-bloat-and-distillation-plan.md @ 09f4300 (removed in this commit)
+
+## 2026-07-03 — Doc bloat and distillation design
+- Decided: Added `detecting-doc-bloat`/`fixing-doc-bloat` as a second skill pair mirroring
+  `detecting-doc-drift`/`fixing-doc-drift`'s shape (contract-emitting detector + human-gated
+  applier), covering the value axis (drift covers accuracy). `DISTILL` retires a landed
+  planning artifact by extracting its durable decisions into living docs plus one
+  decision-log entry, then deleting it — chosen over keeping design docs verbatim forever or
+  per-line-cutting them.
+- Still binds: the apply-only discipline for fix skills has one owner
+  (`plugins/doc-lifecycle/references/apply-discipline.md`); `DISTILL`'s two-status model
+  (`pending-implementation` forbids payload, `ready` requires verified claims + one
+  decision-log entry) is closed.
+- Code: `plugins/doc-lifecycle/references/apply-discipline.md`,
+  `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py`
+- Source: docs/plans/2026-07-03-doc-bloat-and-distillation-design.md @ 09f4300 (removed in this commit)

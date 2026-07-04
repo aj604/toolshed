@@ -45,6 +45,13 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
   Method, status, and resume notes: `docs/plans/HANDOFF.md`; full design:
   `docs/plans/2026-06-09-documentation-skills-suite-design.md` (suite) and
   `docs/plans/2026-06-20-reference-doc-containment-design.md` (the `docs/reference/` shape).
+- The generic apply-only rules for fix skills (authorized-records-only, no-while-I'm-here,
+  blast-radius stop, evidence-travels-with-the-change) have one owner,
+  `plugins/doc-lifecycle/references/apply-discipline.md`, cited (not restated) by both
+  `fixing-doc-drift` and `fixing-doc-bloat`.
+- `DISTILL` records use a closed two-status model: `pending-implementation` forbids any
+  payload; `ready` requires payload = verified claims plus one decision-log entry — the
+  mechanism for retiring a landed planning artifact, not a per-line CUT spree.
 - **The helper scripts have unit tests** (stdlib `unittest`, no deps) at
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
   output contract — `sync-gate_test.py`/`render-report_test.py` also cover `doc-bloat.yml`'s
