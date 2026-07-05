@@ -20,7 +20,7 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
   root**: `/plugin marketplace add <owner>/<repo>` only finds `marketplace.json` there.
 - `plugins/doc-lifecycle/` — the one published plugin. `.claude-plugin/plugin.json` is its
   manifest; `skills/` and `agents/` hold its contents.
-- `docs/` — `plans/` (design docs + `HANDOFF.md`). Not published.
+- `docs/` — `plans/` (design docs + `HANDOFF.md`), `guides/` (narrative user guides). Not published.
 - `tests/` — `fixtures/` (runnable sample repos) and `baselines/` (RED/GREEN skill-test records).
   Not published.
 
@@ -56,7 +56,9 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill — one door for both human and agent docs; it carries
   the agent-density bar inline and dispatches the `llm-doc-writer` agent for heavy agent-facing jobs).
-- **This repo's `docs/` stays flat** (`plans/`) — a single-unit marketplace; the
+- **This repo's `docs/` stays flat** (`plans/`, plus `guides/` — durable narrative user guides,
+  each carrying growing-docs' `> As of` first-line anchor, never planning artifacts) — a
+  single-unit marketplace; the
   `docs/reference/` convention the plugin prescribes for larger repos
   (`plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md`) does not apply here —
   don't add one.
