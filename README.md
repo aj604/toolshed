@@ -18,7 +18,7 @@
 - schema 2 → exits 5           schema 3 → exits 4      (worker bumped)
 ```
 
-`doc-lifecycle` is a Claude Code plugin that turns that silent failure into a **record**: docs whose job is to track the repo are written so every line is a claim checkable against the code — which means drift can be *detected* with evidence and *fixed* surgically, instead of discovered mid-incident.
+`doc-lifecycle` is a Claude Code plugin that turns that silent failure into a **record**: docs whose job is to track the repo are written so every line is a claim checkable against the code. That makes them auditable on both axes docs fail on — **drift** (the claim is now false) and **bloat** (the claim is true but no longer earns its tokens) — with evidence, and fixable surgically, instead of discovered mid-incident.
 
 <p align="center">
   <img src="assets/drift-audit-demo.svg" alt="Animated terminal demo: asking whether CLAUDE.md is still accurate triggers detecting-doc-drift, which greps the Makefile, reads worker.js, and emits a STALE record with evidence and a ready-to-land fix." width="720">
@@ -34,20 +34,26 @@
 /plugin install doc-lifecycle@toolshed
 ```
 
-## Then just ask
+Developing against a local checkout? `/plugin marketplace add /path/to/toolshed` instead.
 
-The skills trigger on ordinary requests — there are no new commands to learn:
+Installing schedules nothing and changes nothing — the skills trigger on ordinary requests in your sessions, and every doc edit flows through your approval. Unattended automation exists, but it's the last step of the path below and it's explicitly opted into.
 
-| You say | What runs | What you get back |
-|---------|-----------|-------------------|
-| "document this project" | `bootstrapping-docs` | the smallest high-leverage doc set for an undocumented repo — then it deliberately stops |
-| "is the README still accurate?" | `detecting-doc-drift` | a structured drift report: every claim verified, stale, or unverifiable, each with evidence |
-| "apply that drift report" | `fixing-doc-drift` | each flagged line fixed surgically — nothing the report didn't authorize gets touched |
-| any edit to a README / runbook / `CLAUDE.md` | `writing-docs` | a doc where every line is a claim verifiable against the repo |
+## Pick your starting point
 
-## What a drift audit hands you
+Start with **[the principles](docs/guides/principles.md)** — one page on the model everything shares: docs as checkable claims, propose → approve → apply, automation as a graduation. Then:
 
-Not "the docs look a bit stale" — a machine-checkable record per claim. This is the worked example from the skill's own [output contract](plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md):
+| Your repo today | You say | Guide |
+|-----------------|---------|-------|
+| No docs yet | "document this project" | [Starting docs from scratch](docs/guides/starting-docs-from-scratch.md) |
+| Docs exist — are they still true? | "is the README still accurate?" | the drift loop — demoed above, [dissected below](#what-an-audit-hands-you) |
+| Docs exist — accurate, but heavy | "audit the docs for bloat" | [Auditing and fixing bloat](docs/guides/auditing-doc-bloat.md) |
+| Loops feel routine — make them unattended | "set up doc sync" | [Turning on the nightly](docs/guides/scheduling-doc-sync.md) |
+
+Two skills need no starting point because they trigger on the way: any edit to a README / runbook / `CLAUDE.md` invokes `writing-docs` (every line a verifiable claim), and "should we document X?" invokes `growing-docs` (demand signals grow docs; calendars don't).
+
+## What an audit hands you
+
+Not "the docs look a bit stale" — a machine-checkable record per claim. This is a record from the worked example in the drift skill's own [output contract](plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md):
 
 ```json
 {
@@ -67,47 +73,45 @@ Three properties make this more than a report:
 - **`fix` is the complete replacement line**, not an instruction — so `fixing-doc-drift` can land it as a one-hunk diff without re-deciding anything.
 - **The shape is enforced mechanically** — a bundled validator ([`validate-drift-output.py`](plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py), stdlib-only) rejects malformed records and emits a recomputed `summary` line automation can gate on.
 
+Closing the loop is one more request — "apply that drift report" — and `fixing-doc-drift` lands each `STALE` record's `fix` at its `location`, touching nothing the report didn't flag.
+
+Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum, cited evidence, [their own validator](plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py) — and you approve fixes **by record ID**; the [bloat guide](docs/guides/auditing-doc-bloat.md) walks one end to end.
+
 ## What's in it
 
 | Component | Type | Use it when |
 |-----------|------|-------------|
-| `bootstrapping-docs` | skill | Pointing at an undocumented repo — produces the smallest high-leverage doc set, then deliberately stops. |
-| `growing-docs` | skill | Growing a doc set past the bootstrap minimum on a demand signal — a second hard derivation of a fact earns a doc, one signal → one smallest artifact; `bootstrapping-docs` exits by writing `docs/doc-scope.md`, whose format this skill owns. |
+| `bootstrapping-docs` | skill | Pointing at an undocumented repo — produces the smallest high-leverage doc set, then deliberately stops, recording deferrals in `docs/doc-scope.md`. |
+| `growing-docs` | skill | Growing a doc set past the bootstrap minimum on a demand signal — a second hard derivation of a fact earns a doc, one signal → one smallest artifact; owns the `docs/doc-scope.md` format. |
 | `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
-| `detecting-doc-drift` | skill | Auditing docs against the code — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
-| `fixing-doc-drift` | skill | Applying a drift report to the docs — lands each STALE fix surgically, never deletes, never touches what the report didn't flag, stops on a large blast radius. |
-| `scheduling-doc-sync` | skill | Wiring a repo for unattended nightly drift sync — installs the shipped GitHub Action (detect → gate → fix → evidence PR) with marker-based idempotency and a blast-radius stop. |
+| `detecting-doc-drift` | skill | Auditing docs against the code for **accuracy** — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
+| `fixing-doc-drift` | skill | Applying a drift report — lands each STALE fix surgically, never deletes, never touches what the report didn't flag, stops on a large blast radius. |
+| `detecting-doc-bloat` | skill | Auditing docs for **weight** — content past its useful form: restated code, padded paragraphs, duplicated docs, landed design docs. Read-only; every finding is an ID'd record with evidence. |
+| `fixing-doc-bloat` | skill | Applying the human-approved subset of a bloat report — approved IDs only, proposals landed verbatim, `DISTILL` records dispatched to `doc-distiller`. |
+| `scheduling-doc-sync` | skill | Wiring a repo for unattended sync — installs the nightly drift Action (detect → gate → fix → evidence PR) and the weekly bloat sweep (draft PRs per lane), marker-idempotent, with a blast-radius stop. |
 | `llm-doc-writer` | agent | A dispatchable subagent that produces LLM-optimized documentation with maximum context efficiency. |
+| `doc-distiller` | agent | A dispatchable subagent that retires a landed design doc: re-verifies its durable claims against the code, lands claims and insights in their living docs, appends one `docs/decisions.md` entry — one staged commit. |
 
 ## Why this works where "keep the docs updated" doesn't
 
-The suite shares one contract: **a repo-tracking doc is a set of claims.** Every line is either a **verifiable claim** — a command, path, symbol, behavior, or structure checkable against the repo *as it is now* — or a **rationale claim**, the "why," quarantined to a marked section and **anchored** to a `file:line` ref. Anything else — marketing prose, an aspirational "should," a restatement of the file tree — gets cut. (Tutorials, conceptual overviews, and design-rationale docs are narrative by design and out of scope; the claim bar would wrongly gut them.)
+The suite shares one contract: **a repo-tracking doc is a set of claims** — verifiable against the repo as it is now, or rationale explicitly marked and anchored. That bar is what makes drift *detectable*, bloat *judgeable*, and fixes *reviewable*; the full argument, with pointers into the skill files that enforce it, is one page: **[docs/guides/principles.md](docs/guides/principles.md)**.
 
-The bar is mechanical enough that tooling enforces its *shape* — every claim carries evidence, every verdict a valid enum — without leaning on a reviewer's patience. What tooling does **not** do is decide whether a claim is *true*: that's model judgment at the chosen verification tier, and a cheap static check confirms a path still resolves, not that it still means the same thing. The contract makes drift *checkable*; it doesn't make correctness *automatic*.
-
-That one contract runs through the whole suite, which is what lets the pieces compose instead of fight:
+The same contract is what lets the pieces compose instead of fight:
 
 ```
-writing-docs        mandates verifiable claims
-detecting-doc-drift extracts and verifies those same claims, with evidence
-fixing-doc-drift    lands the drafted fixes, one diff hunk per record
-scheduling-doc-sync installs the nightly Action that runs detect→fix and opens the PR
+writing-docs          mandates verifiable claims
+detecting-doc-drift   audits those claims for accuracy   → fixing-doc-drift lands approved fixes
+detecting-doc-bloat   audits those claims for weight     → fixing-doc-bloat lands approved fixes
+scheduling-doc-sync   installs the Actions that run both loops on a schedule and open evidence PRs
 ```
 
-All of the above ships today; past its blast-radius cap the nightly sync files an issue instead of opening one giant PR.
+All of the above ships today; past its blast-radius cap the nightly sync files an issue instead of opening one giant PR, and bloat sweeps only ever open draft PRs.
 
 ## How it was built
 
 Every skill was written test-first — RED (baseline agents fail) → GREEN (skill fixes it) → REFACTOR (pressure-test for loopholes). Rules target failures that actually showed up in baseline runs, not best-practice folklore. Test records live under [`tests/`](tests/). This README follows the plugin's own contract — every line above is a claim you can check against this repo.
 
 And the loop is closed in this repo's own history: on its first nightly run here (2026-07-02), `doc-sync` caught two stale claims in these very docs — one falsified by the commit that installed it — and opened [the evidence PR](https://github.com/aj604/toolshed/pull/5) that fixed them. Full record: [`tests/baselines/doc-sync-setup-red/DOGFOOD-first-catch.md`](tests/baselines/doc-sync-setup-red/DOGFOOD-first-catch.md).
-
-## Try it locally
-
-```
-/plugin marketplace add /path/to/toolshed
-/plugin install doc-lifecycle@toolshed
-```
 
 ## About this repo
 
@@ -121,7 +125,8 @@ plugins/doc-lifecycle/            # the published plugin
   agents/                         # llm-doc-writer, doc-distiller
 assets/                           # social-card.png (hero + GitHub social preview),
                                   #   drift-audit-demo.svg + demo/make_cast.py (its generator)
-docs/                             # plans: design docs + handoff (not part of the installed plugin)
+docs/                             # guides: user-facing walkthroughs; plans: design docs +
+                                  #   handoff (not part of the installed plugin)
 tests/                            # RED/GREEN records + fixtures (not part of the installed plugin)
 ```
 
