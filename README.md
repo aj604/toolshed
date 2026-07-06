@@ -10,7 +10,9 @@
   <a href="https://docs.claude.com/en/docs/claude-code/plugins"><img src="https://img.shields.io/badge/Claude_Code-plugin-da7756" alt="Claude Code plugin"></a>
 </p>
 
-**Stale docs don't fail loudly — they get acted on.** A `CLAUDE.md` says `make reset` resets state and the worker "accepts schema 2, exits 5." The code moves; the doc doesn't. Now an agent runs a command that no longer exists and writes an error handler for the wrong exit code:
+**Documentation that can prove it's still true.**
+
+`doc-lifecycle` is a Claude Code plugin that treats your README, runbooks, and `CLAUDE.md` as sets of claims checkable against the code. Ask **"is the README still accurate?"** and it verifies each claim — then hands you a report where every verdict carries evidence and every stale claim carries a ready-to-land fix:
 
 ```diff
   what the doc claims          the code as of today
@@ -18,7 +20,7 @@
 - schema 2 → exits 5           schema 3 → exits 4      (worker bumped)
 ```
 
-`doc-lifecycle` is a Claude Code plugin that turns that silent failure into a **record**: docs whose job is to track the repo are written so every line is a claim checkable against the code. That makes them auditable on both axes docs fail on — **drift** (the claim is now false) and **bloat** (the claim is true but no longer earns its tokens) — with evidence, and fixable surgically, instead of discovered mid-incident.
+Stale docs like these don't fail loudly — an agent (or a teammate) just acts on them: runs a command that no longer exists, writes an error handler for the wrong exit code. `doc-lifecycle` turns that silent failure into a **record**, auditable on both axes docs fail on — **drift** (the claim is now false) and **bloat** (the claim is true but no longer earns its tokens) — and fixable surgically, instead of discovered mid-incident.
 
 <p align="center">
   <img src="assets/drift-audit-demo.svg" alt="Animated terminal demo: asking whether CLAUDE.md is still accurate triggers detecting-doc-drift, which greps the Makefile, reads worker.js, and emits a STALE record with evidence and a ready-to-land fix." width="720">
@@ -36,7 +38,11 @@
 
 Developing against a local checkout? `/plugin marketplace add /path/to/toolshed` instead.
 
-Installing schedules nothing and changes nothing — the skills trigger on ordinary requests in your sessions, and every doc edit flows through your approval. Unattended automation exists, but it's the last step of the path below and it's explicitly opted into.
+Then, in an ordinary session, just ask:
+
+> is the README still accurate?
+
+No flags, no config — installing schedules nothing and changes nothing; the skills trigger on ordinary requests in your sessions, and every doc edit flows through your approval. Unattended automation exists — it's the last row of the table below, and explicitly opted into.
 
 ## Pick your starting point
 
