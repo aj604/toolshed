@@ -34,9 +34,10 @@ def rec(verdict="STALE", location="README.md:5", claim="README mentions make tes
     }
 
 
-def brec(verdict, location=None, doc="README.md", evidence="seven lines carry one fact"):
-    return {"id": "B1", "doc": doc, "location": location, "verdict": verdict,
-            "evidence": evidence, "proposal": None, "status": None, "payload": None}
+def brec(verdict, location=None, doc="README.md", evidence="seven lines carry one fact",
+         status=None, files=None, rid="B1"):
+    return {"id": rid, "doc": doc, "location": location, "verdict": verdict,
+            "evidence": evidence, "proposal": None, "status": status, "files": files}
 
 
 def run(*cmd):
@@ -249,34 +250,57 @@ class BloatRender(unittest.TestCase):
         os.unlink(report)
         self.assertIn("`RETIRE-DOC` @ `docs/plans/old.md`", out.stdout)
 
-    def test_pr_body_distill_row_carries_payload_counts(self):
-        ready = brec("DISTILL", doc="docs/plans/old.md")
-        ready["status"] = "ready"
-        ready["payload"] = {
-            "claims": [{"claim": "c", "target": "README.md", "evidence": "e"}],
-            "insights": [{"insight": "i", "target": "docs/reference/x.md",
-                          "anchor": "docs/plans/old.md @ abc1234"},
-                         {"insight": "j", "target": "docs/reference/x.md",
-                          "anchor": "docs/plans/old.md @ abc1234"}],
-            "decision_entry": "## entry",
-        }
+    def test_pr_body_distill_row_shows_status(self):
+        ready = brec("DISTILL", doc="docs/plans/old.md", status="ready")
         report = write_report([ready])
         out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
         os.unlink(report)
-        self.assertIn("`DISTILL` @ `docs/plans/old.md` (1 claim, 2 insights)", out.stdout)
+        self.assertIn("`DISTILL(ready)` @ `docs/plans/old.md`", out.stdout)
 
-    def test_pr_body_distill_row_flags_zero_insights(self):
-        ready = brec("DISTILL", doc="docs/plans/old.md")
-        ready["status"] = "ready"
-        ready["payload"] = {
-            "claims": [{"claim": "c", "target": "README.md", "evidence": "e"},
-                       {"claim": "d", "target": "README.md", "evidence": "e"}],
-            "decision_entry": "## entry",
-        }
-        report = write_report([ready])
+    def test_pr_body_policy_row_counts_files(self):
+        rec = brec("POLICY", doc="docs/superpowers",
+                   files=["docs/superpowers/plans/a.md",
+                          "docs/superpowers/specs/b.md"])
+        report = write_report([rec])
         out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
         os.unlink(report)
-        self.assertIn("`DISTILL` @ `docs/plans/old.md` (2 claims, 0 insights)", out.stdout)
+        self.assertIn("`POLICY` @ `docs/superpowers` (2 files)", out.stdout)
+
+    def test_pr_body_opens_with_rollup(self):
+        report = write_report([
+            brec("CUT", location="README.md:5"),
+            brec("CONDENSE", location="README.md:22", rid="B2"),
+            brec("POLICY", doc="docs/superpowers", rid="B3",
+                 files=["docs/superpowers/plans/a.md"]),
+        ])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertIn("**Rollup:** 3 record(s) across 2 doc(s) — "
+                      "cut 1, condense 1, policy 1", out.stdout)
+
+    def test_triage_groups_by_doc_with_ids(self):
+        report = write_report([
+            brec("CUT", location="README.md:5"),
+            brec("POLICY", doc="docs/superpowers", rid="B2",
+                 files=["docs/superpowers/plans/a.md"]),
+            brec("DISTILL", doc="docs/plans/old.md", status="ready", rid="B3"),
+        ])
+        out = run(sys.executable, SCRIPT, "bloat-triage", "--report", report)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("README.md", out.stdout)
+        self.assertIn("[B1] CUT", out.stdout)
+        self.assertIn("README.md:5", out.stdout)
+        self.assertIn("[B2] POLICY", out.stdout)
+        self.assertIn("(1 files)", out.stdout)
+        self.assertIn("[B3] DISTILL(ready)", out.stdout)
+        self.assertIn("**Rollup:**", out.stdout)
+        self.assertNotIn("approve", out.stdout.lower())
+
+    def test_triage_missing_report_exits_2(self):
+        out = run(sys.executable, SCRIPT, "bloat-triage",
+                  "--report", "/nonexistent.json")
+        self.assertEqual(out.returncode, 2)
 
     def test_pr_body_escapes_pipe(self):
         report = write_report([brec("CUT", location="README.md:5", evidence="a | b")])

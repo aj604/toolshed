@@ -19,6 +19,7 @@ Usage:
     render-report.py bloat-pr-title --report FILE --lane L --date YYYY-MM-DD
     render-report.py bloat-pr-summary --report FILE --lane L --pr-url URL
     render-report.py bloat-skip-summary --lane L --reason {skip-empty|skip-pending|skip-noop}
+    render-report.py bloat-triage --report FILE
 
 Body subcommands (issue-body, pr-body) print markdown on stdout for --body-file.
 Summary subcommands append to the file named by $GITHUB_STEP_SUMMARY (stdout when
@@ -180,27 +181,61 @@ def render_bloat_pre_summary(decision):
     raise ValueError(f"unknown bloat-pre decision: {decision!r}")
 
 
+def bloat_change_cell(r):
+    where = r.get("location") or r.get("doc")
+    verdict = r["verdict"]
+    if verdict == "DISTILL":
+        verdict = f"DISTILL({r.get('status')})"
+    cell = f"`{verdict}` @ `{where}`"
+    if r["verdict"] == "POLICY":
+        cell += f" ({len(r.get('files') or [])} files)"
+    return cell
+
+
+def render_bloat_rollup(records):
+    counts, docs = {}, set()
+    for r in records:
+        counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
+        docs.add(r["doc"])
+    order = ["CUT", "CONDENSE", "EXTRACT-AND-MOVE", "RETIRE-DOC",
+             "MERGE-DOC", "DISTILL", "POLICY"]
+    parts = [f"{v.lower().replace('-', ' ')} {counts[v]}" for v in order if v in counts]
+    return (f"**Rollup:** {len(records)} record(s) across {len(docs)} doc(s) — "
+            + ", ".join(parts))
+
+
 def render_bloat_pr_body(records):
     lines = [
         "Proposed by the weekly doc-bloat sweep — each row is applied in the diff below. "
         "Draft PR: review, drop any commit you don't want, merge to accept.",
         "",
+        render_bloat_rollup(records),
+        "",
         "| Change (see diff) | Why it's bloat |",
         "|---|---|",
     ]
     for r in records:
-        where = r.get("location") or r.get("doc")
-        change = f"`{r['verdict']}` @ `{where}`"
-        payload = r.get("payload")
-        if r["verdict"] == "DISTILL" and isinstance(payload, dict):
-            # Surface the residue counts so a reviewer sees "0 insights" and can
-            # reject a distill that examined nothing worth keeping.
-            nc = len(payload.get("claims") or [])
-            ni = len(payload.get("insights") or [])
-            claims = f"{nc} claim" + ("" if nc == 1 else "s")
-            insights = f"{ni} insight" + ("" if ni == 1 else "s")
-            change += f" ({claims}, {insights})"
-        lines.append(f"| {change} | {md_cell(r['evidence'])} |")
+        lines.append(f"| {bloat_change_cell(r)} | {md_cell(r['evidence'])} |")
+    return "\n".join(lines)
+
+
+def render_bloat_triage(records):
+    """In-session triage view: rollup, then records grouped by doc, one line
+    per record — the human approves by the [id]s shown."""
+    by_doc = {}
+    for r in records:
+        by_doc.setdefault(r["doc"], []).append(r)
+    lines = [render_bloat_rollup(records), ""]
+    for doc in sorted(by_doc):
+        lines.append(doc)
+        for r in by_doc[doc]:
+            verdict = r["verdict"]
+            if verdict == "DISTILL":
+                verdict = f"DISTILL({r.get('status')})"
+            where = r.get("location") or ""
+            extra = f" ({len(r.get('files') or [])} files)" if r["verdict"] == "POLICY" else ""
+            lines.append(f"  [{r['id']}] {verdict:<14} {where}{extra} — "
+                         f"{md_cell(r['evidence'])}")
     return "\n".join(lines)
 
 
@@ -296,6 +331,9 @@ def main():
     bskip.add_argument("--lane", required=True)
     bskip.add_argument("--reason", required=True)
 
+    btriage = sub.add_parser("bloat-triage")
+    btriage.add_argument("--report", required=True)
+
     args = parser.parse_args()
 
     try:
@@ -325,6 +363,8 @@ def main():
                 print(render_bloat_pr_title(records, args.lane, args.date))
             elif args.mode == "bloat-pr-summary":
                 write_summary(render_bloat_pr_summary(records, args.lane, args.pr_url))
+            elif args.mode == "bloat-triage":
+                print(render_bloat_triage(records))
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
         print(f"error: {e!r}", file=sys.stderr)
         return 2
