@@ -336,6 +336,22 @@ class BloatRender(unittest.TestCase):
         self.assertIn("1 chunk(s) unswept", out.stdout)
         self.assertIn("docs/plans/p.md", out.stdout)
 
+    def _unswept_summary(self, report):
+        """Run bloat-unswept-summary with a real $GITHUB_STEP_SUMMARY file
+        (CI always sets one) and return (result, summary_text). The banner is a
+        run-summary line, not stdout — the workflow step surfaces it there."""
+        fd, summary_path = tempfile.mkstemp()
+        os.close(fd)
+        env = dict(os.environ, GITHUB_STEP_SUMMARY=summary_path)
+        out = subprocess.run(
+            [sys.executable, SCRIPT, "bloat-unswept-summary", "--report", report],
+            capture_output=True, text=True, env=env,
+        )
+        with open(summary_path, encoding="utf-8") as f:
+            summary = f.read()
+        os.unlink(summary_path)
+        return out, summary
+
     def test_unswept_summary_writes_gap_state(self):
         report = write_report([])
         with open(report) as f:
@@ -343,21 +359,19 @@ class BloatRender(unittest.TestCase):
         data["unswept"] = [{"chunk": "c-dead1", "docs": ["docs/plans/p.md"]}]
         with open(report, "w") as f:
             json.dump(data, f)
-        out = run(sys.executable, SCRIPT, "bloat-unswept-summary",
-                  "--report", report)
+        out, summary = self._unswept_summary(report)
         os.unlink(report)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("1 chunk(s) unswept", out.stdout)
-        self.assertIn("docs/plans/p.md", out.stdout)
-        self.assertIn("next sweep", out.stdout)
+        self.assertIn("1 chunk(s) unswept", summary)
+        self.assertIn("docs/plans/p.md", summary)
+        self.assertIn("next sweep", summary)
 
     def test_unswept_summary_silent_when_complete(self):
         report = write_report([brec("CUT", location="README.md:5")])
-        out = run(sys.executable, SCRIPT, "bloat-unswept-summary",
-                  "--report", report)
+        out, summary = self._unswept_summary(report)
         os.unlink(report)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(out.stdout.strip(), "")
+        self.assertEqual(summary.strip(), "")
 
     def test_triage_missing_report_exits_2(self):
         out = run(sys.executable, SCRIPT, "bloat-triage",
