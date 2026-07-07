@@ -1,0 +1,6 @@
+{
+  "exclude": [],
+  "include": [],
+  "policy_scope": ["docs/superpowers"],
+  "chunking": {"max_docs": 3, "max_lines": 400}
+}
