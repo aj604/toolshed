@@ -457,6 +457,32 @@ class Assembly(SeamFixture):
         self.assertEqual(report["records"], [])
         self.assertEqual(sum(report["summary"].values()), 0)
 
+    def test_allow_partial_records_unswept_chunks_with_docs(self):
+        self.write_chunk("c-aaa.json", self.sweep_result())
+        r, out = self.assemble("--allow-partial")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(out, encoding="utf-8") as f:
+            report = json.load(f)
+        self.assertEqual(report["unswept"], [
+            {"chunk": "p-bbb", "docs": ["docs/superpowers/plans/a.md",
+                                        "docs/superpowers/specs/b.md"]}])
+        final = run_argv(out)  # a gapped report is still a valid final report
+        self.assertEqual(final.returncode, 0, final.stderr)
+
+    def test_complete_assembly_omits_unswept(self):
+        self.write_both()
+        r, out = self.assemble("--allow-partial")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(out, encoding="utf-8") as f:
+            report = json.load(f)
+        self.assertNotIn("unswept", report)
+
+    def test_final_rejects_malformed_unswept(self):
+        report = wrap([rec()], unswept="p-bbb")
+        r = run(report)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unswept", r.stderr)
+
     def test_usage_errors_exit_2(self):
         cases = (
             ("--assemble", self.chunks_dir),                      # no manifest/out

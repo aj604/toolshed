@@ -94,7 +94,7 @@ decision entry for an approved distillation are authored by the
 time, and never smuggled into `evidence` (its `evidence` is the landed-code
 proof, full stop). B4 (`pending-implementation`) exists to *say* the design is
 pending — never propose deleting it. B5's `files` must name every covered path;
-in a chunked run it is the manifest's list verbatim.
+in a chunked run it is the dispatched chunk's list verbatim.
 
 ## The emitted artifact: a schema-2 wrapped report
 
@@ -126,7 +126,7 @@ A chunk executor (interactive dispatch or the headless workflow matrix) never
 emits the wrapped report. It emits exactly:
 
 ```json
-{"chunk": "<manifest chunk id>", "records": [ /* v2 records */ ]}
+{"chunk": "<dispatched chunk id>", "records": [ /* v2 records */ ]}
 ```
 
 Rules the seam validator enforces (`--chunk <file> --manifest <manifest>`):
@@ -140,4 +140,8 @@ Rules the seam validator enforces (`--chunk <file> --manifest <manifest>`):
 
 Assembly (`--assemble <dir> --manifest <manifest> --out bloat-report.json`)
 seam-validates every chunk, renumbers ids `B1..Bn`, and writes the wrapped
-schema-2 report; it refuses partial assembly (missing chunks fail by name).
+schema-2 report. Missing chunks fail the assembly by name, unless
+`--allow-partial` (what CI passes): then they are skipped **loudly** — each
+lands in the report's optional `unswept` list (`[{"chunk": id, "docs":
+[paths]}]`, rendered as a PR-body banner), and the next run's
+content-addressed resume sweeps exactly them. An invalid chunk always fails.

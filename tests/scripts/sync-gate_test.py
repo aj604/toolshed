@@ -218,6 +218,24 @@ class BloatLaneGate(unittest.TestCase):
         self.assertEqual(dec, "skip-empty")
         self.assertEqual(filtered, [])
 
+    def test_lane_out_propagates_unswept(self):
+        report = write_report([brec("CUT", location="README.md:5")])
+        with open(report) as f:
+            data = json.load(f)
+        data["unswept"] = [{"chunk": "c-dead", "docs": ["docs/plans/p.md"]}]
+        with open(report, "w") as f:
+            json.dump(data, f)
+        out_fd, out_path = tempfile.mkstemp(suffix=".json")
+        os.close(out_fd)
+        res = run("bloat-lane", "--report", report, "--lane", "prune",
+                  "--pr-open", "0", "--out", out_path)
+        with open(out_path) as f:
+            lane = json.load(f)
+        os.unlink(report); os.unlink(out_path)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(lane["unswept"],
+                         [{"chunk": "c-dead", "docs": ["docs/plans/p.md"]}])
+
     def test_v2_wrapped_report_with_schema_key_loads(self):
         report = write_report([brec("CUT", location="README.md:5")])
         with open(report) as f:
@@ -232,6 +250,61 @@ class BloatLaneGate(unittest.TestCase):
         os.unlink(report); os.unlink(out_path)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(res.stdout.strip(), "open")
+
+
+def execution_log(payload):
+    fd, path = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump(payload, f)
+    return path
+
+
+class BloatRetry(unittest.TestCase):
+    """bloat-retry classifies a failed sweep attempt: budget-shaped failures
+    escalate the turn cap; everything else re-dispatches fresh and identical."""
+
+    def classify(self, log_path, turns):
+        res = run("bloat-retry", "--execution-log", log_path, "--turns", str(turns))
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        out = dict(line.split("=", 1) for line in res.stdout.strip().splitlines())
+        return out, res.stderr
+
+    def test_max_turns_escalates_budget_1_5x(self):
+        # SDK stream format: array of events, result event last.
+        log = execution_log([
+            {"type": "system", "subtype": "init"},
+            {"type": "result", "subtype": "error_max_turns",
+             "is_error": True, "num_turns": 21},
+        ])
+        out, err = self.classify(log, 20)
+        os.unlink(log)
+        self.assertEqual(out, {"mode": "escalate", "turns": "30"})
+        self.assertIn("max", err.lower())  # self-explaining reason on stderr
+
+    def test_escalation_caps_at_60(self):
+        log = execution_log(
+            {"type": "result", "subtype": "error_max_turns", "is_error": True})
+        out, _ = self.classify(log, 45)
+        os.unlink(log)
+        self.assertEqual(out, {"mode": "escalate", "turns": "60"})
+
+    def test_non_budget_failure_is_fresh_identical(self):
+        # Attempt finished (subtype success) but the seam validator rejected
+        # the result — variance-shaped garbage, so a fresh identical retry.
+        log = execution_log([{"type": "result", "subtype": "success",
+                              "is_error": False, "num_turns": 9}])
+        out, _ = self.classify(log, 20)
+        os.unlink(log)
+        self.assertEqual(out, {"mode": "fresh", "turns": "20"})
+
+    def test_missing_log_is_fresh_identical(self):
+        out, err = self.classify("/nonexistent/execution.json", 24)
+        self.assertEqual(out, {"mode": "fresh", "turns": "24"})
+        self.assertIn("no execution log", err)
+
+    def test_bad_turns_exits_2(self):
+        res = run("bloat-retry", "--execution-log", "/dev/null", "--turns", "0")
+        self.assertEqual(res.returncode, 2)
 
 
 if __name__ == "__main__":

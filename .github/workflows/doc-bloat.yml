@@ -3,11 +3,16 @@
 # upgrade this file. Sibling to doc-sync.yml (drift): bloat is detect-and-propose only —
 # fixing-doc-bloat applies a human-approved subset, so each lane opens a DRAFT PR and the
 # merge is the approval.
-# Orchestration is deterministic: plan-chunks.py plans bounded chunks (no model), one model
-# invocation sweeps each chunk under a turn cap, and validate-bloat-output.py seam-validates
-# every chunk where it is produced (one fresh retry) and refuses partial assembly — a failed
-# chunk fails the run by name while every valid chunk survives as a checkpoint artifact.
-# Design: docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md in aj604/toolshed.
+# Orchestration is deterministic: plan-chunks.py plans bounded chunks (no model) with
+# content-addressed ids and per-chunk turn budgets, resuming past any prior run's checkpoint
+# artifacts; each sweep invocation gets its slice verbatim via --emit-prompt; a failed attempt
+# is classified (sync-gate.py bloat-retry: budget exhaustion escalates the cap, anything else
+# retries fresh); assembly tolerates gaps (--allow-partial) and records them as the report's
+# "unswept" list, rendered as a loud PR-body banner — a twice-failed chunk costs its own docs,
+# never the report, and the next sweep picks it up automatically. GitHub caps a matrix at 256
+# jobs; on a corpus that plans past that, set chunking.max_chunks (audit-scope.json) and sweep
+# in resumed passes. Design: docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md
+# + docs/plans/2026-07-07-bloat-scale-hardening-design.md in aj604/toolshed.
 name: doc-bloat
 
 on:
@@ -55,12 +60,24 @@ jobs:
             --distill-pr-open "${{ steps.facts.outputs.distill_pr }}")
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
           python3 .github/doc-sync/render-report.py bloat-pre-summary --decision "${DECISION}"
+      - name: Fetch prior chunk results (resume)
+        if: steps.pre.outputs.decision == 'detect'
+        run: |
+          set -euo pipefail
+          mkdir -p chunks
+          PREV=$(gh run list --workflow doc-bloat --status completed --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty')
+          if [ -n "${PREV}" ]; then
+            gh run download "${PREV}" --pattern 'bloat-chunk*' --dir prior || true
+            find prior -name '*.json' -exec cp {} chunks/ \; 2>/dev/null || true
+          fi
+          echo "carried $(ls chunks | wc -l) prior chunk result(s); content-addressed ids drop any whose docs changed"
       - name: Plan chunks (deterministic — no model)
         if: steps.pre.outputs.decision == 'detect'
         id: chunks
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/plan-chunks.py --out manifest.json
+          python3 .github/doc-sync/plan-chunks.py --out manifest.json --results-dir chunks
           echo "pending=$(python3 -c 'import json; print(json.dumps(json.load(open("manifest.json"))["pending"]))')" >> "$GITHUB_OUTPUT"
       - name: Upload manifest
         if: steps.pre.outputs.decision == 'detect'
@@ -68,6 +85,13 @@ jobs:
         with:
           name: bloat-manifest
           path: manifest.json
+      - name: Upload carried results (so assemble sees prior + new)
+        if: steps.pre.outputs.decision == 'detect'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bloat-chunks-carried
+          path: chunks/
+          if-no-files-found: ignore
 
   sweep:
     needs: plan
@@ -84,7 +108,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bloat-manifest
+      - name: Render dispatch payload (slice verbatim, planner-computed budget)
+        id: slice
+        run: |
+          set -euo pipefail
+          echo "turns=$(python3 .github/doc-sync/plan-chunks.py --emit-turns "${CHUNK_ID}" --manifest manifest.json)" >> "$GITHUB_OUTPUT"
+          {
+            echo "prompt<<BLOAT_PROMPT_EOF"
+            python3 .github/doc-sync/plan-chunks.py --emit-prompt "${CHUNK_ID}" --manifest manifest.json
+            echo "BLOAT_PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Detect chunk (attempt 1)
+        id: attempt1
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
@@ -92,21 +127,21 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           plugin_marketplaces: https://github.com/aj604/toolshed.git
           plugins: doc-lifecycle@toolshed
-          prompt: >-
-            Use the doc-lifecycle:detecting-doc-bloat skill as a headless chunk executor.
-            Read manifest.json in the repository root and find the chunk whose id is
-            "${{ matrix.chunk }}". Audit exactly the docs that chunk lists — no others —
-            and write the chunk result object {"chunk": "${{ matrix.chunk }}", "records": [...]}
-            to chunks/${{ matrix.chunk }}.json. If nothing in the chunk is bloated, emit an
-            empty records array.
-          claude_args: --max-turns 15 --allowedTools "Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
+          prompt: ${{ steps.slice.outputs.prompt }}
+          claude_args: --max-turns ${{ steps.slice.outputs.turns }} --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
       - name: Seam-validate (attempt 1)
         id: seam1
         continue-on-error: true
         run: python3 .github/doc-sync/validate-bloat-output.py --chunk "chunks/${CHUNK_ID}.json" --manifest manifest.json
-      - name: Discard invalid result before retry
+      - name: Classify failure (budget-shaped escalates; anything else retries fresh)
         if: steps.seam1.outcome != 'success'
-        run: rm -f "chunks/${CHUNK_ID}.json"
+        id: retry
+        run: |
+          set -euo pipefail
+          rm -f "chunks/${CHUNK_ID}.json"
+          python3 .github/doc-sync/sync-gate.py bloat-retry \
+            --execution-log "${{ steps.attempt1.outputs.execution_file || '/home/runner/work/_temp/claude-execution-output.json' }}" \
+            --turns "${{ steps.slice.outputs.turns }}" >> "$GITHUB_OUTPUT"
       - name: Detect chunk (retry — fresh dispatch)
         if: steps.seam1.outcome != 'success'
         uses: anthropics/claude-code-action@v1
@@ -115,19 +150,16 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           plugin_marketplaces: https://github.com/aj604/toolshed.git
           plugins: doc-lifecycle@toolshed
-          prompt: >-
-            Use the doc-lifecycle:detecting-doc-bloat skill as a headless chunk executor.
-            Read manifest.json in the repository root and find the chunk whose id is
-            "${{ matrix.chunk }}". Audit exactly the docs that chunk lists — no others —
-            and write the chunk result object {"chunk": "${{ matrix.chunk }}", "records": [...]}
-            to chunks/${{ matrix.chunk }}.json. If nothing in the chunk is bloated, emit an
-            empty records array.
-          claude_args: --max-turns 15 --allowedTools "Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
+          prompt: ${{ steps.slice.outputs.prompt }}
+          claude_args: --max-turns ${{ steps.retry.outputs.turns }} --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
       - name: Seam-validate (final)
         if: steps.seam1.outcome != 'success'
         run: |
+          # On double failure, discard the invalid result BEFORE exiting: a leftover
+          # invalid file would upload, fail the gap-tolerant assembly (which only
+          # tolerates MISSING chunks), and mask the chunk as done on the next resume.
           python3 .github/doc-sync/validate-bloat-output.py --chunk "chunks/${CHUNK_ID}.json" --manifest manifest.json \
-            || { echo "::error::chunk ${CHUNK_ID} failed seam validation twice — this chunk's spend is discarded; every valid chunk is preserved as an artifact"; exit 1; }
+            || { rm -f "chunks/${CHUNK_ID}.json"; echo "::error::chunk ${CHUNK_ID} failed twice — its docs go to the report's unswept banner and the next sweep resumes them; every valid chunk is preserved as an artifact"; exit 1; }
       - name: Upload chunk result
         if: always()
         uses: actions/upload-artifact@v4
@@ -138,7 +170,10 @@ jobs:
 
   assemble:
     needs: [plan, sweep]
-    if: always() && needs.plan.outputs.decision == 'detect' && needs.plan.outputs.pending != '[]'
+    # No pending-empty guard here (sweep keeps it): a fully-resumed run — every
+    # chunk carried from the prior run's artifacts — must still assemble, gate,
+    # and open lanes, or the carried state silently self-perpetuates forever.
+    if: always() && needs.plan.outputs.decision == 'detect'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -152,11 +187,13 @@ jobs:
           name: bloat-manifest
       - uses: actions/download-artifact@v4
         with:
-          pattern: bloat-chunk-*
+          pattern: bloat-chunk*
           path: chunks
           merge-multiple: true
-      - name: Assemble report (refuses partial results)
-        run: python3 .github/doc-sync/validate-bloat-output.py --assemble chunks --manifest manifest.json --out bloat-report.json
+      - name: Assemble report (tolerates gaps — unswept chunks are recorded, never silent)
+        run: python3 .github/doc-sync/validate-bloat-output.py --assemble chunks --manifest manifest.json --out bloat-report.json --allow-partial
+      - name: Surface unswept gaps on the run summary
+        run: python3 .github/doc-sync/render-report.py bloat-unswept-summary --report bloat-report.json
       - name: Upload report artifact
         if: always()
         uses: actions/upload-artifact@v4

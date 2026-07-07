@@ -1,5 +1,31 @@
 # Decisions
 
+## 2026-07-07 — bloat scale hardening (provisioned executors, budgets, convergent runs)
+- Decided: The headless sweep lane is provisioned, budgeted, and convergent — the dispatch
+  prompt carries the chunk slice verbatim (rendered by `plan-chunks.py --emit-prompt`, never
+  YAML templating, and the executor never opens the manifest), `Skill` joins the sweep
+  allowlist (the 2026-07-07 career-compass run 28860529836 showed every invocation burning
+  1–2 permission denials and 14–18 turns against a flat `--max-turns 15`), turn caps are
+  planner-computed per chunk (12 + 2/doc, 4/planning-doc, +1 per 600 lines, clamp [20,40];
+  policy flat 20) with retry classification at the seam (`sync-gate.py bloat-retry`:
+  `error_max_turns` escalates ceil(1.5×) cap 60, anything else retries fresh), chunk ids are
+  content-addressed over (path, content-sha256) so cross-run resume never reuses a stale
+  result, and assembly is gap-tolerant (`--allow-partial` in CI): unswept chunks land in the
+  report's `unswept` list, render as a loud PR banner and run-summary line, and the next
+  sweep resumes exactly them.
+- Still binds: full per-doc audit depth (no triage-first mode; chunk splitting rejected —
+  the failing chunks are single docs); a twice-failed chunk costs its own docs, never the
+  report; the workflow ceiling (60) is the kill switch, the planner budget is work sizing —
+  two roles, never one number; gaps are always loud (a "nothing to propose" summary with
+  silent unswept chunks is the named failure).
+- Code: plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py,
+  plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/sync-gate.py,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/render-report.py,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat.yml,
+  plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md
+- Source: docs/plans/2026-07-07-bloat-scale-hardening-design.md
+
 ## 2026-07-06 — detecting-doc-bloat rearchitecture (harness, chunked sweeps, contract v2)
 - Decided: DISTILL payload authoring moved from detect time to post-approval distill time —
   detection emits classification + landed-code evidence only; the doc-distiller authors the
@@ -17,8 +43,10 @@
   same validator seam either way.
 - Still binds: the report contract is v2 (`"schema": 2`, eight record fields, seven verdicts,
   no payloads) and the validator rejects v1 shapes with a regenerate error; a policy chunk's
-  result is exactly one POLICY record whose files equal the manifest list; CI never passes
-  `--allow-partial`; doc enumeration and chunk planning go through `plan-chunks.py` (this
+  result is exactly one POLICY record whose files equal the dispatched chunk's list ("CI
+  never passes `--allow-partial`" bound here until 2026-07-07 — superseded by the
+  scale-hardening entry above: CI now passes it, with gaps recorded in the report's
+  `unswept` list); doc enumeration and chunk planning go through `plan-chunks.py` (this
   supersedes the 2026-07-03 entry's "goes through `list-docs.py`" — that helper is absorbed
   and retired), and the 2026-07-03/04 entries' two-lane split now routes `POLICY` to the
   distill lane.
