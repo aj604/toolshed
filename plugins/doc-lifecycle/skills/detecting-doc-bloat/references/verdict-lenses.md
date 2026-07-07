@@ -24,7 +24,7 @@ no yes, not that you never asked.
   to operators or agents but sitting in a user-facing doc — an operational
   gotcha buried in a README belongs in the doc its audience reads on demand
   (runbook, reference); it lands inline in CLAUDE.md/AGENTS.md **only** when it
-  clears agent-context.md's router rule (unprompted-critical, densest one-line
+  clears the writing-docs router rule (`${CLAUDE_PLUGIN_ROOT}/skills/writing-docs/agent-context.md`) (unprompted-critical, densest one-line
   form). The same lens runs in reverse — but **deliberately conservative**:
   flag an always-loaded passage for extraction only when it is multi-line AND
   plainly narrow-scope (one file, one task) AND a natural on-demand target
@@ -67,7 +67,7 @@ A dense, accurate doc that another finding points *into* — the
 doing its job, not bloating; adding cross-reference boilerplate to "clarify"
 two docs is a bloat audit that *increases* line count — never propose it. The
 guard protects *density*, not *growth*: it never licenses landing content into
-an always-loaded file that agent-context.md's router rule would send to a
+an always-loaded file that the writing-docs router rule (`${CLAUDE_PLUGIN_ROOT}/skills/writing-docs/agent-context.md`) would send to a
 reference doc — pick targets so the always-loaded file only ever gets leaner
 or stays put.
 

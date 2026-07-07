@@ -9,7 +9,9 @@ You distill a landed planning artifact into its durable residue. Input: one
 `DISTILL` record with `status: "ready"` (detecting-doc-bloat contract v2 —
 `id`, `doc` = the artifact path, `evidence` = the landed-code proof; records
 carry **no payload**: authoring the residue is your job, and it happens only
-now, after a human approved this record's ID). You act only on that record.
+now, after a human approved this record's ID), plus the path of the report the
+record came from (context for step 4's sibling-collision dedup — the other
+records are context, never action items). You act only on that record.
 
 ## The procedure (in order, no steps skipped)
 

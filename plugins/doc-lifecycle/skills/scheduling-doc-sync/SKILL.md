@@ -7,14 +7,19 @@ description: Use when wiring a repo for automated/unattended documentation drift
 
 ## Overview
 
-Installs the shipped nightly pipeline into a target repo. **You install wiring; you do not
-re-derive it.** Orchestration lives in the shipped `doc-sync.yml`; every gate decision lives in
+Installs the shipped automation into a target repo — **two workflows**: the nightly drift
+sync (`doc-sync.yml`) and the weekly chunked doc-bloat sweep (`doc-bloat.yml`: deterministic
+chunk plan → matrix detect → assemble → two draft-PR lanes). **You install wiring; you do not
+re-derive it.** Orchestration lives in the shipped workflow YAML; every gate decision lives in
 the shipped `sync-gate.py`; every run-surface string (summaries, notices, issue/PR bodies) lives
-in the shipped `render-report.py`; doc judgment lives in `detecting-doc-drift` /
-`fixing-doc-drift`, which the workflow invokes headlessly by name. Never inline detection or fixing method into
+in the shipped `render-report.py`; chunk planning lives in `plan-chunks.py`; doc judgment lives
+in `detecting-doc-drift` / `fixing-doc-drift` / `detecting-doc-bloat` / `fixing-doc-bloat`,
+which the workflows invoke headlessly by name. Never inline detection or fixing method into
 workflow YAML — that forks the method from its one owner.
 
-All shipped files are in this skill's base directory (announced when the skill loads).
+The workflow templates and gate/render scripts are in this skill's base directory (announced
+when the skill loads); the chunk planner and the two output validators are copied from the
+sibling skills that own them (install steps 3–4).
 
 ## Preflight (run all; report failures, don't silently skip)
 

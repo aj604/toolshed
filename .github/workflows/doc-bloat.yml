@@ -288,8 +288,8 @@ jobs:
           git config user.email "doc-bloat@users.noreply.github.com"
           git checkout -b doc-bloat/distill
           # Inline verdicts (MERGE-DOC/RETIRE-DOC/POLICY) leave edits uncommitted; the
-          # distiller commits its own DISTILL result. Commit any leftover uncommitted work,
-          # but a clean index is normal here — don't fail on it.
+          # Apply step already committed each DISTILL result the distiller staged. Commit
+          # any leftover uncommitted work; a clean index is normal here — don't fail on it.
           git add -A
           if ! git diff --cached --quiet; then
             git commit -m "docs: bloat distill sweep (${DATE})"

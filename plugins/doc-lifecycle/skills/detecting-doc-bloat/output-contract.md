@@ -77,7 +77,7 @@ audit sweeps for all seven verdicts.
     "doc": "docs/superpowers",
     "location": null,
     "verdict": "POLICY",
-    "evidence": "10 dated plan/spec artifacts, all for work already merged (git log confirms); one class of ephemeral process artifact, not 10 findings",
+    "evidence": "2 dated plan/spec artifacts, both for work already merged (git log confirms); one class of ephemeral process artifact, not 2 findings",
     "proposal": "Ephemeral process artifacts; retire after the work merges.",
     "status": null,
     "files": [

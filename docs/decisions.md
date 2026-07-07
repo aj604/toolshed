@@ -20,7 +20,8 @@
   result is exactly one POLICY record whose files equal the manifest list; CI never passes
   `--allow-partial`; doc enumeration and chunk planning go through `plan-chunks.py` (this
   supersedes the 2026-07-03 entry's "goes through `list-docs.py`" — that helper is absorbed
-  and retired).
+  and retired), and the 2026-07-03/04 entries' two-lane split now routes `POLICY` to the
+  distill lane.
 - Code: plugins/doc-lifecycle/skills/detecting-doc-bloat/ (SKILL.md, references/,
   scripts/plan-chunks.py, scripts/validate-bloat-output.py),
   plugins/doc-lifecycle/agents/doc-distiller.md,

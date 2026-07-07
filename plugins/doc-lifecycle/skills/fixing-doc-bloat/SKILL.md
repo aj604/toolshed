@@ -59,15 +59,16 @@ exactly as it is; the fact that X's fix touches nearby lines does not extend X's
 cover Y. Absorbing Y into X's diff is applying an unapproved record — a spine §1 violation —
 no matter which record's commit it hides in.
 
-### CONDENSE / claim text lands as given — never blended, never augmented
+### CONDENSE text lands as given — never blended, never augmented
 
-A `CONDENSE` `proposal` and a `DISTILL` claim are complete, writing-docs-bar text. **Land each
-one as-is, at its own boundary; stop at its final character.** Do not merge a neighboring
-claim's rationale into a CONDENSE line "so it reads fuller," do not append a fact the proposal
-didn't state, and do not restate the same fact in an adjacent sentence — a bloat fix that
-*adds* redundancy has failed at its own job. If you believe a CONDENSE proposal is incomplete,
-that is feedback for the human, not a license to rewrite it. "Applied verbatim" must be
-literally true of the bytes you wrote.
+A `CONDENSE` `proposal` is complete, writing-docs-bar text. **Land it as-is, at its own
+boundary; stop at its final character.** Do not merge a neighboring record's rationale into a
+CONDENSE line "so it reads fuller," do not append a fact the proposal didn't state, and do not
+restate the same fact in an adjacent sentence — a bloat fix that *adds* redundancy has failed
+at its own job. If you believe a CONDENSE proposal is incomplete, that is feedback for the
+human, not a license to rewrite it. "Applied verbatim" must be literally true of the bytes you
+wrote. The same hands-off rule covers everything the distiller lands: what it staged is what
+you commit — never re-edited, never "rounded out."
 
 ### DISTILL is the distiller's job — dispatch, never inline
 
@@ -82,7 +83,9 @@ decision log is a repo-level file, **not** a CLAUDE.md subsection), completes th
 line with the artifact's real last-commit SHA, repoints the artifact's inbound references, and
 `git rm`s the artifact — all **staged as one commit, which you then commit.** The distiller
 stages; the dispatcher commits. Match your dispatch input to its contract: hand it the record
-(ID, artifact path, evidence); expect back the residue as drafted, the claims and insights
+(ID, artifact path, evidence) **plus the report path** — the distiller deduplicates its
+landings against sibling records (e.g. an `EXTRACT-AND-MOVE` aimed at the same target), which
+it can only do if it can see them; expect back the residue as drafted, the claims and insights
 landed (with `target:line`), any that failed verification, duplicates skipped with the
 colliding record, references repointed, the log entry as written, and the staged file list —
 the drafted residue is what the approving human sees in the draft PR.
@@ -118,8 +121,9 @@ collision note through to the human; never re-edit the landed result** to "recon
 - Editing only the single line at `location` when the evidence span is multi-line, or deleting
   a whole boundary line that also carries unflagged text → the mandate is the span'd passage
   exactly: all of it, nothing beside it.
-- Rewording, extending, or blending a `CONDENSE` proposal or a `DISTILL` claim → it lands
-  byte-verbatim at its own boundary; adding to it re-introduces the bloat you're removing.
+- Rewording, extending, or blending a `CONDENSE` proposal, or re-editing text the distiller
+  landed → it lands byte-verbatim at its own boundary; adding to it re-introduces the bloat
+  you're removing.
 - Distilling the artifact inline instead of dispatching the distiller → the distiller owns the
   method; inlining it drops the re-verify / dedup / decision-log / single-commit shape.
 - Putting the decision entry anywhere but `docs/decisions.md` (e.g. a CLAUDE.md subsection) →
