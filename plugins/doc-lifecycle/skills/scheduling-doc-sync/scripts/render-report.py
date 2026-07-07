@@ -35,15 +35,33 @@ import sys
 
 
 def load_records(path):
+    return load_report(path)[0]
+
+
+def load_report(path):
+    """(records, unswept-or-None) from a report file, either shape."""
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     if isinstance(data, list):
-        return data
+        return data, None
     if isinstance(data, dict) and isinstance(data.get("records"), list):
-        return data["records"]
+        return data["records"], data.get("unswept")
     raise ValueError(
         "report must be a JSON array of records, or an object with a 'records' array"
     )
+
+
+def render_unswept_banner(unswept):
+    """The loud gap: chunks the sweep never produced a valid result for."""
+    if not unswept:
+        return []
+    docs = [p for u in unswept for p in u.get("docs", [])]
+    return [
+        f"> ⚠️ **{len(unswept)} chunk(s) unswept** — these docs were NOT "
+        f"audited this run (their sweep jobs failed twice); the next sweep "
+        f"resumes them automatically: {', '.join(f'`{d}`' for d in docs)}",
+        "",
+    ]
 
 
 def by_verdict(records, verdict):
@@ -204,11 +222,12 @@ def render_bloat_rollup(records):
             + ", ".join(parts))
 
 
-def render_bloat_pr_body(records):
+def render_bloat_pr_body(records, unswept=None):
     lines = [
         "Proposed by the weekly doc-bloat sweep — each row is applied in the diff below. "
         "Draft PR: review, drop any commit you don't want, merge to accept.",
         "",
+        *render_unswept_banner(unswept),
         render_bloat_rollup(records),
         "",
         "| Change (see diff) | Why it's bloat |",
@@ -219,13 +238,13 @@ def render_bloat_pr_body(records):
     return "\n".join(lines)
 
 
-def render_bloat_triage(records):
+def render_bloat_triage(records, unswept=None):
     """In-session triage view: rollup, then records grouped by doc, one line
     per record — the human approves by the [id]s shown."""
     by_doc = {}
     for r in records:
         by_doc.setdefault(r["doc"], []).append(r)
-    lines = [render_bloat_rollup(records), ""]
+    lines = [*render_unswept_banner(unswept), render_bloat_rollup(records), ""]
     for doc in sorted(by_doc):
         lines.append(doc)
         for r in by_doc[doc]:
@@ -346,7 +365,7 @@ def main():
         elif args.mode == "bloat-skip-summary":
             write_summary(render_bloat_skip_summary(args.lane, args.reason))
         else:
-            records = load_records(args.report)
+            records, unswept = load_report(args.report)
             if args.mode == "issue-body":
                 print(render_issue_body(records, args.cap, args.marker, args.head))
             elif args.mode == "blast-summary":
@@ -358,13 +377,13 @@ def main():
             elif args.mode == "pr-summary":
                 write_summary(render_pr_summary(records, args.pr_url))
             elif args.mode == "bloat-pr-body":
-                print(render_bloat_pr_body(records))
+                print(render_bloat_pr_body(records, unswept))
             elif args.mode == "bloat-pr-title":
                 print(render_bloat_pr_title(records, args.lane, args.date))
             elif args.mode == "bloat-pr-summary":
                 write_summary(render_bloat_pr_summary(records, args.lane, args.pr_url))
             elif args.mode == "bloat-triage":
-                print(render_bloat_triage(records))
+                print(render_bloat_triage(records, unswept))
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
         print(f"error: {e!r}", file=sys.stderr)
         return 2

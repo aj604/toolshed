@@ -25,10 +25,11 @@ classified by failure kind, checkpoints + explicit gap lists make partial assemb
 
 ### Planner (`plan-chunks.py`)
 
-- **Content-safe chunk ids:** sha256 over member `(path, git blob sha)` pairs
-  (`git ls-files -s`; fallback `(path, line count)` outside git). Editing a doc changes its
-  chunk id, so cross-run resume never reuses a stale result; "plan only pending" stays a pure
-  set difference against `--results-dir`.
+- **Content-safe chunk ids:** sha256 over member `(path, content sha256)` pairs, the content
+  hash computed in-process during the same read that counts lines (no git dependency, same
+  behavior in git and walk modes). Editing a doc changes its chunk id, so cross-run resume
+  never reuses a stale result; "plan only pending" stays a pure set difference against
+  `--results-dir`.
 - **Per-chunk `turns` field:** `12 + 2×docs` (living/narrative) or `12 + 4×docs` (planning),
   `+1` per full 600 lines in the chunk, clamped to [20, 40]. Policy chunks: flat 20.
   Grounded in observed 14–18-turn invocations that included ~5 turns of provisioning waste

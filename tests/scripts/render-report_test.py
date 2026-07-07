@@ -297,6 +297,45 @@ class BloatRender(unittest.TestCase):
         self.assertIn("**Rollup:**", out.stdout)
         self.assertNotIn("approve", out.stdout.lower())
 
+    def test_pr_body_renders_unswept_banner_before_rollup(self):
+        report = write_report([brec("CUT", location="README.md:5")])
+        with open(report) as f:
+            data = json.load(f)
+        data["unswept"] = [
+            {"chunk": "c-dead1", "docs": ["docs/plans/p.md", "docs/plans/q.md"]},
+            {"chunk": "c-dead2", "docs": ["docs/guide.md"]},
+        ]
+        with open(report, "w") as f:
+            json.dump(data, f)
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("2 chunk(s) unswept", out.stdout)
+        self.assertIn("docs/plans/p.md", out.stdout)
+        self.assertIn("docs/guide.md", out.stdout)
+        self.assertIn("next sweep", out.stdout)
+        self.assertLess(out.stdout.index("unswept"),
+                        out.stdout.index("**Rollup:**"))
+
+    def test_pr_body_no_banner_when_complete(self):
+        report = write_report([brec("CUT", location="README.md:5")])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertNotIn("unswept", out.stdout)
+
+    def test_triage_renders_unswept_banner(self):
+        report = write_report([brec("CUT", location="README.md:5")])
+        with open(report) as f:
+            data = json.load(f)
+        data["unswept"] = [{"chunk": "c-dead1", "docs": ["docs/plans/p.md"]}]
+        with open(report, "w") as f:
+            json.dump(data, f)
+        out = run(sys.executable, SCRIPT, "bloat-triage", "--report", report)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("1 chunk(s) unswept", out.stdout)
+        self.assertIn("docs/plans/p.md", out.stdout)
+
     def test_triage_missing_report_exits_2(self):
         out = run(sys.executable, SCRIPT, "bloat-triage",
                   "--report", "/nonexistent.json")
