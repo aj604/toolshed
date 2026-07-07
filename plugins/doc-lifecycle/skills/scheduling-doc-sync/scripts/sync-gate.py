@@ -62,7 +62,7 @@ def in_lane(record, lane):
     if lane == "prune":
         return verdict in PRUNE_VERDICTS
     if lane == "distill":
-        if verdict in DISTILL_DOC_VERDICTS:
+        if verdict in DISTILL_DOC_VERDICTS or verdict == "POLICY":
             return True
         return verdict == "DISTILL" and record.get("status") == "ready"
     raise ValueError(f"unknown lane: {lane!r}")

@@ -47,9 +47,9 @@ def report_file(payload):
     return f.name
 
 
-def brec(verdict, status=None, location=None, doc="README.md"):
+def brec(verdict, status=None, location=None, doc="README.md", files=None):
     r = {"id": "B1", "doc": doc, "location": location, "verdict": verdict,
-         "evidence": "x", "proposal": None, "status": status, "payload": None}
+         "evidence": "x", "proposal": None, "status": status, "files": files}
     return r
 
 
@@ -203,6 +203,35 @@ class BloatLaneGate(unittest.TestCase):
     def test_pr_open_skips_pending_even_with_findings(self):
         dec, _ = self._run([brec("CUT", location="README.md:5")], "prune", pr_open=1)
         self.assertEqual(dec, "skip-pending")
+
+    def test_policy_routes_to_distill_lane(self):
+        recs = [brec("POLICY", doc="docs/superpowers",
+                     files=["docs/superpowers/plans/a.md"])]
+        dec, filtered = self._run(recs, "distill")
+        self.assertEqual(dec, "open")
+        self.assertEqual(len(filtered), 1)
+
+    def test_policy_not_in_prune_lane(self):
+        recs = [brec("POLICY", doc="docs/superpowers",
+                     files=["docs/superpowers/plans/a.md"])]
+        dec, filtered = self._run(recs, "prune")
+        self.assertEqual(dec, "skip-empty")
+        self.assertEqual(filtered, [])
+
+    def test_v2_wrapped_report_with_schema_key_loads(self):
+        report = write_report([brec("CUT", location="README.md:5")])
+        with open(report) as f:
+            data = json.load(f)
+        data["schema"] = 2
+        with open(report, "w") as f:
+            json.dump(data, f)
+        out_fd, out_path = tempfile.mkstemp(suffix=".json")
+        os.close(out_fd)
+        res = run("bloat-lane", "--report", report, "--lane", "prune",
+                  "--pr-open", "0", "--out", out_path)
+        os.unlink(report); os.unlink(out_path)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.stdout.strip(), "open")
 
 
 if __name__ == "__main__":
