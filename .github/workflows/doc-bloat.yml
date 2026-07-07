@@ -1,9 +1,13 @@
-# doc-bloat — weekly documentation bloat sweep (detect → propose).
-# Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill; re-run that
-# skill to upgrade this file. Sibling to doc-sync.yml (drift): bloat is detect-and-
-# propose only — fixing-doc-bloat applies a human-approved subset, so each lane opens
-# a DRAFT PR and the merge is the approval.
-# Design: docs/decisions.md's 2026-07-03/04 doc-bloat nightly entries in aj604/toolshed.
+# doc-bloat — weekly documentation bloat sweep (plan → chunked detect → assemble → propose).
+# Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill; re-run that skill to
+# upgrade this file. Sibling to doc-sync.yml (drift): bloat is detect-and-propose only —
+# fixing-doc-bloat applies a human-approved subset, so each lane opens a DRAFT PR and the
+# merge is the approval.
+# Orchestration is deterministic: plan-chunks.py plans bounded chunks (no model), one model
+# invocation sweeps each chunk under a turn cap, and validate-bloat-output.py seam-validates
+# every chunk where it is produced (one fresh retry) and refuses partial assembly — a failed
+# chunk fails the run by name while every valid chunk survives as a checkpoint artifact.
+# Design: docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md in aj604/toolshed.
 name: doc-bloat
 
 on:
@@ -21,18 +25,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  detect:
+  plan:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
     outputs:
-      prune: ${{ steps.prune.outputs.decision }}
-      distill: ${{ steps.distill.outputs.decision }}
+      decision: ${{ steps.pre.outputs.decision }}
+      pending: ${{ steps.chunks.outputs.pending }}
+      prune_pr: ${{ steps.facts.outputs.prune_pr }}
+      distill_pr: ${{ steps.facts.outputs.distill_pr }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Gather facts
         id: facts
         run: |
@@ -43,7 +46,6 @@ jobs:
             echo "prune_pr=${PRUNE_PR}"
             echo "distill_pr=${DISTILL_PR}"
           } >> "$GITHUB_OUTPUT"
-
       - name: Gate (pre-sweep)
         id: pre
         run: |
@@ -53,9 +55,37 @@ jobs:
             --distill-pr-open "${{ steps.facts.outputs.distill_pr }}")
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
           python3 .github/doc-sync/render-report.py bloat-pre-summary --decision "${DECISION}"
-
-      - name: Detect bloat (headless, full sweep)
+      - name: Plan chunks (deterministic — no model)
         if: steps.pre.outputs.decision == 'detect'
+        id: chunks
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/plan-chunks.py --out manifest.json
+          echo "pending=$(python3 -c 'import json; print(json.dumps(json.load(open("manifest.json"))["pending"]))')" >> "$GITHUB_OUTPUT"
+      - name: Upload manifest
+        if: steps.pre.outputs.decision == 'detect'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bloat-manifest
+          path: manifest.json
+
+  sweep:
+    needs: plan
+    if: needs.plan.outputs.decision == 'detect' && needs.plan.outputs.pending != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        chunk: ${{ fromJson(needs.plan.outputs.pending) }}
+    env:
+      CHUNK_ID: ${{ matrix.chunk }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bloat-manifest
+      - name: Detect chunk (attempt 1)
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -63,51 +93,96 @@ jobs:
           plugin_marketplaces: https://github.com/aj604/toolshed.git
           plugins: doc-lifecycle@toolshed
           prompt: >-
-            Use the doc-lifecycle:detecting-doc-bloat skill in full-audit mode over every
-            documentation file in this repository, including docs/plans/. Write the wrapped
-            result object ({"records": [...], "summary": {...}}) to bloat-report.json in the
-            repository root. If nothing is bloated, emit an empty records array with a zero summary.
-          claude_args: --allowedTools "Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
-
-      - name: Assert detect produced a report
-        if: steps.pre.outputs.decision == 'detect'
+            Use the doc-lifecycle:detecting-doc-bloat skill as a headless chunk executor.
+            Read manifest.json in the repository root and find the chunk whose id is
+            "${{ matrix.chunk }}". Audit exactly the docs that chunk lists — no others —
+            and write the chunk result object {"chunk": "${{ matrix.chunk }}", "records": [...]}
+            to chunks/${{ matrix.chunk }}.json. If nothing in the chunk is bloated, emit an
+            empty records array.
+          claude_args: --max-turns 15 --allowedTools "Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
+      - name: Seam-validate (attempt 1)
+        id: seam1
+        continue-on-error: true
+        run: python3 .github/doc-sync/validate-bloat-output.py --chunk "chunks/${CHUNK_ID}.json" --manifest manifest.json
+      - name: Discard invalid result before retry
+        if: steps.seam1.outcome != 'success'
+        run: rm -f "chunks/${CHUNK_ID}.json"
+      - name: Detect chunk (retry — fresh dispatch)
+        if: steps.seam1.outcome != 'success'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugins: doc-lifecycle@toolshed
+          prompt: >-
+            Use the doc-lifecycle:detecting-doc-bloat skill as a headless chunk executor.
+            Read manifest.json in the repository root and find the chunk whose id is
+            "${{ matrix.chunk }}". Audit exactly the docs that chunk lists — no others —
+            and write the chunk result object {"chunk": "${{ matrix.chunk }}", "records": [...]}
+            to chunks/${{ matrix.chunk }}.json. If nothing in the chunk is bloated, emit an
+            empty records array.
+          claude_args: --max-turns 15 --allowedTools "Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
+      - name: Seam-validate (final)
+        if: steps.seam1.outcome != 'success'
         run: |
-          test -f bloat-report.json || { echo "::error::detect step produced no bloat-report.json"; exit 1; }
+          python3 .github/doc-sync/validate-bloat-output.py --chunk "chunks/${CHUNK_ID}.json" --manifest manifest.json \
+            || { echo "::error::chunk ${CHUNK_ID} failed seam validation twice — this chunk's spend is discarded; every valid chunk is preserved as an artifact"; exit 1; }
+      - name: Upload chunk result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bloat-chunk-${{ matrix.chunk }}
+          path: chunks/${{ matrix.chunk }}.json
+          if-no-files-found: ignore
 
-      - name: Validate report (mechanical contract check)
-        if: steps.pre.outputs.decision == 'detect'
-        run: python3 .github/doc-sync/validate-bloat-output.py bloat-report.json
-
+  assemble:
+    needs: [plan, sweep]
+    if: always() && needs.plan.outputs.decision == 'detect' && needs.plan.outputs.pending != '[]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      prune: ${{ steps.prune.outputs.decision }}
+      distill: ${{ steps.distill.outputs.decision }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bloat-manifest
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bloat-chunk-*
+          path: chunks
+          merge-multiple: true
+      - name: Assemble report (refuses partial results)
+        run: python3 .github/doc-sync/validate-bloat-output.py --assemble chunks --manifest manifest.json --out bloat-report.json
       - name: Upload report artifact
-        if: always() && steps.pre.outputs.decision == 'detect'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bloat-report
           path: bloat-report.json
           if-no-files-found: ignore
-
       - name: Gate (prune lane)
-        if: steps.pre.outputs.decision == 'detect'
         id: prune
         run: |
           set -euo pipefail
           DECISION=$(python3 .github/doc-sync/sync-gate.py bloat-lane \
             --report bloat-report.json --lane prune \
-            --pr-open "${{ steps.facts.outputs.prune_pr }}" \
+            --pr-open "${{ needs.plan.outputs.prune_pr }}" \
             --out "$RUNNER_TEMP/prune.json")
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
           if [ "${DECISION}" != "open" ]; then
             python3 .github/doc-sync/render-report.py bloat-skip-summary --lane prune --reason "${DECISION}"
           fi
-
       - name: Gate (distill lane)
-        if: steps.pre.outputs.decision == 'detect'
         id: distill
         run: |
           set -euo pipefail
           DECISION=$(python3 .github/doc-sync/sync-gate.py bloat-lane \
             --report bloat-report.json --lane distill \
-            --pr-open "${{ steps.facts.outputs.distill_pr }}" \
+            --pr-open "${{ needs.plan.outputs.distill_pr }}" \
             --out "$RUNNER_TEMP/distill.json")
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
           if [ "${DECISION}" != "open" ]; then
@@ -115,8 +190,8 @@ jobs:
           fi
 
   prune:
-    needs: detect
-    if: needs.detect.outputs.prune == 'open'
+    needs: [plan, assemble]
+    if: needs.assemble.outputs.prune == 'open'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -173,8 +248,8 @@ jobs:
             --report "$RUNNER_TEMP/lane.json" --lane prune --pr-url "${PR_URL}"
 
   distill:
-    needs: detect
-    if: needs.detect.outputs.distill == 'open'
+    needs: [plan, assemble]
+    if: needs.assemble.outputs.distill == 'open'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -192,10 +267,10 @@ jobs:
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in
-            bloat-report.json whose verdict is MERGE-DOC, RETIRE-DOC, or DISTILL with
-            status "ready" — treat exactly those record IDs as the approved subset, and
-            apply nothing else. DISTILL records dispatch the doc-distiller agent per the
-            skill. Follow the skill's rules exactly.
+            bloat-report.json whose verdict is MERGE-DOC, RETIRE-DOC, or POLICY, or
+            DISTILL with status "ready" — treat exactly those record IDs as the approved
+            subset, and apply nothing else. DISTILL records dispatch the doc-distiller
+            agent per the skill. Follow the skill's rules exactly.
           claude_args: --allowedTools "Task,Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
       - name: Open draft PR
         run: |
@@ -212,9 +287,9 @@ jobs:
           git config user.name "doc-bloat"
           git config user.email "doc-bloat@users.noreply.github.com"
           git checkout -b doc-bloat/distill
-          # Inline verdicts (MERGE-DOC/RETIRE-DOC) leave edits uncommitted; the distiller
-          # commits its own DISTILL result. Commit any leftover uncommitted work, but a
-          # clean index is normal here — don't fail on it.
+          # Inline verdicts (MERGE-DOC/RETIRE-DOC/POLICY) leave edits uncommitted; the
+          # distiller commits its own DISTILL result. Commit any leftover uncommitted work,
+          # but a clean index is normal here — don't fail on it.
           git add -A
           if ! git diff --cached --quiet; then
             git commit -m "docs: bloat distill sweep (${DATE})"

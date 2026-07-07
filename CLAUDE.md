@@ -4,13 +4,13 @@ This repo is a **Claude Code plugin marketplace**, not an application. It is alm
 Markdown; the only executable code published is five skill helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
-`.../detecting-doc-bloat/scripts/list-docs.py`, plus
+`.../detecting-doc-bloat/scripts/plan-chunks.py`, plus
 `scheduling-doc-sync`'s `scripts/sync-gate.py` and `scripts/render-report.py`, all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml` and `doc-bloat.yml`). The sample
 repos under `tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync
 install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
-`doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
+`doc-sync/plan-chunks.py`, `doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
 `doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `workflows/doc-sync.yml`,
 `workflows/doc-bloat.yml`) and the ci+release workflow (`workflows/release.yml`).
 
