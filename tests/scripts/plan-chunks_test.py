@@ -517,6 +517,9 @@ class EmitPrompt(unittest.TestCase):
             self.assertIn("docs/superpowers", r.stdout)
             for i in range(3):
                 self.assertIn(f"docs/superpowers/plans/p{i}.md", r.stdout)
+            # Same scope fence as the sweep prompt — GREEN run (b) showed an
+            # executor enumerating the tree when the policy variant lacked it.
+            self.assertIn("do not enumerate", r.stdout)
 
     def test_emit_turns_prints_the_budget(self):
         with tempfile.TemporaryDirectory() as root:

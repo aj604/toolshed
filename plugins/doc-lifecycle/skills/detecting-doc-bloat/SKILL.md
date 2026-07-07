@@ -120,8 +120,10 @@ own; the human's ID list is what `fixing-doc-bloat` receives.
   seven enum values, the contract shape, nothing else.
 - Evidence asserted, not shown ("the sections are identical", no quote) → go
   get the line or the quoted overlap.
-- Skipping the validator at any seam — chunk result or final report → run it;
-  never hand off a result it rejects.
+- Skipping the validator at an orchestrator seam — chunk results as they
+  land, the final report → run it; never hand off a result it rejects. (As a
+  headless executor, seam validation is the workflow's own step — never a
+  license to open the manifest.)
 - Authoring DISTILL claims/insights/decision entries at detect time — anywhere,
   including inside `evidence` → post-approval distiller work; emit the
   classification and proof only.

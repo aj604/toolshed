@@ -341,6 +341,10 @@ exactly one POLICY record covering it — never walk its files individually —
 and copy this files list verbatim into the record's files field:
 {file_lines}
 
+This list is your entire scope; do not enumerate the tree or open anything
+outside it (sampling a few of the listed files for the evidence field is the
+audit, per the skill).
+
 Write the chunk result object {{"chunk": "{id}", "records": [<the one POLICY
 record>]}} to chunks/{id}.json. Done means exactly that file, in the
 chunk-result shape the skill's contract defines; then stop.
