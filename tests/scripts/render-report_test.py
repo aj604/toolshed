@@ -332,5 +332,42 @@ class BloatRender(unittest.TestCase):
             self.assertEqual(out.returncode, 0)
 
 
+class WorkflowWiring(unittest.TestCase):
+    """Pins doc-bloat.yml's harness wiring: the deterministic plan job, the
+    per-chunk seam validation with one retry, and the no-partial assembly.
+    The YAML stays an allowlist-thin shell; these strings are its contract
+    with the unit-tested scripts."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(
+            os.path.dirname(__file__), "..", "..",
+            "plugins", "doc-lifecycle", "skills", "scheduling-doc-sync",
+            "doc-bloat.yml")
+        with open(path, encoding="utf-8") as f:
+            cls.yml = f.read()
+
+    def test_plan_job_runs_plan_chunks(self):
+        self.assertIn("plan-chunks.py --out manifest.json", self.yml)
+
+    def test_chunks_seam_validated_in_job(self):
+        self.assertIn('--chunk "chunks/${CHUNK_ID}.json" --manifest manifest.json',
+                      self.yml)
+
+    def test_assembly_never_partial(self):
+        self.assertIn("--assemble chunks --manifest manifest.json", self.yml)
+        self.assertNotIn("--allow-partial", self.yml)
+
+    def test_chunk_invocations_are_turn_capped(self):
+        self.assertIn("--max-turns 15", self.yml)
+
+    def test_matrix_does_not_fail_fast(self):
+        self.assertIn("fail-fast: false", self.yml)
+
+    def test_distill_lane_covers_policy_and_keeps_task(self):
+        self.assertIn("RETIRE-DOC, or POLICY", self.yml)
+        self.assertIn('"Task,Read', self.yml)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

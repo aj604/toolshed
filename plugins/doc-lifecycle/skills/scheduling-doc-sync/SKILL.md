@@ -45,25 +45,30 @@ All shipped files are in this skill's base directory (announced when the skill l
 2. Copy `doc-sync.yml` → `.github/workflows/doc-sync.yml`, replacing the literal placeholders
    `{{CRON_SCHEDULE}}` and `{{BLAST_RADIUS_CAP}}` with the chosen values. Copy `doc-bloat.yml` →
    `.github/workflows/doc-bloat.yml`, replacing `{{BLOAT_CRON}}`.
-3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py` and
-   `scripts/render-report.py` → `.github/doc-sync/render-report.py`
-   (gate decisions and run-surface rendering both run from the repo, unit-tested upstream — for
-   both `doc-sync.yml` and `doc-bloat.yml`).
+3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py`,
+   `scripts/render-report.py` → `.github/doc-sync/render-report.py`, and
+   `../detecting-doc-bloat/scripts/plan-chunks.py` → `.github/doc-sync/plan-chunks.py`
+   (gate decisions, run-surface rendering, and doc-bloat's deterministic chunk planning all
+   run from the repo, unit-tested upstream — for both `doc-sync.yml` and `doc-bloat.yml`).
 4. Copy `../detecting-doc-drift/scripts/validate-drift-output.py` → `.github/doc-sync/validate-drift-output.py`
    and `../detecting-doc-bloat/scripts/validate-bloat-output.py` → `.github/doc-sync/validate-bloat-output.py`
    (each workflow's mechanical contract check runs from the repo, not the plugin cache).
 5. Seed the audit scope — **only if absent**: write `.github/doc-sync/audit-scope.json` with the
    starter `{"exclude": [], "include": []}` (empty arrays — a valid no-op default the human tunes).
-   This is the doc-bloat full-audit scope config (exclude/include globs `list-docs.py` reads to
-   pick which docs the weekly sweep audits). An existing file is a tuned config — never overwrite it.
+   This is the doc-bloat full-audit scope config `plan-chunks.py` reads to pick which docs the
+   weekly sweep audits (exclude/include globs) and how to chunk them — the optional
+   `policy_scope` (directories of ephemeral artifacts, each swept as one POLICY record) and
+   `chunking` (`max_docs` / `max_lines` / `max_chunks`) keys are documented in that script's
+   docstring. An existing file is a tuned config — never overwrite it.
 6. Seed the marker — **only if absent**:
    `test -f .github/doc-sync-marker || git rev-parse HEAD > .github/doc-sync-marker`
    An existing marker means an existing install: this is an upgrade, and resetting the marker
    would silently skip every commit since the last sync. Never reset it.
 7. Tell the user, concretely:
-   - the eight files to commit (`doc-sync.yml`, `doc-bloat.yml`, `sync-gate.py`,
-     `render-report.py`, `validate-drift-output.py`, `validate-bloat-output.py`, the seeded
-     `audit-scope.json`, and the seeded `doc-sync-marker`);
+   - the nine files to commit (`doc-sync.yml`, `doc-bloat.yml`, `sync-gate.py`,
+     `render-report.py`, `plan-chunks.py`, `validate-drift-output.py`,
+     `validate-bloat-output.py`, the seeded `audit-scope.json`, and the seeded
+     `doc-sync-marker`);
    - first night: diff from the seeded marker; no drift → marker-only commit, drift → PR on
      `doc-sync/nightly` with evidence, over-cap → a `doc-sync` issue;
    - the weekly bloat sweep opens up to two **draft** PRs (`doc-bloat/prune`, `doc-bloat/distill`);
@@ -97,9 +102,9 @@ All shipped files are in this skill's base directory (announced when the skill l
   makes `validate-drift-output.py` exit nonzero, and the workflow's validate step carries no
   `continue-on-error` — don't add one.
 - **The weekly bloat sweep splits findings into two lanes by verdict:** `prune`
-  (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`, passage-level) and `distill` (`MERGE-DOC`/`RETIRE-DOC`, or
-  `DISTILL` with `status: ready`, doc-level). A `DISTILL` record still `pending-implementation`
-  belongs to neither lane and is never opened as a PR.
+  (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`, passage-level) and `distill` (`MERGE-DOC`/`RETIRE-DOC`/
+  `POLICY`, or `DISTILL` with `status: ready`, doc-level). A `DISTILL` record still
+  `pending-implementation` belongs to neither lane and is never opened as a PR.
 - **`doc-bloat.yml` is a separate sibling workflow from `doc-sync.yml`, each with its own
   concurrency group** — drift's marker-based detect-fix model and bloat's marker-less
   detect-propose model would tangle if combined. Bloat output is always a **draft PR**, never
