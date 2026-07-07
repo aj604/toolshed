@@ -125,7 +125,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
           plugins: doc-lifecycle@toolshed
           prompt: ${{ steps.slice.outputs.prompt }}
           claude_args: --max-turns ${{ steps.slice.outputs.turns }} --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
@@ -148,7 +148,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
           plugins: doc-lifecycle@toolshed
           prompt: ${{ steps.slice.outputs.prompt }}
           claude_args: --max-turns ${{ steps.retry.outputs.turns }} --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
@@ -242,7 +242,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in
@@ -300,7 +300,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in

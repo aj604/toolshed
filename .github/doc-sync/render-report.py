@@ -282,6 +282,48 @@ def render_bloat_skip_summary(lane, reason):
     return msgs[reason]
 
 
+def render_upgrade_summary(status, current, latest, pr_url):
+    if status == "current":
+        return (f"✅ **doc-sync wiring is current.** Installed `{current}`, latest "
+                f"release `{latest}` — nothing to upgrade.")
+    if status == "ahead":
+        return (f"✅ **doc-sync wiring is ahead of releases.** Installed `{current}` is "
+                f"newer than the latest release `{latest}` (a dev/prerelease pin) — no upgrade.")
+    if status == "noop":
+        return (f"✅ **No wiring change.** Regenerating at `{latest}` (from `{current}`) "
+                f"produced no diff — the shipped wiring already matches.")
+    if status == "opened":
+        return (f"🔁 **Wiring upgrade ready.** `{current}` → `{latest}` regenerated — "
+                f"review {pr_url}. Merging advances `.github/doc-sync/installed-version` "
+                f"and re-pins the workflows; closing it re-checks next run.")
+    if status == "pending":
+        return (f"⏭️ **Upgrade skipped — a `doc-sync/upgrade` PR is already open.** "
+                f"Review {pr_url}; the next check resumes after it merges/closes. "
+                f"(Installed `{current}`, latest `{latest}`.)")
+    raise ValueError(f"unknown upgrade status: {status!r}")
+
+
+def render_upgrade_pr_body(current, latest, files):
+    lines = [
+        f"Self-upgrade: this repo's doc-sync wiring was pinned to `{current}`; "
+        f"doc-lifecycle `{latest}` has shipped. Regenerated the wiring at `{latest}` and "
+        "re-pinned every workflow's `plugin_marketplaces` ref to it.",
+        "",
+        "**Preserved unchanged:** the `.github/doc-sync-marker` (sync state), "
+        "`.github/doc-sync/audit-scope.json` (tuned config), and every install-time knob "
+        "(cron / blast-radius cap / bloat & upgrade crons). Only the wiring and "
+        "`.github/doc-sync/installed-version` change.",
+    ]
+    if files:
+        changed = [f for f in files.split(",") if f]
+        if changed:
+            lines += ["", "**Regenerated files:**"]
+            lines += [f"- `{f}`" for f in changed]
+    lines += ["", "Merge to adopt the new version; close to stay on "
+              f"`{current}` until the next release."]
+    return "\n".join(lines)
+
+
 def nonneg(value):
     n = int(value)
     if n < 0:
@@ -353,6 +395,17 @@ def main():
     btriage = sub.add_parser("bloat-triage")
     btriage.add_argument("--report", required=True)
 
+    usum = sub.add_parser("upgrade-summary")
+    usum.add_argument("--status", required=True)
+    usum.add_argument("--current", required=True)
+    usum.add_argument("--latest", required=True)
+    usum.add_argument("--pr-url", default="")
+
+    upr = sub.add_parser("upgrade-pr-body")
+    upr.add_argument("--current", required=True)
+    upr.add_argument("--latest", required=True)
+    upr.add_argument("--files", default="")
+
     bgaps = sub.add_parser("bloat-unswept-summary")
     bgaps.add_argument("--report", required=True)
 
@@ -367,6 +420,11 @@ def main():
             write_summary(render_bloat_pre_summary(args.decision))
         elif args.mode == "bloat-skip-summary":
             write_summary(render_bloat_skip_summary(args.lane, args.reason))
+        elif args.mode == "upgrade-summary":
+            write_summary(render_upgrade_summary(
+                args.status, args.current, args.latest, args.pr_url))
+        elif args.mode == "upgrade-pr-body":
+            print(render_upgrade_pr_body(args.current, args.latest, args.files))
         else:
             records, unswept = load_report(args.report)
             if args.mode == "issue-body":

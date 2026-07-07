@@ -1,18 +1,22 @@
 # CLAUDE.md
 
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
-Markdown; the only executable code published is five skill helper scripts
+Markdown; the only executable code published is six skill helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
 `.../detecting-doc-bloat/scripts/plan-chunks.py`, plus
-`scheduling-doc-sync`'s `scripts/sync-gate.py` and `scripts/render-report.py`, all `python3`, no deps)
+`scheduling-doc-sync`'s `scripts/sync-gate.py`, `scripts/upgrade-gate.py`, and
+`scripts/render-report.py`, all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
-(`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml` and `doc-bloat.yml`). The sample
-repos under `tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync
-install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
+(`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`, `doc-bloat.yml`, and
+`doc-sync-upgrade.yml`). The sample repos under `tests/fixtures/` are the only other runnable
+code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`,
+`doc-sync/upgrade-gate.py`, `doc-sync/render-report.py`,
 `doc-sync/plan-chunks.py`, `doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
-`doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `workflows/doc-sync.yml`,
-`workflows/doc-bloat.yml`) and the ci+release workflow (`workflows/release.yml`).
+`doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `doc-sync/installed-version`
+(the plugin-version lockfile the upgrade workflow reads), `workflows/doc-sync.yml`,
+`workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`) and the ci+release workflow
+(`workflows/release.yml`).
 
 ## Layout (pointers, not descriptions)
 
@@ -53,7 +57,9 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
 - **The helper scripts have unit tests** (stdlib `unittest`, no deps) at
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
   output contract — `sync-gate_test.py`/`render-report_test.py` also cover `doc-bloat.yml`'s
-  gate/render wiring, since both workflows share the two scripts.
+  gate/render wiring, since both workflows share the two scripts. `upgrade-gate_test.py` covers the
+  `doc-sync-upgrade.yml` version-comparison gate. `release.yml`'s CI runs the drift-validator,
+  sync-gate, upgrade-gate, and render-report suites.
 - Sync PR bodies/titles render via `render-report.py`'s `pr-body`/`pr-title` subcommands, never
   inline YAML `jq` — keeping the logic unit-tested and the CI YAML allowlist thin.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable

@@ -336,6 +336,22 @@ class BloatRender(unittest.TestCase):
         self.assertIn("1 chunk(s) unswept", out.stdout)
         self.assertIn("docs/plans/p.md", out.stdout)
 
+    def _unswept_summary(self, report):
+        """Run bloat-unswept-summary with a real $GITHUB_STEP_SUMMARY file
+        (CI always sets one) and return (result, summary_text). The banner is a
+        run-summary line, not stdout — the workflow step surfaces it there."""
+        fd, summary_path = tempfile.mkstemp()
+        os.close(fd)
+        env = dict(os.environ, GITHUB_STEP_SUMMARY=summary_path)
+        out = subprocess.run(
+            [sys.executable, SCRIPT, "bloat-unswept-summary", "--report", report],
+            capture_output=True, text=True, env=env,
+        )
+        with open(summary_path, encoding="utf-8") as f:
+            summary = f.read()
+        os.unlink(summary_path)
+        return out, summary
+
     def test_unswept_summary_writes_gap_state(self):
         report = write_report([])
         with open(report) as f:
@@ -343,21 +359,19 @@ class BloatRender(unittest.TestCase):
         data["unswept"] = [{"chunk": "c-dead1", "docs": ["docs/plans/p.md"]}]
         with open(report, "w") as f:
             json.dump(data, f)
-        out = run(sys.executable, SCRIPT, "bloat-unswept-summary",
-                  "--report", report)
+        out, summary = self._unswept_summary(report)
         os.unlink(report)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("1 chunk(s) unswept", out.stdout)
-        self.assertIn("docs/plans/p.md", out.stdout)
-        self.assertIn("next sweep", out.stdout)
+        self.assertIn("1 chunk(s) unswept", summary)
+        self.assertIn("docs/plans/p.md", summary)
+        self.assertIn("next sweep", summary)
 
     def test_unswept_summary_silent_when_complete(self):
         report = write_report([brec("CUT", location="README.md:5")])
-        out = run(sys.executable, SCRIPT, "bloat-unswept-summary",
-                  "--report", report)
+        out, summary = self._unswept_summary(report)
         os.unlink(report)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(out.stdout.strip(), "")
+        self.assertEqual(summary.strip(), "")
 
     def test_triage_missing_report_exits_2(self):
         out = run(sys.executable, SCRIPT, "bloat-triage",
@@ -459,6 +473,93 @@ class WorkflowWiring(unittest.TestCase):
     def test_distill_lane_covers_policy_and_keeps_task(self):
         self.assertIn("RETIRE-DOC, or POLICY", self.yml)
         self.assertIn('"Task,Read', self.yml)
+
+
+class UpgradeRender(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.summary_path = os.path.join(self.tmp.name, "summary.md")
+
+    def run_script(self, *argv):
+        env = dict(os.environ)
+        env["GITHUB_STEP_SUMMARY"] = self.summary_path
+        return subprocess.run([sys.executable, SCRIPT, *argv],
+                              capture_output=True, text=True, env=env)
+
+    def summary(self):
+        with open(self.summary_path, encoding="utf-8") as f:
+            return f.read()
+
+    # -- upgrade-summary ---------------------------------------------------
+
+    def test_current_reports_both_versions(self):
+        r = self.run_script("upgrade-summary", "--status", "current",
+                            "--current", "0.7.0", "--latest", "0.7.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("current", s.lower())
+        self.assertIn("0.7.0", s)
+
+    def test_ahead_names_dev_pin(self):
+        r = self.run_script("upgrade-summary", "--status", "ahead",
+                            "--current", "0.8.0", "--latest", "0.7.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("ahead", s.lower())
+        self.assertIn("0.8.0", s)
+        self.assertIn("0.7.0", s)
+
+    def test_noop_states_no_wiring_change(self):
+        r = self.run_script("upgrade-summary", "--status", "noop",
+                            "--current", "0.7.0", "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no wiring change", self.summary().lower())
+
+    def test_opened_includes_pr_url_and_bump(self):
+        r = self.run_script("upgrade-summary", "--status", "opened",
+                            "--current", "0.7.0", "--latest", "0.8.0",
+                            "--pr-url", "https://gh/pr/9")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("https://gh/pr/9", s)
+        self.assertIn("0.7.0", s)
+        self.assertIn("0.8.0", s)
+
+    def test_pending_reports_open_pr(self):
+        r = self.run_script("upgrade-summary", "--status", "pending",
+                            "--current", "0.7.0", "--latest", "0.8.0",
+                            "--pr-url", "https://gh/pr/3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("https://gh/pr/3", s)
+        self.assertIn("already open", s.lower())
+
+    def test_unknown_status_exits_2(self):
+        r = self.run_script("upgrade-summary", "--status", "bogus",
+                            "--current", "0.7.0", "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 2)
+
+    # -- upgrade-pr-body ---------------------------------------------------
+
+    def test_pr_body_shows_bump_and_preserved_state(self):
+        r = self.run_script("upgrade-pr-body", "--current", "0.7.0",
+                            "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = r.stdout
+        self.assertIn("0.7.0", out)
+        self.assertIn("0.8.0", out)
+        # states what the upgrade preserves, so a reviewer trusts the diff
+        self.assertIn("marker", out.lower())
+        self.assertIn("audit-scope", out.lower())
+
+    def test_pr_body_lists_changed_files_when_given(self):
+        r = self.run_script("upgrade-pr-body", "--current", "0.7.0",
+                            "--latest", "0.8.0",
+                            "--files", ".github/workflows/doc-sync.yml,.github/doc-sync/sync-gate.py")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("`.github/workflows/doc-sync.yml`", r.stdout)
+        self.assertIn("`.github/doc-sync/sync-gate.py`", r.stdout)
 
 
 if __name__ == "__main__":

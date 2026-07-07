@@ -1,0 +1,135 @@
+# doc-sync-upgrade — keep the installed doc-sync wiring current with the plugin.
+# Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill; re-run that
+# skill to upgrade this file. Preserves .github/doc-sync-marker, audit-scope.json,
+# and the install-time knobs. Design: docs/decisions.md's doc-sync self-upgrade
+# entry in aj604/toolshed.
+#
+# Why this exists: the nightly/weekly workflows pin plugin_marketplaces to a
+# release tag, so the skills they invoke are frozen at the version the vendored
+# wiring was generated from. This workflow is the ONLY thing that advances that
+# pin — weekly it compares the installed version to the plugin's latest release
+# and, when a newer one ships, regenerates the wiring at it and opens a review PR.
+name: doc-sync-upgrade
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write   # claude-code-action OAuth token exchange
+
+concurrency:
+  group: doc-sync-upgrade
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve versions
+        id: versions
+        run: |
+          set -euo pipefail
+          test -f .github/doc-sync/installed-version || {
+            echo "::error::.github/doc-sync/installed-version missing — run the scheduling-doc-sync installer"; exit 1; }
+          CURRENT=$(cat .github/doc-sync/installed-version)
+          # Latest published release of the plugin marketplace (tagName is v-prefixed).
+          LATEST=$(gh release view --repo aj604/toolshed --json tagName --jq .tagName | sed 's/^v//')
+          OPEN_PRS=$(gh pr list --head doc-sync/upgrade --state open --json number --jq length)
+          {
+            echo "current=${CURRENT}"
+            echo "latest=${LATEST}"
+            echo "open_prs=${OPEN_PRS}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Gate
+        id: gate
+        run: |
+          set -euo pipefail
+          # An already-open upgrade PR awaits a human — don't stack a second one.
+          if [ "${{ steps.versions.outputs.open_prs }}" -gt 0 ]; then
+            echo "decision=skip-pending" >> "$GITHUB_OUTPUT"
+            PR_URL=$(gh pr list --head doc-sync/upgrade --state open --json url --jq '.[0].url')
+            python3 .github/doc-sync/render-report.py upgrade-summary \
+              --status pending --current "${{ steps.versions.outputs.current }}" \
+              --latest "${{ steps.versions.outputs.latest }}" --pr-url "${PR_URL}"
+            exit 0
+          fi
+          # Semver comparison lives in the tested gate, never in YAML string-fu.
+          DECISION=$(python3 .github/doc-sync/upgrade-gate.py compare \
+            --current "${{ steps.versions.outputs.current }}" \
+            --latest "${{ steps.versions.outputs.latest }}")
+          echo "gate: ${DECISION}"
+          echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
+          # current / ahead both self-explain and stop here; only 'upgrade' proceeds.
+          if [ "${DECISION}" != "upgrade" ]; then
+            python3 .github/doc-sync/render-report.py upgrade-summary \
+              --status "${DECISION}" --current "${{ steps.versions.outputs.current }}" \
+              --latest "${{ steps.versions.outputs.latest }}"
+          fi
+
+      # Regenerate the wiring at the new version by re-running the skill headlessly,
+      # pinned AT that new version so its shipped files are the ones on disk. The
+      # skill owns which files to lay down and how to preserve state/knobs — never
+      # re-implement that as a cp/sed here.
+      - name: Regenerate wiring (headless upgrade)
+        if: steps.gate.outputs.decision == 'upgrade'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: https://github.com/aj604/toolshed.git#v${{ steps.versions.outputs.latest }}
+          plugins: doc-lifecycle@toolshed
+          prompt: >-
+            Use the doc-lifecycle:scheduling-doc-sync skill in upgrade mode to upgrade THIS
+            repo's existing doc-sync install to plugin version ${{ steps.versions.outputs.latest }}.
+            Follow the skill's "Upgrade mode" section exactly: regenerate only the wiring
+            (the three workflow YAMLs and the scripts under .github/doc-sync/), re-pin every
+            plugin_marketplaces ref to v${{ steps.versions.outputs.latest }}, and set
+            .github/doc-sync/installed-version to ${{ steps.versions.outputs.latest }}.
+            Preserve exactly, untouched: .github/doc-sync-marker, .github/doc-sync/audit-scope.json,
+            and every install-time knob already present in the installed workflow files (cron,
+            blast-radius cap, bloat cron, upgrade cron) — read them out of the current files and
+            re-apply them; never reset to template defaults. Do not commit or open a PR.
+          claude_args: --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *),Bash(jq *)"
+
+      - name: Open upgrade PR
+        if: steps.gate.outputs.decision == 'upgrade'
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet; then
+            # Version advanced but the regenerated wiring is byte-identical — nothing to land.
+            python3 .github/doc-sync/render-report.py upgrade-summary \
+              --status noop --current "${{ steps.versions.outputs.current }}" \
+              --latest "${{ steps.versions.outputs.latest }}"
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only | paste -sd, -)
+          python3 .github/doc-sync/render-report.py upgrade-pr-body \
+            --current "${{ steps.versions.outputs.current }}" \
+            --latest "${{ steps.versions.outputs.latest }}" \
+            --files "${CHANGED}" > "$RUNNER_TEMP/upgrade-pr-body.md"
+          git config user.name "doc-sync"
+          git config user.email "doc-sync@users.noreply.github.com"
+          git checkout -b doc-sync/upgrade
+          git add -A
+          git commit -m "docs: upgrade doc-sync wiring to plugin v${{ steps.versions.outputs.latest }}"
+          # Self-authenticate off GH_TOKEN: claude-code-action drops the checkout-persisted
+          # credential, so a bare push goes out unauthenticated. --force: a closed-unmerged
+          # PR can leave a stale branch. No -u: a token-bearing URL must not persist in config.
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-sync/upgrade
+          PR_URL=$(gh pr create \
+            --title "docs: upgrade doc-sync wiring to plugin v${{ steps.versions.outputs.latest }}" \
+            --body-file "$RUNNER_TEMP/upgrade-pr-body.md" \
+            --head doc-sync/upgrade \
+            --base "${{ github.ref_name }}")
+          python3 .github/doc-sync/render-report.py upgrade-summary \
+            --status opened --current "${{ steps.versions.outputs.current }}" \
+            --latest "${{ steps.versions.outputs.latest }}" --pr-url "${PR_URL}"
