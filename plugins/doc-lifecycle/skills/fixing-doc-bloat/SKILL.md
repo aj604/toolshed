@@ -88,7 +88,7 @@ colliding record, references repointed, the log entry as written, and the staged
 the drafted residue is what the approving human sees in the draft PR.
 
 **Distiller failure handling:** if the distiller reports a claim failed verification, that
-claim is simply not landed — **surface the failure to the human; never patch the payload
+claim is simply not landed — **surface the failure to the human; never redraft the claim
 yourself** to force it through. Land what verified, report what didn't. If the distiller
 reports a collision (a `DISTILL` claim and a sibling `EXTRACT` record aimed near-duplicate
 text at one target), it already deduped its side and landed the line once — **pass its
