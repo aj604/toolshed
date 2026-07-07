@@ -1,5 +1,35 @@
 # Decisions
 
+## 2026-07-06 — detecting-doc-bloat rearchitecture (harness, chunked sweeps, contract v2)
+- Decided: DISTILL payload authoring moved from detect time to post-approval distill time —
+  detection emits classification + landed-code evidence only; the doc-distiller authors the
+  claims/insights/decision entry after a human approves the record ID (speculative →
+  approval-gated; the single biggest cost lever, per career-compass run 28833711517). Added the
+  bulk `POLICY` verdict with a mandatory `files` provenance array; ephemeral-artifact
+  directories are declared config (`policy_scope` in audit-scope.json), selected by filter,
+  never summarized file-by-file by the model. Budgets are structural, not prose: per-chunk
+  `--max-turns 15` (a flail detector), seam validation where each chunk is produced with one
+  fresh re-dispatch, chunk results as checkpoint, assembly that refuses partial results by
+  name; the run-level `chunking.max_chunks` ceiling defaults to off — refusing legitimate
+  large runs is worse than pricing them visibly. One skill with progressive disclosure
+  (thin router + references/) rather than multiple skills; subagent dispatch is the
+  interactive chunk executor and the workflow matrix is the headless one — same manifest,
+  same validator seam either way.
+- Still binds: the report contract is v2 (`"schema": 2`, eight record fields, seven verdicts,
+  no payloads) and the validator rejects v1 shapes with a regenerate error; a policy chunk's
+  result is exactly one POLICY record whose files equal the manifest list; CI never passes
+  `--allow-partial`; doc enumeration and chunk planning go through `plan-chunks.py` (this
+  supersedes the 2026-07-03 entry's "goes through `list-docs.py`" — that helper is absorbed
+  and retired).
+- Code: plugins/doc-lifecycle/skills/detecting-doc-bloat/ (SKILL.md, references/,
+  scripts/plan-chunks.py, scripts/validate-bloat-output.py),
+  plugins/doc-lifecycle/agents/doc-distiller.md,
+  plugins/doc-lifecycle/skills/fixing-doc-bloat/SKILL.md,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/ (doc-bloat.yml, SKILL.md,
+  scripts/sync-gate.py, scripts/render-report.py)
+- Source: docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md (retained;
+  implementation plan: docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-plan.md)
+
 ## 2026-06-09 — Documentation skills suite design
 - Decided: Activity-centered suite — one skill per documentation activity, doc-type knowledge
   in per-artifact reference files — designing four skills (bootstrapping-docs, writing-docs,
