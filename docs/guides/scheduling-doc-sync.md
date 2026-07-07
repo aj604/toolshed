@@ -1,6 +1,6 @@
 # Turning on nightly automation with `scheduling-doc-sync`
 
-> As of 2026-07-06 (doc-lifecycle contract v2; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `doc-sync.yml`, `doc-bloat.yml`)
+> As of 2026-07-07 (doc-lifecycle contract v2 + bloat scale hardening; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `doc-sync.yml`, `doc-bloat.yml`)
 
 **You should already have:** run a drift audit or [bloat sweep](auditing-doc-bloat.md)
 by hand at least once. Automation is those same loops on a cron with you as the PR
@@ -23,10 +23,15 @@ Two GitHub Actions, installed by the skill (never hand-rolled YAML):
 
 **Weekly bloat sweep** (`doc-bloat.yml`, default `0 4 * * 1`, Mondays):
 
-- The sweep is chunked and bounded: a deterministic script plans the chunks, one
-  turn-capped model invocation audits each, and every chunk result is validated where it
-  is produced (one retry, then the run fails naming the chunk — valid chunks survive as
-  artifacts).
+- The sweep is chunked, bounded, and convergent: a deterministic script plans the
+  chunks (content-addressed, each with its own turn budget — big planning docs get more
+  turns than small READMEs), one model invocation audits each with its slice handed
+  verbatim in the prompt, and every chunk result is validated where it is produced. A
+  failed attempt is retried once — with a bigger budget if it ran out of turns, fresh
+  otherwise — and a chunk that fails twice costs only its own docs: the report lands
+  anyway with a loud "unswept" banner naming them, and the next run re-audits exactly
+  the missing or changed chunks (valid results survive as artifacts and are carried
+  forward).
 - Findings are split into two lanes — `doc-bloat/prune` (passage-level cuts/condenses/
   moves) and `doc-bloat/distill` (doc-level merges/retires/distills, plus directory-level
   `POLICY` records) — and each lane opens at most one **draft PR**. Draft means nothing

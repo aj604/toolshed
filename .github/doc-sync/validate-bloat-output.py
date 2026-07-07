@@ -30,8 +30,11 @@ verdict is *correct*. Three duties:
    Reads DIR/<id>.json for every chunk in the manifest, seam-validates each,
    renumbers ids B1..Bn in manifest order, and writes the final wrapped v2
    report to --out. A missing or invalid chunk fails the assembly naming the
-   chunk; --allow-partial (which CI never passes) instead skips MISSING
-   chunks with a stderr note — an invalid chunk still fails.
+   chunk; --allow-partial (what CI passes, so one dead chunk cannot hold the
+   report hostage) instead skips MISSING chunks with a stderr note and
+   records them in the report's "unswept" list ({chunk, docs} entries —
+   the loud gap the PR banner renders; the next run's resume sweeps them) —
+   an invalid chunk still fails.
 
 Exit status: 0 valid; 1 contract violation; 2 bad input/usage.
 On success prints the authoritative summary (recomputed from the records).
@@ -239,6 +242,26 @@ def read_json(src):
     return json.loads(raw)
 
 
+def chunk_doc_paths(chunk):
+    """The doc paths a chunk covers: sweep doc list or policy files."""
+    if chunk.get("kind") == "policy":
+        return list(chunk.get("files", []))
+    return [d.get("path") for d in chunk.get("docs", []) if isinstance(d, dict)]
+
+
+def unswept_errors(unswept):
+    """Shape-check a report's optional 'unswept' gap list."""
+    if unswept is None:
+        return []
+    if not (isinstance(unswept, list) and all(
+            isinstance(u, dict) and nonempty_str(u.get("chunk"))
+            and isinstance(u.get("docs"), list)
+            and all(isinstance(p, str) for p in u["docs"])
+            for u in unswept)):
+        return ["'unswept' must be a list of {chunk, docs} gap entries"]
+    return []
+
+
 def run_final(src):
     try:
         data = read_json(src)
@@ -258,6 +281,7 @@ def run_final(src):
     records = data["records"]
     errs = validate_records(records)
     errs.extend(summary_errors(data.get("summary"), count_verdicts(records)))
+    errs.extend(unswept_errors(data.get("unswept")))
     return fail(errs) if errs else ok(records)
 
 
@@ -348,13 +372,15 @@ def run_assemble(dir_, manifest_path, out, allow_partial):
     except (OSError, ValueError, json.JSONDecodeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    errs, records = [], []
+    errs, records, unswept = [], [], []
     for chunk in chunks:
         path = os.path.join(dir_, chunk["id"] + ".json")
         if not os.path.exists(path):
             if allow_partial:
                 print(f"note: --allow-partial: skipping chunk {chunk['id']} "
                       f"(no result file)", file=sys.stderr)
+                unswept.append({"chunk": chunk["id"],
+                                "docs": chunk_doc_paths(chunk)})
                 continue
             errs.append(f"chunk {chunk['id']}: no result file at {path} — "
                         f"partial assembly refused")
@@ -375,6 +401,8 @@ def run_assemble(dir_, manifest_path, out, allow_partial):
     for n, r in enumerate(records, 1):
         r["id"] = f"B{n}"
     report = {"schema": 2, "records": records, "summary": count_verdicts(records)}
+    if unswept:
+        report["unswept"] = unswept
     with open(out, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
         f.write("\n")

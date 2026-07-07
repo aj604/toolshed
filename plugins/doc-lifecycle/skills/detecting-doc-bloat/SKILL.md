@@ -1,6 +1,6 @@
 ---
 name: detecting-doc-bloat
-description: Use when auditing documentation for low-value content — redundant, verbose, duplicated, or past its useful form — proposing pruning/condensing/distillation, and whenever bloat analysis runs programmatically (nightly sweep, PR gate, or a chunk-executor invocation handed a manifest slice) and must emit a structured, parseable proposal. Read-only — it proposes, a human approves, fixing-doc-bloat applies.
+description: Use when auditing documentation for low-value content — redundant, verbose, duplicated, or past its useful form — proposing pruning/condensing/distillation, and whenever bloat analysis runs programmatically (nightly sweep, PR gate, or a chunk-executor invocation handed its chunk slice) and must emit a structured, parseable proposal. Read-only — it proposes, a human approves, fixing-doc-bloat applies.
 ---
 
 # Detecting Doc Bloat
@@ -18,7 +18,7 @@ judgment one bounded chunk at a time. Three non-negotiables:
 3. **Read-only — this skill never edits.** A human approves IDs;
    **`fixing-doc-bloat`** applies the approved subset.
 
-## Doc kinds (the manifest hints these; override only with stated evidence)
+## Doc kinds (the planner hints these; override only with stated evidence)
 
 - **living** — claim-style docs tracking the repo (README, CLAUDE.md,
   runbooks, reference). Rules: `references/verdict-lenses.md`.
@@ -37,20 +37,24 @@ with the reference rules, emit one wrapped `{"schema": 2, ...}` report, run it
 through the validator before presenting anything.
 
 **Interactive, large scope:** never sweep inline. Run the planner — its
-manifest is the inventory; do not enumerate or read the corpus yourself — then
-dispatch **one subagent per pending chunk**; each gets (i) its manifest chunk
-verbatim, (ii) `output-contract.md`, and (iii) only the reference file(s) its
-chunk's kinds need — `verdict-lenses.md` for living/narrative,
+manifest is your work order as orchestrator; do not enumerate or read the
+corpus yourself — then dispatch **one subagent per pending chunk**. Render
+each dispatch with `--emit-prompt` (the chunk's slice verbatim: doc list or
+policy dir + files, output path, definition of done) and point the subagent
+at (i) `output-contract.md` and (ii) only the reference file(s) its chunk's
+kinds need — `verdict-lenses.md` for living/narrative,
 `planning-artifacts.md` for planning and policy chunks. Each subagent writes
 `{"chunk": "<id>", "records": [...]}` to `<dir>/chunks/<id>.json`; seam-validate
 each result as it lands; a failing chunk is re-dispatched fresh **once**, then
 you stop and name it. Assemble the valid results into the final report.
 
-**Headless (chunk executor):** you were handed a manifest and a chunk id.
-Read the manifest slice you are given, judge exactly those docs with the
-reference rules, write the chunk result, stop. Orchestration belongs to the
-workflow, not to you. A policy chunk means one `POLICY` record, files copied
-from the manifest verbatim.
+**Headless (chunk executor):** your chunk slice arrived verbatim in the
+dispatch prompt — the doc list (or policy dir + files) and the output path.
+That slice is your entire scope: judge exactly those docs with the reference
+rules, write the chunk result, stop. You never open the manifest — it is the
+orchestrator's state, and it may not even be on disk; budgets, retries, and
+assembly are likewise the workflow's, not yours. A policy chunk means one
+`POLICY` record, files copied verbatim from the dispatch.
 
 ## Script invocation templates
 
@@ -58,8 +62,17 @@ from the manifest verbatim.
 # plan (inventory -> chunk manifest; size + projected invocations on stderr).
 # To narrow scope, pass --config with exclude/include globs (include re-adds what
 # it matches); policy_scope/chunking keys are documented in the script docstring.
+# Chunk ids are content-addressed, so --results-dir resume skips only chunks
+# whose docs are unchanged; each chunk carries its model-invocation turn budget.
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
   --out <dir>/manifest.json --results-dir <dir>/chunks
+
+# render one chunk's dispatch prompt / turn budget (slice verbatim — the
+# executor never opens the manifest)
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
+  --emit-prompt <id> --manifest <dir>/manifest.json
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
+  --emit-turns <id> --manifest <dir>/manifest.json
 
 # seam-validate one chunk result
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py \
@@ -113,8 +126,11 @@ own; the human's ID list is what `fixing-doc-bloat` receives.
   including inside `evidence` → post-approval distiller work; emit the
   classification and proof only.
 - Walking a policy chunk file-by-file, or a `files` list that isn't the
-  manifest's verbatim → one `POLICY` record per policy chunk.
+  dispatch's verbatim → one `POLICY` record per policy chunk.
+- Opening the manifest, or enumerating the corpus, as a chunk executor →
+  your slice arrived in the dispatch prompt; audit exactly it and stop.
 - Sweeping inline when the planner projects >2 chunks → dispatch per chunk;
-  the manifest is the work order.
+  the manifest is the orchestrator's work order, each executor's is its
+  dispatched slice.
 - Editing, deleting, or "just fixing the small one" → read-only; surface it as
   a record and stop.

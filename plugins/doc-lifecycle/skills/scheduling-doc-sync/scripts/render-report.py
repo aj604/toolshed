@@ -353,6 +353,9 @@ def main():
     btriage = sub.add_parser("bloat-triage")
     btriage.add_argument("--report", required=True)
 
+    bgaps = sub.add_parser("bloat-unswept-summary")
+    bgaps.add_argument("--report", required=True)
+
     args = parser.parse_args()
 
     try:
@@ -384,6 +387,9 @@ def main():
                 write_summary(render_bloat_pr_summary(records, args.lane, args.pr_url))
             elif args.mode == "bloat-triage":
                 print(render_bloat_triage(records, unswept))
+            elif args.mode == "bloat-unswept-summary":
+                if unswept:
+                    write_summary("\n".join(render_unswept_banner(unswept)).rstrip())
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
         print(f"error: {e!r}", file=sys.stderr)
         return 2
