@@ -36,7 +36,8 @@ judgment one bounded chunk at a time. Three non-negotiables:
 with the reference rules, emit one wrapped `{"schema": 2, ...}` report, run it
 through the validator before presenting anything.
 
-**Interactive, large scope:** never sweep inline. Run the planner, then
+**Interactive, large scope:** never sweep inline. Run the planner — its
+manifest is the inventory; do not enumerate or read the corpus yourself — then
 dispatch **one subagent per pending chunk**; each gets (i) its manifest chunk
 verbatim, (ii) `output-contract.md`, and (iii) only the reference file(s) its
 chunk's kinds need — `verdict-lenses.md` for living/narrative,
@@ -55,6 +56,9 @@ from the manifest verbatim.
 
 ```bash
 # plan (inventory -> chunk manifest; reports size + projected invocations on stderr)
+# to narrow scope (e.g. one subtree), pass --config with exclude/include globs
+# (include re-adds whatever it matches — whitelist wins); policy_scope/chunking
+# keys are documented in the script's docstring
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
   --out <dir>/manifest.json --results-dir <dir>/chunks
 
