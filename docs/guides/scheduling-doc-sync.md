@@ -1,6 +1,6 @@
 # Turning on nightly automation with `scheduling-doc-sync`
 
-> As of 2026-07-05 (doc-lifecycle 0.6.2 @ e5201b8; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `doc-sync.yml`, `doc-bloat.yml`)
+> As of 2026-07-06 (doc-lifecycle contract v2; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `doc-sync.yml`, `doc-bloat.yml`)
 
 **You should already have:** run a drift audit or [bloat sweep](auditing-doc-bloat.md)
 by hand at least once. Automation is those same loops on a cron with you as the PR
@@ -23,11 +23,15 @@ Two GitHub Actions, installed by the skill (never hand-rolled YAML):
 
 **Weekly bloat sweep** (`doc-bloat.yml`, default `0 4 * * 1`, Mondays):
 
+- The sweep is chunked and bounded: a deterministic script plans the chunks, one
+  turn-capped model invocation audits each, and every chunk result is validated where it
+  is produced (one retry, then the run fails naming the chunk — valid chunks survive as
+  artifacts).
 - Findings are split into two lanes — `doc-bloat/prune` (passage-level cuts/condenses/
-  moves) and `doc-bloat/distill` (doc-level merges/retires/distills) — and each lane
-  opens at most one **draft PR**. Draft means nothing merges without you; a lane with no
-  findings, or whose PR is still open from last week, skips itself with a self-explaining
-  run summary.
+  moves) and `doc-bloat/distill` (doc-level merges/retires/distills, plus directory-level
+  `POLICY` records) — and each lane opens at most one **draft PR**. Draft means nothing
+  merges without you; a lane with no findings, or whose PR is still open from last week,
+  skips itself with a self-explaining run summary.
 
 Neither workflow ever commits doc edits to your default branch — the skill refuses to
 install a direct-commit mode even if asked. The evidence PR *is* the product.
@@ -46,8 +50,8 @@ skipping: a GitHub remote, `gh auth status`, a model-auth secret
 (`CLAUDE_CODE_OAUTH_TOKEN` via `/install-github-app`, or `ANTHROPIC_API_KEY`), the
 `doc-sync` label, and the repo setting that lets Actions create PRs. It then confirms
 three knobs — the two crons and the blast-radius cap; defaults are fine — and stages
-eight files for you to commit: the two workflows, the gate/render scripts, the two
-output validators, a starter `audit-scope.json`, and the sync marker.
+nine files for you to commit: the two workflows, the gate/render scripts, the chunk
+planner, the two output validators, a starter `audit-scope.json`, and the sync marker.
 
 First run without waiting for the cron:
 
@@ -59,7 +63,9 @@ gh workflow run doc-bloat
 ## Tuning and living with it
 
 - **Scope:** `.github/doc-sync/audit-scope.json` holds `include`/`exclude` globs the
-  weekly sweep reads (this repo excludes `tests/fixtures/**` and `tests/baselines/**`).
+  weekly sweep reads (this repo excludes `tests/fixtures/**` and `tests/baselines/**`),
+  plus optional `policy_scope` directories (each swept as one `POLICY` record instead of
+  file-by-file) and `chunking` caps — the planner's docstring documents them.
 - **CI on sync PRs:** there are none by default — the pipeline pushes with
   `GITHUB_TOKEN`, which never retriggers CI. If checks on doc PRs matter to you, mint a
   GitHub App token instead (the skill's install notes cover it).

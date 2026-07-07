@@ -14,8 +14,8 @@ human can no longer tell an approved cut from your opinion of what should have b
 
 **Acting on an unapproved record is violating the approval, even when the record is right.**
 
-Input: a validator-passing `detecting-doc-bloat` report (`records` with `id` / `doc` /
-`location` / `verdict` / `evidence` / `proposal` / `status` / `payload`) **plus an explicit
+Input: a validator-passing `detecting-doc-bloat` report (`"schema": 2`, `records` with `id` /
+`doc` / `location` / `verdict` / `evidence` / `proposal` / `status` / `files`) **plus an explicit
 approval** — `{"approved": [ids]}` from issue triage, or the human's in-session ID list. The
 approved records are the action items; **every other record in the report is context, not a
 to-do.** This skill *applies* the approved subset; it does not re-audit or re-classify.
@@ -45,7 +45,8 @@ The doc verdicts carry `location: null` and act on the whole doc.
 | `EXTRACT-AND-MOVE` | land `proposal.text` in `proposal.target` (writing-docs bar), delete the source passage the record's evidence delimits — **one commit** |
 | `RETIRE-DOC` | delete the doc; **approval of this ID is the deletion authorization** — no second confirmation needed |
 | `MERGE-DOC` | move the content not already in `proposal.target` into it, then delete the merged doc — **one commit** |
-| `DISTILL` (`status: "ready"` only) | dispatch **doc-lifecycle:doc-distiller** with the record; commit its staged result. `pending-implementation` is **never actionable** — skip it with a note even if it was approved |
+| `DISTILL` (`status: "ready"` only) | dispatch **doc-lifecycle:doc-distiller** with the record (its ID, the artifact path in `doc`, and its `evidence`); the distiller authors the claims/insights/decision entry post-approval and stages one commit, which you then commit. `pending-implementation` is **never actionable** — skip it with a note even if it was approved |
+| `POLICY` | apply the record's `proposal` policy to **exactly the paths in `files`** — for a retirement-class policy, `git rm` those files in one commit. The `files` array is the complete mandate: never widen to the directory's current contents, never skip a listed path silently. A policy you cannot apply mechanically as stated → stop, surface it. Approval of this ID is the deletion authorization |
 
 ### Boundary rule — an approved edit's blast radius is that record's own location/proposal
 
@@ -58,35 +59,39 @@ exactly as it is; the fact that X's fix touches nearby lines does not extend X's
 cover Y. Absorbing Y into X's diff is applying an unapproved record — a spine §1 violation —
 no matter which record's commit it hides in.
 
-### CONDENSE / claim text lands as given — never blended, never augmented
+### CONDENSE text lands as given — never blended, never augmented
 
-A `CONDENSE` `proposal` and a `DISTILL` claim are complete, writing-docs-bar text. **Land each
-one as-is, at its own boundary; stop at its final character.** Do not merge a neighboring
-claim's rationale into a CONDENSE line "so it reads fuller," do not append a fact the proposal
-didn't state, and do not restate the same fact in an adjacent sentence — a bloat fix that
-*adds* redundancy has failed at its own job. If you believe a CONDENSE proposal is incomplete,
-that is feedback for the human, not a license to rewrite it. "Applied verbatim" must be
-literally true of the bytes you wrote.
+A `CONDENSE` `proposal` is complete, writing-docs-bar text. **Land it as-is, at its own
+boundary; stop at its final character.** Do not merge a neighboring record's rationale into a
+CONDENSE line "so it reads fuller," do not append a fact the proposal didn't state, and do not
+restate the same fact in an adjacent sentence — a bloat fix that *adds* redundancy has failed
+at its own job. If you believe a CONDENSE proposal is incomplete, that is feedback for the
+human, not a license to rewrite it. "Applied verbatim" must be literally true of the bytes you
+wrote. The same hands-off rule covers everything the distiller lands: what it staged is what
+you commit — never re-edited, never "rounded out."
 
 ### DISTILL is the distiller's job — dispatch, never inline
 
 For an approved `DISTILL ready` record, **dispatch the `doc-lifecycle:doc-distiller` agent**
 with that one record; do not distill the artifact yourself. The distiller owns the method
-(single owner): it re-verifies each `payload.claims[]` claim against the code its `evidence`
-cites, dedups against the target, lands each verified claim in its `target` living doc, lands
-each `payload.insights[]` entry in its `target` durable narrative doc (anchored, artifact-true,
-creating the doc with its `> As of` line if absent), appends **one** entry to
-`docs/decisions.md` (creating it with an `# Decisions` heading if absent — the decision log is
-a repo-level file, **not** a CLAUDE.md subsection), completes the `Source:` line with the
-artifact's real last-commit SHA, repoints the artifact's inbound references, and `git rm`s the
-artifact — all **staged as one commit, which you then commit.** The distiller stages; the
-dispatcher commits. Match your dispatch input to its contract: hand it the record; expect back
-the claims and insights landed (with `target:line`), any that failed verification, duplicates
-skipped with the colliding record, references repointed, the log entry as written, and the
-staged file list.
+(single owner), and since contract v2 it also **authors the residue** — records carry no
+payload: post-approval, the distiller re-verifies the landing, runs the per-section insight
+walk, drafts claims (each verified against the code it cites), drafts artifact-true anchored
+insights (creating the target narrative doc with its `> As of` line if absent), appends **one**
+entry to `docs/decisions.md` (creating it with an `# Decisions` heading if absent — the
+decision log is a repo-level file, **not** a CLAUDE.md subsection), completes the `Source:`
+line with the artifact's real last-commit SHA, repoints the artifact's inbound references, and
+`git rm`s the artifact — all **staged as one commit, which you then commit.** The distiller
+stages; the dispatcher commits. Match your dispatch input to its contract: hand it the record
+(ID, artifact path, evidence) **plus the report path** — the distiller deduplicates its
+landings against sibling records (e.g. an `EXTRACT-AND-MOVE` aimed at the same target), which
+it can only do if it can see them; expect back the residue as drafted, the claims and insights
+landed (with `target:line`), any that failed verification, duplicates skipped with the
+colliding record, references repointed, the log entry as written, and the staged file list —
+the drafted residue is what the approving human sees in the draft PR.
 
 **Distiller failure handling:** if the distiller reports a claim failed verification, that
-claim is simply not landed — **surface the failure to the human; never patch the payload
+claim is simply not landed — **surface the failure to the human; never redraft the claim
 yourself** to force it through. Land what verified, report what didn't. If the distiller
 reports a collision (a `DISTILL` claim and a sibling `EXTRACT` record aimed near-duplicate
 text at one target), it already deduped its side and landed the line once — **pass its
@@ -97,10 +102,12 @@ collision note through to the human; never re-edit the landed result** to "recon
 - **Approved ID not in the report** → stop. The inputs disagree; the approval references a
   record that isn't there. Do not guess which record was meant.
 - **DISTILL approved but `status: "pending-implementation"`** → skip it, note it. There is no
-  landed code to verify claims against, so the record carries `payload: null` and nothing is
-  actionable. Approval cannot make an unverifiable future-design into an edit.
-- **Distiller reports failed claims** → land what verified, surface the failures. Never patch
-  the payload to launder an unverified claim into a living doc.
+  landed code to verify claims against, so nothing is actionable. Approval cannot make an
+  unverifiable future-design into an edit.
+- **Distiller reports failed claims, or refuses because the landing re-verify failed** → land
+  what verified, surface the failures. Never redraft its claims yourself to force one through.
+- **POLICY approved but a `files` entry no longer exists** → apply the rest, note the missing
+  path — never widen the edit to the directory's current contents to "compensate".
 - **A doc-level verdict (`RETIRE-DOC` / `MERGE-DOC`) and a passage verdict both approved for
   the same doc** → apply the passage edits first, the doc-level delete/merge last. Deleting the
   doc first would strand the passage edits.
@@ -114,14 +121,18 @@ collision note through to the human; never re-edit the landed result** to "recon
 - Editing only the single line at `location` when the evidence span is multi-line, or deleting
   a whole boundary line that also carries unflagged text → the mandate is the span'd passage
   exactly: all of it, nothing beside it.
-- Rewording, extending, or blending a `CONDENSE` proposal or a `DISTILL` claim → it lands
-  byte-verbatim at its own boundary; adding to it re-introduces the bloat you're removing.
+- Rewording, extending, or blending a `CONDENSE` proposal, or re-editing text the distiller
+  landed → it lands byte-verbatim at its own boundary; adding to it re-introduces the bloat
+  you're removing.
 - Distilling the artifact inline instead of dispatching the distiller → the distiller owns the
   method; inlining it drops the re-verify / dedup / decision-log / single-commit shape.
 - Putting the decision entry anywhere but `docs/decisions.md` (e.g. a CLAUDE.md subsection) →
   the decision log is a repo-level file; the distiller owns it.
-- Patching a payload the distiller failed to verify, or re-editing a landed result it flagged
+- Redrafting a claim the distiller failed to verify, or re-editing a landed result it flagged
   for collision → surface it; don't launder or reconcile.
+- Applying a `POLICY` record to files beyond its `files` array ("two new artifacts appeared —
+  same class, I'll retire them too") → the array is the mandate; new files are a finding for
+  the next sweep.
 - Approving IDs yourself, or treating your presented summary as the approval → only the human's
   ID list is the mandate.
 - Splitting an `EXTRACT-AND-MOVE`, `MERGE-DOC`, or `DISTILL` across commits → the move and the
@@ -140,4 +151,5 @@ collision note through to the human; never re-edit the landed result** to "recon
 | "I'll just distill inline — dispatching is overhead" | The distiller owns the method (single owner). Inlining drops re-verify, dedup, the decision log, and the single-commit shape. |
 | "The decision entry fits fine in CLAUDE.md" | The decision log is `docs/decisions.md`, a repo-level file the distiller owns. |
 | "Pending artifact, but the human approved it" | Approval can't make unverifiable claims verifiable. Skip + note. |
-| "The distiller couldn't verify a claim, but it's clearly true — I'll patch it in" | Land only what verified; surface the failure. Patching the payload launders an unchecked claim. |
+| "The distiller couldn't verify a claim, but it's clearly true — I'll patch it in" | Land only what verified; surface the failure. Redrafting its claims launders an unchecked one. |
+| "The policy obviously covers the new files in that directory too" | The approved `files` array is the mandate — filter-selected provenance, not a standing license over the directory. |

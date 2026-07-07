@@ -4,13 +4,13 @@ This repo is a **Claude Code plugin marketplace**, not an application. It is alm
 Markdown; the only executable code published is five skill helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
-`.../detecting-doc-bloat/scripts/list-docs.py`, plus
+`.../detecting-doc-bloat/scripts/plan-chunks.py`, plus
 `scheduling-doc-sync`'s `scripts/sync-gate.py` and `scripts/render-report.py`, all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml` and `doc-bloat.yml`). The sample
 repos under `tests/fixtures/` are the only other runnable code, besides the dogfooded doc-sync
 install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
-`doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
+`doc-sync/plan-chunks.py`, `doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
 `doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `workflows/doc-sync.yml`,
 `workflows/doc-bloat.yml`) and the ci+release workflow (`workflows/release.yml`).
 
@@ -41,9 +41,10 @@ install under `.github/` (`doc-sync/sync-gate.py`, `doc-sync/render-report.py`,
   per test milestone (see the directory for the current set), plus the original writing-docs
   records loose at the root.
 - `detecting-doc-bloat`/`fixing-doc-bloat` RED/GREEN baselines are retained at
-  `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/`; method, status, and
-  resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md` (2026-06-09 suite entry;
-  2026-06-20 `docs/reference/` shape).
+  `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/`, and the 2026-07-06
+  rearchitecture's at `tests/baselines/bloat-rearch-red/` / `bloat-rearch-green/`; method,
+  status, and resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md` (2026-06-09
+  suite entry; 2026-06-20 `docs/reference/` shape; 2026-07-06 rearchitecture entry).
 - The generic apply-only rules for fix skills have one owner,
   `plugins/doc-lifecycle/references/apply-discipline.md`, cited (not restated) by both
   `fixing-doc-drift` and `fixing-doc-bloat`.

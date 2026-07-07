@@ -1,8 +1,26 @@
 # Documentation Skills Suite — Handoff
 
-**Last updated:** 2026-07-03
-**HEAD at handoff:** `8b9700a` + review fixes + bloat/distillation suite merge + bloat passage-span contract (see `git log`)
+**Last updated:** 2026-07-06
+**HEAD at handoff:** detecting-doc-bloat rearchitecture landed (harness, chunked sweeps, contract v2 — see `git log`)
 **Repo:** `toolshed` (git)
+
+## Latest milestone (2026-07-06): detecting-doc-bloat rearchitecture
+
+Rebuilt detecting-doc-bloat per
+`docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md` (plan:
+`...-rearchitecture-plan.md`; durable decisions: `docs/decisions.md` 2026-07-06 entry).
+Full writing-skills TDD as a new skill: RED `tests/baselines/bloat-rearch-red/`
+(all five scenarios FAIL — the v1 text taught detect-time payload authoring and
+inline mega-sweeps; runners recovered only via validator archaeology), GREEN
+`tests/baselines/bloat-rearch-green/`. Contract is now v2 (`"schema": 2`, POLICY
+verdict, `files` provenance, no payloads — the doc-distiller authors residue
+post-approval). `list-docs.py` retired, absorbed by `plan-chunks.py`.
+**Pending follow-up (post-release):** re-install scheduling-doc-sync on
+career-compass (`claude plugin update doc-lifecycle@toolshed`, re-run the
+scheduling skill to refresh `.github/doc-sync/` + workflows), then a
+`workflow_dispatch` doc-bloat run. Success bar (design §Testing): valid v2
+report; no permission-denial storm; minutes, not tens of minutes; the
+superpowers swarm collapsed to one POLICY record.
 
 ## What this project is
 
