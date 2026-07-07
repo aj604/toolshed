@@ -1,5 +1,32 @@
 # Decisions
 
+## 2026-07-07 — doc-sync self-upgrade (pinned wiring + upgrade PR)
+- Decided: installs are pinned, not floating. Every `claude-code-action` step pins
+  `plugin_marketplaces` to the install-time release tag (`…/toolshed.git#v<version>`), so the
+  skills a run executes are frozen at the same version as the vendored wiring — closing the
+  drift where the skills floated at `main` while the committed wiring stayed frozen (the
+  2026-07-07 RED doc-bloat runs). Pin lives ONLY in the `#v<version>` ref; the `plugins:`
+  selector stays bare (`claude-code-action` has no `@version` selector — both RED baseline
+  agents guessed `doc-lifecycle@toolshed@<v>` and both were wrong). A third installed workflow
+  `doc-sync-upgrade.yml` is the only thing that advances the pin: weekly it compares
+  `.github/doc-sync/installed-version` (the bare-semver lockfile) against the plugin's latest
+  release via the tested `upgrade-gate.py` (`upgrade|current|ahead`, exit 2 on malformed), and
+  on a newer release re-runs `scheduling-doc-sync` headlessly in upgrade mode to regenerate the
+  wiring and open a `doc-sync/upgrade` review PR. Detection == regeneration: `git diff` after
+  the re-copy is the divergence signal, no separate compare-shipped-vs-vendored logic.
+- Still binds: upgrade mode preserves consumer state (marker, `audit-scope.json`) and re-injects
+  the install-time knobs (cron/cap/bloat-cron/upgrade-cron) rather than resetting to template
+  defaults; the model regenerates files but the workflow owns git/PR (same split as the drift
+  lane); run-surface strings live in `render-report.py` (`upgrade-summary`, `upgrade-pr-body`),
+  gate decisions in `upgrade-gate.py` — never inline YAML. `installed-version` advances only on a
+  merged upgrade PR, like the marker. Built test-first (`tests/baselines/upgrade-red/`).
+- Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/ (SKILL.md, doc-sync.yml, doc-bloat.yml,
+  doc-sync-upgrade.yml, scripts/upgrade-gate.py, scripts/render-report.py),
+  tests/scripts/upgrade-gate_test.py, tests/scripts/render-report_test.py; dogfood under
+  .github/ (workflows/doc-sync-upgrade.yml, the pinned doc-sync.yml/doc-bloat.yml,
+  doc-sync/installed-version, doc-sync/upgrade-gate.py). Fuller design:
+  docs/superpowers/specs/2026-07-07-doc-sync-self-upgrade-design.md.
+
 ## 2026-07-06 — detecting-doc-bloat rearchitecture (harness, chunked sweeps, contract v2)
 - Decided: DISTILL payload authoring moved from detect time to post-approval distill time —
   detection emits classification + landed-code evidence only; the doc-distiller authors the

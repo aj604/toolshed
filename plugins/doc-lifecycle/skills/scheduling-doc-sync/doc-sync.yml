@@ -84,7 +84,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:detecting-doc-drift skill in diff-scoped mode over the
@@ -166,7 +166,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git
+          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:fixing-doc-drift skill to apply the drift report at

@@ -37,14 +37,20 @@ a pinned marketplace ref:
 
 ```yaml
 plugin_marketplaces: https://github.com/aj604/toolshed.git#vX.Y.Z
+plugins: doc-lifecycle@toolshed
 ```
 
-The `#ref` fragment takes a git tag (confirmed against the CLI `marketplace add` docs). Skills stop
-floating; nightly/weekly runs are reproducible at the reviewed version.
+The `#ref` fragment on `plugin_marketplaces` takes a git tag (confirmed against the CLI
+`marketplace add` docs) — pinning the marketplace checkout at the tag pins the plugin content it
+serves. The `plugins:` selector stays **unversioned**: `claude-code-action` does not support a
+`@version` selector there (`doc-lifecycle@toolshed@0.7.0` is invalid — both RED baseline agents
+guessed it and both were wrong). Skills stop floating; nightly/weekly runs are reproducible at the
+reviewed version.
 
-**Lockfile:** `.github/doc-sync/installed-version` — a single line (e.g. `v0.7.0`), the
-machine-readable "what version is my wiring." Written by the installer, updated only by a merged
-upgrade PR. Avoids parsing the pin back out of YAML.
+**Lockfile:** `.github/doc-sync/installed-version` — a single line holding the bare `plugin.json`
+version (e.g. `0.7.0`), the machine-readable "what version is my wiring." Written by the installer
+(straight from `jq .version`), updated only by a merged upgrade PR. The pin ref and the release
+compare add/strip the `v`. Avoids parsing the pin back out of YAML.
 
 ### Upgrade workflow (`doc-sync-upgrade.yml`)
 
@@ -53,12 +59,15 @@ upgrade PR. Avoids parsing the pin back out of YAML.
 - **Permissions:** `contents: write`, `pull-requests: write`, `id-token: write`.
 - **Steps:**
   1. `actions/checkout@v4`.
-  2. Resolve versions: `LATEST=$(gh release view --repo aj604/toolshed --json tagName --jq .tagName)`;
+  2. Resolve versions: `LATEST=$(gh release view --repo aj604/toolshed --json tagName --jq .tagName | sed 's/^v//')`;
      `CURRENT=$(cat .github/doc-sync/installed-version)`.
-  3. **Gate (inline `[ "$LATEST" = "$CURRENT" ]`):** equal → `render-report.py upgrade-summary
-     --status current --current "$CURRENT" --latest "$LATEST"` self-explains and exits 0. Latest
-     release tag is monotonic, so string-inequality is a sufficient "newer" test — no semver compare.
-  4. Newer → `anthropics/claude-code-action@v1` pinned at `#$LATEST`, running `scheduling-doc-sync`
+  3. **Gate (tested `upgrade-gate.py compare --current "$CURRENT" --latest "$LATEST"`):** prints one
+     token — `current` (>=, nothing to do), `upgrade` (latest strictly newer), or `ahead` (install
+     newer than any release — a dev/prerelease pin; skip, never downgrade); malformed input exits
+     nonzero (fail red). `current`/`ahead` → `render-report.py upgrade-summary` self-explains and
+     exits 0. Semver-tuple compare lives in the tested script, not YAML string-fu (RED baseline
+     surfaced this; matches the repo's thin-YAML rule).
+  4. `upgrade` → `anthropics/claude-code-action@v1` pinned at `#v$LATEST`, running `scheduling-doc-sync`
      **headlessly in upgrade mode** targeting `$LATEST`. The skill regenerates the wiring files at
      `$LATEST`, rewrites every `plugin_marketplaces` pin to `#$LATEST`, sets `installed-version` to
      `$LATEST`, and **preserves** the marker, `audit-scope.json`, and the cron/cap/bloat-cron knobs.
@@ -104,18 +113,23 @@ and headless-safe — distinct from first-install:
 - Seed `installed-version` (only if absent) with the install-time release tag.
 - Copy the new `doc-sync-upgrade.yml`.
 - Substitute `{{PLUGIN_REF}}` in all three YAMLs.
-- The "files to commit" list grows from nine to **eleven** (`+ doc-sync-upgrade.yml`,
-  `+ installed-version`).
+- The "files to commit" list grows from nine to **twelve** (`+ doc-sync-upgrade.yml`,
+  `+ upgrade-gate.py`, `+ installed-version`).
 - Preflight/Rules/Red-flags updated: pinned refs are wiring (overwrite freely on upgrade);
   `installed-version` is the lockfile (advances only via merged upgrade PR); resetting it or
   un-pinning to `main` is a red flag.
 
 ## Script + test changes
 
-- `render-report.py`: add `upgrade-summary` (statuses `current` / `noop`) and `upgrade-pr-body`
-  subcommands. Unit tests in `tests/scripts/render-report_test.py`.
-- Sync the dogfood copy: `.github/doc-sync/render-report.py` must match the skill's copy (existing
-  duplication; both are exercised by `render-report_test.py`).
+- **New `scripts/upgrade-gate.py`** (stdlib-only, mirrors `sync-gate.py`): `compare --current
+  --latest` → prints `current` / `upgrade` / `ahead`; malformed/empty input exits nonzero (fail
+  red, like `validate-drift-output.py`). New `tests/scripts/upgrade-gate_test.py` covers each bump
+  (patch/minor/major), equal, `ahead`, and each malformed-input class. Wire it into `release.yml`'s
+  Unit tests step. Copied to `.github/doc-sync/upgrade-gate.py` on install.
+- `render-report.py`: add `upgrade-summary` (statuses `current` / `ahead` / `noop`) and
+  `upgrade-pr-body` subcommands. Cases added to `tests/scripts/render-report_test.py`.
+- Sync the dogfood copy: `.github/doc-sync/render-report.py` and the new `upgrade-gate.py` must
+  match the skill's copies (existing duplication; both exercised by their `tests/scripts/` tests).
 
 ## Dogfood install (this repo's `.github/`)
 

@@ -369,5 +369,92 @@ class WorkflowWiring(unittest.TestCase):
         self.assertIn('"Task,Read', self.yml)
 
 
+class UpgradeRender(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.summary_path = os.path.join(self.tmp.name, "summary.md")
+
+    def run_script(self, *argv):
+        env = dict(os.environ)
+        env["GITHUB_STEP_SUMMARY"] = self.summary_path
+        return subprocess.run([sys.executable, SCRIPT, *argv],
+                              capture_output=True, text=True, env=env)
+
+    def summary(self):
+        with open(self.summary_path, encoding="utf-8") as f:
+            return f.read()
+
+    # -- upgrade-summary ---------------------------------------------------
+
+    def test_current_reports_both_versions(self):
+        r = self.run_script("upgrade-summary", "--status", "current",
+                            "--current", "0.7.0", "--latest", "0.7.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("current", s.lower())
+        self.assertIn("0.7.0", s)
+
+    def test_ahead_names_dev_pin(self):
+        r = self.run_script("upgrade-summary", "--status", "ahead",
+                            "--current", "0.8.0", "--latest", "0.7.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("ahead", s.lower())
+        self.assertIn("0.8.0", s)
+        self.assertIn("0.7.0", s)
+
+    def test_noop_states_no_wiring_change(self):
+        r = self.run_script("upgrade-summary", "--status", "noop",
+                            "--current", "0.7.0", "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no wiring change", self.summary().lower())
+
+    def test_opened_includes_pr_url_and_bump(self):
+        r = self.run_script("upgrade-summary", "--status", "opened",
+                            "--current", "0.7.0", "--latest", "0.8.0",
+                            "--pr-url", "https://gh/pr/9")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("https://gh/pr/9", s)
+        self.assertIn("0.7.0", s)
+        self.assertIn("0.8.0", s)
+
+    def test_pending_reports_open_pr(self):
+        r = self.run_script("upgrade-summary", "--status", "pending",
+                            "--current", "0.7.0", "--latest", "0.8.0",
+                            "--pr-url", "https://gh/pr/3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("https://gh/pr/3", s)
+        self.assertIn("already open", s.lower())
+
+    def test_unknown_status_exits_2(self):
+        r = self.run_script("upgrade-summary", "--status", "bogus",
+                            "--current", "0.7.0", "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 2)
+
+    # -- upgrade-pr-body ---------------------------------------------------
+
+    def test_pr_body_shows_bump_and_preserved_state(self):
+        r = self.run_script("upgrade-pr-body", "--current", "0.7.0",
+                            "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = r.stdout
+        self.assertIn("0.7.0", out)
+        self.assertIn("0.8.0", out)
+        # states what the upgrade preserves, so a reviewer trusts the diff
+        self.assertIn("marker", out.lower())
+        self.assertIn("audit-scope", out.lower())
+
+    def test_pr_body_lists_changed_files_when_given(self):
+        r = self.run_script("upgrade-pr-body", "--current", "0.7.0",
+                            "--latest", "0.8.0",
+                            "--files", ".github/workflows/doc-sync.yml,.github/doc-sync/sync-gate.py")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("`.github/workflows/doc-sync.yml`", r.stdout)
+        self.assertIn("`.github/doc-sync/sync-gate.py`", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
