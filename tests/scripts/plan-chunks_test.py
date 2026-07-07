@@ -356,7 +356,8 @@ class ResumeAndCeiling(unittest.TestCase):
             done_id = m1["chunks"][0]["id"]
             results = os.path.join(root, "chunks")
             os.makedirs(results)
-            write(root, f"chunks/{done_id}.json", "{}")
+            write(root, f"chunks/{done_id}.json",
+                  json.dumps({"chunk": done_id, "records": []}))
             r = run(root, results_dir=results)
             m2 = manifest(r)
             self.assertEqual(len(m2["chunks"]), 2)  # chunks always complete
@@ -381,6 +382,186 @@ class ResumeAndCeiling(unittest.TestCase):
             self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
             self.assertIn("max_chunks", r.stderr)
             self.assertIn("5", r.stderr)
+
+
+def run_emit(root, manifest_path, flag, chunk_id):
+    return subprocess.run(
+        [sys.executable, SCRIPT, "--root", root, flag, chunk_id,
+         "--manifest", manifest_path],
+        capture_output=True, text=True)
+
+
+class ContentAddressedIds(unittest.TestCase):
+    def test_content_edit_changes_chunk_id_even_at_same_line_count(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "alpha\nbeta")
+            git_init(root)
+            id1 = manifest(run(root))["chunks"][0]["id"]
+            write(root, "docs/a.md", "alpha\nbetX")  # same path, same 2 lines
+            id2 = manifest(run(root))["chunks"][0]["id"]
+            self.assertNotEqual(id1, id2)
+
+    def test_content_edit_invalidates_prior_result_on_resume(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "alpha")
+            git_init(root)
+            m1 = manifest(run(root))
+            done_id = m1["chunks"][0]["id"]
+            results = os.path.join(root, "chunks")
+            os.makedirs(results)
+            write(root, f"chunks/{done_id}.json", "{}")
+            write(root, "docs/a.md", "alpha edited")
+            m2 = manifest(run(root, results_dir=results))
+            self.assertEqual(m2["pending"], [m2["chunks"][0]["id"]])
+
+    def test_resume_ignores_garbage_or_mismatched_result_files(self):
+        # An invalid result that survived a failed CI retry must not mask the
+        # chunk as done — resume trusts a result only if it parses and names
+        # this chunk.
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "alpha")
+            git_init(root)
+            m1 = manifest(run(root))
+            cid = m1["chunks"][0]["id"]
+            results = os.path.join(root, "chunks")
+            os.makedirs(results)
+            write(root, f"chunks/{cid}.json", "{not json")
+            m2 = manifest(run(root, results_dir=results))
+            self.assertEqual(m2["pending"], [cid])
+            write(root, f"chunks/{cid}.json",
+                  json.dumps({"chunk": "c-someoneelse", "records": []}))
+            m3 = manifest(run(root, results_dir=results))
+            self.assertEqual(m3["pending"], [cid])
+            write(root, f"chunks/{cid}.json",
+                  json.dumps({"chunk": cid, "records": []}))
+            m4 = manifest(run(root, results_dir=results))
+            self.assertEqual(m4["pending"], [])
+
+    def test_unchanged_tree_yields_stable_ids_without_git(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "alpha")  # walk fallback, no git
+            id1 = manifest(run(root))["chunks"][0]["id"]
+            id2 = manifest(run(root))["chunks"][0]["id"]
+            self.assertEqual(id1, id2)
+
+
+class TurnBudgets(unittest.TestCase):
+    def turns_of(self, m, member_path):
+        for c in m["chunks"]:
+            paths = (c["files"] if c["kind"] == "policy"
+                     else [d["path"] for d in c["docs"]])
+            if member_path in paths:
+                return c["turns"]
+        raise AssertionError(f"{member_path} not in any chunk")
+
+    def test_small_living_chunk_clamps_to_floor_20(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "x")  # 12 + 2*1 = 14 -> clamp 20
+            git_init(root)
+            m = manifest(run(root))
+            self.assertEqual(self.turns_of(m, "docs/a.md"), 20)
+
+    def test_planning_docs_cost_more_per_doc(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i in range(6):  # 12 + 4*6 = 36, no line bonus
+                write(root, f"docs/plans/p{i}.md", "one line")
+            git_init(root)
+            m = manifest(run(root))
+            self.assertEqual(self.turns_of(m, "docs/plans/p0.md"), 36)
+
+    def test_line_volume_adds_one_turn_per_full_600_lines(self):
+        with tempfile.TemporaryDirectory() as root:
+            # single planning doc, 1250 lines: 12 + 4 + 2 = 18 -> clamp 20;
+            # use 8 living docs of 300 lines: 12 + 16 + 4 = 32
+            for i in range(8):
+                write(root, f"docs/d{i}.md", "\n".join(["x"] * 300))
+            git_init(root)
+            cfg = config(root, {"chunking": {"max_lines": 2400}})
+            m = manifest(run(root, cfg))
+            self.assertEqual(self.turns_of(m, "docs/d0.md"), 32)
+
+    def test_ceiling_clamps_to_40(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i in range(8):  # planning: 12 + 4*8 = 44 -> clamp 40
+                write(root, f"docs/plans/p{i}.md", "one line")
+            git_init(root)
+            m = manifest(run(root))
+            self.assertEqual(self.turns_of(m, "docs/plans/p0.md"), 40)
+
+    def test_policy_chunk_gets_flat_20(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i in range(30):
+                write(root, f"docs/superpowers/plans/p{i}.md", "# e")
+            git_init(root)
+            cfg = config(root, {"policy_scope": ["docs/superpowers"]})
+            m = manifest(run(root, cfg))
+            self.assertEqual(
+                self.turns_of(m, "docs/superpowers/plans/p0.md"), 20)
+
+
+class EmitPrompt(unittest.TestCase):
+    def plan_to_file(self, root):
+        out = os.path.join(root, "manifest.json")
+        r = run(root, out=out)
+        assert r.returncode == 0, r.stderr
+        with open(out, encoding="utf-8") as f:
+            return out, json.load(f)
+
+    def test_sweep_prompt_carries_slice_verbatim_no_manifest_hunt(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/plans/p.md", "\n".join(["x"] * 40))
+            write(root, "docs/guide.md", "# guide")
+            git_init(root)
+            path, m = self.plan_to_file(root)
+            chunk = next(c for c in m["chunks"]
+                         if c["docs"][0]["path"] == "docs/plans/p.md")
+            r = run_emit(root, path, "--emit-prompt", chunk["id"])
+            self.assertEqual(r.returncode, 0, r.stderr)
+            prompt = r.stdout
+            self.assertIn("docs/plans/p.md", prompt)
+            self.assertIn("40", prompt)          # line count shown
+            self.assertIn("planning", prompt)    # hint shown
+            self.assertIn(f"chunks/{chunk['id']}.json", prompt)
+            self.assertIn("doc-lifecycle:detecting-doc-bloat", prompt)
+            self.assertNotIn("manifest.json", prompt)
+            self.assertNotIn("docs/guide.md", prompt)  # other chunks excluded
+
+    def test_policy_prompt_lists_files_verbatim_and_names_policy(self):
+        with tempfile.TemporaryDirectory() as root:
+            for i in range(3):
+                write(root, f"docs/superpowers/plans/p{i}.md", "# e")
+            write(root, ".github/doc-sync/audit-scope.json",
+                  json.dumps({"policy_scope": ["docs/superpowers"]}))
+            git_init(root)
+            path, m = self.plan_to_file(root)
+            (p,) = [c for c in m["chunks"] if c["kind"] == "policy"]
+            r = run_emit(root, path, "--emit-prompt", p["id"])
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("POLICY", r.stdout)
+            self.assertIn("docs/superpowers", r.stdout)
+            for i in range(3):
+                self.assertIn(f"docs/superpowers/plans/p{i}.md", r.stdout)
+            # Same scope fence as the sweep prompt — GREEN run (b) showed an
+            # executor enumerating the tree when the policy variant lacked it.
+            self.assertIn("do not enumerate", r.stdout)
+
+    def test_emit_turns_prints_the_budget(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "x")
+            git_init(root)
+            path, m = self.plan_to_file(root)
+            r = run_emit(root, path, "--emit-turns", m["chunks"][0]["id"])
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(r.stdout.strip(), str(m["chunks"][0]["turns"]))
+
+    def test_unknown_chunk_id_exits_2_naming_it(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "x")
+            git_init(root)
+            path, _ = self.plan_to_file(root)
+            r = run_emit(root, path, "--emit-prompt", "c-nope")
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("c-nope", r.stderr)
 
 
 class FixtureEndToEnd(unittest.TestCase):

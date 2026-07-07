@@ -297,6 +297,68 @@ class BloatRender(unittest.TestCase):
         self.assertIn("**Rollup:**", out.stdout)
         self.assertNotIn("approve", out.stdout.lower())
 
+    def test_pr_body_renders_unswept_banner_before_rollup(self):
+        report = write_report([brec("CUT", location="README.md:5")])
+        with open(report) as f:
+            data = json.load(f)
+        data["unswept"] = [
+            {"chunk": "c-dead1", "docs": ["docs/plans/p.md", "docs/plans/q.md"]},
+            {"chunk": "c-dead2", "docs": ["docs/guide.md"]},
+        ]
+        with open(report, "w") as f:
+            json.dump(data, f)
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("2 chunk(s) unswept", out.stdout)
+        self.assertIn("docs/plans/p.md", out.stdout)
+        self.assertIn("docs/guide.md", out.stdout)
+        self.assertIn("next sweep", out.stdout)
+        self.assertLess(out.stdout.index("unswept"),
+                        out.stdout.index("**Rollup:**"))
+
+    def test_pr_body_no_banner_when_complete(self):
+        report = write_report([brec("CUT", location="README.md:5")])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
+        os.unlink(report)
+        self.assertNotIn("unswept", out.stdout)
+
+    def test_triage_renders_unswept_banner(self):
+        report = write_report([brec("CUT", location="README.md:5")])
+        with open(report) as f:
+            data = json.load(f)
+        data["unswept"] = [{"chunk": "c-dead1", "docs": ["docs/plans/p.md"]}]
+        with open(report, "w") as f:
+            json.dump(data, f)
+        out = run(sys.executable, SCRIPT, "bloat-triage", "--report", report)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("1 chunk(s) unswept", out.stdout)
+        self.assertIn("docs/plans/p.md", out.stdout)
+
+    def test_unswept_summary_writes_gap_state(self):
+        report = write_report([])
+        with open(report) as f:
+            data = json.load(f)
+        data["unswept"] = [{"chunk": "c-dead1", "docs": ["docs/plans/p.md"]}]
+        with open(report, "w") as f:
+            json.dump(data, f)
+        out = run(sys.executable, SCRIPT, "bloat-unswept-summary",
+                  "--report", report)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("1 chunk(s) unswept", out.stdout)
+        self.assertIn("docs/plans/p.md", out.stdout)
+        self.assertIn("next sweep", out.stdout)
+
+    def test_unswept_summary_silent_when_complete(self):
+        report = write_report([brec("CUT", location="README.md:5")])
+        out = run(sys.executable, SCRIPT, "bloat-unswept-summary",
+                  "--report", report)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.strip(), "")
+
     def test_triage_missing_report_exits_2(self):
         out = run(sys.executable, SCRIPT, "bloat-triage",
                   "--report", "/nonexistent.json")
@@ -333,10 +395,11 @@ class BloatRender(unittest.TestCase):
 
 
 class WorkflowWiring(unittest.TestCase):
-    """Pins doc-bloat.yml's harness wiring: the deterministic plan job, the
-    per-chunk seam validation with one retry, and the no-partial assembly.
-    The YAML stays an allowlist-thin shell; these strings are its contract
-    with the unit-tested scripts."""
+    """Pins doc-bloat.yml's harness wiring: the deterministic resume-aware
+    plan job, script-rendered dispatch payloads under planner-computed turn
+    budgets, per-chunk seam validation with a classified retry, and
+    gap-tolerant assembly. The YAML stays an allowlist-thin shell; these
+    strings are its contract with the unit-tested scripts."""
 
     @classmethod
     def setUpClass(cls):
@@ -347,19 +410,48 @@ class WorkflowWiring(unittest.TestCase):
         with open(path, encoding="utf-8") as f:
             cls.yml = f.read()
 
-    def test_plan_job_runs_plan_chunks(self):
-        self.assertIn("plan-chunks.py --out manifest.json", self.yml)
+    def test_plan_job_resumes_prior_results(self):
+        self.assertIn("plan-chunks.py --out manifest.json --results-dir chunks",
+                      self.yml)
+        self.assertIn("--pattern 'bloat-chunk*'", self.yml)
 
     def test_chunks_seam_validated_in_job(self):
         self.assertIn('--chunk "chunks/${CHUNK_ID}.json" --manifest manifest.json',
                       self.yml)
 
-    def test_assembly_never_partial(self):
+    def test_assembly_tolerates_gaps_and_surfaces_them(self):
         self.assertIn("--assemble chunks --manifest manifest.json", self.yml)
-        self.assertNotIn("--allow-partial", self.yml)
+        self.assertIn("--allow-partial", self.yml)
+        self.assertIn("bloat-unswept-summary", self.yml)
 
-    def test_chunk_invocations_are_turn_capped(self):
-        self.assertIn("--max-turns 15", self.yml)
+    def test_dispatch_is_script_rendered_with_planner_budget(self):
+        self.assertIn("--emit-prompt", self.yml)
+        self.assertIn("--emit-turns", self.yml)
+        self.assertIn("--max-turns ${{ steps.slice.outputs.turns }}", self.yml)
+        self.assertNotIn("--max-turns 15", self.yml)
+
+    def test_executor_can_invoke_its_skill(self):
+        self.assertIn('"Skill,Read', self.yml)
+
+    def test_retry_is_classified_and_uses_escalated_budget(self):
+        self.assertIn("sync-gate.py bloat-retry", self.yml)
+        self.assertIn("--max-turns ${{ steps.retry.outputs.turns }}", self.yml)
+
+    def test_double_failure_discards_invalid_result_before_exit(self):
+        # A leftover invalid result would fail gap-tolerant assembly (which
+        # tolerates only MISSING chunks) and mask the chunk as done on resume.
+        self.assertIn('|| { rm -f "chunks/${CHUNK_ID}.json"; echo "::error::chunk',
+                      self.yml)
+
+    def test_fully_resumed_run_still_assembles(self):
+        # assemble must NOT carry sweep's pending-empty guard, or an
+        # all-carried run silently produces nothing forever.
+        sweep_if = "needs.plan.outputs.decision == 'detect' && needs.plan.outputs.pending != '[]'"
+        self.assertIn(sweep_if, self.yml)          # sweep keeps the guard
+        assemble_if = "always() && needs.plan.outputs.decision == 'detect'"
+        self.assertIn(assemble_if, self.yml)
+        self.assertNotIn("always() && needs.plan.outputs.decision == 'detect' "
+                         "&& needs.plan.outputs.pending", self.yml)
 
     def test_matrix_does_not_fail_fast(self):
         self.assertIn("fail-fast: false", self.yml)

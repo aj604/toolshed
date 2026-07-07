@@ -16,20 +16,36 @@ caps (chunking.max_docs, default 8; chunking.max_lines, default 1200), and
 consecutive underfull chunks with the same hint are coalesced while the
 caps hold. A single doc larger than max_lines gets its own chunk.
 
-Chunk ids are content-addressed (sha256 of member paths), so re-planning an
-unchanged tree yields the same ids — which is what makes --results-dir
-resume work: a chunk whose <id>.json result already exists stays in
-"chunks" but leaves "pending".
+Chunk ids are content-addressed (sha256 over member (path, content-sha256)
+pairs, the content hash computed during the same read that counts lines), so
+re-planning an unchanged tree yields the same ids — which is what makes
+--results-dir resume work: a chunk whose <id>.json result already exists,
+parses, and names the chunk stays in "chunks" but leaves "pending" — an
+edited doc changes its chunk's id and an invalid leftover never counts, so
+a stale or garbage prior result is never reused.
+
+Every chunk carries a "turns" budget for the model invocation that will sweep
+it: 12 + 2 per doc (4 per planning doc) + 1 per full 600 lines, clamped to
+[20, 40]; policy chunks get a flat 20. The workflow passes it to --max-turns;
+retry escalation above it is the workflow's job, not the planner's.
 
 Usage:
     plan-chunks.py [--config PATH] [--root DIR] [--out FILE] [--results-dir DIR]
+    plan-chunks.py --emit-prompt ID --manifest FILE   # print dispatch prompt
+    plan-chunks.py --emit-turns ID --manifest FILE    # print turn budget
 
-Output: manifest JSON {"schema": 1, "chunks": [...], "pending": [ids]} to
---out (stdout if omitted). Sweep chunks are
-{"id", "kind": "sweep", "docs": [{"path", "lines", "hint"}]}; policy chunks
-are {"id", "kind": "policy", "dir", "files"}. The run-surface report (doc
-count, chunk count, projected invocations, resume skips) always prints to
-stderr.
+--emit-prompt renders the full headless dispatch prompt for one chunk — the
+doc list (or policy dir + files) verbatim, the output path chunks/<id>.json,
+and the definition of done — so prompt templating lives here, unit-tested,
+never in workflow YAML. The executor is handed its slice; it never opens the
+manifest.
+
+Output (plan mode): manifest JSON {"schema": 1, "chunks": [...], "pending":
+[ids]} to --out (stdout if omitted). Sweep chunks are
+{"id", "kind": "sweep", "turns": N, "docs": [{"path", "lines", "hint"}]};
+policy chunks are {"id", "kind": "policy", "turns": N, "dir", "files"}. The
+run-surface report (doc count, chunk count, projected invocations, resume
+skips) always prints to stderr.
 
 Config discovery: --config if given, else <root>/.github/doc-sync/audit-scope.json.
 All keys optional; an absent file is pure defaults:
@@ -179,13 +195,15 @@ def select(paths, exclude, include):
     return sorted(result)
 
 
-def line_count(full):
-    """Number of lines in a file, in-process. Unreadable => 0 (never raises)."""
+def read_doc(full):
+    """(line count, content sha256) in one read. Unreadable => (0, '')."""
     try:
         with open(full, encoding="utf-8", errors="replace") as f:
-            return len(f.read().splitlines())
+            text = f.read()
+        return len(text.splitlines()), hashlib.sha256(
+            text.encode("utf-8", "replace")).hexdigest()
     except OSError:
-        return 0
+        return 0, ""
 
 
 def doc_hint(root, path):
@@ -211,9 +229,26 @@ def policy_dir_of(path, policy_dirs):
     return best
 
 
-def chunk_id(prefix, paths):
-    digest = hashlib.sha256("\n".join(paths).encode("utf-8")).hexdigest()
+def chunk_id(prefix, members):
+    """Content-address a chunk by its members' (path, content-sha) pairs."""
+    digest = hashlib.sha256("\n".join(
+        f"{path}\0{sha}" for path, sha in members).encode("utf-8")).hexdigest()
     return f"{prefix}-{digest[:10]}"
+
+
+TURNS_BASE = 12
+TURNS_PER_DOC = {"planning": 4}          # every other hint costs 2
+TURNS_PER_LINES = 600
+TURNS_FLOOR, TURNS_CEIL = 20, 40
+TURNS_POLICY = 20
+
+
+def turn_budget(docs):
+    """Deterministic per-chunk model-invocation budget for a sweep chunk."""
+    turns = TURNS_BASE
+    turns += sum(TURNS_PER_DOC.get(d["hint"], 2) for d in docs)
+    turns += sum(d["lines"] for d in docs) // TURNS_PER_LINES
+    return max(TURNS_FLOOR, min(TURNS_CEIL, turns))
 
 
 def pack(docs, max_docs, max_lines):
@@ -247,7 +282,11 @@ def coalesce(chunks, max_docs, max_lines):
 
 def plan(root, cfg):
     docs = select(candidates(root), cfg["exclude"], cfg["include"])
-    sized = [{"path": p, "lines": line_count(os.path.join(root, p))} for p in docs]
+    sized, shas = [], {}
+    for p in docs:
+        lines, sha = read_doc(os.path.join(root, p))
+        sized.append({"path": p, "lines": lines})
+        shas[p] = sha
 
     policy_files, sweep = {}, []
     for d in sized:
@@ -261,7 +300,8 @@ def plan(root, cfg):
     chunks = []
     for pdir in sorted(policy_files):
         files = sorted(policy_files[pdir])
-        chunks.append({"id": chunk_id("p", files), "kind": "policy",
+        chunks.append({"id": chunk_id("p", [(f, shas[f]) for f in files]),
+                       "kind": "policy", "turns": TURNS_POLICY,
                        "dir": pdir, "files": files})
 
     groups = {}
@@ -273,9 +313,82 @@ def plan(root, cfg):
                            cfg["max_docs"], cfg["max_lines"]))
     packed.sort(key=lambda c: c[0]["path"])
     for c in coalesce(packed, cfg["max_docs"], cfg["max_lines"]):
-        chunks.append({"id": chunk_id("c", [d["path"] for d in c]),
-                       "kind": "sweep", "docs": c})
+        chunks.append({"id": chunk_id("c", [(d["path"], shas[d["path"]])
+                                            for d in c]),
+                       "kind": "sweep", "turns": turn_budget(c), "docs": c})
     return len(sized), chunks
+
+
+SWEEP_PROMPT = """\
+You are a headless chunk executor. Invoke the doc-lifecycle:detecting-doc-bloat
+skill for the verdict rules and output contract, then audit exactly the docs
+listed below — no others. This list is your entire scope; do not enumerate or
+open anything outside it.
+
+Chunk {id} (sweep):
+{doc_lines}
+
+The kind hints are the planner's; override one only with stated evidence, per
+the skill. Write the chunk result object {{"chunk": "{id}", "records": [...]}}
+to chunks/{id}.json — an empty records array if nothing is bloated. Done means
+exactly that file, in the chunk-result shape the skill's contract defines;
+then stop. Orchestration, retries, and assembly belong to the workflow.
+"""
+
+POLICY_PROMPT = """\
+You are a headless chunk executor. Invoke the doc-lifecycle:detecting-doc-bloat
+skill for the POLICY rules. Directory {dir} is declared policy scope: emit
+exactly one POLICY record covering it — never walk its files individually —
+and copy this files list verbatim into the record's files field:
+{file_lines}
+
+This list is your entire scope; do not enumerate the tree or open anything
+outside it (sampling a few of the listed files for the evidence field is the
+audit, per the skill).
+
+Write the chunk result object {{"chunk": "{id}", "records": [<the one POLICY
+record>]}} to chunks/{id}.json. Done means exactly that file, in the
+chunk-result shape the skill's contract defines; then stop.
+"""
+
+
+def usable_result(results_dir, cid):
+    """True only for a parseable result that names this chunk. An invalid
+    file surviving a failed CI retry must not mask the chunk as done."""
+    path = os.path.join(results_dir, cid + ".json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return isinstance(data, dict) and data.get("chunk") == cid
+
+
+def load_manifest(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        die(f"error: cannot read manifest {path}: {e}")
+
+
+def find_chunk(man, cid):
+    for c in man.get("chunks", []):
+        if c.get("id") == cid:
+            return c
+    die(f"error: chunk {cid} not found in manifest")
+
+
+def emit_prompt(chunk):
+    if chunk["kind"] == "policy":
+        return POLICY_PROMPT.format(
+            id=chunk["id"], dir=chunk["dir"],
+            file_lines="\n".join(f"  - {f}" for f in chunk["files"]))
+    return SWEEP_PROMPT.format(
+        id=chunk["id"],
+        doc_lines="\n".join(
+            f"  - {d['path']} ({d['lines']} lines, hint: {d['hint']})"
+            for d in chunk["docs"]))
 
 
 def main():
@@ -287,7 +400,24 @@ def main():
     ap.add_argument("--out", help="write the manifest here (default: stdout)")
     ap.add_argument("--results-dir", help="existing chunk-result dir; chunks "
                     "with a <id>.json there stay in 'chunks' but leave 'pending'")
+    ap.add_argument("--emit-prompt", metavar="ID",
+                    help="print the dispatch prompt for one manifest chunk")
+    ap.add_argument("--emit-turns", metavar="ID",
+                    help="print the turn budget for one manifest chunk")
+    ap.add_argument("--manifest", help="manifest JSON for --emit-prompt/"
+                    "--emit-turns")
     args = ap.parse_args()
+
+    if args.emit_prompt or args.emit_turns:
+        if not args.manifest:
+            die("error: --emit-prompt/--emit-turns require --manifest")
+        man = load_manifest(args.manifest)
+        if args.emit_prompt:
+            print(emit_prompt(find_chunk(man, args.emit_prompt)), end="")
+        else:
+            # v0.7.0 manifests predate 'turns'; the floor is the safe default.
+            print(find_chunk(man, args.emit_turns).get("turns", TURNS_FLOOR))
+        return 0
 
     config = args.config or os.path.join(
         args.root, ".github", "doc-sync", "audit-scope.json")
@@ -306,8 +436,8 @@ def main():
 
     pending = [c["id"] for c in chunks]
     if args.results_dir:
-        pending = [c["id"] for c in chunks if not os.path.exists(
-            os.path.join(args.results_dir, c["id"] + ".json"))]
+        pending = [c["id"] for c in chunks
+                   if not usable_result(args.results_dir, c["id"])]
 
     nsweep = sum(1 for c in chunks if c["kind"] == "sweep")
     report = (f"{ndocs} doc(s) -> {len(chunks)} chunk(s) "

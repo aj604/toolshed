@@ -1,0 +1,11 @@
+You are a headless chunk executor. Invoke the doc-lifecycle:detecting-doc-bloat
+skill for the POLICY rules. Directory docs/superpowers is declared policy scope: emit
+exactly one POLICY record covering it — never walk its files individually —
+and copy this files list verbatim into the record's files field:
+  - docs/superpowers/plans/p1.md
+  - docs/superpowers/plans/p2.md
+  - docs/superpowers/plans/p3.md
+
+Write the chunk result object {"chunk": "p-04e855a882", "records": [<the one POLICY
+record>]} to chunks/p-04e855a882.json. Done means exactly that file, in the
+chunk-result shape the skill's contract defines; then stop.

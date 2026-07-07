@@ -45,10 +45,12 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
   per test milestone (see the directory for the current set), plus the original writing-docs
   records loose at the root.
 - `detecting-doc-bloat`/`fixing-doc-bloat` RED/GREEN baselines are retained at
-  `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/`, and the 2026-07-06
-  rearchitecture's at `tests/baselines/bloat-rearch-red/` / `bloat-rearch-green/`; method,
-  status, and resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md` (2026-06-09
-  suite entry; 2026-06-20 `docs/reference/` shape; 2026-07-06 rearchitecture entry).
+  `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/`, the 2026-07-06
+  rearchitecture's at `tests/baselines/bloat-rearch-red/` / `bloat-rearch-green/`, and the
+  2026-07-07 scale hardening's at `tests/baselines/bloat-scale-red/` / `bloat-scale-green/`;
+  method, status, and resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md`
+  (2026-06-09 suite entry; 2026-06-20 `docs/reference/` shape; 2026-07-06 rearchitecture
+  entry; 2026-07-07 scale-hardening entry).
 - The generic apply-only rules for fix skills have one owner,
   `plugins/doc-lifecycle/references/apply-discipline.md`, cited (not restated) by both
   `fixing-doc-drift` and `fixing-doc-bloat`.

@@ -1,0 +1,13 @@
+You are a headless chunk executor. Invoke the doc-lifecycle:detecting-doc-bloat
+skill for the verdict rules and output contract, then audit exactly the docs
+listed below — no others. This list is your entire scope; do not enumerate or
+open anything outside it.
+
+Chunk c-5c6cb82ebd (sweep):
+  - docs/plans/payment-retry-design.md (12 lines, hint: planning)
+
+The kind hints are the planner's; override one only with stated evidence, per
+the skill. Write the chunk result object {"chunk": "c-5c6cb82ebd", "records": [...]}
+to chunks/c-5c6cb82ebd.json — an empty records array if nothing is bloated. Done means
+exactly that file, in the chunk-result shape the skill's contract defines;
+then stop. Orchestration, retries, and assembly belong to the workflow.

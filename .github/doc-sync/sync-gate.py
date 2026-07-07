@@ -6,10 +6,11 @@ The workflow (doc-sync.yml) gathers facts via git/gh and performs side effects
 decision matrix is unit-testable instead of living in YAML.
 
 Usage:
-    sync-gate.py pre        --commits N --open-prs N --open-issues N
-    sync-gate.py post       --report FILE --cap N
-    sync-gate.py bloat-pre  --prune-pr-open N --distill-pr-open N
-    sync-gate.py bloat-lane --report FILE --lane {prune|distill} --pr-open N --out FILE
+    sync-gate.py pre         --commits N --open-prs N --open-issues N
+    sync-gate.py post        --report FILE --cap N
+    sync-gate.py bloat-pre   --prune-pr-open N --distill-pr-open N
+    sync-gate.py bloat-lane  --report FILE --lane {prune|distill} --pr-open N --out FILE
+    sync-gate.py bloat-retry --execution-log FILE --turns N
 
 Prints exactly one decision token on stdout:
     pre:        skip-empty     nothing new since the marker
@@ -23,6 +24,17 @@ Prints exactly one decision token on stdout:
     bloat-lane: skip-pending   a lane PR is already open
                 skip-empty     no findings in the lane
                 open           findings await review
+bloat-lane also copies the report's "unswept" gap list into --out so the PR
+body can render the banner from the lane file.
+
+bloat-retry is the exception: it classifies a failed sweep attempt from
+claude-code-action's execution-output JSON and prints GITHUB_OUTPUT lines
+    mode=escalate|fresh
+    turns=N
+A budget-shaped failure (result subtype error_max_turns) escalates to
+ceil(N*1.5) capped at 60 — an identical retry would re-buy the same failure;
+anything else (seam rejection, infra failure, missing log) retries fresh at
+the same budget. The reason always prints to stderr.
 
 Exit status: 0 with a decision on stdout; 2 on bad input.
 """
@@ -87,15 +99,59 @@ def decide_bloat_lane(records, lane, pr_open):
 
 
 def load_records(path):
+    return load_report(path)[0]
+
+
+def load_report(path):
+    """(records, unswept-or-None) from a report file, either shape."""
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     if isinstance(data, list):
-        return data
+        return data, None
     if isinstance(data, dict) and isinstance(data.get("records"), list):
-        return data["records"]
+        return data["records"], data.get("unswept")
     raise ValueError(
         "report must be a JSON array of records, or an object with a 'records' array"
     )
+
+
+RETRY_ESCALATION = 1.5
+RETRY_CEIL = 60
+
+
+def result_subtype(execution_log_path):
+    """The result event's subtype from claude-code-action's execution output.
+
+    The log is either the SDK event stream (array, result event last) or a
+    bare result object. (None, reason) when it cannot be read — the caller
+    treats that as not-budget-shaped.
+    """
+    try:
+        with open(execution_log_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return None, f"no execution log at {execution_log_path}"
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+        return None, f"unreadable execution log: {e}"
+    events = data if isinstance(data, list) else [data]
+    results = [e for e in events
+               if isinstance(e, dict) and e.get("type") == "result"]
+    if not results:
+        return None, "no result event in execution log"
+    return results[-1].get("subtype"), None
+
+
+def decide_bloat_retry(execution_log_path, turns):
+    """(mode, retry_turns, reason) for a failed sweep attempt."""
+    subtype, problem = result_subtype(execution_log_path)
+    if subtype == "error_max_turns":
+        escalated = min(RETRY_CEIL, -(-turns * 3 // 2))  # ceil(turns * 1.5)
+        return ("escalate", escalated,
+                f"attempt exhausted its max-turns budget ({turns}); an identical "
+                f"retry would re-buy the failure — escalating to {escalated}")
+    why = problem or f"result subtype {subtype!r} — not budget-shaped"
+    return ("fresh", turns,
+            f"{why}; fresh identical retry at the same budget ({turns})")
 
 
 def nonneg(value):
@@ -135,7 +191,18 @@ def main():
     blane.add_argument("--pr-open", type=nonneg, required=True)
     blane.add_argument("--out", required=True)
 
+    bretry = sub.add_parser("bloat-retry")
+    bretry.add_argument("--execution-log", required=True)
+    bretry.add_argument("--turns", type=positive, required=True)
+
     args = parser.parse_args()
+
+    if args.mode == "bloat-retry":
+        mode, turns, reason = decide_bloat_retry(args.execution_log, args.turns)
+        print(reason, file=sys.stderr)
+        print(f"mode={mode}")
+        print(f"turns={turns}")
+        return 0
 
     if args.mode == "pre":
         print(decide_pre(args.commits, args.open_prs, args.open_issues))
@@ -147,12 +214,15 @@ def main():
 
     if args.mode == "bloat-lane":
         try:
-            records = load_records(args.report)
+            records, unswept = load_report(args.report)
         except (OSError, ValueError, json.JSONDecodeError) as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
+        lane_out = {"records": filter_lane(records, args.lane)}
+        if unswept:
+            lane_out["unswept"] = unswept
         with open(args.out, "w", encoding="utf-8") as f:
-            json.dump({"records": filter_lane(records, args.lane)}, f)
+            json.dump(lane_out, f)
         print(decide_bloat_lane(records, args.lane, args.pr_open))
         return 0
 
