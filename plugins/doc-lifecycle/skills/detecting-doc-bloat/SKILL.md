@@ -55,10 +55,9 @@ from the manifest verbatim.
 ## Script invocation templates
 
 ```bash
-# plan (inventory -> chunk manifest; reports size + projected invocations on stderr)
-# to narrow scope (e.g. one subtree), pass --config with exclude/include globs
-# (include re-adds whatever it matches — whitelist wins); policy_scope/chunking
-# keys are documented in the script's docstring
+# plan (inventory -> chunk manifest; size + projected invocations on stderr).
+# To narrow scope, pass --config with exclude/include globs (include re-adds what
+# it matches); policy_scope/chunking keys are documented in the script docstring.
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
   --out <dir>/manifest.json --results-dir <dir>/chunks
 
