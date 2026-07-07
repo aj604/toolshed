@@ -356,7 +356,8 @@ class ResumeAndCeiling(unittest.TestCase):
             done_id = m1["chunks"][0]["id"]
             results = os.path.join(root, "chunks")
             os.makedirs(results)
-            write(root, f"chunks/{done_id}.json", "{}")
+            write(root, f"chunks/{done_id}.json",
+                  json.dumps({"chunk": done_id, "records": []}))
             r = run(root, results_dir=results)
             m2 = manifest(r)
             self.assertEqual(len(m2["chunks"]), 2)  # chunks always complete
@@ -412,6 +413,29 @@ class ContentAddressedIds(unittest.TestCase):
             write(root, "docs/a.md", "alpha edited")
             m2 = manifest(run(root, results_dir=results))
             self.assertEqual(m2["pending"], [m2["chunks"][0]["id"]])
+
+    def test_resume_ignores_garbage_or_mismatched_result_files(self):
+        # An invalid result that survived a failed CI retry must not mask the
+        # chunk as done — resume trusts a result only if it parses and names
+        # this chunk.
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "alpha")
+            git_init(root)
+            m1 = manifest(run(root))
+            cid = m1["chunks"][0]["id"]
+            results = os.path.join(root, "chunks")
+            os.makedirs(results)
+            write(root, f"chunks/{cid}.json", "{not json")
+            m2 = manifest(run(root, results_dir=results))
+            self.assertEqual(m2["pending"], [cid])
+            write(root, f"chunks/{cid}.json",
+                  json.dumps({"chunk": "c-someoneelse", "records": []}))
+            m3 = manifest(run(root, results_dir=results))
+            self.assertEqual(m3["pending"], [cid])
+            write(root, f"chunks/{cid}.json",
+                  json.dumps({"chunk": cid, "records": []}))
+            m4 = manifest(run(root, results_dir=results))
+            self.assertEqual(m4["pending"], [])
 
     def test_unchanged_tree_yields_stable_ids_without_git(self):
         with tempfile.TemporaryDirectory() as root:

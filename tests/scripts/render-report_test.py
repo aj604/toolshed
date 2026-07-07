@@ -437,6 +437,22 @@ class WorkflowWiring(unittest.TestCase):
         self.assertIn("sync-gate.py bloat-retry", self.yml)
         self.assertIn("--max-turns ${{ steps.retry.outputs.turns }}", self.yml)
 
+    def test_double_failure_discards_invalid_result_before_exit(self):
+        # A leftover invalid result would fail gap-tolerant assembly (which
+        # tolerates only MISSING chunks) and mask the chunk as done on resume.
+        self.assertIn('|| { rm -f "chunks/${CHUNK_ID}.json"; echo "::error::chunk',
+                      self.yml)
+
+    def test_fully_resumed_run_still_assembles(self):
+        # assemble must NOT carry sweep's pending-empty guard, or an
+        # all-carried run silently produces nothing forever.
+        sweep_if = "needs.plan.outputs.decision == 'detect' && needs.plan.outputs.pending != '[]'"
+        self.assertIn(sweep_if, self.yml)          # sweep keeps the guard
+        assemble_if = "always() && needs.plan.outputs.decision == 'detect'"
+        self.assertIn(assemble_if, self.yml)
+        self.assertNotIn("always() && needs.plan.outputs.decision == 'detect' "
+                         "&& needs.plan.outputs.pending", self.yml)
+
     def test_matrix_does_not_fail_fast(self):
         self.assertIn("fail-fast: false", self.yml)
 

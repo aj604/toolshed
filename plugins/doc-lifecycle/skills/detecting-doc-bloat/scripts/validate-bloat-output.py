@@ -421,7 +421,8 @@ def main():
                     help="assemble every manifest chunk's DIR/<id>.json into --out")
     ap.add_argument("--out", help="where --assemble writes the final report")
     ap.add_argument("--allow-partial", action="store_true",
-                    help="--assemble only: skip missing chunks (CI never passes this)")
+                    help="--assemble only: skip missing chunks loudly, recording "
+                         "them in the report's 'unswept' list (CI passes this)")
     args = ap.parse_args()
 
     if args.chunk and args.assemble:

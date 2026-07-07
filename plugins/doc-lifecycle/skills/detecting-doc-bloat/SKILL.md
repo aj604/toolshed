@@ -44,8 +44,9 @@ policy dir + files, output path, definition of done) and point the subagent
 at (i) `output-contract.md` and (ii) only the reference file(s) its chunk's
 kinds need — `verdict-lenses.md` for living/narrative,
 `planning-artifacts.md` for planning and policy chunks. Each subagent writes
-`{"chunk": "<id>", "records": [...]}` to `<dir>/chunks/<id>.json`; seam-validate
-each result as it lands; a failing chunk is re-dispatched fresh **once**, then
+`{"chunk": "<id>", "records": [...]}` to `chunks/<id>.json` under its working
+directory — the dispatch prompt names the exact path; seam-validate each
+result as it lands; a failing chunk is re-dispatched fresh **once**, then
 you stop and name it. Assemble the valid results into the final report.
 
 **Headless (chunk executor):** your chunk slice arrived verbatim in the

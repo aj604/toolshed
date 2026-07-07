@@ -43,8 +43,10 @@
   same validator seam either way.
 - Still binds: the report contract is v2 (`"schema": 2`, eight record fields, seven verdicts,
   no payloads) and the validator rejects v1 shapes with a regenerate error; a policy chunk's
-  result is exactly one POLICY record whose files equal the manifest list; CI never passes
-  `--allow-partial`; doc enumeration and chunk planning go through `plan-chunks.py` (this
+  result is exactly one POLICY record whose files equal the dispatched chunk's list ("CI
+  never passes `--allow-partial`" bound here until 2026-07-07 — superseded by the
+  scale-hardening entry above: CI now passes it, with gaps recorded in the report's
+  `unswept` list); doc enumeration and chunk planning go through `plan-chunks.py` (this
   supersedes the 2026-07-03 entry's "goes through `list-docs.py`" — that helper is absorbed
   and retired), and the 2026-07-03/04 entries' two-lane split now routes `POLICY` to the
   distill lane.

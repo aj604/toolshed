@@ -19,9 +19,10 @@ caps hold. A single doc larger than max_lines gets its own chunk.
 Chunk ids are content-addressed (sha256 over member (path, content-sha256)
 pairs, the content hash computed during the same read that counts lines), so
 re-planning an unchanged tree yields the same ids — which is what makes
---results-dir resume work: a chunk whose <id>.json result already exists
-stays in "chunks" but leaves "pending" — and an edited doc changes its
-chunk's id, so a stale prior result is never reused.
+--results-dir resume work: a chunk whose <id>.json result already exists,
+parses, and names the chunk stays in "chunks" but leaves "pending" — an
+edited doc changes its chunk's id and an invalid leftover never counts, so
+a stale or garbage prior result is never reused.
 
 Every chunk carries a "turns" budget for the model invocation that will sweep
 it: 12 + 2 per doc (4 per planning doc) + 1 per full 600 lines, clamped to
@@ -351,6 +352,18 @@ chunk-result shape the skill's contract defines; then stop.
 """
 
 
+def usable_result(results_dir, cid):
+    """True only for a parseable result that names this chunk. An invalid
+    file surviving a failed CI retry must not mask the chunk as done."""
+    path = os.path.join(results_dir, cid + ".json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return isinstance(data, dict) and data.get("chunk") == cid
+
+
 def load_manifest(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -423,8 +436,8 @@ def main():
 
     pending = [c["id"] for c in chunks]
     if args.results_dir:
-        pending = [c["id"] for c in chunks if not os.path.exists(
-            os.path.join(args.results_dir, c["id"] + ".json"))]
+        pending = [c["id"] for c in chunks
+                   if not usable_result(args.results_dir, c["id"])]
 
     nsweep = sum(1 for c in chunks if c["kind"] == "sweep")
     report = (f"{ndocs} doc(s) -> {len(chunks)} chunk(s) "

@@ -155,8 +155,11 @@ jobs:
       - name: Seam-validate (final)
         if: steps.seam1.outcome != 'success'
         run: |
+          # On double failure, discard the invalid result BEFORE exiting: a leftover
+          # invalid file would upload, fail the gap-tolerant assembly (which only
+          # tolerates MISSING chunks), and mask the chunk as done on the next resume.
           python3 .github/doc-sync/validate-bloat-output.py --chunk "chunks/${CHUNK_ID}.json" --manifest manifest.json \
-            || { echo "::error::chunk ${CHUNK_ID} failed twice — its docs go to the report's unswept banner and the next sweep resumes them; every valid chunk is preserved as an artifact"; exit 1; }
+            || { rm -f "chunks/${CHUNK_ID}.json"; echo "::error::chunk ${CHUNK_ID} failed twice — its docs go to the report's unswept banner and the next sweep resumes them; every valid chunk is preserved as an artifact"; exit 1; }
       - name: Upload chunk result
         if: always()
         uses: actions/upload-artifact@v4
@@ -167,7 +170,10 @@ jobs:
 
   assemble:
     needs: [plan, sweep]
-    if: always() && needs.plan.outputs.decision == 'detect' && needs.plan.outputs.pending != '[]'
+    # No pending-empty guard here (sweep keeps it): a fully-resumed run — every
+    # chunk carried from the prior run's artifacts — must still assemble, gate,
+    # and open lanes, or the carried state silently self-perpetuates forever.
+    if: always() && needs.plan.outputs.decision == 'detect'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
