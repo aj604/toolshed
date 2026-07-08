@@ -40,7 +40,9 @@ has no `@version` selector there — `doc-lifecycle@toolshed@0.7.0` is invalid).
 The three workflow templates and the gate/render scripts (`sync-gate.py`, `upgrade-gate.py`,
 `render-report.py`) are in this skill's base directory (announced when the skill loads); the
 chunk planner and the two output validators are copied from the sibling skills that own them
-(install steps 3–4).
+(install steps 3–4). `apply-upgrade.py` (also in the base directory) is the deterministic upgrade
+engine — run from the pinned checkout by the upgrade lane, never vendored into the install (see
+Upgrade mode).
 
 ## Preflight (run all; report failures, don't silently skip)
 
@@ -68,9 +70,10 @@ chunk planner and the two output validators are copied from the sibling skills t
    - cron: default `0 3 * * *` (03:00 UTC nightly)
    - blast-radius cap: default `10` (matches fixing-doc-drift's default of ~10 passages)
    - bloat cron: default `0 4 * * 1` (04:00 UTC Mondays); replaces `{{BLOAT_CRON}}` in doc-bloat.yml
-   - upgrade cron: default `0 5 * * 1` (05:00 UTC Mondays); replaces `{{UPGRADE_CRON}}` in
-     doc-sync-upgrade.yml. The plugin version is NOT a knob — it's read from the plugin manifest,
-     not chosen (next step).
+   - upgrade cron: default `0 2 * * 1` (02:00 UTC Mondays); replaces `{{UPGRADE_CRON}}` in
+     doc-sync-upgrade.yml. Earliest of the three (before the 03:00 nightly sync and 04:00 bloat
+     sweep) so the weekly version-bump check is the first run of its day. The plugin version is
+     NOT a knob — it's read from the plugin manifest, not chosen (next step).
 2. Resolve the version being installed: `jq -r .version "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json"`
    (the bare semver, e.g. `0.7.0`). Copy the three workflow templates, replacing the literal
    placeholders in each:
@@ -127,12 +130,25 @@ chunk planner and the two output validators are copied from the sibling skills t
 
 ## Upgrade mode
 
-Dispatched headlessly by `doc-sync-upgrade.yml` (or run by a human forcing an upgrade) once a
-newer plugin release exists. It regenerates the vendored wiring at the new version while leaving
-every consumer-owned value alone. **It is not a fresh install** — skip the Preflight (secrets,
-labels, PR-permissions are already in place) and do not re-seed the marker or audit-scope.
+Run by `doc-sync-upgrade.yml` once a newer plugin release exists (or by a human forcing an
+upgrade). It regenerates the vendored wiring at the new version while leaving every
+consumer-owned value alone. **It is not a fresh install** — skip the Preflight (secrets, labels,
+PR-permissions are already in place) and do not re-seed the marker or audit-scope.
 
-Ownership is the whole game — total on wiring, idempotent on state:
+**The regeneration is deterministic — `scripts/apply-upgrade.py`, no model.** Once the workflow
+YAML went version-agnostic, an upgrade is pure mechanics (re-copy the six scripts, re-render the
+three templates with the consumer's preserved knobs, bump the lockfile), so a tested script owns
+it and the upgrade lane makes no model call — and needs no model auth. The workflow runs it from
+the pinned target checkout; a human forcing an upgrade runs the same script against their checkout
+with `--plugin-root "$CLAUDE_PLUGIN_ROOT"`:
+
+    apply-upgrade.py --plugin-root <doc-lifecycle plugin dir> --repo <install root> --target <version>
+
+The script writes files only; git/PR is the workflow's job (below). Never re-implement its file
+ops by hand.
+
+Ownership is the whole game — total on wiring, idempotent on state (this table is the contract
+`apply-upgrade.py` implements):
 
 | File | Owner | Upgrade behavior |
 |------|-------|------------------|
@@ -142,12 +158,14 @@ Ownership is the whole game — total on wiring, idempotent on state:
 | `.github/doc-sync-marker` | sync state | **Never touch.** |
 | `.github/doc-sync/audit-scope.json` | consumer (tuned config) | **Never touch.** |
 
-**Preserve the knobs — read them out of the installed files, never reset to defaults.** Before
-overwriting a workflow, extract its current value and substitute *that* back in:
+**Knobs are preserved, not reset** — `apply-upgrade.py` reads each install-time value out of the
+currently-installed workflow and substitutes it back into the new template:
 - `doc-sync.yml`: the `cron:` under `schedule` → `{{CRON_SCHEDULE}}`; the `CAP:` env → `{{BLAST_RADIUS_CAP}}`.
 - `doc-bloat.yml`: its `cron:` → `{{BLOAT_CRON}}`.
-- `doc-sync-upgrade.yml`: its `cron:` → `{{UPGRADE_CRON}}`. If this file is absent (an install
-  predating self-upgrade), add it with the default upgrade cron and note it in the PR body.
+- `doc-sync-upgrade.yml`: its `cron:` → `{{UPGRADE_CRON}}`.
+A knob it can't extract fails the run red rather than default-guessing; the one exception is a
+missing `doc-sync-upgrade.yml` (an install predating self-upgrade), where it seeds the default
+upgrade cron (`0 2 * * 1`) and warns on stderr.
 
 **Do not commit or open the PR in upgrade mode** — the workflow owns git: it diffs the working
 tree, opens the `doc-sync/upgrade` PR (or self-explains a no-op), and the merge is what advances
