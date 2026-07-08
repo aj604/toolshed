@@ -1,5 +1,33 @@
 # Decisions
 
+## 2026-07-07 — version-agnostic pins + upgrade workflow-file fallback
+- Follows the local-checkout entry below. Once the marketplace pin worked, the toolshed dogfood
+  upgrade got to its push and hit the next wall (run 28909022925): GitHub refuses to let the
+  Actions `GITHUB_TOKEN` create/update files under `.github/workflows/` — "refusing to allow a
+  GitHub App to create or update workflow … without `workflows` permission" — and that permission
+  is not grantable to the default token via the `permissions:` block. The upgrade lane's whole job
+  is to regenerate the workflow YAMLs, so it always tripped this.
+- Decided (chosen over an elevated PAT): make the nightly workflow files **version-agnostic**. The
+  `Pin plugin marketplace` steps in `doc-sync.yml`/`doc-bloat.yml` read the version from
+  `.github/doc-sync/installed-version` at runtime (`VERSION=$(cat …); git clone --branch
+  "v${VERSION}"`) instead of a hardcoded `v<version>`. So a routine version bump changes only the
+  lockfile (+ scripts) — never a `.github/workflows/` file — and the default token pushes it
+  fine. `installed-version` becomes the single source of truth for the pin (kills the per-step
+  version duplication). The upgrade lane still clones the *target* (`steps.versions.latest`), since
+  the lockfile holds the old version until the skill advances it.
+- Fallback for the rarer case (an upgrade whose new templates change the workflow YAML itself):
+  the `Open upgrade PR` step detects a changed `.github/workflows/` path, writes the diff to the
+  `doc-sync-upgrade-patch` artifact, and fails loud with `git apply` instructions via
+  `render-report.py upgrade-summary --status blocked-workflows`. A human applies it with a
+  `workflow`-scoped credential. No new secret is required for the common path.
+- Consequence: the 0.9.2→0.9.3 upgrade (this change) IS a workflow-template change, so existing
+  installs (career-compass, the dogfood) take it as a one-time manual apply; version-only upgrades
+  after 0.9.3 self-land.
+- Guarded by the new `render-report_test.py` case for `blocked-workflows`.
+- Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/ (SKILL.md, doc-sync.yml, doc-bloat.yml,
+  doc-sync-upgrade.yml, scripts/render-report.py); dogfood under .github/ (the three workflows,
+  doc-sync/render-report.py, doc-sync/installed-version → 0.9.3); tests/scripts/render-report_test.py.
+
 ## 2026-07-07 — marketplace pin moves from URL ref to local checkout
 - Amends the self-upgrade entry below ("Pin lives ONLY in the `#v<version>` ref"). The moving
   `anthropics/claude-code-action@v1` tag tightened its marketplace-URL validator to
