@@ -24,6 +24,7 @@ permissions:
   contents: write
   pull-requests: write
   id-token: write   # claude-code-action OAuth token exchange
+  actions: read     # resume step reads prior runs (gh run list/download) — 403s without it
 
 concurrency:
   group: doc-bloat
@@ -65,8 +66,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p chunks
+          # Best-effort optimization: a failed lookup degrades to a fresh sweep, never a failed run.
           PREV=$(gh run list --workflow doc-bloat --status completed --limit 1 \
-            --json databaseId --jq '.[0].databaseId // empty')
+            --json databaseId --jq '.[0].databaseId // empty' || true)
           if [ -n "${PREV}" ]; then
             gh run download "${PREV}" --pattern 'bloat-chunk*' --dir prior || true
             find prior -name '*.json' -exec cp {} chunks/ \; 2>/dev/null || true
