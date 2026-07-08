@@ -20,11 +20,17 @@ judgment lives in `detecting-doc-drift` / `fixing-doc-drift` / `detecting-doc-bl
 fixing method into workflow YAML — that forks the method from its one owner.
 
 **Installs are pinned, not floating.** Before each `claude-code-action` step, a
-`Pin plugin marketplace at v<version>` step clones the installed release tag
-(`git clone --depth 1 --branch v<version> …/toolshed.git "$RUNNER_TEMP/toolshed-marketplace"`)
+`Pin plugin marketplace` step reads the version from `.github/doc-sync/installed-version` and
+clones that release tag
+(`VERSION=$(cat …/installed-version); git clone --depth 1 --branch "v${VERSION}" …/toolshed.git "$RUNNER_TEMP/toolshed-marketplace"`),
 and the action step points `plugin_marketplaces` at that local path — so the skills a run
 executes are frozen at the same version as the vendored wiring, and can't drift apart mid-week.
-Clone under `$RUNNER_TEMP`, never inside the work tree, or the PR steps' `git add -A` captures it.
+The version is read at runtime, NOT hardcoded in the workflow YAML, so the nightly workflow files
+stay byte-identical across versions — a routine upgrade changes only the lockfile, never a
+`.github/workflows/` file (which the Actions token cannot push; see Upgrade mode). The upgrade
+lane is the exception: it clones the *target* release it's regenerating to (`steps.versions.latest`),
+since `installed-version` still holds the old version until the skill advances it. Clone under
+`$RUNNER_TEMP`, never inside the work tree, or the PR steps' `git add -A` captures it.
 Pin via the local checkout, NOT a `plugin_marketplaces: …/toolshed.git#v<version>` ref —
 `claude-code-action`'s URL validator requires the value end in `.git`, so a `#<ref>` fragment is
 rejected outright. `doc-sync-upgrade.yml` is the only thing that advances the pin, and only via a
@@ -68,14 +74,13 @@ chunk planner and the two output validators are copied from the sibling skills t
 2. Resolve the version being installed: `jq -r .version "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json"`
    (the bare semver, e.g. `0.7.0`). Copy the three workflow templates, replacing the literal
    placeholders in each:
-   - `doc-sync.yml` → `.github/workflows/doc-sync.yml`: `{{CRON_SCHEDULE}}`, `{{BLAST_RADIUS_CAP}}`,
-     and `{{PLUGIN_VERSION}}`.
-   - `doc-bloat.yml` → `.github/workflows/doc-bloat.yml`: `{{BLOAT_CRON}}` and `{{PLUGIN_VERSION}}`.
-   - `doc-sync-upgrade.yml` → `.github/workflows/doc-sync-upgrade.yml`: `{{UPGRADE_CRON}}` and
-     `{{PLUGIN_VERSION}}`.
-   Each `{{PLUGIN_VERSION}}` sits in a `Pin plugin marketplace at v<version>` step's
-   `git clone --branch v<version>` — the local-checkout pin that stops the skills floating
-   (Overview); the `plugin_marketplaces` inputs point at that checkout, not a git URL.
+   - `doc-sync.yml` → `.github/workflows/doc-sync.yml`: `{{CRON_SCHEDULE}}` and `{{BLAST_RADIUS_CAP}}`.
+   - `doc-bloat.yml` → `.github/workflows/doc-bloat.yml`: `{{BLOAT_CRON}}`.
+   - `doc-sync-upgrade.yml` → `.github/workflows/doc-sync-upgrade.yml`: `{{UPGRADE_CRON}}`.
+   The workflow YAML carries NO version placeholder — each `Pin plugin marketplace` step reads
+   `.github/doc-sync/installed-version` at runtime (written in step 7) and clones that tag, so the
+   workflow files are version-agnostic (Overview). The version from step 2 lands only in that
+   lockfile.
 3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py`,
    `scripts/upgrade-gate.py` → `.github/doc-sync/upgrade-gate.py`,
    `scripts/render-report.py` → `.github/doc-sync/render-report.py`, and
@@ -131,9 +136,9 @@ Ownership is the whole game — total on wiring, idempotent on state:
 
 | File | Owner | Upgrade behavior |
 |------|-------|------------------|
-| `doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml` | plugin (wiring) | **Regenerate** from the new templates, but re-inject the consumer's existing knobs (below), not the template defaults; re-pin every `Pin plugin marketplace` clone step's `--branch` to `v<target>`. |
+| `doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml` | plugin (wiring) | **Regenerate** from the new templates, but re-inject the consumer's existing knobs (below), not the template defaults. No version to re-pin — the Pin steps read `installed-version` at runtime. |
 | `.github/doc-sync/*.py` (all six scripts) | plugin (wiring) | **Overwrite** from the new version. |
-| `.github/doc-sync/installed-version` | version state | **Set** to `<target>` (bare semver). |
+| `.github/doc-sync/installed-version` | version state | **Set** to `<target>` (bare semver). This is what advances the pin; on a version-only release it's the *only* file that changes. |
 | `.github/doc-sync-marker` | sync state | **Never touch.** |
 | `.github/doc-sync/audit-scope.json` | consumer (tuned config) | **Never touch.** |
 
@@ -148,6 +153,16 @@ overwriting a workflow, extract its current value and substitute *that* back in:
 tree, opens the `doc-sync/upgrade` PR (or self-explains a no-op), and the merge is what advances
 `installed-version`. Regenerating never leaves an install floating on `main`: the new wiring is
 pinned to `<target>` end to end.
+
+**Workflow-file changes can't self-land.** The Actions `GITHUB_TOKEN` cannot push files under
+`.github/workflows/` (GitHub blocks it; the `workflows` permission is not grantable to it).
+Because the Pin steps read `installed-version` at runtime, a *version-only* upgrade touches only
+that lockfile (+ the scripts) and the PR opens normally. But an upgrade whose new templates change
+the workflow YAML itself can't be pushed by the workflow — the `Open upgrade PR` step detects a
+changed `.github/workflows/` file, writes the diff to the `doc-sync-upgrade-patch` artifact, and
+fails loud with `git apply` instructions (`render-report.py upgrade-summary --status
+blocked-workflows`). A human applies that patch with a `workflow`-scoped credential. This is rare
+and expected; don't try to "fix" it by widening the token — the restriction is GitHub's.
 
 ## Rules
 

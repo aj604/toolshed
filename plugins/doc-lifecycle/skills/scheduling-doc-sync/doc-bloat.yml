@@ -120,14 +120,16 @@ jobs:
             python3 .github/doc-sync/plan-chunks.py --emit-prompt "${CHUNK_ID}" --manifest manifest.json
             echo "BLOAT_PROMPT_EOF"
           } >> "$GITHUB_OUTPUT"
-      # Pin the marketplace to the release tag via a local checkout — claude-code-action
-      # rejects the `…/toolshed.git#v<version>` ref-pin (its URL validator requires the
-      # URL end in `.git`). Cloned under RUNNER_TEMP, outside the work tree.
-      - name: Pin plugin marketplace at v{{PLUGIN_VERSION}}
+      # Pin the marketplace to the installed release, read from the lockfile at runtime
+      # so this file stays version-agnostic (see doc-sync.yml's Pin step for the full
+      # rationale). claude-code-action rejects a `…/toolshed.git#v<version>` URL ref-pin,
+      # so clone the tag to a local path under RUNNER_TEMP, outside the work tree.
+      - name: Pin plugin marketplace
         run: |
           set -euo pipefail
+          VERSION=$(cat .github/doc-sync/installed-version)
           rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
-          git clone --depth 1 --branch v{{PLUGIN_VERSION}} \
+          git clone --depth 1 --branch "v${VERSION}" \
             https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
       - name: Detect chunk (attempt 1)
         id: attempt1
@@ -248,14 +250,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bloat-report
-      # Pin the marketplace to the release tag via a local checkout — claude-code-action
-      # rejects the `…/toolshed.git#v<version>` ref-pin (its URL validator requires the
-      # URL end in `.git`). Cloned under RUNNER_TEMP, outside the work tree.
-      - name: Pin plugin marketplace at v{{PLUGIN_VERSION}}
+      # Pin the marketplace to the installed release, read from the lockfile at runtime
+      # so this file stays version-agnostic (see doc-sync.yml's Pin step for the full
+      # rationale). claude-code-action rejects a `…/toolshed.git#v<version>` URL ref-pin,
+      # so clone the tag to a local path under RUNNER_TEMP, outside the work tree.
+      - name: Pin plugin marketplace
         run: |
           set -euo pipefail
+          VERSION=$(cat .github/doc-sync/installed-version)
           rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
-          git clone --depth 1 --branch v{{PLUGIN_VERSION}} \
+          git clone --depth 1 --branch "v${VERSION}" \
             https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
       - name: Apply (headless)
         uses: anthropics/claude-code-action@v1
@@ -315,14 +319,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bloat-report
-      # Pin the marketplace to the release tag via a local checkout — claude-code-action
-      # rejects the `…/toolshed.git#v<version>` ref-pin (its URL validator requires the
-      # URL end in `.git`). Cloned under RUNNER_TEMP, outside the work tree.
-      - name: Pin plugin marketplace at v{{PLUGIN_VERSION}}
+      # Pin the marketplace to the installed release, read from the lockfile at runtime
+      # so this file stays version-agnostic (see doc-sync.yml's Pin step for the full
+      # rationale). claude-code-action rejects a `…/toolshed.git#v<version>` URL ref-pin,
+      # so clone the tag to a local path under RUNNER_TEMP, outside the work tree.
+      - name: Pin plugin marketplace
         run: |
           set -euo pipefail
+          VERSION=$(cat .github/doc-sync/installed-version)
           rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
-          git clone --depth 1 --branch v{{PLUGIN_VERSION}} \
+          git clone --depth 1 --branch "v${VERSION}" \
             https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
       - name: Apply (headless)
         uses: anthropics/claude-code-action@v1

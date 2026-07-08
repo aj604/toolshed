@@ -535,6 +535,19 @@ class UpgradeRender(unittest.TestCase):
         self.assertIn("https://gh/pr/3", s)
         self.assertIn("already open", s.lower())
 
+    def test_blocked_workflows_lists_files_and_apply_steps(self):
+        r = self.run_script(
+            "upgrade-summary", "--status", "blocked-workflows",
+            "--current", "0.9.2", "--latest", "0.9.3",
+            "--files", ".github/workflows/doc-bloat.yml,.github/doc-sync/render-report.py")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        # Names the offending workflow file, the artifact to apply, and git apply steps.
+        self.assertIn(".github/workflows/doc-bloat.yml", s)
+        self.assertIn("doc-sync-upgrade-patch", s)
+        self.assertIn("git apply", s)
+        self.assertIn("0.9.3", s)
+
     def test_unknown_status_exits_2(self):
         r = self.run_script("upgrade-summary", "--status", "bogus",
                             "--current", "0.7.0", "--latest", "0.8.0")

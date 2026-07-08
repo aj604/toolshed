@@ -74,18 +74,21 @@ jobs:
             --open-prs "${{ steps.facts.outputs.open_prs }}" \
             --open-issues "${{ steps.facts.outputs.open_issues }}"
 
-      # Pin the plugin marketplace to the release the vendored wiring was generated
-      # from. claude-code-action's marketplace-URL validator requires an https URL to
-      # end in `.git`, so a `…/toolshed.git#v<version>` ref-pin is rejected outright.
-      # Clone the tag to a local path instead (the validator passes local paths
-      # through) — same version freeze, under RUNNER_TEMP so `git add -A` in the PR
-      # steps never captures it. Only the upgrade workflow advances this pin.
-      - name: Pin plugin marketplace at v{{PLUGIN_VERSION}}
+      # Pin the plugin marketplace to the installed release. The single source of
+      # truth is .github/doc-sync/installed-version (the lockfile the upgrade lane
+      # advances); reading it at runtime keeps this workflow file byte-identical
+      # across versions, so a routine version bump changes only that lockfile — not a
+      # `.github/workflows/` file — and the nightly push lands it with the default
+      # token. claude-code-action rejects a `…/toolshed.git#v<version>` URL ref-pin
+      # (its validator requires the URL end in `.git`), so clone the tag to a local
+      # path under RUNNER_TEMP (outside the work tree, so `git add -A` never grabs it).
+      - name: Pin plugin marketplace
         if: steps.pre.outputs.decision == 'detect'
         run: |
           set -euo pipefail
+          VERSION=$(cat .github/doc-sync/installed-version)
           rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
-          git clone --depth 1 --branch v{{PLUGIN_VERSION}} \
+          git clone --depth 1 --branch "v${VERSION}" \
             https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
 
       # Model steps run via the official runner (anthropics/claude-code-action) —

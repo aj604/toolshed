@@ -282,7 +282,25 @@ def render_bloat_skip_summary(lane, reason):
     return msgs[reason]
 
 
-def render_upgrade_summary(status, current, latest, pr_url):
+def render_upgrade_summary(status, current, latest, pr_url, files=""):
+    if status == "blocked-workflows":
+        changed = [f for f in files.split(",") if f]
+        wf = [f for f in changed if f.startswith(".github/workflows/")]
+        wf_list = ", ".join(f"`{f}`" for f in wf) or "workflow files"
+        return (
+            f"🛑 **Upgrade `{current}` → `{latest}` needs a manual apply.** It regenerated "
+            f"{wf_list}, and GitHub forbids the Actions token from pushing changes under "
+            "`.github/workflows/` (the `workflows` permission is not grantable to it). The "
+            "full diff is attached as the **`doc-sync-upgrade-patch`** run artifact. Apply it "
+            "from a local checkout with a credential that has the `workflow` scope:\n\n"
+            "```\n"
+            "git switch -c doc-sync/upgrade\n"
+            "git apply doc-sync-upgrade.patch\n"
+            f"git commit -am 'docs: upgrade doc-sync wiring to plugin v{latest}'\n"
+            "git push -u origin doc-sync/upgrade   # then open a PR\n"
+            "```\n\n"
+            "Routine version-only upgrades don't hit this — they change only "
+            "`.github/doc-sync/installed-version`, which the token can push.")
     if status == "current":
         return (f"✅ **doc-sync wiring is current.** Installed `{current}`, latest "
                 f"release `{latest}` — nothing to upgrade.")
@@ -400,6 +418,7 @@ def main():
     usum.add_argument("--current", required=True)
     usum.add_argument("--latest", required=True)
     usum.add_argument("--pr-url", default="")
+    usum.add_argument("--files", default="")
 
     upr = sub.add_parser("upgrade-pr-body")
     upr.add_argument("--current", required=True)
@@ -422,7 +441,7 @@ def main():
             write_summary(render_bloat_skip_summary(args.lane, args.reason))
         elif args.mode == "upgrade-summary":
             write_summary(render_upgrade_summary(
-                args.status, args.current, args.latest, args.pr_url))
+                args.status, args.current, args.latest, args.pr_url, args.files))
         elif args.mode == "upgrade-pr-body":
             print(render_upgrade_pr_body(args.current, args.latest, args.files))
         else:

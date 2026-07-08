@@ -124,6 +124,19 @@ jobs:
             exit 0
           fi
           CHANGED=$(git diff --name-only | paste -sd, -)
+          # The Actions GITHUB_TOKEN cannot push files under .github/workflows/ — GitHub
+          # blocks it, and the `workflows` permission is not grantable to it. Version-only
+          # upgrades don't touch those files (the pin is read from installed-version at
+          # runtime), so the push below succeeds. But an upgrade that changes the workflow
+          # TEMPLATES themselves can't land automatically — emit the diff as a patch
+          # artifact and fail loud with apply instructions, not a cryptic push rejection.
+          if git diff --name-only | grep -q '^\.github/workflows/'; then
+            git diff > "$RUNNER_TEMP/doc-sync-upgrade.patch"
+            python3 .github/doc-sync/render-report.py upgrade-summary \
+              --status blocked-workflows --current "${{ steps.versions.outputs.current }}" \
+              --latest "${{ steps.versions.outputs.latest }}" --files "${CHANGED}"
+            exit 1
+          fi
           python3 .github/doc-sync/render-report.py upgrade-pr-body \
             --current "${{ steps.versions.outputs.current }}" \
             --latest "${{ steps.versions.outputs.latest }}" \
@@ -145,3 +158,14 @@ jobs:
           python3 .github/doc-sync/render-report.py upgrade-summary \
             --status opened --current "${{ steps.versions.outputs.current }}" \
             --latest "${{ steps.versions.outputs.latest }}" --pr-url "${PR_URL}"
+
+      # When the upgrade regenerated workflow files, the step above wrote the diff here
+      # and failed loud (the token can't push .github/workflows/); publish it so a human
+      # can apply it locally. No-op for the common version-only upgrade (no patch file).
+      - name: Upload upgrade patch (manual apply for workflow-file changes)
+        if: always() && steps.gate.outputs.decision == 'upgrade'
+        uses: actions/upload-artifact@v4
+        with:
+          name: doc-sync-upgrade-patch
+          path: ${{ runner.temp }}/doc-sync-upgrade.patch
+          if-no-files-found: ignore
