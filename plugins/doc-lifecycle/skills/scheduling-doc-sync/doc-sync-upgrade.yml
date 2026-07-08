@@ -75,6 +75,18 @@ jobs:
               --latest "${{ steps.versions.outputs.latest }}"
           fi
 
+      # Pin the marketplace to the target release via a local checkout, so the skill
+      # runs AT the version it's regenerating to. claude-code-action rejects a
+      # `…/toolshed.git#v<version>` ref-pin (its URL validator requires the URL end in
+      # `.git`), so clone the tag to a local path under RUNNER_TEMP instead.
+      - name: Pin plugin marketplace at v${{ steps.versions.outputs.latest }}
+        if: steps.gate.outputs.decision == 'upgrade'
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch "v${{ steps.versions.outputs.latest }}" \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
+
       # Regenerate the wiring at the new version by re-running the skill headlessly,
       # pinned AT that new version so its shipped files are the ones on disk. The
       # skill owns which files to lay down and how to preserve state/knobs — never
@@ -85,14 +97,14 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git#v${{ steps.versions.outputs.latest }}
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:scheduling-doc-sync skill in upgrade mode to upgrade THIS
             repo's existing doc-sync install to plugin version ${{ steps.versions.outputs.latest }}.
             Follow the skill's "Upgrade mode" section exactly: regenerate only the wiring
             (the three workflow YAMLs and the scripts under .github/doc-sync/), re-pin every
-            plugin_marketplaces ref to v${{ steps.versions.outputs.latest }}, and set
+            marketplace-checkout step to v${{ steps.versions.outputs.latest }}, and set
             .github/doc-sync/installed-version to ${{ steps.versions.outputs.latest }}.
             Preserve exactly, untouched: .github/doc-sync-marker, .github/doc-sync/audit-scope.json,
             and every install-time knob already present in the installed workflow files (cron,

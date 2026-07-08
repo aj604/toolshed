@@ -19,13 +19,17 @@ judgment lives in `detecting-doc-drift` / `fixing-doc-drift` / `detecting-doc-bl
 `fixing-doc-bloat`, which the workflows invoke headlessly by name. Never inline detection or
 fixing method into workflow YAML — that forks the method from its one owner.
 
-**Installs are pinned, not floating.** Every `claude-code-action` step pins
-`plugin_marketplaces` to the installed release tag (`…/toolshed.git#v<version>`), so the skills
-a run executes are frozen at the same version as the vendored wiring — the two can't drift apart
-mid-week. `doc-sync-upgrade.yml` is the only thing that advances the pin, and only via a
-reviewable PR. Pin ONLY through the `#v<version>` ref on `plugin_marketplaces`; the `plugins:`
-selector stays bare `doc-lifecycle@toolshed` (`claude-code-action` has no `@version` selector
-there — `doc-lifecycle@toolshed@0.7.0` is invalid).
+**Installs are pinned, not floating.** Before each `claude-code-action` step, a
+`Pin plugin marketplace at v<version>` step clones the installed release tag
+(`git clone --depth 1 --branch v<version> …/toolshed.git "$RUNNER_TEMP/toolshed-marketplace"`)
+and the action step points `plugin_marketplaces` at that local path — so the skills a run
+executes are frozen at the same version as the vendored wiring, and can't drift apart mid-week.
+Clone under `$RUNNER_TEMP`, never inside the work tree, or the PR steps' `git add -A` captures it.
+Pin via the local checkout, NOT a `plugin_marketplaces: …/toolshed.git#v<version>` ref —
+`claude-code-action`'s URL validator requires the value end in `.git`, so a `#<ref>` fragment is
+rejected outright. `doc-sync-upgrade.yml` is the only thing that advances the pin, and only via a
+reviewable PR. The `plugins:` selector stays bare `doc-lifecycle@toolshed` (`claude-code-action`
+has no `@version` selector there — `doc-lifecycle@toolshed@0.7.0` is invalid).
 
 The three workflow templates and the gate/render scripts (`sync-gate.py`, `upgrade-gate.py`,
 `render-report.py`) are in this skill's base directory (announced when the skill loads); the
@@ -69,8 +73,9 @@ chunk planner and the two output validators are copied from the sibling skills t
    - `doc-bloat.yml` → `.github/workflows/doc-bloat.yml`: `{{BLOAT_CRON}}` and `{{PLUGIN_VERSION}}`.
    - `doc-sync-upgrade.yml` → `.github/workflows/doc-sync-upgrade.yml`: `{{UPGRADE_CRON}}` and
      `{{PLUGIN_VERSION}}`.
-   Every `plugin_marketplaces` line becomes `…/toolshed.git#v<version>` — the pin that stops the
-   skills floating (Overview).
+   Each `{{PLUGIN_VERSION}}` sits in a `Pin plugin marketplace at v<version>` step's
+   `git clone --branch v<version>` — the local-checkout pin that stops the skills floating
+   (Overview); the `plugin_marketplaces` inputs point at that checkout, not a git URL.
 3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py`,
    `scripts/upgrade-gate.py` → `.github/doc-sync/upgrade-gate.py`,
    `scripts/render-report.py` → `.github/doc-sync/render-report.py`, and
@@ -126,7 +131,7 @@ Ownership is the whole game — total on wiring, idempotent on state:
 
 | File | Owner | Upgrade behavior |
 |------|-------|------------------|
-| `doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml` | plugin (wiring) | **Regenerate** from the new templates, but re-inject the consumer's existing knobs (below), not the template defaults; re-pin `plugin_marketplaces` to `#v<target>`. |
+| `doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml` | plugin (wiring) | **Regenerate** from the new templates, but re-inject the consumer's existing knobs (below), not the template defaults; re-pin every `Pin plugin marketplace` clone step's `--branch` to `v<target>`. |
 | `.github/doc-sync/*.py` (all six scripts) | plugin (wiring) | **Overwrite** from the new version. |
 | `.github/doc-sync/installed-version` | version state | **Set** to `<target>` (bare semver). |
 | `.github/doc-sync-marker` | sync state | **Never touch.** |
@@ -157,11 +162,15 @@ pinned to `<target>` end to end.
   the marker-only commit on a no-drift run.
 - **Upgrade preserves the marker** (step 6) and the version lockfile discipline. Overwrite the
   yml and scripts freely; the marker and `audit-scope.json` are state, not wiring. See Upgrade mode.
-- **Installs are pinned; only the upgrade workflow advances the pin.** Every `plugin_marketplaces`
-  ships `…/toolshed.git#v<version>` so the skills a run executes are frozen at the vendored
-  wiring's version. `installed-version` is the lockfile — it advances only when a `doc-sync/upgrade`
-  PR merges, exactly like the marker. Never ship an unpinned `plugin_marketplaces`, and never
-  version the `plugins:` selector (`@version` there is unsupported).
+- **Installs are pinned; only the upgrade workflow advances the pin.** Every model step is
+  preceded by a `Pin plugin marketplace` step that clones `…/toolshed.git` at `v<version>` to a
+  local path, and `plugin_marketplaces` points there — so the skills a run executes are frozen at
+  the vendored wiring's version. (`claude-code-action` rejects a `plugin_marketplaces` git URL
+  carrying a `#<ref>` fragment; its validator requires the value end in `.git`, so the pin lives
+  in the checkout, not the URL.) `installed-version` is the lockfile — it advances only when a
+  `doc-sync/upgrade` PR merges, exactly like the marker. Never ship an unpinned marketplace
+  checkout (bare `main`), and never version the `plugins:` selector (`@version` there is
+  unsupported).
 - **Don't customize the installed YAML beyond the cron/cap/bloat-cron/upgrade-cron knobs.** Real
   changes belong upstream in the plugin (aj604/toolshed) so every install gets them on next upgrade.
 - **The drift report is a build artifact, never repo content.** The shipped workflow already
@@ -189,8 +198,12 @@ pinned to `<target>` end to end.
 - Adding a direct-commit mode, or dropping the cap/pending-work gates "to simplify" → the gates
   are the product; see the design doc in aj604/toolshed.
 - Committing `drift-report.json` or `pr-body.md` as repo content → artifact hygiene, not history.
-- Shipping `plugin_marketplaces: …/toolshed.git` with no `#v<version>` ref → an unpinned install
-  that floats on `main` and drifts from the frozen wiring. Pin it.
+- Dropping the `Pin plugin marketplace` clone step, or pointing `plugin_marketplaces` at
+  `…/toolshed.git` (bare `main`) → an unpinned install that floats and drifts from the frozen
+  wiring. Pin it via the local checkout of the release tag.
+- Reaching for `plugin_marketplaces: …/toolshed.git#v<version>` → `claude-code-action` rejects it
+  ("Invalid marketplace URL format"); its validator requires the URL end in `.git`. Pin via the
+  local checkout instead.
 - Writing `plugins: doc-lifecycle@toolshed@<version>` → the `@version` selector is unsupported;
   pin via the `#v<version>` ref on `plugin_marketplaces` only.
 - Resetting `.github/doc-sync/installed-version`, or overwriting the marker/audit-scope, during an

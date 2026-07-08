@@ -74,6 +74,20 @@ jobs:
             --open-prs "${{ steps.facts.outputs.open_prs }}" \
             --open-issues "${{ steps.facts.outputs.open_issues }}"
 
+      # Pin the plugin marketplace to the release the vendored wiring was generated
+      # from. claude-code-action's marketplace-URL validator requires an https URL to
+      # end in `.git`, so a `…/toolshed.git#v<version>` ref-pin is rejected outright.
+      # Clone the tag to a local path instead (the validator passes local paths
+      # through) — same version freeze, under RUNNER_TEMP so `git add -A` in the PR
+      # steps never captures it. Only the upgrade workflow advances this pin.
+      - name: Pin plugin marketplace at v0.9.0
+        if: steps.pre.outputs.decision == 'detect'
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch v0.9.0 \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
+
       # Model steps run via the official runner (anthropics/claude-code-action) —
       # it owns Claude Code install, plugin setup, and auth. Auth prefers the OAuth
       # token (created by /install-github-app); an unset secret renders empty and the
@@ -84,7 +98,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git#v0.9.0
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:detecting-doc-drift skill in diff-scoped mode over the
@@ -166,7 +180,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git#v0.9.0
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:fixing-doc-drift skill to apply the drift report at

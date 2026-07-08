@@ -1,5 +1,31 @@
 # Decisions
 
+## 2026-07-07 — marketplace pin moves from URL ref to local checkout
+- Amends the self-upgrade entry below ("Pin lives ONLY in the `#v<version>` ref"). The moving
+  `anthropics/claude-code-action@v1` tag tightened its marketplace-URL validator to
+  `/^https:\/\/…+\.git$/` — the value must END in `.git` — so a `…/toolshed.git#v<version>`
+  ref-pin is now rejected outright ("Invalid marketplace URL format"), before Claude runs. It
+  broke every doc-sync workflow at the model step (career-compass upgrade run 28908054944; the
+  same `#ref` had worked in live runs ~24h earlier, so the action's `@v1` moved under us).
+- Decided: pin via a **local checkout of the release tag**, not a URL ref. Each model step is
+  preceded by a `Pin plugin marketplace at v<version>` step that
+  `git clone --depth 1 --branch v<version> …/toolshed.git "$RUNNER_TEMP/toolshed-marketplace"`,
+  and the `claude-code-action` step points `plugin_marketplaces` at that local path (the
+  validator passes local paths straight through). Same version freeze; clone under
+  `$RUNNER_TEMP`, outside the work tree, so the PR steps' `git add -A` never captures it. The
+  `plugins:` selector stays bare (unchanged). This is also a known-good pattern — the E2E
+  install used a `git clone --branch` + local-path marketplace add before the URL-ref form
+  existed (`tests/baselines/doc-sync-setup-red/E2E-results.md`).
+- Consequence: installs cannot self-heal through their own upgrade workflow — its
+  `doc-sync-upgrade.yml` carries the same broken pin and dies before the skill runs, and the
+  last released version (`0.9.1`) still has the URL-ref templates. Recovering an existing install
+  requires a one-time hand-patch of its workflows to the checkout form.
+- Guarded by `tests/scripts/marketplace-pin_test.py` (in release CI): no shipped
+  `plugin_marketplaces` value may be an `https://` URL not ending in `.git`.
+- Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/ (SKILL.md, doc-sync.yml, doc-bloat.yml,
+  doc-sync-upgrade.yml, scripts/render-report.py); dogfood under .github/ (the three workflows +
+  doc-sync/render-report.py); tests/scripts/marketplace-pin_test.py.
+
 ## 2026-07-07 — doc-sync self-upgrade (pinned wiring + upgrade PR)
 - Decided: installs are pinned, not floating. Every `claude-code-action` step pins
   `plugin_marketplaces` to the install-time release tag (`…/toolshed.git#v<version>`), so the

@@ -307,7 +307,7 @@ def render_upgrade_pr_body(current, latest, files):
     lines = [
         f"Self-upgrade: this repo's doc-sync wiring was pinned to `{current}`; "
         f"doc-lifecycle `{latest}` has shipped. Regenerated the wiring at `{latest}` and "
-        "re-pinned every workflow's `plugin_marketplaces` ref to it.",
+        "re-pinned every workflow's marketplace checkout to it.",
         "",
         "**Preserved unchanged:** the `.github/doc-sync-marker` (sync state), "
         "`.github/doc-sync/audit-scope.json` (tuned config), and every install-time knob "
