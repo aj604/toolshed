@@ -120,6 +120,15 @@ jobs:
             python3 .github/doc-sync/plan-chunks.py --emit-prompt "${CHUNK_ID}" --manifest manifest.json
             echo "BLOAT_PROMPT_EOF"
           } >> "$GITHUB_OUTPUT"
+      # Pin the marketplace to the release tag via a local checkout — claude-code-action
+      # rejects the `…/toolshed.git#v<version>` ref-pin (its URL validator requires the
+      # URL end in `.git`). Cloned under RUNNER_TEMP, outside the work tree.
+      - name: Pin plugin marketplace at v{{PLUGIN_VERSION}}
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch v{{PLUGIN_VERSION}} \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
       - name: Detect chunk (attempt 1)
         id: attempt1
         continue-on-error: true
@@ -127,7 +136,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
           prompt: ${{ steps.slice.outputs.prompt }}
           claude_args: --max-turns ${{ steps.slice.outputs.turns }} --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
@@ -150,7 +159,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
           prompt: ${{ steps.slice.outputs.prompt }}
           claude_args: --max-turns ${{ steps.retry.outputs.turns }} --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
@@ -239,12 +248,21 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bloat-report
+      # Pin the marketplace to the release tag via a local checkout — claude-code-action
+      # rejects the `…/toolshed.git#v<version>` ref-pin (its URL validator requires the
+      # URL end in `.git`). Cloned under RUNNER_TEMP, outside the work tree.
+      - name: Pin plugin marketplace at v{{PLUGIN_VERSION}}
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch v{{PLUGIN_VERSION}} \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
       - name: Apply (headless)
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in
@@ -297,12 +315,21 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bloat-report
+      # Pin the marketplace to the release tag via a local checkout — claude-code-action
+      # rejects the `…/toolshed.git#v<version>` ref-pin (its URL validator requires the
+      # URL end in `.git`). Cloned under RUNNER_TEMP, outside the work tree.
+      - name: Pin plugin marketplace at v{{PLUGIN_VERSION}}
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch v{{PLUGIN_VERSION}} \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
       - name: Apply (headless)
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/aj604/toolshed.git#v{{PLUGIN_VERSION}}
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in
