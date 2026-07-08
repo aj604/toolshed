@@ -1,5 +1,39 @@
 # Decisions
 
+## 2026-07-07 — deterministic doc-sync upgrade (no model for a version bump)
+- Follows the version-agnostic entry below. With the workflow YAML version-agnostic (Pin steps read
+  `installed-version` at runtime), an upgrade carries no doc-judgment: re-copy the six vendored
+  scripts, re-render the three templates with the consumer's preserved knobs, bump the lockfile. The
+  headless `claude-code-action` step that did this was a model call to do `cp` + four regexes.
+- Decided: replace it with a tested, deterministic `apply-upgrade.py` (scheduling-doc-sync's
+  `scripts/`). `doc-sync-upgrade.yml`'s regenerate step now runs it from the pinned target checkout
+  (`--plugin-root <checkout>/plugins/doc-lifecycle --repo $GITHUB_WORKSPACE --target <latest>`) — so
+  the target version's own upgrade logic applies, matching the prior "run the skill at the target
+  version" intent. The script writes files only; the workflow keeps owning git/PR and the
+  blocked-workflows fallback (`git diff` is still the divergence signal). It is NOT vendored into
+  installs — it only runs in the upgrade lane, which always has the checkout — so the vendored set
+  stays six.
+- Consequence: the upgrade lane makes no model call, so it needs no model auth — dropped
+  `id-token: write` and the secret refs from `doc-sync-upgrade.yml`. Knob extraction that fails (a
+  hand-mangled installed file) fails the run red rather than default-guessing; a missing
+  `doc-sync-upgrade.yml` (a pre-self-upgrade install) is the one exception — seeds the default
+  upgrade cron and warns on stderr. The skill's Upgrade mode now delegates to the script (single
+  owner); a human forcing an upgrade runs the same script with `--plugin-root "$CLAUDE_PLUGIN_ROOT"`.
+- Also moved the default upgrade cron `0 5 * * 1` → `0 2 * * 1`, so the weekly version-bump check is
+  the first of the three scheduled runs (before the 03:00 nightly sync and the 04:00 Monday bloat
+  sweep).
+- Consequence (v0.9.4, this change): it rewrites `doc-sync-upgrade.yml`, so existing installs still
+  on the model-based upgrade template take the 0.9.3→0.9.4 step as a one-time manual apply (the
+  Actions token can't push `.github/workflows/`; blocked-workflows path). The dogfood is hand-applied
+  here, so its own self-upgrade to 0.9.4 re-renders identical workflows and self-lands as an
+  installed-version-only bump. Upgrades after 0.9.4 that don't touch the templates self-land.
+- Guarded by `tests/scripts/apply-upgrade_test.py` (in release CI): knob preservation, placeholder-
+  free render (GitHub `${{ }}` expressions untouched), six-script overwrite, marker/audit-scope
+  untouched, absent-upgrade.yml default, and nonzero exit on unextractable knobs / missing sources.
+- Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/ (SKILL.md, doc-sync-upgrade.yml,
+  scripts/apply-upgrade.py), tests/scripts/apply-upgrade_test.py, .github/workflows/release.yml;
+  dogfood under .github/ (workflows/doc-sync-upgrade.yml).
+
 ## 2026-07-07 — version-agnostic pins + upgrade workflow-file fallback
 - Follows the local-checkout entry below. Once the marketplace pin worked, the toolshed dogfood
   upgrade got to its push and hit the next wall (run 28909022925): GitHub refuses to let the

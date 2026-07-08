@@ -1,12 +1,13 @@
 # CLAUDE.md
 
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
-Markdown; the only executable code published is six skill helper scripts
+Markdown; the only executable code published is seven skill helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
 `.../detecting-doc-bloat/scripts/plan-chunks.py`, plus
-`scheduling-doc-sync`'s `scripts/sync-gate.py`, `scripts/upgrade-gate.py`, and
-`scripts/render-report.py`, all `python3`, no deps)
+`scheduling-doc-sync`'s `scripts/sync-gate.py`, `scripts/upgrade-gate.py`, `scripts/render-report.py`,
+and `scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
+the upgrade lane, not vendored into installs), all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`, `doc-bloat.yml`, and
 `doc-sync-upgrade.yml`). The sample repos under `tests/fixtures/` are the only other runnable
@@ -58,8 +59,10 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
   output contract — `sync-gate_test.py`/`render-report_test.py` also cover `doc-bloat.yml`'s
   gate/render wiring, since both workflows share the two scripts. `upgrade-gate_test.py` covers the
-  `doc-sync-upgrade.yml` version-comparison gate. `release.yml`'s CI runs the drift-validator,
-  sync-gate, upgrade-gate, and render-report suites.
+  `doc-sync-upgrade.yml` version-comparison gate, and `apply-upgrade_test.py` covers that workflow's
+  deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
+  unextractable knobs). `release.yml`'s CI runs the drift-validator, sync-gate, upgrade-gate,
+  apply-upgrade, and render-report suites.
 - Sync PR bodies/titles render via `render-report.py`'s `pr-body`/`pr-title` subcommands, never
   inline YAML `jq` — keeping the logic unit-tested and the CI YAML allowlist thin.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable

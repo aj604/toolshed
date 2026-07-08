@@ -51,6 +51,7 @@ jobs:
           python3 tests/scripts/validate-drift-output_test.py
           python3 tests/scripts/sync-gate_test.py
           python3 tests/scripts/upgrade-gate_test.py
+          python3 tests/scripts/apply-upgrade_test.py
           python3 tests/scripts/render-report_test.py
           python3 tests/scripts/marketplace-pin_test.py
       - name: Validate plugin manifests
