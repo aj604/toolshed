@@ -9,12 +9,15 @@ description: Use when wiring a repo for automated/unattended documentation drift
 
 Installs the shipped automation into a target repo — **three workflows**: the nightly drift
 sync (`doc-sync.yml`), the weekly chunked doc-bloat sweep (`doc-bloat.yml`: deterministic
-chunk plan → matrix detect → assemble → two draft-PR lanes), and the weekly self-upgrade
+chunk plan → matrix detect → assemble → prune lane + fanned-out distill lane, each a draft
+PR), and the weekly self-upgrade
 (`doc-sync-upgrade.yml`: compare installed version to the plugin's latest release → regenerate
 the wiring at a newer one → open a review PR). **You install wiring; you do not re-derive it.**
 Orchestration lives in the shipped workflow YAML; every gate decision lives in the shipped
 `sync-gate.py` / `upgrade-gate.py`; every run-surface string (summaries, notices, issue/PR
-bodies) lives in the shipped `render-report.py`; chunk planning lives in `plan-chunks.py`; doc
+bodies) lives in the shipped `render-report.py`; chunk planning lives in `plan-chunks.py`;
+distill-lane planning, dispatch rendering, and the deterministic patch merge live in
+`plan-distill.py`; doc
 judgment lives in `detecting-doc-drift` / `fixing-doc-drift` / `detecting-doc-bloat` /
 `fixing-doc-bloat`, which the workflows invoke headlessly by name. Never inline detection or
 fixing method into workflow YAML — that forks the method from its one owner.
@@ -37,10 +40,10 @@ rejected outright. `doc-sync-upgrade.yml` is the only thing that advances the pi
 reviewable PR. The `plugins:` selector stays bare `doc-lifecycle@toolshed` (`claude-code-action`
 has no `@version` selector there — `doc-lifecycle@toolshed@0.7.0` is invalid).
 
-The three workflow templates and the gate/render scripts (`sync-gate.py`, `upgrade-gate.py`,
-`render-report.py`) are in this skill's base directory (announced when the skill loads); the
-chunk planner and the two output validators are copied from the sibling skills that own them
-(install steps 3–4). `apply-upgrade.py` (also in the base directory) is the deterministic upgrade
+The three workflow templates and this skill's own scripts (`sync-gate.py`, `upgrade-gate.py`,
+`render-report.py`, `plan-distill.py`) are in its base directory (announced when the skill
+loads); the chunk planner and the two output validators are copied from the sibling skills
+that own them (install steps 3–4). `apply-upgrade.py` (also in the base directory) is the deterministic upgrade
 engine — run from the pinned checkout by the upgrade lane, never vendored into the install (see
 Upgrade mode).
 
@@ -86,11 +89,12 @@ Upgrade mode).
    lockfile.
 3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py`,
    `scripts/upgrade-gate.py` → `.github/doc-sync/upgrade-gate.py`,
-   `scripts/render-report.py` → `.github/doc-sync/render-report.py`, and
+   `scripts/render-report.py` → `.github/doc-sync/render-report.py`,
+   `scripts/plan-distill.py` → `.github/doc-sync/plan-distill.py`, and
    `../detecting-doc-bloat/scripts/plan-chunks.py` → `.github/doc-sync/plan-chunks.py`
-   (gate decisions, the version-comparison gate, run-surface rendering, and doc-bloat's
-   deterministic chunk planning all run from the repo, unit-tested upstream — across all three
-   workflows).
+   (gate decisions, the version-comparison gate, run-surface rendering, doc-bloat's
+   deterministic chunk planning, and the distill lane's planning + patch merge all run from
+   the repo, unit-tested upstream — across all three workflows).
 4. Copy `../detecting-doc-drift/scripts/validate-drift-output.py` → `.github/doc-sync/validate-drift-output.py`
    and `../detecting-doc-bloat/scripts/validate-bloat-output.py` → `.github/doc-sync/validate-bloat-output.py`
    (each workflow's mechanical contract check runs from the repo, not the plugin cache).
@@ -110,8 +114,8 @@ Upgrade mode).
    the pin, so on a fresh install always write it. `doc-sync-upgrade.yml` reads it to decide
    whether a newer release exists; it advances only when an upgrade PR merges.
 8. Tell the user, concretely:
-   - the twelve files to commit (`doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml`,
-     `sync-gate.py`, `upgrade-gate.py`, `render-report.py`, `plan-chunks.py`,
+   - the thirteen files to commit (`doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml`,
+     `sync-gate.py`, `upgrade-gate.py`, `render-report.py`, `plan-chunks.py`, `plan-distill.py`,
      `validate-drift-output.py`, `validate-bloat-output.py`, the seeded `audit-scope.json`, the
      seeded `doc-sync-marker`, and `installed-version`);
    - first night: diff from the seeded marker; no drift → marker-only commit, drift → PR on
@@ -136,7 +140,7 @@ consumer-owned value alone. **It is not a fresh install** — skip the Preflight
 PR-permissions are already in place) and do not re-seed the marker or audit-scope.
 
 **The regeneration is deterministic — `scripts/apply-upgrade.py`, no model.** Once the workflow
-YAML went version-agnostic, an upgrade is pure mechanics (re-copy the six scripts, re-render the
+YAML went version-agnostic, an upgrade is pure mechanics (re-copy the seven scripts, re-render the
 three templates with the consumer's preserved knobs, bump the lockfile), so a tested script owns
 it and the upgrade lane makes no model call — and needs no model auth. The workflow runs it from
 the pinned target checkout; a human forcing an upgrade runs the same script against their checkout
@@ -153,7 +157,7 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | File | Owner | Upgrade behavior |
 |------|-------|------------------|
 | `doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml` | plugin (wiring) | **Regenerate** from the new templates, but re-inject the consumer's existing knobs (below), not the template defaults. No version to re-pin — the Pin steps read `installed-version` at runtime. |
-| `.github/doc-sync/*.py` (all six scripts) | plugin (wiring) | **Overwrite** from the new version. |
+| `.github/doc-sync/*.py` (all seven scripts) | plugin (wiring) | **Overwrite** from the new version. |
 | `.github/doc-sync/installed-version` | version state | **Set** to `<target>` (bare semver). This is what advances the pin; on a version-only release it's the *only* file that changes. |
 | `.github/doc-sync-marker` | sync state | **Never touch.** |
 | `.github/doc-sync/audit-scope.json` | consumer (tuned config) | **Never touch.** |

@@ -68,6 +68,39 @@ def by_verdict(records, verdict):
     return [r for r in records if isinstance(r, dict) and r.get("verdict") == verdict]
 
 
+def load_merge(path):
+    """plan-distill.py --merge summary: {'applied': [ids], 'unapplied': [...]}."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not (isinstance(data, dict) and isinstance(data.get("applied"), list)
+            and isinstance(data.get("unapplied"), list)):
+        raise ValueError(
+            "merge summary must carry 'applied' and 'unapplied' arrays")
+    return data
+
+
+def render_unapplied_banner(unapplied):
+    """The loud gap: lane records the distill merge could not land."""
+    if not unapplied:
+        return []
+    items = ", ".join(f"`{u['id']}` ({md_cell(u['reason'])})"
+                      for u in unapplied)
+    return [
+        f"> ⚠️ **{len(unapplied)} record(s) not landed this run** — proposed "
+        f"by the sweep but not applied; the next sweep re-proposes them: "
+        f"{items}",
+        "",
+    ]
+
+
+def render_distill_merge_summary(merge):
+    n, u = len(merge["applied"]), len(merge["unapplied"])
+    if u == 0:
+        return f"🧬 **Distill merge:** all {n} record(s) landed."
+    return (f"🧬 **Distill merge:** {n} record(s) landed, {u} not landed — "
+            f"reasons in the PR body; the next sweep re-proposes them.")
+
+
 def write_summary(text):
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if path:
@@ -222,12 +255,22 @@ def render_bloat_rollup(records):
             + ", ".join(parts))
 
 
-def render_bloat_pr_body(records, unswept=None):
+def render_bloat_pr_body(records, unswept=None, merge=None):
+    unapplied = (merge or {}).get("unapplied") or []
+    if unapplied:
+        preamble = ("Proposed by the weekly doc-bloat sweep — applied rows "
+                    "land in the diff below; the banner lists what could not "
+                    "be landed this run. Draft PR: review, drop any commit "
+                    "you don't want, merge to accept.")
+    else:
+        preamble = ("Proposed by the weekly doc-bloat sweep — each row is "
+                    "applied in the diff below. Draft PR: review, drop any "
+                    "commit you don't want, merge to accept.")
     lines = [
-        "Proposed by the weekly doc-bloat sweep — each row is applied in the diff below. "
-        "Draft PR: review, drop any commit you don't want, merge to accept.",
+        preamble,
         "",
         *render_unswept_banner(unswept),
+        *render_unapplied_banner(unapplied),
         render_bloat_rollup(records),
         "",
         "| Change (see diff) | Why it's bloat |",
@@ -395,6 +438,10 @@ def main():
 
     bbody = sub.add_parser("bloat-pr-body")
     bbody.add_argument("--report", required=True)
+    bbody.add_argument("--merge", help="plan-distill.py --merge summary JSON")
+
+    dmerge = sub.add_parser("distill-merge-summary")
+    dmerge.add_argument("--merge", required=True)
 
     btitle = sub.add_parser("bloat-pr-title")
     btitle.add_argument("--report", required=True)
@@ -444,6 +491,8 @@ def main():
                 args.status, args.current, args.latest, args.pr_url, args.files))
         elif args.mode == "upgrade-pr-body":
             print(render_upgrade_pr_body(args.current, args.latest, args.files))
+        elif args.mode == "distill-merge-summary":
+            write_summary(render_distill_merge_summary(load_merge(args.merge)))
         else:
             records, unswept = load_report(args.report)
             if args.mode == "issue-body":
@@ -457,7 +506,8 @@ def main():
             elif args.mode == "pr-summary":
                 write_summary(render_pr_summary(records, args.pr_url))
             elif args.mode == "bloat-pr-body":
-                print(render_bloat_pr_body(records, unswept))
+                merge = load_merge(args.merge) if args.merge else None
+                print(render_bloat_pr_body(records, unswept, merge))
             elif args.mode == "bloat-pr-title":
                 print(render_bloat_pr_title(records, args.lane, args.date))
             elif args.mode == "bloat-pr-summary":

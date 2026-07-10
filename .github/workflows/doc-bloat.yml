@@ -11,8 +11,10 @@
 # "unswept" list, rendered as a loud PR-body banner — a twice-failed chunk costs its own docs,
 # never the report, and the next sweep picks it up automatically. GitHub caps a matrix at 256
 # jobs; on a corpus that plans past that, set chunking.max_chunks (audit-scope.json) and sweep
-# in resumed passes. Design: docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md
-# + docs/plans/2026-07-07-bloat-scale-hardening-design.md in aj604/toolshed.
+# in resumed passes. The distill apply lane fans out the same way (see the distill_plan
+# comment below). Design: docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md
+# + docs/plans/2026-07-07-bloat-scale-hardening-design.md
+# + docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md in aj604/toolshed.
 name: doc-bloat
 
 on:
@@ -308,17 +310,72 @@ jobs:
           python3 .github/doc-sync/render-report.py bloat-pr-summary \
             --report "$RUNNER_TEMP/lane.json" --lane prune --pr-url "${PR_URL}"
 
-  distill:
+  # The distill lane fans out like the sweep: plan-distill.py plans bounded record
+  # groups (no model — DISTILL records grouped by artifact directory so same-target
+  # residue rides one executor, mechanical verdicts in one inline group); each group
+  # runs as its own matrix invocation with its slice rendered via --emit-prompt and
+  # NO turn cap (an apply invocation is never truncated mid-judgment — the kill-switch
+  # is the job timeout); a deterministic merge job lands each group's format-patch
+  # series (docs/decisions.md append conflicts union-resolved; anything else skips
+  # that record loudly) and opens the one draft PR. There is deliberately no
+  # cross-run patch resume: an unapplied record's artifact survives, so the next
+  # sweep re-proposes it — convergence is re-detection.
+  # Design: docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md in aj604/toolshed.
+  distill_plan:
     needs: [plan, assemble]
     if: needs.assemble.outputs.distill == 'open'
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
+    outputs:
+      pending: ${{ steps.groups.outputs.pending }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: bloat-report
+      - name: Plan distill groups (deterministic — no model)
+        id: groups
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/plan-distill.py --report bloat-report.json --out distill-manifest.json
+          echo "pending=$(python3 -c 'import json; print(json.dumps(json.load(open("distill-manifest.json"))["pending"]))')" >> "$GITHUB_OUTPUT"
+      - name: Upload distill manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: distill-manifest
+          path: distill-manifest.json
+
+  distill_sweep:
+    needs: distill_plan
+    if: needs.distill_plan.outputs.pending != '[]'
+    runs-on: ubuntu-latest
+    # Wall-clock kill-switch for a hung invocation — a bound on hangs, not on care;
+    # there is no --max-turns on apply invocations by design.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJson(needs.distill_plan.outputs.pending) }}
+    env:
+      GROUP_ID: ${{ matrix.group }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: distill-manifest
+      - uses: actions/download-artifact@v4
+        with:
+          name: bloat-report
+      - name: Render dispatch payload (slice verbatim)
+        id: slice
+        run: |
+          set -euo pipefail
+          git config user.name "doc-bloat"
+          git config user.email "doc-bloat@users.noreply.github.com"
+          {
+            echo "prompt<<DISTILL_PROMPT_EOF"
+            python3 .github/doc-sync/plan-distill.py --emit-prompt "${GROUP_ID}" --manifest distill-manifest.json
+            echo "DISTILL_PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
       # Pin the marketplace to the installed release, read from the lockfile at runtime
       # so this file stays version-agnostic (see doc-sync.yml's Pin step for the full
       # rationale). claude-code-action rejects a `…/toolshed.git#v<version>` URL ref-pin,
@@ -330,20 +387,96 @@ jobs:
           rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
           git clone --depth 1 --branch "v${VERSION}" \
             https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
-      - name: Apply (headless)
+      - name: Apply group (attempt 1)
+        id: attempt1
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
-          prompt: >-
-            Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in
-            bloat-report.json whose verdict is MERGE-DOC, RETIRE-DOC, or POLICY, or
-            DISTILL with status "ready" — treat exactly those record IDs as the approved
-            subset, and apply nothing else. DISTILL records dispatch the doc-distiller
-            agent per the skill. Follow the skill's rules exactly.
-          claude_args: --allowedTools "Task,Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
+          prompt: ${{ steps.slice.outputs.prompt }}
+          claude_args: --allowedTools "Skill,Task,Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
+      - name: Seam-validate (attempt 1)
+        id: seam1
+        continue-on-error: true
+        run: python3 .github/doc-sync/plan-distill.py --validate-result "distill-results/${GROUP_ID}.json" --manifest distill-manifest.json
+      - name: Reset for fresh retry
+        if: steps.seam1.outcome != 'success'
+        run: |
+          set -euo pipefail
+          git reset --hard "${{ github.sha }}"
+          git clean -fd -e bloat-report.json -e distill-manifest.json
+          rm -f "distill-results/${GROUP_ID}.json"
+      - name: Apply group (retry — fresh dispatch)
+        if: steps.seam1.outcome != 'success'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
+          plugins: doc-lifecycle@toolshed
+          prompt: ${{ steps.slice.outputs.prompt }}
+          claude_args: --allowedTools "Skill,Task,Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
+      - name: Seam-validate (final)
+        if: steps.seam1.outcome != 'success'
+        run: |
+          # On double failure, discard the invalid result BEFORE exiting: the merge job
+          # drops a group without a valid sidecar, so a leftover invalid file must not
+          # ride into the artifacts looking like a result.
+          python3 .github/doc-sync/plan-distill.py --validate-result "distill-results/${GROUP_ID}.json" --manifest distill-manifest.json \
+            || { rm -f "distill-results/${GROUP_ID}.json"; echo "::error::group ${GROUP_ID} failed twice — its records go to the PR's not-landed banner and the next sweep re-proposes them"; exit 1; }
+      - name: Export patch series
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "patches/${GROUP_ID}" distill-results
+          if [ -f "distill-results/${GROUP_ID}.json" ]; then
+            git format-patch "${{ github.sha }}..HEAD" -o "patches/${GROUP_ID}"
+          fi
+      - name: Upload group result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: distill-group-${{ matrix.group }}
+          path: |
+            patches/${{ matrix.group }}/
+            distill-results/${{ matrix.group }}.json
+          if-no-files-found: ignore
+
+  distill_merge:
+    needs: [plan, assemble, distill_plan, distill_sweep]
+    # No success guard on distill_sweep: a twice-failed group costs its own
+    # records (dropped by the merge, bannered in the PR), never the lane.
+    if: always() && needs.assemble.outputs.distill == 'open'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: distill-manifest
+      - uses: actions/download-artifact@v4
+        with:
+          name: bloat-report
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: distill-group-*
+          merge-multiple: true
+      - name: Merge group patches (deterministic — gaps recorded, never silent)
+        run: |
+          set -euo pipefail
+          git config user.name "doc-bloat"
+          git config user.email "doc-bloat@users.noreply.github.com"
+          git checkout -b doc-bloat/distill
+          mkdir -p distill-results patches
+          python3 .github/doc-sync/plan-distill.py --merge \
+            --manifest distill-manifest.json --results-dir distill-results \
+            --patches-dir patches --repo . --out "$RUNNER_TEMP/distill-merge.json"
+          python3 .github/doc-sync/render-report.py distill-merge-summary \
+            --merge "$RUNNER_TEMP/distill-merge.json"
       - name: Open draft PR
         run: |
           set -euo pipefail
@@ -351,23 +484,15 @@ jobs:
           python3 .github/doc-sync/sync-gate.py bloat-lane \
             --report bloat-report.json --lane distill --pr-open 0 \
             --out "$RUNNER_TEMP/lane.json" >/dev/null
-          rm -f bloat-report.json
           python3 .github/doc-sync/render-report.py bloat-pr-body \
-            --report "$RUNNER_TEMP/lane.json" > "$RUNNER_TEMP/body.md"
+            --report "$RUNNER_TEMP/lane.json" \
+            --merge "$RUNNER_TEMP/distill-merge.json" > "$RUNNER_TEMP/body.md"
           TITLE=$(python3 .github/doc-sync/render-report.py bloat-pr-title \
             --report "$RUNNER_TEMP/lane.json" --lane distill --date "${DATE}")
-          git config user.name "doc-bloat"
-          git config user.email "doc-bloat@users.noreply.github.com"
-          git checkout -b doc-bloat/distill
-          # Inline verdicts (MERGE-DOC/RETIRE-DOC/POLICY) leave edits uncommitted; the
-          # Apply step already committed each DISTILL result the distiller staged. Commit
-          # any leftover uncommitted work; a clean index is normal here — don't fail on it.
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "docs: bloat distill sweep (${DATE})"
-          fi
-          # Nothing to propose if the branch matches the base commit (github.sha) — skip
-          # cleanly instead of failing on an empty commit or opening an empty PR.
+          # The branch is exactly the merged per-record commits — nothing is added
+          # here (the manifest, report, patches, and sidecars are untracked and
+          # stay behind). Nothing landed => skip cleanly, with the merge summary
+          # above explaining why.
           if git diff --quiet "${{ github.sha }}" HEAD; then
             python3 .github/doc-sync/render-report.py bloat-skip-summary --lane distill --reason skip-noop
             exit 0

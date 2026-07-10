@@ -30,6 +30,21 @@ anchor-confirm, blast-radius, evidence-travels — are owned by
 bloat-specific application below. The routing table, stops, red flags, and rationalization
 table here are in force unchanged.
 
+## Headless (group executor)
+
+When the weekly workflow dispatches you as a matrix group executor, your approved subset
+arrived **verbatim in the dispatch prompt** — the record IDs (with verdict and doc) plus the
+report path. That list is the human approval and your entire mandate: apply exactly those
+records by the routing table, nothing else. Make **one commit per applied record, in the
+order listed** — the workflow transports your work as a per-record patch series, so an
+uncommitted landing does not exist and a multi-record commit cannot be merged record-by-record.
+A record you cannot apply is reported as skipped or failed with its stated reason — never a
+stopper for its siblings. Done means the per-record commits plus the group result object
+(`{"group", "applied", "skipped", "failed"}` — every listed id in exactly one array) written
+to the exact path the dispatch names; then stop. You never open the distill manifest, never
+push, never open a PR, and never merge — orchestration, retries, the merge, and the draft PR
+are the workflow's, not yours.
+
 ## The routing table (the bloat-specific rules)
 
 Apply each **approved** record by its verdict. For the passage verdicts, `location` is the
@@ -137,6 +152,8 @@ collision note through to the human; never re-edit the landed result** to "recon
   ID list is the mandate.
 - Splitting an `EXTRACT-AND-MOVE`, `MERGE-DOC`, or `DISTILL` across commits → the move and the
   deletion ride one commit, or the diff stops reading "moved, not lost."
+- Pushing, opening a PR, or folding several records into one commit as a group executor → one
+  commit per record, the group result file, stop; the merge and the draft PR are the workflow's.
 - Applying `DISTILL pending-implementation` because it was approved → skip + note; approval
   can't make unverifiable claims verifiable.
 
