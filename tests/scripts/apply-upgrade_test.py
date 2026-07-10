@@ -39,7 +39,7 @@ TPL_DOC_UPGRADE = (
 )
 
 SCRIPT_SOURCES = {
-    "scheduling-doc-sync/scripts": ["sync-gate.py", "upgrade-gate.py", "render-report.py"],
+    "scheduling-doc-sync/scripts": ["sync-gate.py", "upgrade-gate.py", "render-report.py", "plan-distill.py"],
     "detecting-doc-bloat/scripts": ["plan-chunks.py", "validate-bloat-output.py"],
     "detecting-doc-drift/scripts": ["validate-drift-output.py"],
 }
@@ -143,7 +143,7 @@ class ApplyUpgrade(unittest.TestCase):
             (repo / ".github/doc-sync/installed-version").read_text(), "0.9.4\n"
         )
 
-    def test_overwrites_all_six_scripts_from_source(self):
+    def test_overwrites_all_seven_scripts_from_source(self):
         pr = make_plugin_root(self.base)
         repo = make_install(self.base)
         run(pr, repo, "0.9.4")

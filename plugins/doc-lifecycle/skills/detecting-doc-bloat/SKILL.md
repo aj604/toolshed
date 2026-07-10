@@ -38,7 +38,9 @@ through the validator before presenting anything.
 
 **Interactive, large scope:** never sweep inline. Run the planner — its
 manifest is your work order as orchestrator; do not enumerate or read the
-corpus yourself — then dispatch **one subagent per pending chunk**. Render
+corpus yourself — then dispatch **one subagent per pending chunk, in
+concurrent waves of several, never serially** (chunks are independent; a
+serial walk of a bootstrap-scale manifest is hours of avoidable wall-clock). Render
 each dispatch with `--emit-prompt` (the chunk's slice verbatim: doc list or
 policy dir + files, output path, definition of done) and point the subagent
 at (i) `output-contract.md` and (ii) only the reference file(s) its chunk's

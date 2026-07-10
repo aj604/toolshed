@@ -1,10 +1,30 @@
 # Documentation Skills Suite — Handoff
 
-**Last updated:** 2026-07-06
-**HEAD at handoff:** detecting-doc-bloat rearchitecture landed (harness, chunked sweeps, contract v2 — see `git log`)
+**Last updated:** 2026-07-09
+**HEAD at handoff:** doc-bloat distill lane fanned out (plan → matrix → deterministic merge — see `git log`)
 **Repo:** `toolshed` (git)
 
-## Latest milestone (2026-07-06): detecting-doc-bloat rearchitecture
+## Latest milestone (2026-07-09): distill-lane fan-out (apply-side scale)
+
+The career-compass bootstrap run (28912881170) proved the 07-07 hardening: 35 sweep chunks in
+~9 minutes — and exposed the next wall: the distill lane's single uncapped invocation took 250
+minutes applying 56 DISTILL records serially. Rebuilt the lane per
+`docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md` (durable decisions:
+`docs/decisions.md` 2026-07-09 entry): `plan-distill.py` groups the lane's records
+(artifact-directory affinity, inline group for mechanical verdicts), a matrix job per group
+applies one-commit-per-record with no turn cap (owner call; job timeout is the kill-switch),
+and a deterministic merge job lands the patch series (decisions.md conflicts union-resolved,
+anything else dropped loudly to the PR's not-landed banner; convergence is re-detection, not
+patch resume). Skill-text RED/GREEN: `tests/baselines/distill-fanout-red/` /
+`distill-fanout-green/`. Plugin bumped to 0.10.0.
+**Pending follow-up (post-release):** career-compass picks the change up via its weekly
+upgrade lane — which will take the **blocked-workflows manual-apply path** (this release
+regenerates `doc-bloat.yml` and `doc-sync-upgrade.yml`, and the Actions token can't push
+`.github/workflows/`; the run attaches the patch artifact) — or by re-running
+scheduling-doc-sync locally. Success bar = a bootstrap-scale distill lane in minutes with
+per-record gaps bannered, never a multi-hour serial job.
+
+## Prior milestone (2026-07-06): detecting-doc-bloat rearchitecture
 
 Rebuilt detecting-doc-bloat per
 `docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md` (plan:

@@ -49,6 +49,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 tests/scripts/validate-drift-output_test.py
+          python3 tests/scripts/validate-bloat-output_test.py
+          python3 tests/scripts/plan-chunks_test.py
+          python3 tests/scripts/plan-distill_test.py
           python3 tests/scripts/sync-gate_test.py
           python3 tests/scripts/upgrade-gate_test.py
           python3 tests/scripts/apply-upgrade_test.py

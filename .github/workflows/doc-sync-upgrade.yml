@@ -90,7 +90,7 @@ jobs:
 
       # Regenerate the wiring deterministically at the new version. Now that the
       # workflow YAML is version-agnostic (the Pin steps read installed-version at
-      # runtime), an upgrade is pure mechanics — re-copy the six scripts, re-render the
+      # runtime), an upgrade is pure mechanics — re-copy the seven scripts, re-render the
       # three templates with the consumer's preserved knobs, bump the lockfile — so a
       # tested script does it, no model call (hence no model auth in this workflow).
       # Run it FROM the pinned checkout so the target version's own upgrade logic

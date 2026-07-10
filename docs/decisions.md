@@ -1,5 +1,47 @@
 # Decisions
 
+## 2026-07-09 — doc-bloat distill lane fan-out (apply-side scale)
+- Evidence: career-compass run 28912881170 (2026-07-08) — the hardened sweep matrix (35 chunks)
+  finished in ~9 minutes, but the distill lane took 250 of the run's 260 minutes: one uncapped
+  headless invocation dispatching doc-distiller 56× sequentially in a single session, whose
+  transcript re-ships every turn (cost quadratic in records) and outlives the prompt-cache TTL.
+  On hundreds of planning docs the lane extrapolates to days.
+- Decided: fan the distill lane out like the sweep. New `plan-distill.py` (scheduling-doc-sync
+  `scripts/`, vendored — the set is now seven) plans the lane's actionable records into
+  content-addressed groups: the lane mapping is imported from the co-located `sync-gate.py`
+  (one owner), `DISTILL pending-implementation` is never planned, DISTILL-ready records group
+  by artifact directory (the plan-time affinity proxy for distill-time targets — same-dir plans
+  land residue in the same narrative docs, so same-target work rides one executor), and the
+  mechanical verdicts (MERGE-DOC/RETIRE-DOC/POLICY) form one inline group. `--emit-prompt`
+  renders each dispatch slice verbatim; each matrix job applies its group one-commit-per-record
+  and exports a format-patch series plus a seam-validated sidecar; a deterministic merge job
+  lands the series with `git am -3`, union-resolves `docs/decisions.md` append-append conflicts
+  (append-only log), skips any other conflict loudly (per-record, never the lane), and opens the
+  one draft PR with a not-landed banner (`render-report.py bloat-pr-body --merge`).
+- Decided: NO turn caps anywhere on the apply side (owner call — an apply invocation is never
+  truncated mid-judgment); the kill-switch is the job-level `timeout-minutes` (bounds hangs,
+  not care). Retry is one fresh dispatch after a hard reset; there is no budget to escalate.
+- Decided: no cross-run patch resume — a patch is a diff against a moving base. Convergence is
+  re-detection: an unapplied record's artifact survives on main, the next sweep re-proposes it.
+- Still binds: fixing-doc-bloat's group-executor mode treats the dispatch's record-id list as
+  the human approval and the entire mandate — one commit per applied record, the sidecar at the
+  named path, never push/PR/merge; `doc-distiller` is unchanged (the DISTILL method keeps its
+  single owner, and one-commit-per-record is the merge's transport unit).
+- Guarded by `tests/scripts/plan-distill_test.py` (lane selection, affinity grouping, ids,
+  emit-prompt, sidecar seam, and the patch-merge engine incl. union resolution, against real
+  git repos) and `render-report_test.py`'s wiring pins (script-borne distill lane, no
+  `--max-turns` on its `claude_args`, merge job runs even when a group fails). `release.yml`
+  CI now runs every `tests/scripts/*_test.py` suite (this also wired in the previously-missing
+  plan-chunks and validate-bloat-output suites).
+- Consequence (v0.10.0): the release rewrites `doc-bloat.yml` (and a comment in
+  `doc-sync-upgrade.yml`), so existing installs' self-upgrade takes the blocked-workflows
+  manual-apply path once (Actions token can't push `.github/workflows/`); the dogfood is
+  hand-applied here. Script-only releases after this self-land as usual.
+- Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/ (SKILL.md, doc-bloat.yml,
+  scripts/plan-distill.py, scripts/render-report.py, scripts/apply-upgrade.py),
+  skills/fixing-doc-bloat/SKILL.md, skills/detecting-doc-bloat/SKILL.md (parallel-waves line);
+  dogfood under .github/. Design: docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md.
+
 ## 2026-07-07 — deterministic doc-sync upgrade (no model for a version bump)
 - Follows the version-agnostic entry below. With the workflow YAML version-agnostic (Pin steps read
   `installed-version` at runtime), an upgrade carries no doc-judgment: re-copy the six vendored

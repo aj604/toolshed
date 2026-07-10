@@ -3,7 +3,7 @@
 
 Once the workflow YAML went version-agnostic (the Pin steps read the version from
 .github/doc-sync/installed-version at runtime), a routine upgrade has no
-doc-judgment left in it: re-copy the six vendored scripts, re-render the three
+doc-judgment left in it: re-copy the seven vendored scripts, re-render the three
 workflow templates with the consumer's existing knobs, and bump the lockfile.
 This script does exactly that — the mechanical work the headless model used to do
 in upgrade mode — so the upgrade lane needs no model call (and no model auth).
@@ -28,7 +28,7 @@ Usage:
 
 Ownership (total on wiring, idempotent on state):
     .github/workflows/{doc-sync,doc-bloat,doc-sync-upgrade}.yml  regenerate, knobs preserved
-    .github/doc-sync/*.py (six scripts)                          overwrite
+    .github/doc-sync/*.py (seven scripts)                        overwrite
     .github/doc-sync/installed-version                           set to <target>
     .github/doc-sync-marker, .github/doc-sync/audit-scope.json   never touched
 
@@ -65,13 +65,14 @@ TEMPLATE_PLACEHOLDERS = {
     "doc-sync-upgrade.yml": ["{{UPGRADE_CRON}}"],
 }
 
-# Vendored scripts and the skill dir each is copied from (three from this skill,
+# Vendored scripts and the skill dir each is copied from (four from this skill,
 # the planner + bloat validator from detecting-doc-bloat, the drift validator from
 # detecting-doc-drift). Mirror scheduling-doc-sync's install steps 3-4.
 SCRIPTS = {
     "sync-gate.py": "scheduling-doc-sync/scripts",
     "upgrade-gate.py": "scheduling-doc-sync/scripts",
     "render-report.py": "scheduling-doc-sync/scripts",
+    "plan-distill.py": "scheduling-doc-sync/scripts",
     "plan-chunks.py": "detecting-doc-bloat/scripts",
     "validate-bloat-output.py": "detecting-doc-bloat/scripts",
     "validate-drift-output.py": "detecting-doc-drift/scripts",

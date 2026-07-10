@@ -1,11 +1,12 @@
 # CLAUDE.md
 
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
-Markdown; the only executable code published is seven skill helper scripts
+Markdown; the only executable code published is eight skill helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
 `.../detecting-doc-bloat/scripts/plan-chunks.py`, plus
 `scheduling-doc-sync`'s `scripts/sync-gate.py`, `scripts/upgrade-gate.py`, `scripts/render-report.py`,
+`scripts/plan-distill.py` (doc-bloat's distill-lane planner + deterministic patch merge),
 and `scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
 the upgrade lane, not vendored into installs), all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
@@ -13,7 +14,8 @@ plus the GitHub Actions templates the scheduling skill installs
 `doc-sync-upgrade.yml`). The sample repos under `tests/fixtures/` are the only other runnable
 code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`,
 `doc-sync/upgrade-gate.py`, `doc-sync/render-report.py`,
-`doc-sync/plan-chunks.py`, `doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
+`doc-sync/plan-chunks.py`, `doc-sync/plan-distill.py`,
+`doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
 `doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `doc-sync/installed-version`
 (the plugin-version lockfile the upgrade workflow reads), `workflows/doc-sync.yml`,
 `workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`) and the ci+release workflow
@@ -47,11 +49,13 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
   records loose at the root.
 - `detecting-doc-bloat`/`fixing-doc-bloat` RED/GREEN baselines are retained at
   `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/`, the 2026-07-06
-  rearchitecture's at `tests/baselines/bloat-rearch-red/` / `bloat-rearch-green/`, and the
-  2026-07-07 scale hardening's at `tests/baselines/bloat-scale-red/` / `bloat-scale-green/`;
+  rearchitecture's at `tests/baselines/bloat-rearch-red/` / `bloat-rearch-green/`, the
+  2026-07-07 scale hardening's at `tests/baselines/bloat-scale-red/` / `bloat-scale-green/`,
+  and the 2026-07-09 distill-lane fan-out's at `tests/baselines/distill-fanout-red/` /
+  `distill-fanout-green/`;
   method, status, and resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md`
   (2026-06-09 suite entry; 2026-06-20 `docs/reference/` shape; 2026-07-06 rearchitecture
-  entry; 2026-07-07 scale-hardening entry).
+  entry; 2026-07-07 scale-hardening entry; 2026-07-09 distill-fan-out entry).
 - The generic apply-only rules for fix skills have one owner,
   `plugins/doc-lifecycle/references/apply-discipline.md`, cited (not restated) by both
   `fixing-doc-drift` and `fixing-doc-bloat`.
@@ -61,8 +65,9 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
   gate/render wiring, since both workflows share the two scripts. `upgrade-gate_test.py` covers the
   `doc-sync-upgrade.yml` version-comparison gate, and `apply-upgrade_test.py` covers that workflow's
   deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
-  unextractable knobs). `release.yml`'s CI runs the drift-validator, sync-gate, upgrade-gate,
-  apply-upgrade, and render-report suites.
+  unextractable knobs). `plan-distill_test.py` covers the distill lane's grouping, dispatch
+  rendering, sidecar seam, and patch-merge engine. `release.yml`'s CI runs every
+  `tests/scripts/*_test.py` suite.
 - Sync PR bodies/titles render via `render-report.py`'s `pr-body`/`pr-title` subcommands, never
   inline YAML `jq` — keeping the logic unit-tested and the CI YAML allowlist thin.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable

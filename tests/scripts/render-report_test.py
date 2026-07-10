@@ -470,9 +470,30 @@ class WorkflowWiring(unittest.TestCase):
     def test_matrix_does_not_fail_fast(self):
         self.assertIn("fail-fast: false", self.yml)
 
-    def test_distill_lane_covers_policy_and_keeps_task(self):
-        self.assertIn("RETIRE-DOC, or POLICY", self.yml)
-        self.assertIn('"Task,Read', self.yml)
+    def test_distill_lane_is_planned_dispatched_and_merged_by_scripts(self):
+        # plan -> matrix -> merge: every distill-lane decision is script-borne.
+        self.assertIn("plan-distill.py --report bloat-report.json --out distill-manifest.json",
+                      self.yml)
+        self.assertIn('plan-distill.py --emit-prompt "${GROUP_ID}"', self.yml)
+        self.assertIn('--validate-result "distill-results/${GROUP_ID}.json"',
+                      self.yml)
+        self.assertIn("plan-distill.py --merge", self.yml)
+        self.assertIn("distill-merge-summary", self.yml)
+        self.assertIn('--merge "$RUNNER_TEMP/distill-merge.json"', self.yml)
+
+    def test_distill_executor_keeps_skill_and_task_without_turn_cap(self):
+        # The apply side is never truncated mid-judgment: no --max-turns on
+        # its invocations (owner decision); the kill-switch is wall-clock.
+        self.assertIn('"Skill,Task,Read', self.yml)
+        self.assertIn("timeout-minutes: 60", self.yml)
+        distill = self.yml[self.yml.index("distill_sweep:"):]
+        for line in distill.splitlines():
+            if "claude_args" in line:
+                self.assertNotIn("--max-turns", line)
+
+    def test_distill_merge_runs_even_when_a_group_fails(self):
+        self.assertIn("always() && needs.assemble.outputs.distill == 'open'",
+                      self.yml)
 
 
 class UpgradeRender(unittest.TestCase):
@@ -573,6 +594,85 @@ class UpgradeRender(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("`.github/workflows/doc-sync.yml`", r.stdout)
         self.assertIn("`.github/doc-sync/sync-gate.py`", r.stdout)
+
+
+class DistillMergeRender(unittest.TestCase):
+    """The distill lane's merge outcomes: unapplied banner in the PR body,
+    run-surface merge summary."""
+
+    def write_merge(self, applied, unapplied):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump({"applied": applied, "unapplied": unapplied}, f)
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_pr_body_banners_unapplied_records(self):
+        report = write_report([brec("DISTILL", doc="docs/plans/a.md",
+                                    status="ready", rid="B1"),
+                               brec("DISTILL", doc="docs/plans/b.md",
+                                    status="ready", rid="B2")])
+        merge = self.write_merge(["B1"], [
+            {"id": "B2", "reason": "merge conflict: README.md",
+             "stage": "merge"}])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report,
+                  "--merge", merge)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("1 record(s) not landed this run", out.stdout)
+        self.assertIn("`B2`", out.stdout)
+        self.assertIn("merge conflict: README.md", out.stdout)
+        self.assertIn("next sweep re-proposes", out.stdout)
+        # The blanket "each row is applied" claim must not survive a gap.
+        self.assertNotIn("each row is applied", out.stdout)
+
+    def test_pr_body_with_clean_merge_has_no_banner(self):
+        report = write_report([brec("DISTILL", doc="docs/plans/a.md",
+                                    status="ready", rid="B1")])
+        merge = self.write_merge(["B1"], [])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report,
+                  "--merge", merge)
+        os.unlink(report)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn("not landed", out.stdout)
+        self.assertIn("each row is applied", out.stdout)
+
+    def _summary(self, merge_path):
+        fd, summary_path = tempfile.mkstemp()
+        os.close(fd)
+        self.addCleanup(os.unlink, summary_path)
+        env = dict(os.environ, GITHUB_STEP_SUMMARY=summary_path)
+        out = subprocess.run(
+            [sys.executable, SCRIPT, "distill-merge-summary",
+             "--merge", merge_path],
+            capture_output=True, text=True, env=env)
+        with open(summary_path, encoding="utf-8") as f:
+            return out, f.read()
+
+    def test_merge_summary_all_landed(self):
+        out, summary = self._summary(self.write_merge(["B1", "B2"], []))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("all 2 record(s) landed", summary)
+
+    def test_merge_summary_names_gap_count(self):
+        out, summary = self._summary(self.write_merge(
+            ["B1"], [{"id": "B2", "reason": "skipped by executor: x",
+                      "stage": "executor"}]))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("1 record(s) landed", summary)
+        self.assertIn("1 not landed", summary)
+
+    def test_malformed_merge_file_errors(self):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            f.write("{\"applied\": 3}")
+        self.addCleanup(os.unlink, path)
+        report = write_report([brec("DISTILL", doc="a.md", status="ready")])
+        out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report,
+                  "--merge", path)
+        os.unlink(report)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("error:", out.stderr)
 
 
 if __name__ == "__main__":

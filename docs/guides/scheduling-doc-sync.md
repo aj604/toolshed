@@ -1,6 +1,6 @@
 # Turning on nightly automation with `scheduling-doc-sync`
 
-> As of 2026-07-07 (doc-lifecycle contract v2 + bloat scale hardening; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `doc-sync.yml`, `doc-bloat.yml`)
+> As of 2026-07-09 (doc-lifecycle contract v2 + bloat scale hardening + distill-lane fan-out; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `doc-sync.yml`, `doc-bloat.yml`)
 
 **You should already have:** run a drift audit or [bloat sweep](auditing-doc-bloat.md)
 by hand at least once. Automation is those same loops on a cron with you as the PR
@@ -34,7 +34,11 @@ Two GitHub Actions, installed by the skill (never hand-rolled YAML):
   forward).
 - Findings are split into two lanes — `doc-bloat/prune` (passage-level cuts/condenses/
   moves) and `doc-bloat/distill` (doc-level merges/retires/distills, plus directory-level
-  `POLICY` records) — and each lane opens at most one **draft PR**. Draft means nothing
+  `POLICY` records) — and each lane opens at most one **draft PR**. The distill lane
+  *applies* the same fanned-out way the sweep detects: record groups run as parallel
+  jobs (uncapped — an apply is never truncated mid-judgment), a deterministic merge
+  lands their commits, and any record that couldn't land is named in a PR banner and
+  re-proposed by the next sweep. Draft means nothing
   merges without you; a lane with no findings, or whose PR is still open from last week,
   skips itself with a self-explaining run summary.
 
