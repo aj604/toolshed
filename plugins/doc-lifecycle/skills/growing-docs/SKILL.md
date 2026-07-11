@@ -102,6 +102,9 @@ be mistaken for a retire-on-landing planning artifact. Its home:
    and was actually run.** Narrative structure is exempt from the claim bar; fabrication
    is not.
 3. **Still the smallest doc that absorbs the signal.**
+4. **Rationale gets one owner.** If the "why" you are landing already lives as a code
+   comment, trim that comment to a pointer at the new doc in the same change — duplicated
+   rationale drifts apart; the pointer keeps the breadcrumb where the reader trips on it.
 
 ## Rationalizations
 
