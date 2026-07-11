@@ -88,15 +88,15 @@ Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum
 | Component | Type | Use it when |
 |-----------|------|-------------|
 | `bootstrapping-docs` | skill | Pointing at an undocumented repo — produces the smallest high-leverage doc set, then deliberately stops, recording deferrals in `docs/doc-scope.md`. |
-| `growing-docs` | skill | Growing a doc set past the bootstrap minimum on a demand signal — a second hard derivation of a fact earns a doc, one signal → one smallest artifact; owns the `docs/doc-scope.md` format. |
+| `growing-docs` | skill | Baseline docs exist but a demand signal says they fall short — writes the one artifact that absorbs the signal, then stops. The demand-driven counterpart to `bootstrapping-docs`. |
 | `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
 | `detecting-doc-drift` | skill | Auditing docs against the code for **accuracy** — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
 | `fixing-doc-drift` | skill | Applying a drift report — lands each STALE fix surgically, never deletes, never touches what the report didn't flag, stops on a large blast radius. |
-| `detecting-doc-bloat` | skill | Auditing docs for **weight** — content past its useful form: restated code, padded paragraphs, duplicated docs, landed design docs. Read-only; every finding is an ID'd record with evidence. |
-| `fixing-doc-bloat` | skill | Applying the human-approved subset of a bloat report — approved IDs only, proposals landed verbatim, `DISTILL` records dispatched to `doc-distiller`. |
+| `detecting-doc-bloat` | skill | Auditing docs for low-value content — redundant, verbose, duplicated, or past its useful form — emits a structured prune/condense/distill proposal. Read-only: it proposes, a human approves. |
+| `fixing-doc-bloat` | skill | Applying a human-approved subset of a bloat report — lands approved cuts/condenses/moves/merges and dispatches distillations. Approval by record ID is the only mandate. |
 | `scheduling-doc-sync` | skill | Wiring a repo for unattended sync — installs the nightly drift Action (detect → gate → fix → evidence PR) and the weekly bloat sweep (draft PRs per lane), marker-idempotent, with a blast-radius stop. |
 | `llm-doc-writer` | agent | A dispatchable subagent that produces LLM-optimized documentation with maximum context efficiency. |
-| `doc-distiller` | agent | A dispatchable subagent that retires a landed design doc: re-verifies its durable claims against the code, lands claims and insights in their living docs, appends one `docs/decisions.md` entry — one staged commit. |
+| `doc-distiller` | agent | Applies one approved DISTILL record — verifies each durable claim, lands the extractions in their living docs, retires the planning artifact, all as one commit. Dispatched by `fixing-doc-bloat`. |
 
 ## Why this works where "keep the docs updated" doesn't
 
@@ -111,7 +111,7 @@ detecting-doc-bloat   audits those claims for weight     → fixing-doc-bloat la
 scheduling-doc-sync   installs the Actions that run both loops on a schedule and open evidence PRs
 ```
 
-All of the above ships today; past its blast-radius cap the nightly sync files an issue instead of opening one giant PR, and bloat sweeps only ever open draft PRs.
+All of the above ships today. The automation layer — `scheduling-doc-sync` — installs a nightly GitHub Action that runs detect→fix unattended on the commits since the last sync and opens a docs-update PR with the evidence (PR-only; past the blast-radius cap it files an issue instead), and a weekly bloat sweep that only ever opens draft PRs; both are wiring on top of the contract, which lives in the detect/fix skill pairs.
 
 ## How it was built
 
