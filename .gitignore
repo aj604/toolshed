@@ -2,3 +2,6 @@
 node_modules/
 .taskflow-state.json
 __pycache__/
+
+# skill-creator eval workspaces (run outputs, not repo content)
+skill-workspaces/

@@ -157,6 +157,17 @@ class Hints(unittest.TestCase):
             self.assertEqual(self.hint_of(manifest(r), "docs/plans/walkthrough.md"),
                              "narrative")
 
+    def test_as_of_anchor_under_title_is_narrative(self):
+        # growing-docs' template places the anchor on the first line UNDER the
+        # title; the hint must accept that placement, not just file-first-line.
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/guides/g.md", "# Guide\n\n> As of 2026-01-01 (x)\n\nbody")
+            write(root, "docs/guides/h.md", "# Guide\n\nplain prose, no anchor")
+            git_init(root)
+            m = manifest(run(root))
+            self.assertEqual(self.hint_of(m, "docs/guides/g.md"), "narrative")
+            self.assertEqual(self.hint_of(m, "docs/guides/h.md"), "living")
+
     def test_plans_or_specs_segment_is_planning(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "docs/plans/a.md", "# a design")

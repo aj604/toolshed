@@ -32,7 +32,12 @@ and shipped as the `scheduling-doc-sync` skill, wires detect→fix to cron/PR).
    *sound* factual but name no checkable thing ("robust", "production-ready", "reasonably
    fast", "handles most workloads"). Extract those too, kind `value`: they become
    `UNVERIFIABLE`. Do not skip them — an unbacked quality claim is the most common drift a
-   human eye waves through. Lines already marked `> UNVERIFIED: <claim>` (the marker
+   human eye waves through. And they stay `UNVERIFIABLE` even when you can build a code case
+   that the boast overreaches ("handles arbitrarily large inputs" vs. a whole-buffer read):
+   put that argument in `evidence`, not in the verdict. `STALE` is reserved for claims with a
+   checkable true value to restore — puffery has none, so any replacement line you'd draft is
+   new authorship, and cutting or rewording it is a human/bloat decision, not a sync. Lines
+   already marked `> UNVERIFIED: <claim>` (the marker
    llm-doc-writer writes) are extracted like any claim and default to `UNVERIFIABLE` unless
    the repo now makes them checkable.
 2. **Verify** each claim against the repo at the appropriate tier (below).
@@ -118,6 +123,9 @@ The validator (step 4) also cross-checks a wrapped object's `summary` counts aga
 - Eyeballing a command table instead of grepping the Makefile/package.json for each target.
 - Skipping a "robust"/"fast"/"production-ready" line because it's "just prose" → extract it
   as UNVERIFIABLE; that is the finding.
+- Marking a quality boast STALE because the code argues against it, and drafting a
+  replacement → still UNVERIFIABLE; the contradiction goes in `evidence`. A `fix` must
+  restore a checkable true value, not reword puffery.
 - A record with an invented `kind` (e.g. `schema_mismatch`) → use the six enum values only.
 - Marking an anchor STALE for being off by a line, or emitting a `fix` that only changes a
   line number → not drift. The anchor is metadata, not its own claim.

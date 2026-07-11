@@ -22,8 +22,9 @@ judgment one bounded chunk at a time. Three non-negotiables:
 
 - **living** — claim-style docs tracking the repo (README, CLAUDE.md,
   runbooks, reference). Rules: `references/verdict-lenses.md`.
-- **narrative** — first line is growing-docs' `> As of` anchor, wherever the
-  file sits. Own bar; never a planning artifact. Rules: `verdict-lenses.md`.
+- **narrative** — opens with growing-docs' `> As of` anchor (the file's first
+  line, or the first line under the title), wherever the file sits. Own bar;
+  never a planning artifact. Rules: `verdict-lenses.md`.
 - **planning** — designs/specs/plans describing an intended change. Rules:
   `references/planning-artifacts.md`.
 - A **policy chunk** (directory declared `policy_scope` in the repo's
