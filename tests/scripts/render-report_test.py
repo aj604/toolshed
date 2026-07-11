@@ -457,6 +457,17 @@ class WorkflowWiring(unittest.TestCase):
         self.assertIn('|| { rm -f "chunks/${CHUNK_ID}.json"; echo "::error::chunk',
                       self.yml)
 
+    def test_hard_failed_retry_cannot_strand_an_invalid_chunk(self):
+        # If the retry action itself dies hard, the final seam-validate must
+        # still run (an implicit success() would skip it) or the always()
+        # upload ships the dead attempt's partially-written chunk file — and
+        # one invalid chunk fails the whole gap-tolerant assembly.
+        retry_block = self.yml.split("Detect chunk (retry")[1].split("- name:")[0]
+        self.assertIn("continue-on-error: true", retry_block)
+        final_block = self.yml.split("Seam-validate (final)")[1].split("- name:")[0]
+        self.assertIn("!cancelled() && steps.seam1.outcome == 'failure'",
+                      final_block)
+
     def test_fully_resumed_run_still_assembles(self):
         # assemble must NOT carry sweep's pending-empty guard, or an
         # all-carried run silently produces nothing forever.

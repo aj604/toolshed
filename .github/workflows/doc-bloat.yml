@@ -159,6 +159,7 @@ jobs:
             --turns "${{ steps.slice.outputs.turns }}" >> "$GITHUB_OUTPUT"
       - name: Detect chunk (retry — fresh dispatch)
         if: steps.seam1.outcome != 'success'
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -168,7 +169,10 @@ jobs:
           prompt: ${{ steps.slice.outputs.prompt }}
           claude_args: --max-turns ${{ steps.retry.outputs.turns }} --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
       - name: Seam-validate (final)
-        if: steps.seam1.outcome != 'success'
+        # !cancelled(): must run even when the retry action died hard (the
+        # implicit success() would skip it), or the always() upload ships the
+        # dead attempt's partially-written chunk file.
+        if: ${{ !cancelled() && steps.seam1.outcome == 'failure' }}
         run: |
           # On double failure, discard the invalid result BEFORE exiting: a leftover
           # invalid file would upload, fail the gap-tolerant assembly (which only
