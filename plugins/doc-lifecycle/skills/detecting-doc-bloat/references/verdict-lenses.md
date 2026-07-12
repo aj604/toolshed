@@ -23,9 +23,12 @@ no yes, not that you never asked.
   caveat or gotcha ("quirk", "note that", "silently", "worth knowing") addressed
   to operators or agents but sitting in a user-facing doc — an operational
   gotcha buried in a README belongs in the doc its audience reads on demand
-  (runbook, reference); it lands inline in CLAUDE.md/AGENTS.md **only** when it
-  clears the writing-docs router rule (`${CLAUDE_PLUGIN_ROOT}/skills/writing-docs/agent-context.md`) (unprompted-critical, densest one-line
-  form). The same lens runs in reverse — but **deliberately conservative**:
+  (runbook, reference). It lands inline in an always-loaded CLAUDE.md/AGENTS.md
+  **only** if it passes the *inline-landing test*: it is unprompted-critical
+  (most sessions genuinely need it) **and** it fits one dense line — otherwise
+  it goes to the on-demand doc. (That test is the writing-docs router rule;
+  depth at `${CLAUDE_PLUGIN_ROOT}/skills/writing-docs/agent-context.md`.) The
+  same lens runs in reverse — but **deliberately conservative**:
   flag an always-loaded passage for extraction only when it is multi-line AND
   plainly narrow-scope (one file, one task) AND a natural on-demand target
   already exists; it moves out leaving at most a when-to-read line. A
@@ -34,6 +37,14 @@ no yes, not that you never asked.
   file costs more than the line it would relocate. **Value is not placement** —
   a high-value line can still be misplaced; do not "keep" it where it is, and
   do not delete it. `proposal`: `{"target": <right doc>, "text": <the line>}`.
+
+**Evidence format for all three passage verdicts:** the "Evidence:" hints above
+name *what proof to cite* — but every passage record's `evidence` must first
+**open with the passage's full extent**, `file:start-end` (`file:start` if one
+line), starting on the same line as `location`, and *then* the proof. That
+leading span is normative — it is the exact text `fixing-doc-bloat` deletes or
+replaces — and the validator rejects any passage evidence that omits it
+(`output-contract.md`).
 
 And a *doc* against its neighbors is bloat when it is a **near-duplicate of
 another doc** → `MERGE-DOC` (fold the unique remainder into the survivor,
@@ -67,7 +78,7 @@ A dense, accurate doc that another finding points *into* — the
 doing its job, not bloating; adding cross-reference boilerplate to "clarify"
 two docs is a bloat audit that *increases* line count — never propose it. The
 guard protects *density*, not *growth*: it never licenses landing content into
-an always-loaded file that the writing-docs router rule (`${CLAUDE_PLUGIN_ROOT}/skills/writing-docs/agent-context.md`) would send to a
+an always-loaded file that the inline-landing test above would send to a
 reference doc — pick targets so the always-loaded file only ever gets leaner
 or stays put.
 

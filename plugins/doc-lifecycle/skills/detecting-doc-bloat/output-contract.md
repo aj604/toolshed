@@ -25,7 +25,7 @@ Approval is **by `id`** — the human returns a subset of IDs and
 
 ## Worked example
 
-Five records covering the shapes that trip agents up. **This is an example of
+Seven records covering the shapes that trip agents up. **This is an example of
 record shape, not an inventory of findings** — these records are from an
 invented repo (a small caching library plus an ephemeral-artifact swarm); your
 audit sweeps for all seven verdicts.
@@ -84,17 +84,49 @@ audit sweeps for all seven verdicts.
       "docs/superpowers/plans/2026-06-01-batching-plan.md",
       "docs/superpowers/specs/2026-06-01-batching-spec.md"
     ]
+  },
+  {
+    "id": "B6",
+    "doc": "README.md",
+    "location": "README.md:34",
+    "verdict": "CUT",
+    "evidence": "README.md:34 — the sentence 'get_or_fill(key, fill) returns the cached value or computes it via fill' restates the signature and docstring shown verbatim in the fenced example directly below (README.md:36-39); it adds nothing the code doesn't",
+    "proposal": null,
+    "status": null,
+    "files": null
+  },
+  {
+    "id": "B7",
+    "doc": "README.md",
+    "location": "README.md:52",
+    "verdict": "EXTRACT-AND-MOVE",
+    "evidence": "README.md:52-55 — a four-line operator caveat ('note that swarm workers silently exit if `.cache-state.json` is missing; run `make migrate` first') sits in the user-facing README; it is an on-demand operational gotcha for operators, and a runbook already exists to hold it",
+    "proposal": {
+      "target": "docs/runbook.md",
+      "text": "Swarm workers exit silently when `.cache-state.json` is absent — run `make migrate` before `make dev` (`src/worker.py:9`)."
+    },
+    "status": null,
+    "files": null
   }
 ]
 ```
 
-B3 (`ready`) carries **no payload of any kind**: the claims, insights, and
-decision entry for an approved distillation are authored by the
-`doc-distiller` agent **after a human approves this ID** — never at detect
-time, and never smuggled into `evidence` (its `evidence` is the landed-code
-proof, full stop). B4 (`pending-implementation`) exists to *say* the design is
-pending — never propose deleting it. B5's `files` must name every covered path;
-in a chunked run it is the dispatched chunk's list verbatim.
+B6 (`CUT`) and B7 (`EXTRACT-AND-MOVE`) are the two passage shapes the earlier
+records omit. Both open `evidence` with the passage span, starting on
+`location`'s line — `file:start-end`, collapsed to `file:start` for a
+single-line passage like B6. B6's `proposal` is `null`, B7's is the
+`{"target", "text"}` object. Note B7's `target` (`docs/runbook.md`) is a
+**different doc than the one judged** — a passage verdict's target may point at
+any doc, in or out of the executor's chunk slice. Only the `doc` field is
+slice-bound; a target never is.
+
+B3 (`ready`) carries **no payload of any kind** — its `evidence` is the
+landed-code proof, full stop. The residue (claims, insights, decision entry) is
+the `doc-distiller`'s post-approval job; the rationale lives once in
+`references/planning-artifacts.md`, not here. B4 (`pending-implementation`)
+exists to *say* the design is pending — never propose deleting it. B5's `files`
+must name every covered path; in a chunked run it is the dispatched chunk's list
+verbatim.
 
 ## The emitted artifact: a schema-2 wrapped report
 
@@ -103,9 +135,9 @@ in a chunked run it is the dispatched chunk's list verbatim.
   "schema": 2,
   "records": [ /* the records above */ ],
   "summary": {
-    "cut": 0,
+    "cut": 1,
     "condense": 1,
-    "extract_and_move": 0,
+    "extract_and_move": 1,
     "retire_doc": 0,
     "merge_doc": 1,
     "distill": 2,
@@ -132,7 +164,9 @@ emits the wrapped report. It emits exactly:
 Rules the seam validator enforces (`--chunk <file> --manifest <manifest>`):
 
 - A **sweep** chunk's records may only name docs in that chunk's slice, and a
-  sweep chunk never emits `POLICY`.
+  sweep chunk never emits `POLICY`. This binds the `doc` field only — an
+  `EXTRACT-AND-MOVE`/`MERGE-DOC` `proposal` target may point at any doc, in or
+  out of slice (its destination is often outside the audited slice by design).
 - A **policy** chunk's result is exactly one `POLICY` record: `doc` = the
   chunk's `dir`, `files` = the chunk's file list verbatim. Never a
   file-by-file walk.
