@@ -1,0 +1,30 @@
+{
+  "variants": ["none", "plugin-shaped", "bloated", "stale"],
+  "tasks": [
+    {
+      "id": "orientation-quiz",
+      "timeout_s": 360,
+      "prompt": "Without modifying any code, write a file named answers.json in the repo root with exactly these keys: \"test_command\" (string: the command to run this repo's test suite), \"required_env\" (array of strings: environment variable names that must be set for the API server to start), \"setup_order\" (array of strings: the commands, in order, to go from a fresh checkout to running services), \"node_version\" (string: the minimum Node.js version this repo requires)."
+    },
+    {
+      "id": "run-tests",
+      "timeout_s": 480,
+      "prompt": "Run this repository's test suite. When it passes, write the number of passing tests as a bare integer to a file named test-count.txt in the repo root."
+    },
+    {
+      "id": "start-api",
+      "timeout_s": 600,
+      "prompt": "Start this repository's HTTP API server, make a GET request to its /health endpoint, and save the exact response body to a file named health.json in the repo root. Stop any processes you started before finishing."
+    },
+    {
+      "id": "run-worker",
+      "timeout_s": 600,
+      "prompt": "Start this repository's background worker, capture the first line it prints to stdout into a file named worker-output.txt in the repo root, then stop the worker."
+    },
+    {
+      "id": "add-helper",
+      "timeout_s": 600,
+      "prompt": "In the @taskflow/shared package, add and export a normalizeStatus(s) helper: it returns one of the strings 'todo', 'doing', or 'done'. A null or undefined input returns 'todo'; any of those three exact strings is returned unchanged; anything else returns 'todo'. Add tests for it alongside the package's existing tests, and make sure the repository's whole test suite passes before finishing."
+    }
+  ]
+}
