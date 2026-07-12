@@ -1,6 +1,6 @@
 ---
 name: growing-docs
-description: 'Use when a repo already has baseline docs but a demand signal says they are no longer enough — the same question answered twice, a fact re-derived the hard way across sessions, an incident with no runbook, onboarding pain, a recurring "why is it like this?", someone asking "should we document X?", or a docs/doc-scope.md item whose promotion signal has fired. The demand-driven counterpart to bootstrapping-docs, which creates the minimum for a repo with no docs.'
+description: 'Use when a repo already has baseline docs but a demand signal says they are no longer enough — the same question answered twice, a fact re-derived the hard way across sessions, an incident with no runbook, onboarding pain, a recurring "why is it like this?", someone asking "should we document X?", or a docs/doc-scope.md item whose promotion signal has fired — and for any direct ask to write a narrative doc: an ADR, tutorial, walkthrough, or architecture overview (writing-docs scopes those out by design; their REQUIRED template lives here). The demand-driven counterpart to bootstrapping-docs, which creates the minimum for a repo with no docs.'
 ---
 
 # Growing Docs
@@ -24,7 +24,11 @@ drift report to legitimize growth — it never will.
 
 ## The second-rediscovery rule
 
-The first time a fact is asked for or derived the hard way, answering is fine. **The second
+The first time a fact is asked for or derived the hard way, answering is fine — but the
+exemption costs one logged line: add `- seen: <date> <one-line occurrence>` under the
+matching `## Deferred` item in `docs/doc-scope.md` (create the item if absent). The second
+rediscovery is usually a different session or a different person — without the log, nobody
+can recognize a second occurrence as the second, and this rule never fires. **The second
 time, it has earned a doc — write it where the reader would have looked first** (the doc they
 opened, the section they scanned, the file they read). This is the positive twin of
 writing-docs Rule 5: "cheaply inferable" is an empirical claim, and a second hard derivation
@@ -49,10 +53,12 @@ lists, directory trees) still binds — a demand signal is not a license to cata
 ## The scope record: `docs/doc-scope.md` (this skill owns the format)
 
 - **On entry:** if `docs/doc-scope.md` exists, read it alongside the live signal — the item
-  may already carry a promotion condition that just fired.
+  may already carry a promotion condition that just fired. A Deferred item already carrying
+  a `seen:` line means the live signal **is** the second rediscovery: promote it.
 - **On exit:** update it — create it if absent. Log what you wrote in Done with the signal
   that fired (moving the item from Deferred if it was listed there); add any new deliberate
-  deferrals, each with a `promote when:` signal.
+  deferrals, each with a `promote when:` signal; log any first occurrence you exempted as a
+  `seen:` line (the second-rediscovery rule above).
 
 ```markdown
 # Doc scope record
@@ -60,6 +66,7 @@ lists, directory trees) still binds — a demand signal is not a license to cata
 
 ## Deferred
 - <artifact>: <what> — promote when: <signal>
+  - seen: <date> <one-line occurrence>   <!-- first-rediscovery tally -->
 
 ## Done
 - <date> <artifact> ← <signal that fired>
@@ -118,6 +125,9 @@ be mistaken for a retire-on-landing planning artifact. Its home:
 ## Red flags — STOP
 
 - Answering the same question a second time and moving on → it has earned a doc; write it.
+- Answering a first-time question and moving on without a `seen:` line in
+  `docs/doc-scope.md` → the second rediscovery becomes unrecognizable across sessions;
+  the exemption costs the log line.
 - Growing docs with no nameable signal (a milestone, a release, "while I'm here") → wrong
   trigger; demand grows docs, calendars don't.
 - One signal producing a catalogue (routes, signatures, trees) → one smallest artifact;

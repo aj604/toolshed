@@ -1,10 +1,34 @@
 # Documentation Skills Suite — Handoff
 
-**Last updated:** 2026-07-09
-**HEAD at handoff:** doc-bloat distill lane fanned out (plan → matrix → deterministic merge — see `git log`)
+**Last updated:** 2026-07-12
+**HEAD at handoff:** grow-loop sensors + unowned-bucket owners (review findings 1,3,4,6) — see `git log`
 **Repo:** `toolshed` (git)
 
-## Latest milestone (2026-07-09): distill-lane fan-out (apply-side scale)
+## Latest milestone (2026-07-12): review-finding grow-loop + disposition owners (v0.11.0)
+
+Landed four of the six 2026-07-12 architecture-review findings; design + rationale:
+`docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md`, durable decisions:
+`docs/decisions.md` (2026-07-12 entry).
+- **F1a** — `growing-docs`' first-time exemption now costs a dated `- seen:` tally line in
+  `docs/doc-scope.md`; a matching item that already carries one **is** the second rediscovery.
+- **F6** — `growing-docs` description claims the direct "write an ADR/tutorial/walkthrough" ask.
+- **F3** — UNVERIFIABLE waiver file (`.github/doc-sync/drift-waivers.json`): detector stays
+  pure, `render-report.py` suppresses waived claims and surfaces unwaived ones (incl. on
+  no-drift nights); installer + `apply-upgrade.py` seed only-if-absent.
+- **F4** — recurrence memory: `sync-gate.py stale-state` → `last-stales.json` on the PR branch;
+  `pr-body --prev-stales` tags a re-staled location with re-shape-don't-re-fix advice.
+- **F1b** — `render-report.py growth-backlog` renders the doc-scope backlog on every weekly
+  doc-bloat run.
+Skill text re-GREENed via `skill-workspaces/` growing-docs iteration-3 (with-skill 22/22 vs
+prior 21/22, fresh graders). Scripts RED→GREEN in `tests/scripts/`; full suite + `claude plugin
+validate` pass.
+**Pending follow-up:** F5 (monthly full-audit drift lane — reuse the bloat chunk-sweep
+architecture: `plan-chunks.py` over `audit-scope.json` → matrix full-extract audits → existing
+post gate) and F2 (narrative-doc command/path claims extracted in that full audit; anchor-date
+staleness as an FYI, never STALE). Both fully specified in the 2026-07-12 design doc's F5/F2
+sections; they ride their own release.
+
+## Prior milestone (2026-07-09): distill-lane fan-out (apply-side scale)
 
 The career-compass bootstrap run (28912881170) proved the 07-07 hardening: 35 sweep chunks in
 ~9 minutes — and exposed the next wall: the distill lane's single uncapped invocation took 250

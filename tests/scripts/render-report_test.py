@@ -225,6 +225,141 @@ class RenderReportTest(unittest.TestCase):
         self.assertIn("error:", r.stderr)
 
 
+class DriftWaivers(unittest.TestCase):
+    """--waivers wiring: UNVERIFIABLE records get a durable disposition path."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.summary_path = os.path.join(self.tmp.name, "summary.md")
+
+    def run_script(self, *argv):
+        env = dict(os.environ)
+        env["GITHUB_STEP_SUMMARY"] = self.summary_path
+        return subprocess.run(
+            [sys.executable, SCRIPT, *argv],
+            capture_output=True, text=True, env=env,
+        )
+
+    def summary(self):
+        with open(self.summary_path, encoding="utf-8") as f:
+            return f.read()
+
+    def write_json(self, name, payload):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        return path
+
+    def report_two_flagged(self):
+        return self.write_json("report.json", {"records": [
+            rec(),
+            rec(verdict="UNVERIFIABLE", location="README.md:9",
+                claim="blazing fast", evidence="no benchmark backs it", fix=None),
+            rec(verdict="UNVERIFIABLE", location="docs/ops.md:2",
+                claim="production-ready", evidence="quality boast", fix=None),
+        ], "summary": {}})
+
+    def waive(self, *entries):
+        return self.write_json("drift-waivers.json", {"waivers": [
+            {"file": f, "claim": c, "reason": "accepted marketing tone",
+             "date": "2026-07-12"} for f, c in entries
+        ]})
+
+    # -- pr-body ------------------------------------------------------------
+
+    def test_pr_body_suppresses_waived_and_hints_disposition(self):
+        r = self.run_script(
+            "pr-body", "--report", self.report_two_flagged(),
+            "--marker", "aaa", "--head", "bbb",
+            "--waivers", self.waive(("docs/ops.md", "production-ready")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("`README.md:9`", r.stdout)
+        self.assertNotIn("`docs/ops.md:2`", r.stdout)
+        self.assertIn("1 waived claim(s) suppressed", r.stdout)
+        self.assertIn("drift-waivers.json", r.stdout)
+
+    def test_pr_body_without_waivers_flag_lists_all_flagged(self):
+        r = self.run_script(
+            "pr-body", "--report", self.report_two_flagged(),
+            "--marker", "aaa", "--head", "bbb")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("`README.md:9`", r.stdout)
+        self.assertIn("`docs/ops.md:2`", r.stdout)
+        self.assertNotIn("suppressed", r.stdout)
+
+    def test_pr_body_missing_waiver_file_treated_as_empty(self):
+        r = self.run_script(
+            "pr-body", "--report", self.report_two_flagged(),
+            "--marker", "aaa", "--head", "bbb",
+            "--waivers", os.path.join(self.tmp.name, "absent.json"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("`README.md:9`", r.stdout)
+        self.assertIn("`docs/ops.md:2`", r.stdout)
+
+    def test_pr_body_malformed_waivers_errors(self):
+        bad = self.write_json("drift-waivers.json", {"waivers": {}})
+        r = self.run_script(
+            "pr-body", "--report", self.report_two_flagged(),
+            "--marker", "aaa", "--head", "bbb", "--waivers", bad)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("error:", r.stderr)
+
+    # -- pr-title -----------------------------------------------------------
+
+    def test_pr_title_flagged_count_excludes_waived(self):
+        r = self.run_script(
+            "pr-title", "--report", self.report_two_flagged(),
+            "--date", "2026-07-12",
+            "--waivers", self.waive(("docs/ops.md", "production-ready")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("1 flagged", r.stdout)
+
+    def test_pr_title_all_waived_drops_flagged_suffix(self):
+        r = self.run_script(
+            "pr-title", "--report", self.report_two_flagged(),
+            "--date", "2026-07-12",
+            "--waivers", self.waive(("docs/ops.md", "production-ready"),
+                                    ("README.md", "blazing fast")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("flagged", r.stdout)
+
+    # -- no-drift-summary (the quiet-night surface) ---------------------------
+
+    def test_no_drift_summary_surfaces_unwaived_unverifiable(self):
+        report = self.write_json("report.json", {"records": [
+            rec(verdict="VERIFIED", fix=None),
+            rec(verdict="UNVERIFIABLE", location="README.md:9",
+                claim="blazing fast", evidence="no benchmark backs it", fix=None),
+        ], "summary": {}})
+        r = self.run_script(
+            "no-drift-summary", "--commits", "3", "--head", "bbb",
+            "--report", report,
+            "--waivers", self.write_json("drift-waivers.json", {"waivers": []}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("No drift.", self.summary())
+        self.assertIn("1 unverifiable claim(s) await disposition", self.summary())
+        self.assertIn("drift-waivers.json", self.summary())
+
+    def test_no_drift_summary_quiet_when_all_waived(self):
+        report = self.write_json("report.json", {"records": [
+            rec(verdict="UNVERIFIABLE", location="README.md:9",
+                claim="blazing fast", evidence="no benchmark backs it", fix=None),
+        ], "summary": {}})
+        r = self.run_script(
+            "no-drift-summary", "--commits", "3", "--head", "bbb",
+            "--report", report,
+            "--waivers", self.waive(("README.md", "blazing fast")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("await disposition", self.summary())
+
+    def test_no_drift_summary_without_report_unchanged(self):
+        r = self.run_script("no-drift-summary", "--commits", "3", "--head", "bbb")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("No drift.", self.summary())
+        self.assertNotIn("await disposition", self.summary())
+
+
 def write_report(records):
     """Write a bloat report (filtered lane file) to a temp JSON file."""
     fd, path = tempfile.mkstemp(suffix=".json")
@@ -406,6 +541,208 @@ class BloatRender(unittest.TestCase):
         for d in ("detect", "skip-pending"):
             out = run(sys.executable, SCRIPT, "bloat-pre-summary", "--decision", d)
             self.assertEqual(out.returncode, 0)
+
+
+class DocSyncWaiverWiring(unittest.TestCase):
+    """Pins doc-sync.yml's waiver wiring: every UNVERIFIABLE surface renders
+    waiver-aware, and the quiet-night (advance-marker) path renders its
+    disposition line BEFORE the report file is deleted."""
+
+    WAIVERS = "--waivers .github/doc-sync/drift-waivers.json"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ymls = {}
+        for label, parts in {
+            "template": ("plugins", "doc-lifecycle", "skills",
+                         "scheduling-doc-sync", "doc-sync.yml"),
+            "dogfood": (".github", "workflows", "doc-sync.yml"),
+        }.items():
+            path = os.path.join(os.path.dirname(__file__), "..", "..", *parts)
+            with open(path, encoding="utf-8") as f:
+                cls.ymls[label] = f.read()
+
+    def test_pr_body_and_title_are_waiver_aware(self):
+        for label, yml in self.ymls.items():
+            body = yml[yml.index("render-report.py pr-body"):]
+            self.assertIn(self.WAIVERS, body[:body.index("pr-title")], label)
+            title = yml[yml.index("render-report.py pr-title"):]
+            self.assertIn(self.WAIVERS, title[:title.index("git config")], label)
+
+    def test_no_drift_summary_carries_report_and_waivers(self):
+        for label, yml in self.ymls.items():
+            # Both branches (push ok / push rejected) must surface the count.
+            self.assertEqual(yml.count("no-drift-summary"), 2, label)
+            for chunk in yml.split("no-drift-summary")[1:]:
+                head = chunk[:300]
+                self.assertIn("--report drift-report.json", head, label)
+                self.assertIn(self.WAIVERS, head, label)
+
+    def test_report_deleted_only_after_quiet_night_render(self):
+        for label, yml in self.ymls.items():
+            step = yml[yml.index("Advance marker"):yml.index("blast-radius issue")]
+            self.assertIn("rm -f drift-report.json", step, label)
+            self.assertLess(step.index("no-drift-summary"),
+                            step.index("rm -f drift-report.json"), label)
+
+    def test_pr_body_compares_against_prior_stale_state(self):
+        for label, yml in self.ymls.items():
+            body = yml[yml.index("render-report.py pr-body"):]
+            self.assertIn("--prev-stales .github/doc-sync/last-stales.json",
+                          body[:body.index("pr-title")], label)
+
+    def test_new_stale_state_rides_the_sync_pr(self):
+        for label, yml in self.ymls.items():
+            step = yml[yml.index("Open sync PR"):]
+            self.assertIn("sync-gate.py stale-state", step, label)
+            self.assertIn("--out .github/doc-sync/last-stales.json", step, label)
+            # State must be staged before the PR commit, so it advances only
+            # when the fix merges.
+            self.assertLess(step.index("stale-state"),
+                            step.index("git add -A"), label)
+
+
+class DocBloatGrowthWiring(unittest.TestCase):
+    """Pins the weekly grow-loop surface: every doc-bloat run renders the
+    doc-scope.md growth backlog, skip paths included."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ymls = {}
+        for label, parts in {
+            "template": ("plugins", "doc-lifecycle", "skills",
+                         "scheduling-doc-sync", "doc-bloat.yml"),
+            "dogfood": (".github", "workflows", "doc-bloat.yml"),
+        }.items():
+            path = os.path.join(os.path.dirname(__file__), "..", "..", *parts)
+            with open(path, encoding="utf-8") as f:
+                cls.ymls[label] = f.read()
+
+    def test_growth_backlog_rendered_every_run(self):
+        for label, yml in self.ymls.items():
+            self.assertIn("growth-backlog --scope-file docs/doc-scope.md",
+                          yml, label)
+            # Before the pre-gate branch: it must render on skip paths too.
+            self.assertLess(yml.index("growth-backlog"),
+                            yml.index("bloat-pre-summary"), label)
+
+
+class RecurrenceRender(unittest.TestCase):
+    """pr-body --prev-stales: a location STALE in consecutive proceed runs is a
+    shape problem, not a fix problem — the PR body says so once, per record."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write_json(self, name, payload):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        return path
+
+    def pr_body(self, prev=None):
+        report = self.write_json("report.json", {"records": [
+            rec(location="README.md:5"),
+            rec(location="docs/ops.md:40", claim="port is 8080",
+                evidence="config says 9090", fix="port is 9090"),
+        ], "summary": {}})
+        argv = [sys.executable, SCRIPT, "pr-body", "--report", report,
+                "--marker", "aaa", "--head", "bbb"]
+        if prev is not None:
+            argv += ["--prev-stales", prev]
+        return subprocess.run(argv, capture_output=True, text=True)
+
+    def test_recurred_location_tagged_with_shape_hint(self):
+        prev = self.write_json("last-stales.json", {"stales": [
+            {"file": "README.md", "line": 7, "kind": "command"},  # ±3 of line 5
+        ]})
+        r = self.pr_body(prev)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("recurred", r.stdout)
+        self.assertLess(r.stdout.index("README.md:5"), r.stdout.index("recurred"))
+        self.assertNotIn("docs/ops.md:40` | ⟳", r.stdout)
+        self.assertIn("shape problem", r.stdout)
+        self.assertIn("pointer", r.stdout)
+
+    def test_no_match_renders_clean(self):
+        prev = self.write_json("last-stales.json", {"stales": [
+            {"file": "README.md", "line": 40, "kind": "command"},  # far away
+        ]})
+        r = self.pr_body(prev)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("recurred", r.stdout)
+        self.assertNotIn("shape problem", r.stdout)
+
+    def test_missing_prev_stales_treated_as_empty(self):
+        r = self.pr_body(os.path.join(self.tmp.name, "absent.json"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("recurred", r.stdout)
+
+    def test_kind_mismatch_is_not_recurrence(self):
+        prev = self.write_json("last-stales.json", {"stales": [
+            {"file": "README.md", "line": 5, "kind": "behavior"},
+        ]})
+        r = self.pr_body(prev)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("recurred", r.stdout)
+
+
+class GrowthBacklog(unittest.TestCase):
+    """growth-backlog: the weekly bloat run surfaces docs/doc-scope.md Deferred
+    items so the grow loop is seen on the same cadence as the prune loop."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.summary_path = os.path.join(self.tmp.name, "summary.md")
+
+    def run_script(self, scope_path):
+        env = dict(os.environ)
+        env["GITHUB_STEP_SUMMARY"] = self.summary_path
+        return subprocess.run(
+            [sys.executable, SCRIPT, "growth-backlog", "--scope-file", scope_path],
+            capture_output=True, text=True, env=env,
+        )
+
+    def summary(self):
+        with open(self.summary_path, encoding="utf-8") as f:
+            return f.read()
+
+    def write_scope(self, text):
+        path = os.path.join(self.tmp.name, "doc-scope.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return path
+
+    def test_renders_deferred_items_with_tallies(self):
+        scope = self.write_scope(
+            "# Doc scope record\n<!-- format: doc-lifecycle growing-docs -->\n\n"
+            "## Deferred\n"
+            "- runbook: CI triage — promote when: an on-call needs steps\n"
+            "- rationale: why lint is a build mode — promote when: someone asks again\n"
+            "  - seen: 2026-07-05 contributor asked in review\n\n"
+            "## Done\n- 2026-06-28 baseline ← bootstrap\n")
+        r = self.run_script(scope)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("Growth backlog", s)
+        self.assertIn("2 deferred", s)
+        self.assertIn("runbook: CI triage", s)
+        self.assertIn("seen: 2026-07-05", s)
+        self.assertIn("next occurrence promotes", s)
+
+    def test_missing_scope_file_is_quiet_not_fatal(self):
+        r = self.run_script(os.path.join(self.tmp.name, "absent.md"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no doc-scope.md", self.summary())
+
+    def test_empty_deferred_section_reports_empty(self):
+        scope = self.write_scope(
+            "# Doc scope record\n\n## Deferred\n\n## Done\n- x\n")
+        r = self.run_script(scope)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Growth backlog: empty", self.summary())
 
 
 class WorkflowWiring(unittest.TestCase):

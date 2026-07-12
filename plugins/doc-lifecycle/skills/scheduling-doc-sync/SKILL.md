@@ -84,7 +84,7 @@ Upgrade mode).
    - `doc-bloat.yml` → `.github/workflows/doc-bloat.yml`: `{{BLOAT_CRON}}`.
    - `doc-sync-upgrade.yml` → `.github/workflows/doc-sync-upgrade.yml`: `{{UPGRADE_CRON}}`.
    The workflow YAML carries NO version placeholder — each `Pin plugin marketplace` step reads
-   `.github/doc-sync/installed-version` at runtime (written in step 7) and clones that tag, so the
+   `.github/doc-sync/installed-version` at runtime (written in step 8) and clones that tag, so the
    workflow files are version-agnostic (Overview). The version from step 2 lands only in that
    lockfile.
 3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py`,
@@ -105,19 +105,27 @@ Upgrade mode).
    `policy_scope` (directories of ephemeral artifacts, each swept as one POLICY record) and
    `chunking` (`max_docs` / `max_lines` / `max_chunks`) keys are documented in that script's
    docstring. An existing file is a tuned config — never overwrite it.
-6. Seed the marker — **only if absent**:
+6. Seed the drift waivers — **only if absent**: write `.github/doc-sync/drift-waivers.json`
+   with the starter `{"waivers": []}`. This is the UNVERIFIABLE disposition record: the nightly
+   surfaces every unverifiable claim (on the sync PR, or on the run summary of a no-drift
+   night) until a human either rewords the doc line or accepts it here as
+   `{"file": <doc>, "claim": <exact line text>, "reason": ..., "date": ...}` — waived claims
+   stop resurfacing. Matching is exact claim text, so rewording a waived line puts it back on
+   the surface (new authorship is a new decision). An existing file is accumulated human
+   judgment — never overwrite it.
+7. Seed the marker — **only if absent**:
    `test -f .github/doc-sync-marker || git rev-parse HEAD > .github/doc-sync-marker`
    An existing marker means an existing install: this is an upgrade, and resetting the marker
    would silently skip every commit since the last sync. Never reset it.
-7. Write the version lockfile: `.github/doc-sync/installed-version` = the bare version from step 2
+8. Write the version lockfile: `.github/doc-sync/installed-version` = the bare version from step 2
    (e.g. `0.7.0`). Unlike the marker/audit-scope, this tracks the wiring version and must equal
    the pin, so on a fresh install always write it. `doc-sync-upgrade.yml` reads it to decide
    whether a newer release exists; it advances only when an upgrade PR merges.
-8. Tell the user, concretely:
-   - the thirteen files to commit (`doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml`,
+9. Tell the user, concretely:
+   - the fourteen files to commit (`doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml`,
      `sync-gate.py`, `upgrade-gate.py`, `render-report.py`, `plan-chunks.py`, `plan-distill.py`,
      `validate-drift-output.py`, `validate-bloat-output.py`, the seeded `audit-scope.json`, the
-     seeded `doc-sync-marker`, and `installed-version`);
+     seeded `drift-waivers.json`, the seeded `doc-sync-marker`, and `installed-version`);
    - first night: diff from the seeded marker; no drift → marker-only commit, drift → PR on
      `doc-sync/nightly` with evidence, over-cap → a `doc-sync` issue;
    - the weekly bloat sweep opens up to two **draft** PRs (`doc-bloat/prune`, `doc-bloat/distill`);
@@ -161,6 +169,7 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | `.github/doc-sync/installed-version` | version state | **Set** to `<target>` (bare semver). This is what advances the pin; on a version-only release it's the *only* file that changes. |
 | `.github/doc-sync-marker` | sync state | **Never touch.** |
 | `.github/doc-sync/audit-scope.json` | consumer (tuned config) | **Never touch.** |
+| `.github/doc-sync/drift-waivers.json` | consumer (accepted-claim record) | **Never touch.** Seed `{"waivers": []}` only if absent (pre-0.11 installs lack it). |
 
 **Knobs are preserved, not reset** — `apply-upgrade.py` reads each install-time value out of the
 currently-installed workflow and substitutes it back into the new template:
@@ -197,7 +206,7 @@ and expected; don't try to "fix" it by widening the token — the restriction is
   branch — not even if asked ("PRs are annoying"). The reviewable evidence-PR *is* the product;
   a direct-commit pipeline is an unreviewable one. The only direct push the pipeline makes is
   the marker-only commit on a no-drift run.
-- **Upgrade preserves the marker** (step 6) and the version lockfile discipline. Overwrite the
+- **Upgrade preserves the marker** (step 7) and the version lockfile discipline. Overwrite the
   yml and scripts freely; the marker and `audit-scope.json` are state, not wiring. See Upgrade mode.
 - **Installs are pinned; only the upgrade workflow advances the pin.** Every model step is
   preceded by a `Pin plugin marketplace` step that clones `…/toolshed.git` at `v<version>` to a

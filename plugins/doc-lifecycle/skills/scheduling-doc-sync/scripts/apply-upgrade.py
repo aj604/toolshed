@@ -30,7 +30,9 @@ Ownership (total on wiring, idempotent on state):
     .github/workflows/{doc-sync,doc-bloat,doc-sync-upgrade}.yml  regenerate, knobs preserved
     .github/doc-sync/*.py (seven scripts)                        overwrite
     .github/doc-sync/installed-version                           set to <target>
-    .github/doc-sync-marker, .github/doc-sync/audit-scope.json   never touched
+    .github/doc-sync-marker, .github/doc-sync/audit-scope.json,
+    .github/doc-sync/drift-waivers.json                          never touched
+    (drift-waivers.json is seeded empty when absent — pre-0.11 installs)
 
 Exit status: 0 on success; 1 on any error (missing source/installed file, a knob
 that can't be extracted, or a template placeholder the script doesn't know) —
@@ -157,6 +159,18 @@ def copy_scripts(plugin_root, repo):
         shutil.copyfile(src, dest / name)
 
 
+def seed_waivers(repo):
+    """Seed an empty drift-waivers.json — only if absent.
+
+    Pre-0.11 installs lack the file; the regenerated workflows reference it.
+    An existing file is accumulated human judgment (accepted UNVERIFIABLE
+    claims) and is never touched — same discipline as audit-scope.json.
+    """
+    path = repo / ".github" / "doc-sync" / "drift-waivers.json"
+    if not path.is_file():
+        path.write_text('{"waivers": []}\n')
+
+
 def write_version(repo, target):
     # Trailing newline matches the install-time lockfile; bash `$(cat …)` strips it
     # either way, but keep the file identical so a version-only upgrade diffs cleanly.
@@ -167,6 +181,7 @@ def apply_upgrade(plugin_root, repo, target):
     knobs = read_knobs(repo)
     render_workflows(plugin_root, repo, knobs)
     copy_scripts(plugin_root, repo)
+    seed_waivers(repo)
     write_version(repo, target)
     print(
         f"regenerated wiring at v{target}: 3 workflows (knobs preserved), "

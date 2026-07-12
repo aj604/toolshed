@@ -164,6 +164,24 @@ class ApplyUpgrade(unittest.TestCase):
             '{"exclude": ["keep/me"], "include": []}\n',
         )
 
+    def test_seeds_drift_waivers_only_if_absent(self):
+        pr = make_plugin_root(self.base)
+        # Pre-0.11 install: no drift-waivers.json → seeded empty.
+        repo = make_install(self.base)
+        run(pr, repo, "0.11.0")
+        self.assertEqual(
+            (repo / ".github/doc-sync/drift-waivers.json").read_text(),
+            '{"waivers": []}\n',
+        )
+        # Existing file is accumulated human judgment → byte-identical survive.
+        repo2 = make_install(self.base / "second-install")
+        tuned = '{"waivers": [{"file": "README.md", "claim": "fast"}]}\n'
+        (repo2 / ".github/doc-sync/drift-waivers.json").write_text(tuned)
+        run(pr, repo2, "0.11.0")
+        self.assertEqual(
+            (repo2 / ".github/doc-sync/drift-waivers.json").read_text(), tuned
+        )
+
     # --- absent upgrade.yml (pre-self-upgrade install) ----------------------
 
     def test_absent_upgrade_yml_uses_default_cron_and_warns(self):

@@ -16,7 +16,8 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
 `doc-sync/upgrade-gate.py`, `doc-sync/render-report.py`,
 `doc-sync/plan-chunks.py`, `doc-sync/plan-distill.py`,
 `doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
-`doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `doc-sync/installed-version`
+`doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `doc-sync/drift-waivers.json`
+(accepted-UNVERIFIABLE waivers the sync run surfaces consume), `doc-sync/installed-version`
 (the plugin-version lockfile the upgrade workflow reads), `workflows/doc-sync.yml`,
 `workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`) and the ci+release workflow
 (`workflows/release.yml`).

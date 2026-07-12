@@ -54,6 +54,10 @@ jobs:
             echo "prune_pr=${PRUNE_PR}"
             echo "distill_pr=${DISTILL_PR}"
           } >> "$GITHUB_OUTPUT"
+      - name: Growth backlog (docs/doc-scope.md)
+        # The grow-loop's weekly surface — renders on every run, skip paths
+        # included, so deferred docs are seen at the same cadence as bloat.
+        run: python3 .github/doc-sync/render-report.py growth-backlog --scope-file docs/doc-scope.md
       - name: Gate (pre-sweep)
         id: pre
         run: |

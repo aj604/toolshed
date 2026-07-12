@@ -151,6 +151,45 @@ class PostGate(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
 
 
+class StaleState(unittest.TestCase):
+    """stale-state: one run of location memory so the next run's PR body can
+    tag same-spot recurrence (re-shaping advice, not another re-fix)."""
+
+    def out_path(self):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+        return path
+
+    def test_derives_stale_identities_only(self):
+        stale = rec("STALE")
+        stale2 = dict(rec("STALE"), location="docs/ops.md:40", kind="value")
+        path = report_file(wrapped([stale, rec("VERIFIED"), stale2,
+                                    rec("UNVERIFIABLE")]))
+        out = self.out_path()
+        r = run("stale-state", "--report", path, "--out", out)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(out) as f:
+            state = json.load(f)
+        self.assertEqual(state, {"stales": [
+            {"file": "README.md", "line": 5, "kind": "command"},
+            {"file": "docs/ops.md", "line": 40, "kind": "value"},
+        ]})
+
+    def test_zero_stale_writes_empty_state(self):
+        path = report_file(wrapped([rec("VERIFIED")]))
+        out = self.out_path()
+        r = run("stale-state", "--report", path, "--out", out)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(out) as f:
+            self.assertEqual(json.load(f), {"stales": []})
+
+    def test_malformed_report_exits_2(self):
+        path = report_file('{"nope": true}')
+        r = run("stale-state", "--report", path, "--out", self.out_path())
+        self.assertEqual(r.returncode, 2)
+
+
 class BloatPreGate(unittest.TestCase):
     def test_both_prs_open_skips(self):
         out = run("bloat-pre", "--prune-pr-open", "1", "--distill-pr-open", "2")
