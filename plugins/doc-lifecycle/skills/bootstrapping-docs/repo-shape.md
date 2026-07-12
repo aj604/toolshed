@@ -85,7 +85,9 @@ the way `writing-docs` governs any example — verifiable against the actual wir
    containment boundary — "tracks code" vs not — not the doc-type flavoring this rule bans.)
 3. **One always-loaded doc, at the repo root.** Everything else is read on demand. Keep the
    always-on file lean — a bloated always-loaded doc makes the agent ignore your real
-   instructions. It is a router, not a repository: inline content only when the agent needs
+   instructions. SKILL.md's ~40-line calibration applies to the router too; the way routers
+   quietly blow past it is verbose gotcha entries — each gotcha earns one line
+   (symptom → cause → fix pointer), with anything longer living in the doc it points to. It is a router, not a repository: inline content only when the agent needs
    it before it would know to look; the rest is a discovery-named reference doc plus at most
    a when-to-read line (the router rule — writing-docs' agent-context.md owns it, and it
    binds sweeps and distills, not just hand edits).
