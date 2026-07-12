@@ -83,6 +83,49 @@ Two layers, per the skill-workspaces harness pattern:
 - `analyze.py` renders the variant×task matrix (success rate, median tokens/turns/cost)
   plus the three hypothesis comparisons.
 
+## Results (2026-07-11, claude-sonnet-5, 60 runs, $10.67 total)
+
+All 60 cells completed, none timed out. Five fresh grader agents (one per task family,
+none the executor) audited every run against GRADING-NOTES.md including session
+transcripts: **60/60 mechanical verdicts confirmed, 0 overrides, 0 fabricated artifacts**
+(every health.json came from a real `curl -o`; every test count from a real suite run).
+
+| Variant | Success | Median cost | Mean turns | Mean output tokens | Total spend |
+|---------|---------|-------------|------------|--------------------|-------------|
+| none | 15/15 | $0.20 | 10.7 | 1710 | $3.04 |
+| plugin-shaped | 15/15 | $0.15 | 6.3 | 983 | $2.10 |
+| bloated | 15/15 | $0.14 | 5.1 | 832 | $2.16 |
+| stale | 14/15 | $0.22 | 11.8 | 2561 | $3.38 |
+
+**H1 (hydration): supported, as a cost effect.** Equal success (the fixture is small and
+readable), but plugin-shaped docs cut mean turns 41% (10.7 → 6.3), mean output tokens 43%,
+and total spend 31% vs no docs. Sharpest on orientation: 11 turns → 3.
+
+**H2 (density): not supported at this scale.** Bloated (~340 lines, all accurate) matched
+plugin-shaped on success and slightly beat it on turns/cost. At fixture size, accurate
+verbosity is free: the docs fit in context and the buried facts stay findable. The density
+premise's predicted cost (dilution, context rot) needs real-repo doc scale to test — this
+experiment bounds where density matters rather than confirming it. Corollary: **accuracy
+dominated brevity** — the bloat lane's severity ranking below drift is empirically right.
+
+**H3 (drift): supported — the only correctness failure and the highest cost.** Stale docs
+produced the experiment's sole failure and cost more than no docs at all (+10% spend,
++50% output tokens vs none). Transcript-level mechanism, per graders:
+- All 3 stale run-tests agents tried the planted `npm test` first, then recovered (2–4×
+  turn inflation vs plugin-shaped).
+- The failure: stale orientation t3 grepped package.json, saw **no scripts block**, and
+  still answered `npm test`, rationalizing "npm test → runs node --test per the Makefile"
+  — the doc's false claim overrode code evidence the agent had just read.
+- The recoveries weren't free either: stale agents systematically cross-checked docs
+  against source before acting (the *distrust tax*), and two left themselves notes that
+  the CLAUDE.md gotchas were stale.
+
+**Net reading:** on a small readable repo, good docs are a ~30–40% cost lever, accurate
+docs matter more than dense ones, and false docs are the only thing that breaks
+correctness — validating the suite's investment ordering (nightly drift > weekly bloat)
+and giving the hydration premise its first measured citation. Effects should be re-tested
+at real-repo scale before citing beyond fixtures.
+
 ## Out of scope
 
 - Skill-generated variants (a follow-up could compare hand-authored vs bootstrapping-docs
