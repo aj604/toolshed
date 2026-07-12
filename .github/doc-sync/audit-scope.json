@@ -1,1 +1,1 @@
-{"exclude": ["tests/fixtures/**", "tests/baselines/**"], "include": []}
+{"exclude": ["tests/fixtures/**", "tests/baselines/**", "tests/docs-ab/**"], "include": []}
