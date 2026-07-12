@@ -34,9 +34,16 @@ governs *what to create and when to stop*; writing-docs governs *how each doc re
 1. **CLAUDE.md / AGENTS.md — first, always.** Highest leverage for agent performance. It
    holds only what an agent can't cheaply infer (see checklist). Agent rendering — max
    signal-per-token, pointers over inline copies; the `writing-docs` skill carries this bar
-   (dispatch the `llm-doc-writer` agent for a whole-doc job).
+   (dispatch the `llm-doc-writer` agent for a whole-doc job). **Calibration: a bootstrap
+   agent file that lands much past ~40 lines has almost always stopped cutting.** The
+   aggregate budget binds even when every individual line is true, verified, and anchored —
+   each line here is re-read at the start of every future session, so overflow content
+   doesn't get cheaper by being good. When good material overflows, move it to a referenced
+   doc or defer it in the scope record; keep the pointer.
 2. **README skeleton** — human front door: one-line what-and-why, setup, the run/test
-   commands. A skeleton, not a manual.
+   commands. A skeleton, not a manual (~30–40 lines): the front door is for orientation,
+   and a section that outgrows it is reference material — link it, or defer it in the
+   scope record.
 3. **Operational stubs** — only if real operational knowledge surfaced during exploration;
    otherwise defer it in the scope record (`- runbook: … — promote when: <signal>`) and move on.
 
@@ -87,6 +94,9 @@ residue re-read every session. A pointer line to `docs/doc-scope.md` is fine.
 - A directory tree mirroring the filesystem → cut.
 - Adding contributing/changelog/badges nobody asked for → cut.
 - Aiming for "comprehensive" or "complete" → wrong target; aim for minimal-high-leverage.
+- The agent file or README sliding past ~40 lines of individually-good content → the
+  aggregate budget binds too; the overflow is exactly what referenced docs and
+  `docs/doc-scope.md` deferrals are for.
 - Finishing the bootstrap with no scope record (`docs/doc-scope.md`) → you haven't decided
   scope, you've just stopped — and the decision dies with the session. (A bootstrap-time
   check — don't lint established docs for a standing section.)
