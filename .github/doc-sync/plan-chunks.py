@@ -9,7 +9,8 @@ detection invocation can hold.
 Policy-scope directories (config "policy_scope") become one 'policy' chunk
 each — a single POLICY record covers them; they are never walked
 file-by-file. Every other doc gets a deterministic doc-kind hint (narrative
-if its first line starts with '> As of'; planning if a 'plans' or 'specs'
+if it opens with '> As of' — the file's first line, or the first non-blank
+line under a leading title; planning if a 'plans' or 'specs'
 path segment contains it; else living — a hint the model may override only
 with stated evidence), is grouped by (directory, hint), packed under the
 caps (chunking.max_docs, default 8; chunking.max_lines, default 1200), and
@@ -207,13 +208,26 @@ def read_doc(full):
 
 
 def doc_hint(root, path):
-    """Deterministic doc-kind hint; the '> As of' anchor wins over location."""
+    """Deterministic doc-kind hint; the '> As of' anchor wins over location.
+
+    growing-docs' template puts the anchor on the first line under the title;
+    older narrative docs carry it as the file's literal first line. Accept
+    both: the anchor counts on line 1, or as the first non-blank line after
+    a leading '#' title. Any other first line means not-narrative.
+    """
     try:
         with open(os.path.join(root, path), encoding="utf-8", errors="replace") as f:
-            first = f.readline()
+            head = [f.readline().lstrip() for _ in range(6)]
     except OSError:
-        first = ""
-    if first.lstrip().startswith("> As of"):
+        head = []
+    anchored = bool(head) and head[0].startswith("> As of")
+    if not anchored and head and head[0].startswith("#"):
+        for line in head[1:]:
+            if not line.strip():
+                continue
+            anchored = line.startswith("> As of")
+            break
+    if anchored:
         return "narrative"
     if any(seg in ("plans", "specs") for seg in path.split("/")[:-1]):
         return "planning"
