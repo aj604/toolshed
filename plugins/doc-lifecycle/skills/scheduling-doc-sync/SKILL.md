@@ -242,6 +242,6 @@ and expected; don't try to "fix" it by widening the token — the restriction is
   ("Invalid marketplace URL format"); its validator requires the URL end in `.git`. Pin via the
   local checkout instead.
 - Writing `plugins: doc-lifecycle@toolshed@<version>` → the `@version` selector is unsupported;
-  pin via the `#v<version>` ref on `plugin_marketplaces` only.
+  pin via the local checkout of the release tag only.
 - Resetting `.github/doc-sync/installed-version`, or overwriting the marker/audit-scope, during an
   upgrade → upgrade preserves consumer state; only wiring + the pin + the lockfile change.
