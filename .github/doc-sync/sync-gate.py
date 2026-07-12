@@ -8,6 +8,7 @@ decision matrix is unit-testable instead of living in YAML.
 Usage:
     sync-gate.py pre         --commits N --open-prs N --open-issues N
     sync-gate.py post        --report FILE --cap N
+    sync-gate.py stale-state --report FILE --out FILE
     sync-gate.py bloat-pre   --prune-pr-open N --distill-pr-open N
     sync-gate.py bloat-lane  --report FILE --lane {prune|distill} --pr-open N --out FILE
     sync-gate.py bloat-retry --execution-log FILE --turns N
@@ -26,6 +27,12 @@ Prints exactly one decision token on stdout:
                 open           findings await review
 bloat-lane also copies the report's "unswept" gap list into --out so the PR
 body can render the banner from the lane file.
+
+stale-state prints nothing: it derives {"stales": [{file, line, kind}, ...]}
+from the report's STALE records into --out. The workflow commits it beside the
+marker on the PR branch, so the state advances only when the fix lands — the
+next run's pr-body compares against it to tag same-location recurrence
+(a re-staled line after a merged fix is a shape problem, not a fix problem).
 
 bloat-retry is the exception: it classifies a failed sweep attempt from
 claude-code-action's execution-output JSON and prints GITHUB_OUTPUT lines
@@ -63,6 +70,22 @@ def decide_post(records, cap):
     if stale > cap:
         return "blast-radius"
     return "proceed"
+
+
+def stale_state(records):
+    """Location identities of STALE records, for next-run recurrence tagging."""
+    stales = []
+    for r in records:
+        if not (isinstance(r, dict) and r.get("verdict") == "STALE"):
+            continue
+        loc = str(r.get("location", ""))
+        file, _, line = loc.rpartition(":")
+        try:
+            line_no = int(line)
+        except ValueError:
+            file, line_no = loc, 0
+        stales.append({"file": file, "line": line_no, "kind": r.get("kind")})
+    return {"stales": stales}
 
 
 PRUNE_VERDICTS = {"CUT", "CONDENSE", "EXTRACT-AND-MOVE"}
@@ -195,6 +218,10 @@ def main():
     bretry.add_argument("--execution-log", required=True)
     bretry.add_argument("--turns", type=positive, required=True)
 
+    sstate = sub.add_parser("stale-state")
+    sstate.add_argument("--report", required=True)
+    sstate.add_argument("--out", required=True)
+
     args = parser.parse_args()
 
     if args.mode == "bloat-retry":
@@ -210,6 +237,16 @@ def main():
 
     if args.mode == "bloat-pre":
         print(decide_bloat_pre(args.prune_pr_open, args.distill_pr_open))
+        return 0
+
+    if args.mode == "stale-state":
+        try:
+            records = load_records(args.report)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        with open(args.out, "w", encoding="utf-8") as f:
+            json.dump(stale_state(records), f)
         return 0
 
     if args.mode == "bloat-lane":

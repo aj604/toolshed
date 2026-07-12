@@ -142,7 +142,6 @@ jobs:
         if: steps.post.outputs.decision == 'advance-marker'
         run: |
           set -euo pipefail
-          rm -f drift-report.json
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
           echo "${{ steps.facts.outputs.head_sha }}" > .github/doc-sync-marker
@@ -151,16 +150,24 @@ jobs:
           # Branch protection may forbid this push; the marker then rides in the next sync PR.
           # Self-authenticate off GH_TOKEN: claude-code-action drops the checkout-persisted
           # credential from git config, so a bare `git push` goes out unauthenticated.
+          # The report outlives the push: a no-drift run is the only surface where
+          # unwaived UNVERIFIABLE claims are ever seen, so the summary renders from
+          # it (waiver-aware) before it is deleted.
           if git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:${{ github.ref_name }}; then
             python3 .github/doc-sync/render-report.py no-drift-summary \
               --commits "${{ steps.facts.outputs.commits }}" \
-              --head "${{ steps.facts.outputs.head_sha }}"
+              --head "${{ steps.facts.outputs.head_sha }}" \
+              --report drift-report.json \
+              --waivers .github/doc-sync/drift-waivers.json
           else
             python3 .github/doc-sync/render-report.py no-drift-summary \
               --commits "${{ steps.facts.outputs.commits }}" \
               --head "${{ steps.facts.outputs.head_sha }}" \
-              --push-rejected
+              --push-rejected \
+              --report drift-report.json \
+              --waivers .github/doc-sync/drift-waivers.json
           fi
+          rm -f drift-report.json
 
       - name: Open blast-radius issue
         if: steps.post.outputs.decision == 'blast-radius'
@@ -200,13 +207,21 @@ jobs:
             --report "$RUNNER_TEMP/drift-report.json" \
             --marker "${{ steps.facts.outputs.marker }}" \
             --head "${{ steps.facts.outputs.head_sha }}" \
+            --waivers .github/doc-sync/drift-waivers.json \
+            --prev-stales .github/doc-sync/last-stales.json \
             > "$RUNNER_TEMP/pr-body.md"
           TITLE=$(python3 .github/doc-sync/render-report.py pr-title \
-            --report "$RUNNER_TEMP/drift-report.json" --date "${DATE}")
+            --report "$RUNNER_TEMP/drift-report.json" --date "${DATE}" \
+            --waivers .github/doc-sync/drift-waivers.json)
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
           git checkout -b doc-sync/nightly
           echo "${{ steps.facts.outputs.head_sha }}" > .github/doc-sync-marker
+          # Recurrence memory rides the PR: the state advances only when the
+          # fix merges, so next run's pr-body tags re-staled locations.
+          python3 .github/doc-sync/sync-gate.py stale-state \
+            --report "$RUNNER_TEMP/drift-report.json" \
+            --out .github/doc-sync/last-stales.json
           git add -A
           git commit -m "docs: sync with ${{ github.ref_name }} (${DATE})"
           # --force: a closed-unmerged PR can leave a stale branch behind.

@@ -36,7 +36,11 @@ and shipped as the `scheduling-doc-sync` skill, wires detect→fix to cron/PR).
    that the boast overreaches ("handles arbitrarily large inputs" vs. a whole-buffer read):
    put that argument in `evidence`, not in the verdict. `STALE` is reserved for claims with a
    checkable true value to restore — puffery has none, so any replacement line you'd draft is
-   new authorship, and cutting or rewording it is a human/bloat decision, not a sync. Lines
+   new authorship, and cutting or rewording it is a human decision, not a sync. In a
+   scheduled install the human's third option is a durable waiver
+   (`.github/doc-sync/drift-waivers.json`, owned by scheduling-doc-sync): an accepted claim
+   stops resurfacing on run surfaces, while this skill keeps emitting it — detection stays
+   pure; disposition is the pipeline's job. Lines
    already marked `> UNVERIFIED: <claim>` (the marker
    llm-doc-writer writes) are extracted like any claim and default to `UNVERIFIABLE` unless
    the repo now makes them checkable.

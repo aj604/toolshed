@@ -8,11 +8,12 @@ exits are unit-testable instead of living as jq/heredoc templates in YAML.
 
 Usage:
     render-report.py pre-summary --decision D --marker M --head H --commits N --open-prs N --open-issues N
-    render-report.py no-drift-summary --commits N --head H [--push-rejected]
+    render-report.py no-drift-summary --commits N --head H [--push-rejected] [--report FILE] [--waivers FILE]
     render-report.py issue-body --report FILE --cap N --marker M --head H
     render-report.py blast-summary --report FILE --cap N --issue-url URL
-    render-report.py pr-body --report FILE --marker M --head H
-    render-report.py pr-title --report FILE --date YYYY-MM-DD
+    render-report.py pr-body --report FILE --marker M --head H [--waivers FILE] [--prev-stales FILE]
+    render-report.py pr-title --report FILE --date YYYY-MM-DD [--waivers FILE]
+    render-report.py growth-backlog --scope-file docs/doc-scope.md
     render-report.py pr-summary --report FILE --pr-url URL
     render-report.py bloat-pre-summary --decision {detect|skip-pending}
     render-report.py bloat-pr-body --report FILE
@@ -66,6 +67,85 @@ def render_unswept_banner(unswept):
 
 def by_verdict(records, verdict):
     return [r for r in records if isinstance(r, dict) and r.get("verdict") == verdict]
+
+
+def load_waivers(path):
+    """Set of (file, claim) pairs from a drift-waivers file.
+
+    None or a missing file is an empty set — installs seed the file, but its
+    absence must not kill the run surface mid-pipeline. A malformed file is an
+    error: a typo'd waiver silently un-waiving everything would defeat the
+    disposition mechanism.
+    """
+    if not path:
+        return set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return set()
+    if not (isinstance(data, dict) and isinstance(data.get("waivers"), list)):
+        raise ValueError("waivers file must be an object with a 'waivers' array")
+    pairs = set()
+    for w in data["waivers"]:
+        if not (isinstance(w, dict) and "file" in w and "claim" in w):
+            raise ValueError("each waiver needs 'file' and 'claim' fields")
+        pairs.add((w["file"], w["claim"]))
+    return pairs
+
+
+RECUR_WINDOW = 3  # lines a claim may drift between runs and still be "the same spot"
+
+
+def load_prev_stales(path):
+    """Prior run's stale-state entries; None or a missing file is empty (first
+    proceed run, or an install predating recurrence tracking)."""
+    if not path:
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return []
+    if not (isinstance(data, dict) and isinstance(data.get("stales"), list)):
+        raise ValueError("stale-state file must carry a 'stales' array")
+    return [s for s in data["stales"] if isinstance(s, dict)]
+
+
+def is_recurrence(record, prev_stales):
+    """Same file, same kind, within RECUR_WINDOW lines of a prior-run STALE.
+
+    Line-window matching, not claim text: the previous fix rewrote the line,
+    so a re-stale carries new text at nearly the same location.
+    """
+    loc = str(record.get("location", ""))
+    file, _, line = loc.rpartition(":")
+    try:
+        line_no = int(line)
+    except ValueError:
+        return False
+    for s in prev_stales:
+        try:
+            prev_line = int(s.get("line"))
+        except (TypeError, ValueError):
+            continue
+        if (s.get("file") == file and s.get("kind") == record.get("kind")
+                and abs(prev_line - line_no) <= RECUR_WINDOW):
+            return True
+    return False
+
+
+def split_waived(records, waivers):
+    """(unwaived, waived) UNVERIFIABLE records under a (file, claim) waiver set.
+
+    Identity is exact claim text — a reworded claim resurfaces by design; new
+    authorship is a new disposition decision.
+    """
+    unwaived, waived = [], []
+    for r in by_verdict(records, "UNVERIFIABLE"):
+        key = (str(r["location"]).rsplit(":", 1)[0], r["claim"])
+        (waived if key in waivers else unwaived).append(r)
+    return unwaived, waived
 
 
 def load_merge(path):
@@ -152,6 +232,20 @@ def render_no_drift_summary(args):
             f"✅ **No drift.** {args.commits} commit(s) checked, all doc claims still "
             f"hold; marker advanced to `{args.head}`."
         )
+    # The quiet-night surface: UNVERIFIABLE records ride no PR on a no-drift
+    # run, so this summary is the only place a human ever sees them.
+    report = getattr(args, "report", None)
+    if report:
+        records = load_records(report)
+        waivers_path = getattr(args, "waivers", None)
+        unwaived, _ = split_waived(records, load_waivers(waivers_path))
+        if unwaived:
+            hint = waivers_path or ".github/doc-sync/drift-waivers.json"
+            write_summary(
+                f"🔎 **{len(unwaived)} unverifiable claim(s) await disposition** — "
+                f"reword or cut the doc line, or waive it in `{hint}` to accept "
+                f"it permanently."
+            )
 
 
 def render_issue_body(records, cap, marker, head):
@@ -185,7 +279,8 @@ def md_cell(text):
     return str(text).replace("|", "\\|").replace("\n", " ")
 
 
-def render_pr_body(records, marker, head):
+def render_pr_body(records, marker, head, waivers=None, waivers_path=None,
+                   prev_stales=None):
     lines = [
         f"Nightly doc sync over `{marker}..{head}` — merge to advance the marker, "
         "close to re-check next run.",
@@ -193,21 +288,51 @@ def render_pr_body(records, marker, head):
         "| Fixed (see diff) | Why it was stale |",
         "|---|---|",
     ]
+    recurred = 0
     for r in by_verdict(records, "STALE"):
-        lines.append(f"| `{r['location']}` | {md_cell(r['evidence'])} |")
-    unverifiable = by_verdict(records, "UNVERIFIABLE")
+        tag = ""
+        if prev_stales and is_recurrence(r, prev_stales):
+            tag = " ⟳ **recurred**"
+            recurred += 1
+        lines.append(f"| `{r['location']}`{tag} | {md_cell(r['evidence'])} |")
+    if recurred:
+        lines.append("")
+        lines.append(
+            f"⟳ {recurred} location(s) were STALE in the previous sync too — "
+            f"recurring drift at one spot is a shape problem, not a fix problem: "
+            f"consider replacing the snapshot with a pointer to the source "
+            f"(writing-docs), instead of another re-fix.")
+    if waivers is None:
+        unverifiable, waived = by_verdict(records, "UNVERIFIABLE"), []
+    else:
+        unverifiable, waived = split_waived(records, waivers)
     if unverifiable:
         lines.append("")
         lines.append("| Flagged for a human — not edited | Why unverifiable |")
         lines.append("|---|---|")
         for r in unverifiable:
             lines.append(f"| `{r['location']}` | {md_cell(r['evidence'])} |")
+    if waivers is not None:
+        notes = []
+        if unverifiable:
+            notes.append(
+                f"To accept a flagged line permanently, add its `file` + `claim` "
+                f"to `{waivers_path}` — it stops appearing here.")
+        if waived:
+            notes.append(f"{len(waived)} waived claim(s) suppressed "
+                         f"(`{waivers_path}`).")
+        if notes:
+            lines.append("")
+            lines.extend(notes)
     return "\n".join(lines)
 
 
-def render_pr_title(records, date):
+def render_pr_title(records, date, waivers=None):
     stale = len(by_verdict(records, "STALE"))
-    flagged = len(by_verdict(records, "UNVERIFIABLE"))
+    if waivers is None:
+        flagged = len(by_verdict(records, "UNVERIFIABLE"))
+    else:
+        flagged = len(split_waived(records, waivers)[0])
     title = "docs: nightly sync — 1 fix" if stale == 1 else f"docs: nightly sync — {stale} fixes"
     if flagged > 0:
         title += f", {flagged} flagged"
@@ -221,6 +346,48 @@ def render_pr_summary(records, pr_url):
         f"{pr_url}. Merging it advances the marker; closing it unmerged re-checks the "
         f"range next night."
     )
+
+
+def parse_deferred(scope_text):
+    """[(item, [seen lines])] from doc-scope.md's ## Deferred section.
+
+    Tolerant by design: the file is human-edited; a parse miss must degrade to
+    an incomplete list, never a failed run."""
+    items = []
+    in_deferred = False
+    for line in scope_text.splitlines():
+        if line.startswith("## "):
+            in_deferred = line.strip().lower() == "## deferred"
+            continue
+        if not in_deferred:
+            continue
+        stripped = line.strip()
+        if line.startswith("- "):
+            items.append((line[2:].strip(), []))
+        elif stripped.startswith("- seen:") and items:
+            items[-1][1].append(stripped[2:].split("<!--")[0].strip())
+    return items
+
+
+def render_growth_backlog(scope_path):
+    """The weekly grow-loop surface: deferred docs and their fired tallies."""
+    try:
+        with open(scope_path, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return (f"🌱 Growth backlog: no doc-scope.md at `{scope_path}` — "
+                f"bootstrapping-docs/growing-docs write it; nothing recorded yet.")
+    items = parse_deferred(text)
+    if not items:
+        return "🌱 Growth backlog: empty — no deferred docs awaiting a signal."
+    lines = [
+        f"🌱 **Growth backlog: {len(items)} deferred doc(s)** (`{scope_path}`) — "
+        f"deliberate deferrals awaiting their promotion signal:"]
+    for item, seens in items:
+        lines.append(f"- {item}")
+        for s in seens:
+            lines.append(f"  - {s} — **next occurrence promotes** (growing-docs)")
+    return "\n".join(lines)
 
 
 def render_bloat_pre_summary(decision):
@@ -408,6 +575,8 @@ def main():
     nodrift.add_argument("--commits", type=nonneg, required=True)
     nodrift.add_argument("--head", required=True)
     nodrift.add_argument("--push-rejected", action="store_true")
+    nodrift.add_argument("--report", help="drift report; surfaces unwaived UNVERIFIABLE counts")
+    nodrift.add_argument("--waivers", help="drift-waivers.json path")
 
     issue = sub.add_parser("issue-body")
     issue.add_argument("--report", required=True)
@@ -424,10 +593,13 @@ def main():
     prbody.add_argument("--report", required=True)
     prbody.add_argument("--marker", required=True)
     prbody.add_argument("--head", required=True)
+    prbody.add_argument("--waivers", help="drift-waivers.json path")
+    prbody.add_argument("--prev-stales", help="previous run's stale-state file")
 
     prtitle = sub.add_parser("pr-title")
     prtitle.add_argument("--report", required=True)
     prtitle.add_argument("--date", required=True)
+    prtitle.add_argument("--waivers", help="drift-waivers.json path")
 
     prsum = sub.add_parser("pr-summary")
     prsum.add_argument("--report", required=True)
@@ -475,6 +647,9 @@ def main():
     bgaps = sub.add_parser("bloat-unswept-summary")
     bgaps.add_argument("--report", required=True)
 
+    growth = sub.add_parser("growth-backlog")
+    growth.add_argument("--scope-file", required=True)
+
     args = parser.parse_args()
 
     try:
@@ -493,6 +668,8 @@ def main():
             print(render_upgrade_pr_body(args.current, args.latest, args.files))
         elif args.mode == "distill-merge-summary":
             write_summary(render_distill_merge_summary(load_merge(args.merge)))
+        elif args.mode == "growth-backlog":
+            write_summary(render_growth_backlog(args.scope_file))
         else:
             records, unswept = load_report(args.report)
             if args.mode == "issue-body":
@@ -500,9 +677,13 @@ def main():
             elif args.mode == "blast-summary":
                 write_summary(render_blast_summary(records, args.cap, args.issue_url))
             elif args.mode == "pr-body":
-                print(render_pr_body(records, args.marker, args.head))
+                waivers = load_waivers(args.waivers) if args.waivers else None
+                print(render_pr_body(records, args.marker, args.head,
+                                     waivers, args.waivers,
+                                     load_prev_stales(args.prev_stales)))
             elif args.mode == "pr-title":
-                print(render_pr_title(records, args.date))
+                waivers = load_waivers(args.waivers) if args.waivers else None
+                print(render_pr_title(records, args.date, waivers))
             elif args.mode == "pr-summary":
                 write_summary(render_pr_summary(records, args.pr_url))
             elif args.mode == "bloat-pr-body":

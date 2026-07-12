@@ -1,5 +1,50 @@
 # Decisions
 
+## 2026-07-12 — grow-loop sensors + unowned-bucket owners (review findings 1,3,4,6)
+- Evidence: 2026-07-12 architecture review — the shrink loops (drift, bloat) have sensors,
+  gates, and cadence; the grow loop had only an in-session rule, and the buckets automation
+  can't settle (UNVERIFIABLE puffery, recurring re-stales) had no disposition owner. Six
+  findings verified against the repo; this release lands four (F1a, F6, F3, F4, F1b). F5
+  (monthly full-audit drift lane) and F2 (narrative-doc claims in that audit) are deferred as
+  a follow-up — the full-audit lane is the heavy piece and rides its own release.
+- Decided (F1a first-rediscovery tally): the first-time answer exemption in `growing-docs`
+  now costs one logged `- seen: <date> <occurrence>` line under the matching `docs/doc-scope.md`
+  Deferred item; a live signal matching an item that already carries a `seen:` line **is** the
+  second rediscovery. The log — not the conversation — is the cross-session memory the
+  second-rediscovery rule needs.
+- Decided (F6 direct narrative ask): `growing-docs` description now claims the direct
+  "write an ADR/tutorial/walkthrough" ask (it owns the narrative template; writing-docs scopes
+  those out), closing the routing gap on the door to the rich half of the ecosystem.
+- Decided (F3 UNVERIFIABLE waiver): the detector stays pure (emits every UNVERIFIABLE);
+  disposition is a run-surface concern. New consumer file `.github/doc-sync/drift-waivers.json`
+  (`{file, claim}` exact-match identity — reworded → resurfaces, new authorship is a new
+  decision) consumed by `render-report.py` pr-body/pr-title/no-drift-summary. A no-drift night
+  now surfaces "N unverifiable claim(s) await disposition" (the previously-never-seen bucket).
+  Seeded by the installer and by `apply-upgrade.py` (only-if-absent, never touched thereafter —
+  audit-scope precedent). `detecting-doc-drift`'s dangling "human/bloat decision" handoff now
+  cites the waiver flow instead of a bloat lens that never existed.
+- Decided (F4 recurrence): `sync-gate.py stale-state` writes one run of STALE locations onto
+  the PR branch (`.github/doc-sync/last-stales.json`) so it advances only when the fix merges;
+  next run's `pr-body --prev-stales` tags a same-location re-stale (±3 lines, same kind) with a
+  re-shape-don't-re-fix hint. The loop becomes adaptive without records carrying history.
+- Decided (F1b growth surface): `render-report.py growth-backlog` renders `docs/doc-scope.md`
+  Deferred items + `seen:` tallies on every weekly doc-bloat run (skip paths included), so the
+  grow backlog is seen on the same cadence as the prune backlog. Tolerant parser: a missing
+  file or empty section degrades to one quiet line, never a failed run.
+- Still binds: detection is never disposition (drift emits, the pipeline waives); consumer
+  state (`audit-scope.json`, `drift-waivers.json`, marker, `last-stales.json`) is never reset
+  by an upgrade; the growing-docs STOP list and one-smallest-artifact rule bind the tally path.
+- Code: plugins/doc-lifecycle/skills/growing-docs/SKILL.md,
+  plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md,
+  scheduling-doc-sync `scripts/{render-report,sync-gate,apply-upgrade}.py`,
+  scheduling-doc-sync `doc-sync.yml`/`doc-bloat.yml`, the dogfooded `.github/` mirror, and
+  `.github/doc-sync/drift-waivers.json`.
+- Guarded by `tests/scripts/{render-report,sync-gate,apply-upgrade}_test.py`; growing-docs
+  skill text re-GREENed in `skill-workspaces/` iteration-3 (with-skill 22/22 vs prior 21/22).
+- Source: docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md (retained —
+  F5/F2 sections describe the deferred follow-up).
+
 ## 2026-07-09 — doc-bloat distill lane fan-out (apply-side scale)
 - Evidence: career-compass run 28912881170 (2026-07-08) — the hardened sweep matrix (35 chunks)
   finished in ~9 minutes, but the distill lane took 250 of the run's 260 minutes: one uncapped
