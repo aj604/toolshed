@@ -163,9 +163,10 @@ class RenderReportTest(unittest.TestCase):
         r = self.run_script("pr-body", "--report", report,
                             "--marker", "abc123", "--head", "def456")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("`abc123..def456` — merge to advance the marker", r.stdout)
-        self.assertIn("| Fixed (see diff) | Why it was stale |", r.stdout)
-        self.assertIn("| `README.md:5` | Makefile has `test:` |", r.stdout)
+        self.assertIn("`abc123..def456`", r.stdout)
+        self.assertIn("advance the marker", r.stdout)
+        self.assertIn("### ✅ Fixed — 1 stale claim(s)", r.stdout)
+        self.assertIn("- **`README.md:5`** — Makefile has `test:`", r.stdout)
         self.assertNotIn("Flagged for a human", r.stdout)
 
     def test_pr_body_includes_unverifiable_table_when_present(self):
@@ -177,8 +178,9 @@ class RenderReportTest(unittest.TestCase):
         r = self.run_script("pr-body", "--report", report,
                             "--marker", "abc123", "--head", "def456")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("| Flagged for a human — not edited | Why unverifiable |", r.stdout)
-        self.assertIn("| `docs/run.md:3` | no timing source |", r.stdout)
+        self.assertIn("### 🔍 Flagged for a human — 1 unverifiable claim(s), not edited",
+                      r.stdout)
+        self.assertIn("- **`docs/run.md:3`** — no timing source", r.stdout)
 
     def test_pr_body_escapes_pipes_and_flattens_newlines_in_evidence(self):
         report = self.write_report([
@@ -187,7 +189,7 @@ class RenderReportTest(unittest.TestCase):
         r = self.run_script("pr-body", "--report", report,
                             "--marker", "abc123", "--head", "def456")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("| pipe \\| in evidence |", r.stdout)
+        self.assertIn("- **`README.md:5`** — pipe \\| in evidence", r.stdout)
 
     def test_pr_title_singular_plural_and_flagged(self):
         one = self.write_report([rec()])
@@ -375,9 +377,9 @@ class BloatRender(unittest.TestCase):
         out = run(sys.executable, SCRIPT, "bloat-pr-body", "--report", report)
         os.unlink(report)
         self.assertEqual(out.returncode, 0)
-        self.assertIn("`CUT` @ `README.md:5`", out.stdout)
+        self.assertIn("- `CUT` @ `README.md:5` — seven lines carry one fact", out.stdout)
         self.assertIn("`CONDENSE` @ `README.md:22`", out.stdout)
-        self.assertIn("| Change (see diff) | Why it's bloat |", out.stdout)
+        self.assertIn("### ✂️ Proposed changes — 2 record(s)", out.stdout)
 
     def test_pr_body_uses_doc_when_location_null(self):
         report = write_report([brec("RETIRE-DOC", doc="docs/plans/old.md")])
@@ -661,7 +663,7 @@ class RecurrenceRender(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("recurred", r.stdout)
         self.assertLess(r.stdout.index("README.md:5"), r.stdout.index("recurred"))
-        self.assertNotIn("docs/ops.md:40` | ⟳", r.stdout)
+        self.assertNotIn("docs/ops.md:40`** ⟳", r.stdout)
         self.assertIn("shape problem", r.stdout)
         self.assertIn("pointer", r.stdout)
 
