@@ -164,7 +164,7 @@ class RenderReportTest(unittest.TestCase):
                             "--marker", "abc123", "--head", "def456")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("`abc123..def456`", r.stdout)
-        self.assertIn("advance the sync marker", r.stdout)
+        self.assertIn("advance the marker", r.stdout)
         self.assertIn("### ✅ Fixed — 1 stale claim(s)", r.stdout)
         self.assertIn("- **`README.md:5`** — Makefile has `test:`", r.stdout)
         self.assertNotIn("Flagged for a human", r.stdout)
@@ -178,7 +178,8 @@ class RenderReportTest(unittest.TestCase):
         r = self.run_script("pr-body", "--report", report,
                             "--marker", "abc123", "--head", "def456")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("### 🔍 Flagged for a human — 1 unverifiable claim(s)", r.stdout)
+        self.assertIn("### 🔍 Flagged for a human — 1 unverifiable claim(s), not edited",
+                      r.stdout)
         self.assertIn("- **`docs/run.md:3`** — no timing source", r.stdout)
 
     def test_pr_body_escapes_pipes_and_flattens_newlines_in_evidence(self):

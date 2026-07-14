@@ -287,13 +287,10 @@ def render_pr_body(records, marker, head, waivers=None, waivers_path=None,
     # scan the fixed / flagged split at a glance.
     stale = by_verdict(records, "STALE")
     lines = [
-        f"Nightly doc sync — `{marker}..{head}`.",
-        "",
-        "Merge to advance the sync marker; close to re-check this range next run.",
+        f"Nightly doc sync — `{marker}..{head}`. Merge to advance the marker; "
+        "close to re-check next run.",
         "",
         f"### ✅ Fixed — {len(stale)} stale claim(s)",
-        "",
-        "Each line below contradicted the code and is corrected in the diff:",
         "",
     ]
     recurred = 0
@@ -306,10 +303,9 @@ def render_pr_body(records, marker, head, waivers=None, waivers_path=None,
     if recurred:
         lines.append("")
         lines.append(
-            f"> ⟳ {recurred} location(s) were STALE in the previous sync too. "
-            f"Recurring drift at one spot is a shape problem, not a fix problem — "
-            f"consider replacing the snapshot with a pointer to the source "
-            f"(writing-docs) instead of another re-fix.")
+            f"> ⟳ {recurred} location(s) were STALE last sync too — recurring drift "
+            f"is a shape problem, not a fix problem: replace the snapshot with a "
+            f"pointer to the source (writing-docs).")
     if waivers is None:
         unverifiable, waived = by_verdict(records, "UNVERIFIABLE"), []
     else:
@@ -317,9 +313,8 @@ def render_pr_body(records, marker, head, waivers=None, waivers_path=None,
     if unverifiable:
         lines.append("")
         lines.append(
-            f"### 🔍 Flagged for a human — {len(unverifiable)} unverifiable claim(s)")
-        lines.append("")
-        lines.append("Not edited — the sweep couldn't verify these against the repo:")
+            f"### 🔍 Flagged for a human — {len(unverifiable)} "
+            f"unverifiable claim(s), not edited")
         lines.append("")
         for r in unverifiable:
             lines.append(f"- **`{r['location']}`** — {md_cell(r['evidence'])}")
@@ -327,8 +322,8 @@ def render_pr_body(records, marker, head, waivers=None, waivers_path=None,
         notes = []
         if unverifiable:
             notes.append(
-                f"_To accept a flagged line permanently, add its `file` + `claim` "
-                f"to `{waivers_path}` — it stops appearing here._")
+                f"_Accept a flagged line for good: add its `file` + `claim` "
+                f"to `{waivers_path}`._")
         if waived:
             notes.append(f"_{len(waived)} waived claim(s) suppressed "
                          f"(`{waivers_path}`)._")
@@ -452,8 +447,6 @@ def render_bloat_pr_body(records, unswept=None, merge=None):
         render_bloat_rollup(records),
         "",
         f"### ✂️ Proposed changes — {len(records)} record(s)",
-        "",
-        "Each entry is one edit in the diff below:",
         "",
     ]
     for r in records:
