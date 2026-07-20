@@ -1,3 +1,5 @@
+> **Repository structure:** `toolshed` is the Claude Code marketplace; [`doc-lifecycle`](plugins/doc-lifecycle/) is the plugin it currently publishes. The repository and install commands use the marketplace name.
+
 <p align="center">
   <img src="assets/social-card.png" alt="doc-lifecycle — Reference docs as checkable claims." width="720">
 </p>
