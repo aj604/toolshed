@@ -8,6 +8,8 @@ which reports problems and *no* partial output. The full five-state result model
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from . import ARTIFACT_SCHEMA_VERSION
+
 STATUS_OK = "ok"
 STATUS_INVALID = "invalid"
 
@@ -27,11 +29,9 @@ class Invalid:
     status: str = STATUS_INVALID
 
     def to_dict(self):
-        from . import SCHEMA_VERSION
-
         return {
             "status": self.status,
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
             "problems": [
                 {"code": p.code, "message": p.message, "location": p.location}
                 for p in self.problems

@@ -4,13 +4,12 @@ import os
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from . import SCHEMA_VERSION
+from . import ARTIFACT_SCHEMA_VERSION
 from . import registry as registry_mod
 from .digest import sha256_canonical, sha256_file
 from .results import STATUS_OK, Invalid, Problem
 
 DEFAULT_REGISTRY_PATH = ".doc-lifecycle/registry.json"
-DOCUMENT_EXTENSIONS = (".md",)
 
 
 @dataclass(frozen=True)
@@ -42,7 +41,7 @@ class Inventory:
         """The wire form. Both the library and the CLI hand back exactly this."""
         return {
             "status": self.status,
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
             "registry": {"path": self.registry_path, "digest": self.registry_digest},
             "digest": self.digest,
             "documents": _document_payload(self.documents),
@@ -66,41 +65,44 @@ def _document_payload(documents):
     ]
 
 
-def _walk_root(repo_root, root):
+def _walk_root(repo_root, root, registry):
     """Yield (repo-relative path, is_symlink) under `root`, in sorted order.
 
-    A root may be a single file (`CLAUDE.md`) or a subtree (`docs`). Only
-    `DOCUMENT_EXTENSIONS` files are documents; other files under a root are not
-    documentation and so are not subject to the closed-world rule.
+    A root may be a single file (`CLAUDE.md`) or a subtree (`docs`). Only files
+    with a registry-declared extension are documents; other files under a root
+    are not documentation, and so are not subject to the closed-world rule.
 
-    Symlinks are yielded but never followed: a symlinked directory is reported
-    and pruned rather than walked, so an innocuous-looking documentation path
-    cannot pull in a subtree from outside its root.
+    Excluded paths are pruned, not filtered, so an excluded subtree is never
+    walked. Symlinks are yielded but never followed: a symlinked directory is
+    reported and pruned rather than descended, so an innocuous-looking
+    documentation path cannot pull in a subtree from outside its root.
     """
     absolute = os.path.join(repo_root, root)
     if os.path.islink(absolute):
         yield root, True
         return
     if os.path.isfile(absolute):
-        if absolute.endswith(DOCUMENT_EXTENSIONS):
+        if registry.is_document(root):
             yield root, False
         return
     for dirpath, dirnames, filenames in os.walk(absolute):
         kept = []
         for name in sorted(dirnames):
-            if name == ".git":
-                continue
             path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, repo_root)
+            if name == ".git" or registry.excludes(rel):
+                continue
             if os.path.islink(path):
-                yield os.path.relpath(path, repo_root), True
+                yield rel, True
             else:
                 kept.append(name)
         dirnames[:] = kept
         for name in sorted(filenames):
-            if not name.endswith(DOCUMENT_EXTENSIONS):
-                continue
             path = os.path.join(dirpath, name)
-            yield os.path.relpath(path, repo_root), os.path.islink(path)
+            rel = os.path.relpath(path, repo_root)
+            if not registry.is_document(rel) or registry.excludes(rel):
+                continue
+            yield rel, os.path.islink(path)
 
 
 def build_inventory(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
@@ -145,9 +147,7 @@ def build_inventory(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
 
     documents, findings = [], []
     for root in reg.roots:
-        for rel, is_symlink in _walk_root(repo_root, root):
-            if registry_mod.matches_any(reg.exclude, rel):
-                continue
+        for rel, is_symlink in _walk_root(repo_root, root, reg):
             if is_symlink:
                 findings.append(Finding(
                     code="symlinked-path",
@@ -159,7 +159,7 @@ def build_inventory(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
                     ),
                 ))
                 continue
-            rule = registry_mod.classify(reg, rel)
+            rule = reg.classify(rel)
             if rule is None:
                 # Closed world: a document under a declared root that no rule
                 # claims is a finding, never a silent skip.

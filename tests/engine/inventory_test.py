@@ -11,18 +11,11 @@ Run: python3 tests/engine/inventory_test.py
 import json
 import os
 import sys
-import tempfile
 import unittest
 
-sys.path.insert(
-    0,
-    os.path.abspath(
-        os.path.join(
-            os.path.dirname(__file__), "..", "..",
-            "plugins", "doc-lifecycle", "engine",
-        )
-    ),
-)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from support import RepoTestCase  # noqa: E402  (also puts the engine on sys.path)
 
 from doclifecycle.inventory import build_inventory  # noqa: E402
 
@@ -33,20 +26,7 @@ def registry(**overrides):
     return json.dumps(reg)
 
 
-class InventoryTestCase(unittest.TestCase):
-    def repo(self, files):
-        """Materialize {relpath: contents} in a temp dir; return its path."""
-        root = tempfile.mkdtemp()
-        self.addCleanup(__import__("shutil").rmtree, root, ignore_errors=True)
-        for rel, contents in files.items():
-            path = os.path.join(root, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(contents)
-        return root
-
-
-class Classification(InventoryTestCase):
+class Classification(RepoTestCase):
     def test_registered_document_carries_kind_and_no_set(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": registry(
@@ -64,7 +44,7 @@ class Classification(InventoryTestCase):
         )
 
 
-class Precedence(InventoryTestCase):
+class Precedence(RepoTestCase):
     def test_last_matching_rule_wins(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": registry(
@@ -124,7 +104,7 @@ class Precedence(InventoryTestCase):
         self.assertEqual(result.documents[0].rule, "docs/plans/*.md")
 
 
-class ClosedWorld(InventoryTestCase):
+class ClosedWorld(RepoTestCase):
     def test_unregistered_document_under_a_root_is_a_finding(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": registry(
@@ -158,7 +138,7 @@ class ClosedWorld(InventoryTestCase):
         self.assertEqual(result.findings, ())
 
 
-class InvalidRegistry(InventoryTestCase):
+class InvalidRegistry(RepoTestCase):
     def test_unparseable_registry_invalidates_the_whole_run(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": "{ not json",
@@ -303,7 +283,7 @@ REJECTED_REGISTRIES = [
 ]
 
 
-class RegistryValidation(InventoryTestCase):
+class RegistryValidation(RepoTestCase):
     def test_every_rejected_registry_yields_its_typed_problem(self):
         for name, body, code in REJECTED_REGISTRIES:
             with self.subTest(name):
@@ -354,7 +334,7 @@ class RegistryValidation(InventoryTestCase):
         self.assertIn("migrat", message.lower())
 
 
-class DeclaredRoots(InventoryTestCase):
+class DeclaredRoots(RepoTestCase):
     def test_declared_root_that_does_not_exist_invalidates_the_run(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": registry(
@@ -402,7 +382,7 @@ class DeclaredRoots(InventoryTestCase):
         self.assertEqual(result.findings, ())
 
 
-class Symlinks(InventoryTestCase):
+class Symlinks(RepoTestCase):
     """Inventory refuses symlinks outright; #67's path authorization owns the
     general rule. A symlink is reported, never followed and never inventoried."""
 
@@ -446,7 +426,168 @@ class Symlinks(InventoryTestCase):
         )
 
 
-class Digests(InventoryTestCase):
+class OverlappingRoots(RepoTestCase):
+    """A document must appear once. Overlapping roots would otherwise list it
+    twice and make the inventory digest depend on how roots were spelled."""
+
+    def test_nested_root_is_rejected(self):
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": registry(
+                roots=["docs", "docs/adr"],
+                rules=[{"glob": "docs/**/*.md", "kind": "living"}],
+            ),
+            "docs/adr/0001-use-json.md": "# ADR 1\n",
+        })
+
+        result = build_inventory(repo)
+
+        self.assertEqual(result.status, "invalid")
+        self.assertEqual(
+            [p.code for p in result.problems], ["registry-overlapping-root"]
+        )
+        self.assertIn("docs/adr", result.problems[0].message)
+
+    def test_root_spelled_twice_is_rejected(self):
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": registry(
+                roots=["docs", "docs/"],
+                rules=[{"glob": "docs/**/*.md", "kind": "living"}],
+            ),
+            "docs/architecture.md": "# Architecture\n",
+        })
+
+        result = build_inventory(repo)
+
+        self.assertEqual(result.status, "invalid")
+        self.assertEqual(
+            [p.code for p in result.problems], ["registry-overlapping-root"]
+        )
+
+    def test_sibling_roots_are_fine(self):
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": registry(
+                roots=["docs", "handbook"],
+                rules=[{"glob": "**/*.md", "kind": "living"}],
+            ),
+            "docs/architecture.md": "# Architecture\n",
+            "handbook/onboarding.md": "# Onboarding\n",
+        })
+
+        result = build_inventory(repo)
+
+        self.assertEqual(
+            [d.path for d in result.documents],
+            ["docs/architecture.md", "handbook/onboarding.md"],
+        )
+
+
+class Exclusions(RepoTestCase):
+    def test_naming_a_directory_excludes_its_subtree(self):
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": registry(
+                exclude=["docs/vendor"],
+                rules=[{"glob": "docs/*.md", "kind": "living"}],
+            ),
+            "docs/architecture.md": "# Architecture\n",
+            "docs/vendor/upstream.md": "# Upstream\n",
+            "docs/vendor/deep/nested.md": "# Nested\n",
+        })
+
+        result = build_inventory(repo)
+
+        self.assertEqual([d.path for d in result.documents], ["docs/architecture.md"])
+        self.assertEqual(result.findings, ())
+
+    def test_excluded_subtree_is_not_walked(self):
+        # An excluded subtree is pruned, so hostile content inside it — here a
+        # symlink that would otherwise be reported — is never even looked at.
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": registry(
+                exclude=["docs/vendor"],
+                rules=[{"glob": "docs/*.md", "kind": "living"}],
+            ),
+            "docs/architecture.md": "# Architecture\n",
+            "docs/vendor/upstream.md": "# Upstream\n",
+        })
+        os.symlink("/etc", os.path.join(repo, "docs", "vendor", "alias"))
+
+        result = build_inventory(repo)
+
+        self.assertEqual(result.findings, ())
+
+
+class DocumentExtensions(RepoTestCase):
+    def test_only_markdown_counts_by_default(self):
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": registry(
+                rules=[{"glob": "docs/**", "kind": "living"}],
+            ),
+            "docs/architecture.md": "# Architecture\n",
+            "docs/diagram.png": "not really a png\n",
+        })
+
+        result = build_inventory(repo)
+
+        self.assertEqual([d.path for d in result.documents], ["docs/architecture.md"])
+        self.assertEqual(result.findings, ())
+
+    def test_declared_extensions_widen_what_counts_as_a_document(self):
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": registry(
+                extensions=[".md", ".rst"],
+                rules=[
+                    {"glob": "docs/**/*.md", "kind": "living"},
+                    {"glob": "docs/**/*.rst", "kind": "living"},
+                ],
+            ),
+            "docs/architecture.md": "# Architecture\n",
+            "docs/guide.rst": "Guide\n=====\n",
+        })
+
+        result = build_inventory(repo)
+
+        self.assertEqual(
+            [d.path for d in result.documents],
+            ["docs/architecture.md", "docs/guide.rst"],
+        )
+
+    def test_declared_extension_is_subject_to_the_closed_world_rule(self):
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": registry(
+                extensions=[".md", ".rst"],
+                rules=[{"glob": "docs/**/*.md", "kind": "living"}],
+            ),
+            "docs/architecture.md": "# Architecture\n",
+            "docs/guide.rst": "Guide\n=====\n",
+        })
+
+        result = build_inventory(repo)
+
+        self.assertEqual(
+            [(f.code, f.path) for f in result.findings],
+            [("unregistered-document", "docs/guide.rst")],
+        )
+
+    def test_extensions_must_be_dotted_suffixes(self):
+        for value in (["md"], [".md", 1], ".md", []):
+            with self.subTest(value):
+                repo = self.repo({
+                    ".doc-lifecycle/registry.json": registry(
+                        extensions=value,
+                        rules=[{"glob": "docs/**/*.md", "kind": "living"}],
+                    ),
+                    "docs/architecture.md": "# Architecture\n",
+                })
+
+                result = build_inventory(repo)
+
+                self.assertEqual(result.status, "invalid")
+                self.assertIn(
+                    "registry-invalid-extensions", [p.code for p in result.problems]
+                )
+
+
+class Digests(RepoTestCase):
     # `printf '# Architecture\n' | shasum -a 256` — an independent literal, not
     # a value recomputed the way the engine computes it.
     ARCHITECTURE_DIGEST = (

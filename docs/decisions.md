@@ -1,5 +1,41 @@
 # Decisions
 
+## 2026-07-26 — engine package + registry-driven closed-world inventory (#57 stage 1, #60)
+- Evidence: issue #57's distilled-decisions comment (2026-07-26) commits to "one stdlib-only
+  Python package … thin `python3 -m` CLI entrypoints wrap library functions, so library and
+  command behavior cannot diverge", with classification living in a registry rather than in
+  first-line markers. #60 is its first slice; the eight helper scripts are absorbed in later
+  stages, not now.
+- Decided (registry location): `.doc-lifecycle/registry.json`, a tool-owned dotdir at the
+  consumer's repo root rather than a file per concern scattered across `docs/` and
+  `.github/doc-sync/`. Later consumer state (waivers, markers, lockfile) moves under the same
+  dir as its ticket lands.
+- Decided (classification precedence): rule order, **last match wins** — the .gitignore mental
+  model. Glob specificity is deliberately not consulted: order is visible in the file,
+  specificity is not, so precedence stays reviewable in a diff.
+- Decided (closed world's boundary): `roots` may not overlap or repeat, so a document belongs
+  to exactly one root and cannot be inventoried twice; `extensions` (default `[".md"]`)
+  declares what counts as a document, so coverage language can name exactly what it covered
+  instead of hiding non-markdown docs; naming a directory in `exclude` excludes its subtree
+  (a bare-directory no-op would be a silent coverage hole).
+- Decided (identity): digests are taken over canonical JSON of *meaning*, not file bytes —
+  reformatting a registry must not invalidate a report, while changing a rule must. Rule order
+  is part of the registry digest; root/exclude/set/extension order is normalized away.
+- Decided (failure shape): an unreadable, unparseable, or invalid registry — including a
+  declared root that does not exist — returns a typed `Invalid` carrying every problem found
+  in one pass, with no `documents` field at all. A partial inventory a reader could mistake for
+  the corpus is worse than a refusal. The five-state result model arrives with the report
+  contract (#62); this slice ships `ok`/`invalid` only.
+- Decided (invocation): a `doc-lifecycle.py` launcher beside the package so a skill can run the
+  engine from a plugin checkout with no PYTHONPATH; it and `python3 -m doclifecycle` both call
+  `cli.main()` and hold no logic.
+- Interim, not a second owner: the registry's path/glob hygiene checks and the walk's refusal to
+  follow symlinks are needed before the path-authorization module (#67) exists, which becomes
+  their single owner when it lands.
+- Code: `plugins/doc-lifecycle/engine/` (package + launcher + `README.md`),
+  `tests/engine/{inventory,cli}_test.py` + `support.py`, `.github/workflows/release.yml`
+  ("Engine tests", discovery-based so a new suite wires itself), `CLAUDE.md`, `CONTEXT.md`.
+
 ## 2026-07-12 — grow-loop sensors + unowned-bucket owners (review findings 1,3,4,6)
 - Evidence: 2026-07-12 architecture review — the shrink loops (drift, bloat) have sensors,
   gates, and cadence; the grow loop had only an in-session rule, and the buckets automation

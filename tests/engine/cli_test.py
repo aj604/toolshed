@@ -11,18 +11,13 @@ Run: python3 tests/engine/cli_test.py
 
 import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 
-ENGINE = os.path.abspath(
-    os.path.join(
-        os.path.dirname(__file__), "..", "..", "plugins", "doc-lifecycle", "engine"
-    )
-)
-sys.path.insert(0, ENGINE)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from support import ENGINE, RepoTestCase  # noqa: E402
 
 from doclifecycle.inventory import build_inventory  # noqa: E402
 
@@ -45,19 +40,7 @@ def run(*argv, cwd=None):
     )
 
 
-class CliTestCase(unittest.TestCase):
-    def repo(self, files):
-        root = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
-        for rel, contents in files.items():
-            path = os.path.join(root, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(contents)
-        return root
-
-
-class InventoryCommand(CliTestCase):
+class InventoryCommand(RepoTestCase):
     def test_payload_is_exactly_the_library_result(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": REGISTRY,
@@ -157,7 +140,41 @@ class InventoryCommand(CliTestCase):
         )
 
 
-class InvalidRuns(CliTestCase):
+class Launcher(RepoTestCase):
+    """A skill or workflow invoking the engine from a plugin checkout has no
+    PYTHONPATH to set: the launcher script beside the package is the entrypoint."""
+
+    SCRIPT = os.path.join(ENGINE, "doc-lifecycle.py")
+
+    def test_runs_without_pythonpath_and_agrees_with_the_library(self):
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/architecture.md": "# Architecture\n",
+        })
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, "inventory", "--repo", repo],
+            capture_output=True, text=True, env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), build_inventory(repo).to_dict())
+
+    def test_reports_an_invalid_run_the_same_way(self):
+        repo = self.repo({".doc-lifecycle/registry.json": "{ not json"})
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, "inventory", "--repo", repo],
+            capture_output=True, text=True, env=env,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("registry-unparseable", result.stderr)
+
+
+class InvalidRuns(RepoTestCase):
     def test_invalid_registry_exits_one_with_typed_problems(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": "{ not json",

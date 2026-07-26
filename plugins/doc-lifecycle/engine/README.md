@@ -1,8 +1,8 @@
 # doc-lifecycle engine
 
 Stdlib-only Python package (`doclifecycle`) behind the plugin's skills and workflows. No
-third-party dependencies. Library functions are the implementation; `python3 -m doclifecycle`
-subcommands wrap them and add nothing, so an import and a command cannot disagree.
+third-party dependencies. Library functions are the implementation; the commands wrap them and
+add nothing, so an import and a command cannot disagree.
 
 Current surface: the registry parser and the document inventory. Report contract, segmenter,
 cache, path authorization, approval sets, and the applier land in later slices of the
@@ -16,7 +16,7 @@ re-architecture (issue #57).
 | `doclifecycle/inventory.py` | `build_inventory()`, the closed-world walk, document/inventory digests |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the `ok`/`invalid` status strings |
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
-| `doclifecycle/cli.py`, `__main__.py` | argv parsing and exit codes only |
+| `doclifecycle/cli.py`, `__main__.py`, `doc-lifecycle.py` | argv parsing and exit codes only |
 
 ## The registry
 
@@ -27,8 +27,9 @@ content-coupled facts (as-of, anchors, lifecycle state) stay in the documents.
 {
   "schema_version": 1,
   "roots": ["docs", "CLAUDE.md"],
-  "exclude": ["docs/vendor/**"],
+  "exclude": ["docs/vendor"],
   "sets": ["adr"],
+  "extensions": [".md"],
   "rules": [
     {"glob": "docs/**/*.md", "kind": "living"},
     {"glob": "docs/adr/*.md", "kind": "narrative", "set": "adr"}
@@ -37,35 +38,47 @@ content-coupled facts (as-of, anchors, lifecycle state) stay in the documents.
 ```
 
 - `roots` (required, non-empty) — declared documentation roots. A root is a subtree or a
-  single file. Classification is closed-world *within* the roots: a `.md` file under a root
-  that no rule claims is an `unregistered-document` finding; a file outside every root is
-  not documentation and is not reported.
+  single file. Roots may not overlap or repeat (`registry-overlapping-root`), so a document
+  belongs to exactly one root. Classification is closed-world *within* the roots: a document
+  under a root that no rule claims is an `unregistered-document` finding; a file outside every
+  root is not documentation and is not reported.
 - `rules` (required) — evaluated in order, **last match wins**, so broad defaults go first
   and narrower overrides after. `kind` is `living`, `narrative`, or `planning`. `set` is
   optional and must be declared in `sets`.
-- `exclude` (optional) — globs skipped entirely: neither inventoried nor reported.
+- `exclude` (optional) — paths skipped entirely, neither inventoried nor reported. Naming a
+  directory excludes everything beneath it, and the subtree is pruned rather than walked.
+- `extensions` (optional, default `[".md"]`) — which files under a root are documents, and so
+  what the closed-world rule covers. Files with other suffixes are not documentation and are
+  not reported; widen this list rather than leaving formats silently outside coverage.
 - Globs: `*` and `?` stop at `/`; `**/` spans zero or more directories, so
   `docs/**/*.md` matches both `docs/a.md` and `docs/deep/a.md`.
-- Documents are files ending in `.md` (`inventory.DOCUMENT_EXTENSIONS`).
 
-Validation fails closed and reports every problem it finds in one pass. An unparseable, unreadable, or
-invalid registry — including a declared root that does not exist — yields
+Validation fails closed and reports every problem it finds in one pass. An unparseable,
+unreadable, or invalid registry — including a declared root that does not exist — yields
 `status: "invalid"` with typed problems and **no** documents: never a partial inventory.
-Symlinks under a root are reported as `symlinked-path` and never followed. (Path
-authorization proper is issue #67.)
+Symlinks under a root are reported as `symlinked-path` and never followed; the general path
+authorization module (issue #67) becomes the single owner of path rules when it lands.
 
 ## Inventory command
 
+From a plugin checkout, with nothing to set up:
+
 ```bash
-python3 -m doclifecycle inventory --repo . --registry .doc-lifecycle/registry.json
+python3 <plugin>/engine/doc-lifecycle.py inventory --repo . --registry .doc-lifecycle/registry.json
+```
+
+Equivalently, with the engine directory on `PYTHONPATH`:
+
+```bash
+python3 -m doclifecycle inventory --repo .
 ```
 
 Both flags are optional (`--repo` defaults to the current directory). Exit codes: `0` the
 run completed — findings are data, not a gate; `1` the run is invalid; `2` usage error.
 
-Output for a repository whose registry declares root `docs` and one rule
-`docs/adr/*.md → narrative, set adr`, containing `docs/adr/0001-use-json.md` and an
-unregistered `docs/notes.md`:
+Real output for a repository containing exactly `.doc-lifecycle/registry.json` (root `docs`,
+one rule `docs/adr/*.md → narrative, set adr`), `docs/adr/0001-use-json.md` holding
+`# 1. Use JSON`, and an unregistered `docs/notes.md` holding `# Notes`:
 
 ```json
 {
@@ -73,9 +86,9 @@ unregistered `docs/notes.md`:
   "schema_version": 1,
   "registry": {
     "path": ".doc-lifecycle/registry.json",
-    "digest": "72c60a3ec06b59e375130060a20cdf03ce6ac2384a8c784e8a60e85197c60607"
+    "digest": "f3188f08325acfcd2522439e2678df48cedc211739046661349e49c96ee3ddb1"
   },
-  "digest": "c507af7946f5eed30bd12f0169481dc337c787540c290a449af9fd641e94bcce",
+  "digest": "6e2d949654d63ba6792a84438718e2d91b21139a90ed00dab5f7c93cb6759b05",
   "documents": [
     {
       "path": "docs/adr/0001-use-json.md",
@@ -95,6 +108,9 @@ unregistered `docs/notes.md`:
 }
 ```
 
+The registry and inventory digests above hold only for that exact registry text's *meaning*
+and those file bytes; reformatting the registry leaves them unchanged.
+
 An invalid run prints the same payload shape with `"status": "invalid"` and a `problems`
 array, repeats each problem on stderr, and exits 1.
 
@@ -104,15 +120,15 @@ The library call behind it:
 from doclifecycle.inventory import build_inventory
 
 result = build_inventory(".")          # → Inventory (status "ok") or Invalid
-result.to_dict()                        # → the payload above, as a dict
+result.to_dict()                       # → the payload above, as a dict
 ```
 
 ## Digests
 
 `digest.sha256_canonical` hashes the canonical JSON form (sorted keys, compact separators),
-so reformatting a registry is not a new registry while changing a rule is. Rule order is
-part of the registry digest because it decides precedence; root, exclude, and set order is
-normalized away. A document's digest is the sha256 of its bytes. The inventory digest covers
+so reformatting a registry is not a new registry while changing a rule is. Rule order is part
+of the registry digest because it decides precedence; root, exclude, set, and extension order
+is normalized away. A document's digest is the sha256 of its bytes. The inventory digest covers
 the registry digest, every document entry, and each finding's code and path — not finding
 messages, which are prose.
 
@@ -125,5 +141,6 @@ CI runs them (`.github/workflows/release.yml`, "Engine tests"):
 python3 -m unittest discover -s tests/engine -p '*_test.py'
 ```
 
-Seams under test: `build_inventory()` as a library call, and `python3 -m doclifecycle
-inventory` as a subprocess whose payload must equal `build_inventory(...).to_dict()`.
+Seams under test: `build_inventory()` as a library call, and the commands as subprocesses
+whose payload must equal `build_inventory(...).to_dict()`. Shared fixtures live in
+`tests/engine/support.py`.

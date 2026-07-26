@@ -5,4 +5,7 @@ entrypoints are thin wrappers over them, so a command and an import cannot
 disagree.
 """
 
-SCHEMA_VERSION = 1
+# The version of the artifacts this engine emits (inventory payloads today;
+# reports, approval sets, and edit plans later). Distinct from
+# `registry.SCHEMA_VERSION`, which versions the registry file a consumer writes.
+ARTIFACT_SCHEMA_VERSION = 1
