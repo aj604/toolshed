@@ -88,3 +88,17 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
   refuse to start without it (`tests/fixtures/taskflow/Makefile:7`, comment). `make test`
   (`node --test packages/*/test/`) does not need migrate; only `@taskflow/shared` has tests
   (`Makefile:21`, comment).
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+This repo uses the five default canonical triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repo uses a single-context domain-doc layout. See `docs/agents/domain.md`.
