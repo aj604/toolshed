@@ -4,8 +4,8 @@ Stdlib-only Python package (`doclifecycle`) behind the plugin's skills and workf
 third-party dependencies. Library functions are the implementation; the commands wrap them and
 add nothing, so an import and a command cannot disagree.
 
-Current surface: the registry parser and the document inventory. Report contract, segmenter,
-cache, path authorization, approval sets, and the applier land in later slices of the
+Current surface: the registry parser, the document inventory, and path authorization. Report
+contract, segmenter, cache, approval sets, and the applier land in later slices of the
 re-architecture (issue #57).
 
 ## Modules
@@ -14,6 +14,7 @@ re-architecture (issue #57).
 |---|---|
 | `doclifecycle/registry.py` | registry parsing, validation, classification, glob matching, registry digest |
 | `doclifecycle/inventory.py` | `build_inventory()`, the closed-world walk, document/inventory digests |
+| `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, the canonical path form and target classes |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the `ok`/`invalid` status strings |
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
 | `doclifecycle/cli.py`, `__main__.py`, `doc-lifecycle.py` | argv parsing and exit codes only |
@@ -56,8 +57,9 @@ content-coupled facts (as-of, anchors, lifecycle state) stay in the documents.
 Validation fails closed and reports every problem it finds in one pass. An unparseable,
 unreadable, or invalid registry — including a declared root that does not exist — yields
 `status: "invalid"` with typed problems and **no** documents: never a partial inventory.
-Symlinks under a root are reported as `symlinked-path` and never followed; the general path
-authorization module (issue #67) becomes the single owner of path rules when it lands.
+Symlinks under a root are reported as `symlinked-path` and never followed. The inventory walk
+enumerates; `paths.authorize_path()` below decides what may be read or written, and the applier
+slice (issue #69) is what routes through it.
 
 ## Inventory command
 
@@ -123,6 +125,71 @@ result = build_inventory(".")          # → Inventory (status "ok") or Invalid
 result.to_dict()                       # → the payload above, as a dict
 ```
 
+## Path authorization
+
+`doclifecycle/paths.py` is the single owner of path safety: everything that reads or writes on
+behalf of a record asks it first.
+
+For a repository where `docs/architecture.md` exists as a regular non-symlinked file:
+
+```python
+from doclifecycle.paths import authorize_path
+
+decision = authorize_path("docs/architecture.md", repo_root=".", roots=("docs",))
+decision.authorized      # True
+decision.path            # "docs/architecture.md" — the canonical form, or None when refused
+decision.root            # "docs" — the declared root containing it, or None
+decision.target_class    # "documentation"; on a class refusal, the class detected instead
+decision.problem         # None, or a results.Problem with a typed code
+```
+
+`roots` are repository-relative, each a subtree or a single file. `target_class` defaults to
+`"documentation"` and is the only value `DECLARABLE_TARGET_CLASSES` accepts — the dangerous
+classes are not a default a record, a plan, or a consumer config can switch off. A verdict is a
+function of the path, the roots, the target class, and the state of `repo_root` on disk; the same
+inputs always give the same `Authorization`.
+
+Refusal, not repair: `docs//a.md` is refused rather than rewritten to `docs/a.md`, so one file
+never has two authorizable spellings. There is no partial verdict — a refusal carries no path.
+
+Checks run in this order, and the first one that fires is the verdict: path spelling, the
+declared roots' own spelling, whether the target class may be declared, root containment, what
+the path is on disk, then its class.
+
+| Code | Refused because |
+|---|---|
+| `path-empty` | empty or blank |
+| `path-control-character` | a Unicode `Cc`/`Cf`/`Cs`/`Co`/`Cn` character, including invisible reordering ones |
+| `path-absolute` | leading `/` or `~`, or a drive letter |
+| `path-separator` | `\` used as a separator |
+| `path-whitespace` | any whitespace, leading, trailing, or interior |
+| `path-unicode-non-canonical` | not in Unicode NFC form |
+| `path-traversal` | a `..` component |
+| `path-non-canonical` | a `.` or empty component — `./`, `//`, or a trailing `/` |
+| `path-leading-dash` | a component starting with `-`, which reads as an option |
+| `roots-undeclared` | no roots were declared, so nothing is eligible |
+| `roots-invalid` | a declared root is not itself canonically spelled |
+| `path-outside-root` | canonical, but under none of the declared roots |
+| `repo-root-missing` | `repo_root` is not a directory |
+| `symlinked-path` | the path or one of its ancestors is a symlink |
+| `path-case-mismatch` | an existing entry differs only by case |
+| `path-unicode-collision` | an existing entry differs only by Unicode normalization |
+| `path-not-a-file` | it is a directory, or an ancestor is a file |
+| `path-executable-mode` | the file is marked executable |
+| `path-forbidden-class` | its class is not the declared target class |
+| `target-class-undeclarable` | the caller named a class the engine never writes |
+
+`classify_target(path)` is the pure classifier behind the last row, returning `documentation`,
+`workflow`, `source`, `configuration`, `credential`, `hook`, `executable`, or `other`. It is
+ordered most-dangerous-first, and matches directory prefixes at a component boundary anywhere in
+the path — so `docs/.github/workflows/ci.yml` is `workflow`, not documentation, and living under
+a documentation root launders nothing. `other` is the fallback rather than `documentation`:
+eligibility is a positive list, so an unrecognized shape is refused too.
+
+A path that does not exist yet is authorizable — `create-document` must be able to name its
+target before anything is written there. Ancestors that do exist are still checked, so a new
+file cannot be created behind an alias or under a case-folded twin of an existing directory.
+
 ## Digests
 
 `digest.sha256_canonical` hashes the canonical JSON form (sorted keys, compact separators),
@@ -141,6 +208,7 @@ CI runs them (`.github/workflows/release.yml`, "Engine tests"):
 python3 -m unittest discover -s tests/engine -p '*_test.py'
 ```
 
-Seams under test: `build_inventory()` as a library call, and the commands as subprocesses
-whose payload must equal `build_inventory(...).to_dict()`. Shared fixtures live in
+Seams under test: `build_inventory()` and `authorize_path()` as library calls, and the commands
+as subprocesses whose payload must equal `build_inventory(...).to_dict()`. Path authorization has
+no command of its own — it is substrate the other components call. Shared fixtures live in
 `tests/engine/support.py`.
