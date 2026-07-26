@@ -3,13 +3,15 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture is absorbing the helper scripts into; see its `README.md`) plus eight skill
+re-architecture is absorbing the helper scripts into; see its `README.md`) plus nine skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
 `.../detecting-doc-bloat/scripts/plan-chunks.py`, plus
 `scheduling-doc-sync`'s `scripts/sync-gate.py`, `scripts/upgrade-gate.py`, `scripts/render-report.py`,
 `scripts/plan-distill.py` (doc-bloat's distill-lane planner + deterministic patch merge),
+`scripts/authorize-paths.py` (the path authority the credentialed workflow jobs enforce over a
+model's edit set),
 and `scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
 the upgrade lane, not vendored into installs), all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
@@ -17,7 +19,7 @@ plus the GitHub Actions templates the scheduling skill installs
 `doc-sync-upgrade.yml`). The sample repos under `tests/fixtures/` are the only other runnable
 code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`,
 `doc-sync/upgrade-gate.py`, `doc-sync/render-report.py`,
-`doc-sync/plan-chunks.py`, `doc-sync/plan-distill.py`,
+`doc-sync/plan-chunks.py`, `doc-sync/plan-distill.py`, `doc-sync/authorize-paths.py`,
 `doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
 `doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `doc-sync/drift-waivers.json`
 (accepted-UNVERIFIABLE waivers the sync run surfaces consume), `doc-sync/installed-version`
@@ -72,7 +74,12 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
   `doc-sync-upgrade.yml` version-comparison gate, and `apply-upgrade_test.py` covers that workflow's
   deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
   unextractable knobs). `plan-distill_test.py` covers the distill lane's grouping, dispatch
-  rendering, sidecar seam, and patch-merge engine. `release.yml`'s CI runs every
+  rendering, sidecar seam, and patch-merge engine; `authorize-paths_test.py` covers the per-lane
+  path authority the credentialed jobs enforce over a model's edit set. Two suites cover the
+  wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
+  token-free, write jobs model-free and staging explicit paths) and `install-parity_test.py`
+  (the dogfooded `.github/` install is byte-identical to what `apply-upgrade.py` would lay down
+  from the plugin with this install's knobs). `release.yml`'s CI runs every
   `tests/scripts/*_test.py` suite.
 - **The engine's tests live at `tests/engine/*_test.py`** and are found by discovery
   (`python3 -m unittest discover -s tests/engine -p '*_test.py'`), which is how `release.yml`'s

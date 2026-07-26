@@ -2,6 +2,18 @@
 # Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill; re-run that
 # skill to upgrade this file (it preserves .github/doc-sync-marker).
 # Design: docs/decisions.md's 2026-07-02 doc-sync automation entries in aj604/toolshed.
+#
+# The model holds no repository write authority. The jobs split by trust level:
+# plan/detect/fix run read-only (no write-capable token, checkout credentials
+# dropped) and hand their work forward as artifacts; `land` is the only
+# credentialed job, and it stages an explicit path list the report authorized —
+# never `git add -A`. So a prompt-injected or mistaken model run cannot write to
+# this repository at all: its work only ever arrives as a reviewable PR whose
+# diff is confined to documentation paths the report named. What that does NOT
+# yet close is the report itself being model output — a compromised detect run
+# can name a different doc as STALE. Bounding that is the approval-set stage of
+# the re-architecture (aj604/toolshed#57); here the backstop is PR review, and
+# the wiring (workflows, vendored scripts, marker) is unreachable either way.
 name: doc-sync
 
 on:
@@ -11,26 +23,36 @@ on:
   # v1 is nightly-only. A pull_request mode (Tier-3 verification over the PR's own
   # diff) is a deliberate seam for later — add it here, not as a second workflow.
 
+# Least privilege by default; each job widens only what it needs.
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  id-token: write   # claude-code-action OAuth token exchange
+  contents: read
 
 concurrency:
   group: doc-sync
   cancel-in-progress: false
 
+env:
+  CAP: "10"
+
 jobs:
-  sync:
+  plan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
     env:
       GH_TOKEN: ${{ github.token }}
-      CAP: "10"
+    outputs:
+      decision: ${{ steps.pre.outputs.decision }}
+      marker: ${{ steps.facts.outputs.marker }}
+      head_sha: ${{ steps.facts.outputs.head_sha }}
+      commits: ${{ steps.facts.outputs.commits }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # the gate diffs marker..HEAD
+          persist-credentials: false
 
       - name: Gather facts
         id: facts
@@ -74,6 +96,22 @@ jobs:
             --open-prs "${{ steps.facts.outputs.open_prs }}" \
             --open-issues "${{ steps.facts.outputs.open_issues }}"
 
+  # Read-only model job: it emits drift-report.json as an artifact and nothing else.
+  detect:
+    needs: plan
+    if: needs.plan.outputs.decision == 'detect'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # claude-code-action OAuth exchange only — not repo write
+    outputs:
+      decision: ${{ steps.post.outputs.decision }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # detection is diff-scoped over marker..HEAD
+          persist-credentials: false   # no write-capable credential in a model job
+
       # Pin the plugin marketplace to the installed release. The single source of
       # truth is .github/doc-sync/installed-version (the lockfile the upgrade lane
       # advances); reading it at runtime keeps this workflow file byte-identical
@@ -81,9 +119,9 @@ jobs:
       # `.github/workflows/` file — and the nightly push lands it with the default
       # token. claude-code-action rejects a `…/toolshed.git#v<version>` URL ref-pin
       # (its validator requires the URL end in `.git`), so clone the tag to a local
-      # path under RUNNER_TEMP (outside the work tree, so `git add -A` never grabs it).
+      # path under RUNNER_TEMP (outside the work tree, so the exported edit set
+      # never captures it).
       - name: Pin plugin marketplace
-        if: steps.pre.outputs.decision == 'detect'
         run: |
           set -euo pipefail
           VERSION=$(cat .github/doc-sync/installed-version)
@@ -95,8 +133,9 @@ jobs:
       # it owns Claude Code install, plugin setup, and auth. Auth prefers the OAuth
       # token (created by /install-github-app); an unset secret renders empty and the
       # action treats empty as absent, so ANTHROPIC_API_KEY alone also works.
+      # The allowedTools list is ergonomics, not the boundary — the job's read-only
+      # permissions and credential-free checkout are.
       - name: Detect drift (headless, diff-scoped)
-        if: steps.pre.outputs.decision == 'detect'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -105,7 +144,7 @@ jobs:
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:detecting-doc-drift skill in diff-scoped mode over the
-            git commit range ${{ steps.facts.outputs.marker }}..${{ steps.facts.outputs.head_sha }}
+            git commit range ${{ needs.plan.outputs.marker }}..${{ needs.plan.outputs.head_sha }}
             of this repository. Write the wrapped result object
             ({"records": [...], "summary": {...}}) to drift-report.json in the repository
             root. If the diff invalidates nothing, emit an empty records array with a zero
@@ -113,16 +152,14 @@ jobs:
           claude_args: --allowedTools "Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
 
       - name: Assert detect produced a report
-        if: steps.pre.outputs.decision == 'detect'
         run: |
           test -f drift-report.json || { echo "::error::detect step produced no drift-report.json"; exit 1; }
 
       - name: Validate report (mechanical contract check)
-        if: steps.pre.outputs.decision == 'detect'
         run: python3 .github/doc-sync/validate-drift-output.py drift-report.json
 
       - name: Upload report artifact
-        if: always() && steps.pre.outputs.decision == 'detect'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: drift-report
@@ -130,7 +167,6 @@ jobs:
           if-no-files-found: ignore
 
       - name: Gate (post-detection)
-        if: steps.pre.outputs.decision == 'detect'
         id: post
         run: |
           set -euo pipefail
@@ -138,54 +174,32 @@ jobs:
           echo "post-gate: ${DECISION}"
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
 
-      - name: Advance marker (no drift)
-        if: steps.post.outputs.decision == 'advance-marker'
-        run: |
-          set -euo pipefail
-          git config user.name "doc-sync"
-          git config user.email "doc-sync@users.noreply.github.com"
-          echo "${{ steps.facts.outputs.head_sha }}" > .github/doc-sync-marker
-          git add .github/doc-sync-marker
-          git commit -m "docs: advance doc-sync marker (no drift in ${{ steps.facts.outputs.commits }} commit(s))"
-          # Branch protection may forbid this push; the marker then rides in the next sync PR.
-          # Self-authenticate off GH_TOKEN: claude-code-action drops the checkout-persisted
-          # credential from git config, so a bare `git push` goes out unauthenticated.
-          # The report outlives the push: a no-drift run is the only surface where
-          # unwaived UNVERIFIABLE claims are ever seen, so the summary renders from
-          # it (waiver-aware) before it is deleted.
-          if git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:${{ github.ref_name }}; then
-            python3 .github/doc-sync/render-report.py no-drift-summary \
-              --commits "${{ steps.facts.outputs.commits }}" \
-              --head "${{ steps.facts.outputs.head_sha }}" \
-              --report drift-report.json \
-              --waivers .github/doc-sync/drift-waivers.json
-          else
-            python3 .github/doc-sync/render-report.py no-drift-summary \
-              --commits "${{ steps.facts.outputs.commits }}" \
-              --head "${{ steps.facts.outputs.head_sha }}" \
-              --push-rejected \
-              --report drift-report.json \
-              --waivers .github/doc-sync/drift-waivers.json
-          fi
-          rm -f drift-report.json
+  # Read-only model job: the fixes leave as a patch artifact, never as a push.
+  fix:
+    needs: [plan, detect]
+    if: needs.detect.outputs.decision == 'proceed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # a fix cites the history the record's evidence names
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: drift-report
 
-      - name: Open blast-radius issue
-        if: steps.post.outputs.decision == 'blast-radius'
+      - name: Pin plugin marketplace
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-report.py issue-body \
-            --report drift-report.json --cap "${CAP}" \
-            --marker "${{ steps.facts.outputs.marker }}" \
-            --head "${{ steps.facts.outputs.head_sha }}" \
-            > "$RUNNER_TEMP/issue-body.md"
-          ISSUE_URL=$(gh issue create --label doc-sync \
-            --title "doc-sync: drift exceeds blast-radius cap (${CAP})" \
-            --body-file "$RUNNER_TEMP/issue-body.md")
-          python3 .github/doc-sync/render-report.py blast-summary \
-            --report drift-report.json --cap "${CAP}" --issue-url "${ISSUE_URL}"
+          VERSION=$(cat .github/doc-sync/installed-version)
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch "v${VERSION}" \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
 
       - name: Apply fixes (headless)
-        if: steps.post.outputs.decision == 'proceed'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -195,18 +209,133 @@ jobs:
           prompt: >-
             Use the doc-lifecycle:fixing-doc-drift skill to apply the drift report at
             drift-report.json to this repository's docs. Follow the skill's rules exactly.
+            Edit files in place only — never commit, push, or open a PR; the workflow
+            transports your edits.
           claude_args: --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
 
+      - name: Export the edit set (artifact only — this job cannot write to the repo)
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/edits"
+          # The report is a build artifact, never repo content. The export below is
+          # deliberately total — anything else this run touched rides along, so the
+          # land job rejects it loudly instead of silently dropping it.
+          rm -f drift-report.json
+          git add -A
+          # --no-renames: a rename record reports only its destination path to the
+          # authority check, leaving the source unexamined.
+          git diff --cached --binary --no-renames > "${RUNNER_TEMP}/edits/edits.patch"
+          echo "exported edit set:"
+          git diff --cached --name-only --no-renames
+
+      - name: Upload edit set
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-edits
+          path: ${{ runner.temp }}/edits/edits.patch
+
+  # The only credentialed job, and no model runs in it: it consumes the validated
+  # artifacts, authorizes every path the patch names against the report, and
+  # stages exactly those.
+  land:
+    needs: [plan, detect, fix]
+    if: always() && needs.detect.result == 'success' && needs.fix.result != 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: drift-report
+
+      - name: Advance marker (no drift)
+        if: needs.detect.outputs.decision == 'advance-marker'
+        run: |
+          set -euo pipefail
+          git config user.name "doc-sync"
+          git config user.email "doc-sync@users.noreply.github.com"
+          echo "${{ needs.plan.outputs.head_sha }}" > .github/doc-sync-marker
+          git add .github/doc-sync-marker
+          git commit -m "docs: advance doc-sync marker (no drift in ${{ needs.plan.outputs.commits }} commit(s))"
+          # Branch protection may forbid this push; the marker then rides in the next
+          # sync PR. Self-authenticate off GH_TOKEN for parity with the PR push below.
+          # The report outlives the push: a no-drift run is the only surface where
+          # unwaived UNVERIFIABLE claims are ever seen, so the summary renders from
+          # it (waiver-aware) before it is deleted.
+          if git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:${{ github.ref_name }}; then
+            python3 .github/doc-sync/render-report.py no-drift-summary \
+              --commits "${{ needs.plan.outputs.commits }}" \
+              --head "${{ needs.plan.outputs.head_sha }}" \
+              --report drift-report.json \
+              --waivers .github/doc-sync/drift-waivers.json
+          else
+            python3 .github/doc-sync/render-report.py no-drift-summary \
+              --commits "${{ needs.plan.outputs.commits }}" \
+              --head "${{ needs.plan.outputs.head_sha }}" \
+              --push-rejected \
+              --report drift-report.json \
+              --waivers .github/doc-sync/drift-waivers.json
+          fi
+          rm -f drift-report.json
+
+      - name: Open blast-radius issue
+        if: needs.detect.outputs.decision == 'blast-radius'
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/render-report.py issue-body \
+            --report drift-report.json --cap "${CAP}" \
+            --marker "${{ needs.plan.outputs.marker }}" \
+            --head "${{ needs.plan.outputs.head_sha }}" \
+            > "$RUNNER_TEMP/issue-body.md"
+          ISSUE_URL=$(gh issue create --label doc-sync \
+            --title "doc-sync: drift exceeds blast-radius cap (${CAP})" \
+            --body-file "$RUNNER_TEMP/issue-body.md")
+          python3 .github/doc-sync/render-report.py blast-summary \
+            --report drift-report.json --cap "${CAP}" --issue-url "${ISSUE_URL}"
+
+      - name: Download the model's edit set
+        if: needs.detect.outputs.decision == 'proceed'
+        uses: actions/download-artifact@v4
+        with:
+          name: drift-edits
+          path: ${{ runner.temp }}/edits
+
+      # The report is the authority: the fix may touch the docs its STALE records
+      # name, and nothing else. A patch naming any other path fails here — before
+      # anything is applied, so the run ends with no PR and no staged changes.
+      - name: Authorize the edit set against the report
+        if: needs.detect.outputs.decision == 'proceed'
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/authorize-paths.py expected \
+            --report drift-report.json --lane drift \
+            --out "$RUNNER_TEMP/expected-paths.json"
+          python3 .github/doc-sync/authorize-paths.py check \
+            --expected "$RUNNER_TEMP/expected-paths.json" \
+            --patch "$RUNNER_TEMP/edits/edits.patch" --repo . \
+            > "$RUNNER_TEMP/authorized-paths.txt"
+          if [ ! -s "$RUNNER_TEMP/authorized-paths.txt" ]; then
+            echo "::error::the fix step produced no doc edits, but the gate decided 'proceed' — nothing to sync"
+            exit 1
+          fi
+
       - name: Open sync PR
-        if: steps.post.outputs.decision == 'proceed'
+        if: needs.detect.outputs.decision == 'proceed'
         run: |
           set -euo pipefail
           mv drift-report.json "$RUNNER_TEMP/drift-report.json"
           DATE=$(date -u +%F)
           python3 .github/doc-sync/render-report.py pr-body \
             --report "$RUNNER_TEMP/drift-report.json" \
-            --marker "${{ steps.facts.outputs.marker }}" \
-            --head "${{ steps.facts.outputs.head_sha }}" \
+            --marker "${{ needs.plan.outputs.marker }}" \
+            --head "${{ needs.plan.outputs.head_sha }}" \
             --waivers .github/doc-sync/drift-waivers.json \
             --prev-stales .github/doc-sync/last-stales.json \
             > "$RUNNER_TEMP/pr-body.md"
@@ -216,19 +345,28 @@ jobs:
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
           git checkout -b doc-sync/nightly
-          echo "${{ steps.facts.outputs.head_sha }}" > .github/doc-sync-marker
+          git apply "$RUNNER_TEMP/edits/edits.patch"
+          # Explicit path-list staging — never `git add -A`: the list is what the
+          # report authorized and the check above re-derived from the patch.
+          git add --pathspec-from-file="$RUNNER_TEMP/authorized-paths.txt"
+          echo "${{ needs.plan.outputs.head_sha }}" > .github/doc-sync-marker
           # Recurrence memory rides the PR: the state advances only when the
           # fix merges, so next run's pr-body tags re-staled locations.
           python3 .github/doc-sync/sync-gate.py stale-state \
             --report "$RUNNER_TEMP/drift-report.json" \
             --out .github/doc-sync/last-stales.json
-          git add -A
+          git add .github/doc-sync-marker .github/doc-sync/last-stales.json
+          # Belt and braces: what is actually staged must still be authorized. The
+          # two state files above are this job's own writes, never the model's —
+          # which is exactly what --allow-workflow-state admits.
+          git diff --cached --name-only --no-renames > "$RUNNER_TEMP/staged-paths.txt"
+          python3 .github/doc-sync/authorize-paths.py check \
+            --expected "$RUNNER_TEMP/expected-paths.json" \
+            --paths "$RUNNER_TEMP/staged-paths.txt" --allow-workflow-state >/dev/null
           git commit -m "docs: sync with ${{ github.ref_name }} (${DATE})"
-          # --force: a closed-unmerged PR can leave a stale branch behind.
-          # Self-authenticate off GH_TOKEN (see advance-marker note): claude-code-action ran
-          # just above and drops the checkout-persisted credential. No `-u` — a token-bearing
-          # URL must not persist into .git/config. Pushing by URL leaves no upstream tracking
-          # ref, so gh can't infer the head; pass --head explicitly.
+          # --force: a closed-unmerged PR can leave a stale branch behind. No `-u` —
+          # a token-bearing URL must not persist into .git/config. Pushing by URL
+          # leaves no upstream tracking ref, so gh can't infer the head; pass --head.
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-sync/nightly
           PR_URL=$(gh pr create \
             --title "${TITLE}" \
