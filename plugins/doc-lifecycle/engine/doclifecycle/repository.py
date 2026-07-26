@@ -10,7 +10,28 @@ import subprocess
 
 from .results import Problem
 
-SCHEMES = ("https://", "http://", "ssh://", "git://", "git+ssh://")
+SCHEMES = ("https://", "http://", "ssh://", "git://", "git+ssh://", "file://")
+
+# Environment variables that redirect git at a different repository than the one
+# named on the command line. Scrubbed, not trusted: a composite action or an
+# earlier workflow step that exports `GIT_DIR` would otherwise make the
+# freshness check answer about someone else's tree, silently, and in the
+# direction of certifying rather than failing.
+REDIRECTING_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_NAMESPACE",
+)
+
+# A local repository read is milliseconds. Anything near this is a hung git —
+# a pager, a credential prompt, a network remote — and hanging a CI job is a
+# worse answer than a typed problem.
+TIMEOUT_SECONDS = 30
 
 
 def _problem(repo_root, detail):
@@ -26,14 +47,22 @@ def _problem(repo_root, detail):
 
 
 def _git(repo_root, *args):
-    """Run git in `repo_root`. Returns (stdout, error detail or None)."""
+    """Run git in `repo_root`. Returns (stdout, error detail or None).
+
+    The repository is the one named here and nowhere else: the environment is
+    scrubbed of every variable that could point git at another tree, so the
+    `--show-toplevel` guard below cannot be walked around.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in REDIRECTING_VARS}
     try:
         result = subprocess.run(
             ["git", "-C", repo_root, *args],
-            capture_output=True, text=True,
+            capture_output=True, text=True, env=env, timeout=TIMEOUT_SECONDS,
         )
     except OSError as exc:
         return None, f"git is not available ({exc.strerror})"
+    except subprocess.TimeoutExpired:
+        return None, f"git {args[0]} did not finish in {TIMEOUT_SECONDS}s"
     if result.returncode != 0:
         detail = result.stderr.strip().splitlines()
         return None, detail[0] if detail else f"git {args[0]} failed"
@@ -42,22 +71,41 @@ def _git(repo_root, *args):
 
 def normalize_remote(url):
     """A remote URL reduced to host and path, so spellings of one repository
-    agree: scheme, credentials, `.git`, and trailing `/` are not identity."""
+    agree: scheme, credentials, port, `.git`, and trailing `/` are not identity.
+
+    Only the host is case-folded. Hosts are case-insensitive; repository paths
+    are not on every forge, so lowercasing the whole URL would merge
+    `Team/Repo` with `team/repo` into one identity.
+    """
     value = url.strip().rstrip("/")
     if value.endswith(".git"):
         value = value[:-4]
-    for scheme in SCHEMES:
-        if value.lower().startswith(scheme):
-            value = value[len(scheme):]
+
+    scheme = ""
+    for candidate in SCHEMES:
+        if value.lower().startswith(candidate):
+            scheme, value = candidate, value[len(candidate):]
             break
-    head = value.split("/", 1)[0]
-    if "@" in head:
-        value = value.split("@", 1)[1]
-        head = value.split("/", 1)[0]
-    if ":" in head:
-        host, _, rest = value.partition(":")
-        value = f"{host}/{rest}"
-    return value.lower()
+
+    if scheme:
+        authority, _, path = value.partition("/")
+    else:
+        # scp-like `git@host:path/to/repo`, where the colon is the separator.
+        authority, separator, path = value.partition(":")
+        if not separator:
+            authority, _, path = value.partition("/")
+
+    if "@" in authority:
+        authority = authority.split("@", 1)[1]
+    if scheme:
+        # `host:port` — a route to the repository, not the repository. Only
+        # stripped under a scheme, where a colon cannot be a path separator.
+        host, colon, port = authority.rpartition(":")
+        if colon and port.isdigit():
+            authority = host
+
+    path = path.strip("/")
+    return f"{authority.lower()}/{path}" if path else authority.lower()
 
 
 def lineage(repo_root):
@@ -71,6 +119,12 @@ def lineage(repo_root):
     remoteless repository (a fixture, a fresh `git init`) still has. A
     repository that gains a remote therefore changes identity, which is the
     honest answer: reports pinned to the old identity read as stale.
+
+    The fallback is only stable where history is: a `--depth 1` clone reports
+    its shallow boundary as the root commit, so a remoteless repository checked
+    out shallowly reads as a different repository and can never validate a
+    report as fresh. The fail direction is safe (stale, not certified), but a
+    repository audited in CI wants either a remote or full history.
     """
     top, detail = _git(repo_root, "rev-parse", "--show-toplevel")
     if detail is not None:

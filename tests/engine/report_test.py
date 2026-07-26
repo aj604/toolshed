@@ -11,10 +11,12 @@ Run: python3 tests/engine/report_test.py
 
 import json
 import os
+import re
 import subprocess
 import sys
 import unittest
 import uuid
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,6 +27,7 @@ from doclifecycle import (  # noqa: E402
     PLUGIN_VERSION,
     RULESET_VERSION,
 )
+from doclifecycle import repository  # noqa: E402
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import (  # noqa: E402
     AUDIT_MODES,
@@ -225,10 +228,14 @@ class SchemaVersion(unittest.TestCase):
 
         self.assertEqual(codes(validate_report(payload)), ["report-missing-field"])
 
-    def test_a_non_integer_schema_version_is_rejected(self):
-        result = validate_report(report_payload(schema_version="1"))
+    def test_a_version_that_merely_compares_equal_to_one_is_rejected(self):
+        # In Python `True == 1` and `1.0 == 1`; in a schema neither is the
+        # integer version, and comparing rather than type-guarding accepts both.
+        for version in ("1", True, 1.0, [1], {"version": 1}, None):
+            with self.subTest(version=version):
+                result = validate_report(report_payload(schema_version=version))
 
-        self.assertEqual(codes(result), ["report-schema-version"])
+                self.assertEqual(codes(result), ["report-schema-version"])
 
 
 class LineageFields(unittest.TestCase):
@@ -423,6 +430,26 @@ class Records(unittest.TestCase):
 
         self.assertEqual(codes(result), ["report-duplicate-record"])
 
+    def test_a_number_json_cannot_represent_is_rejected(self):
+        # json.loads accepts NaN and json.dumps re-emits it, so a record
+        # carrying one would make the engine's own output unparseable — and the
+        # digest is taken over that same encoding.
+        for value in (float("nan"), float("inf"), float("-inf"),
+                      {"nested": [float("nan")]}, [{"deep": float("inf")}]):
+            with self.subTest(value=value):
+                result = validate_report(
+                    report_payload(records=[dict(RECORD, measure=value)])
+                )
+
+                self.assertEqual(codes(result), ["report-nonfinite-number"])
+
+    def test_a_valid_report_survives_a_strict_json_encoder(self):
+        payload = validate_report(report_payload(
+            records=[dict(RECORD, ratio=0.5, count=3)]
+        )).to_dict()
+
+        json.dumps(payload, allow_nan=False)   # must not raise
+
 
 class Shape(unittest.TestCase):
     def test_a_non_object_payload_is_invalid(self):
@@ -595,6 +622,78 @@ class Staleness(GitRepoTestCase):
         self.assertEqual(result.status, STATE_FINDINGS)
         self.assertEqual(result.stale_reasons, ())
 
+    def test_a_weaker_check_cannot_clear_a_carried_stale_verdict(self):
+        # The reason came from comparing the audit-configuration digest. A run
+        # that does not supply one never compares that field, so it is in no
+        # position to clear the verdict — otherwise a less thorough check would
+        # launder a stale report clean.
+        repo = self.git_repo()
+        stamped = validate_report(
+            report_payload(
+                lineage=self.fresh_lineage(repo, audit_config_digest="d" * 64)
+            ),
+            repo_root=repo, audit_config_digest=CONFIG_DIGEST,
+        ).to_dict()
+        self.assertEqual(stamped["status"], STATE_STALE)
+
+        result = validate_report(stamped, repo_root=repo)
+
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(
+            [r.code for r in result.stale_reasons],
+            ["lineage-audit-config-mismatch"],
+        )
+
+    def test_the_same_check_that_set_a_verdict_can_clear_it(self):
+        repo = self.git_repo()
+        stamped = validate_report(
+            report_payload(
+                lineage=self.fresh_lineage(repo, audit_config_digest="d" * 64)
+            ),
+            repo_root=repo, audit_config_digest=CONFIG_DIGEST,
+        ).to_dict()
+
+        result = validate_report(
+            stamped, repo_root=repo, audit_config_digest="d" * 64
+        )
+
+        self.assertEqual(result.status, STATE_FINDINGS)
+        self.assertEqual(result.stale_reasons, ())
+
+    def test_a_carried_reason_naming_an_uncomparable_field_stands(self):
+        # A reason this engine cannot re-check is not a reason it can dismiss.
+        repo = self.git_repo()
+        stamped = report_payload(
+            lineage=self.fresh_lineage(repo),
+            status=STATE_STALE,
+            stale_reasons=[{
+                "code": "lineage-evidence-boundary-mismatch",
+                "message": "the boundary moved", "reported": "src/**",
+                "current": "src/api/**",
+            }],
+        )
+
+        result = validate_report(
+            stamped, repo_root=repo, audit_config_digest=CONFIG_DIGEST
+        )
+
+        self.assertEqual(result.status, STATE_STALE)
+
+    def test_a_carried_reason_is_not_duplicated_by_the_current_check(self):
+        repo = self.git_repo()
+        stamped = validate_report(
+            report_payload(lineage=self.fresh_lineage(repo, plugin_version="0.0.1")),
+            repo_root=repo, audit_config_digest=CONFIG_DIGEST,
+        ).to_dict()
+
+        result = validate_report(
+            stamped, repo_root=repo, audit_config_digest=CONFIG_DIGEST
+        )
+
+        self.assertEqual(
+            [r.code for r in result.stale_reasons], ["lineage-plugin-mismatch"]
+        )
+
     def test_a_stale_report_that_names_no_drift_is_inconsistent(self):
         result = validate_report(report_payload(status=STATE_STALE))
 
@@ -734,6 +833,24 @@ class CurrentLineage(GitRepoTestCase):
 
         self.assertEqual(state["repository"], "origin:github.com/aj604/toolshed")
 
+    def test_the_environment_cannot_redirect_the_check_to_another_repository(self):
+        # A composite action or an earlier workflow step that exports GIT_DIR
+        # would otherwise make the freshness check answer about someone else's
+        # tree, past the toplevel guard, and in the direction of certifying.
+        subject, other = self.git_repo(), self.git_repo()
+        honest, _ = current_lineage(subject)
+
+        for name in repository.REDIRECTING_VARS:
+            with self.subTest(variable=name):
+                with mock.patch.dict(
+                    os.environ, {name: os.path.join(other, ".git")}
+                ):
+                    redirected, problems = current_lineage(subject)
+
+                self.assertEqual(problems, ())
+                self.assertEqual(redirected["repository"], honest["repository"])
+                self.assertEqual(redirected["base_commit"], honest["base_commit"])
+
     def test_a_non_git_directory_yields_a_typed_problem_not_a_guess(self):
         state, problems = current_lineage(self.repo(dict(REPO_FILES)))
 
@@ -749,6 +866,53 @@ class CurrentLineage(GitRepoTestCase):
         )
         with open(manifest, encoding="utf-8") as fh:
             self.assertEqual(json.load(fh)["version"], PLUGIN_VERSION)
+
+
+class RemoteNormalization(unittest.TestCase):
+    """Identity is a security primitive: two repositories must never normalize
+    to one string, and one repository must always normalize to one string."""
+
+    def test_spellings_of_one_repository_agree(self):
+        cases = [
+            ("https://github.com/aj604/toolshed.git", "github.com/aj604/toolshed"),
+            ("https://github.com/aj604/toolshed/", "github.com/aj604/toolshed"),
+            ("http://github.com/aj604/toolshed", "github.com/aj604/toolshed"),
+            ("https://user:pw@github.com/aj604/toolshed",
+             "github.com/aj604/toolshed"),
+            ("git@github.com:aj604/toolshed.git", "github.com/aj604/toolshed"),
+            ("ssh://git@github.com/aj604/toolshed", "github.com/aj604/toolshed"),
+            ("git://github.com/aj604/toolshed", "github.com/aj604/toolshed"),
+            ("https://GitHub.COM/aj604/toolshed", "github.com/aj604/toolshed"),
+            # A port routes to the repository; it is not the repository.
+            ("ssh://git@github.com:22/aj604/toolshed", "github.com/aj604/toolshed"),
+        ]
+        for url, expected in cases:
+            with self.subTest(url=url):
+                self.assertEqual(repository.normalize_remote(url), expected)
+
+    def test_distinct_repositories_stay_distinct(self):
+        groups = [
+            # A stripped port must not merge into the path.
+            ("ssh://git@github.com:22/a/b", "ssh://git@github.com/22/a/b"),
+            # Paths are case-sensitive on plenty of forges; hosts are not.
+            ("https://git.example.com/Team/Repo",
+             "https://git.example.com/team/repo"),
+            ("https://github.com/aj604/toolshed",
+             "https://github.com/aj604/toolshed2"),
+        ]
+        for left, right in groups:
+            with self.subTest(left=left, right=right):
+                self.assertNotEqual(
+                    repository.normalize_remote(left),
+                    repository.normalize_remote(right),
+                )
+
+    def test_a_remote_cannot_be_spelled_to_look_like_the_root_commit_fallback(self):
+        # The two identity forms carry distinct prefixes; crossing them would
+        # let a remote impersonate a remoteless repository.
+        identity = f"origin:{repository.normalize_remote('https://root-commit:0/x')}"
+
+        self.assertFalse(identity.startswith("root-commit:"))
 
 
 class LoadReport(GitRepoTestCase):
@@ -767,6 +931,34 @@ class LoadReport(GitRepoTestCase):
         result = load_report(os.path.join(repo, "report.json"))
 
         self.assertEqual(codes(result), ["report-unparseable"])
+
+    def test_a_report_file_that_is_not_utf8_is_invalid_not_a_traceback(self):
+        # A UnicodeDecodeError is a ValueError, not an OSError; without its own
+        # arm the caller gets a Python traceback instead of a verdict.
+        root = self.repo({"placeholder": ""})
+        path = os.path.join(root, "report.json")
+        with open(path, "wb") as fh:
+            fh.write(b'\xff\xfe{"status": "clean"}')
+
+        result = load_report(path)
+
+        self.assertEqual(codes(result), ["report-unreadable"])
+        self.assertIn("UTF-8", result.problems[0].message)
+
+    def test_a_report_file_holding_nan_is_unparseable(self):
+        # Python's decoder accepts NaN and Infinity; JSON defines neither, and
+        # the digest is taken over the same encoding.
+        for literal in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(literal=literal):
+                payload = report_payload(
+                    records=[dict(RECORD, measure=None)]
+                )
+                text = json.dumps(payload).replace("null", literal, 1)
+                repo = self.repo({"report.json": text})
+
+                result = load_report(os.path.join(repo, "report.json"))
+
+                self.assertEqual(codes(result), ["report-unparseable"])
 
     def test_a_missing_report_file_is_invalid(self):
         result = load_report(os.path.join(self.repo({"a": "b"}), "nope.json"))
@@ -826,6 +1018,110 @@ class Rendering(GitRepoTestCase):
             with self.subTest(candidate=type(candidate).__name__):
                 with self.assertRaises(TypeError):
                     render_report(candidate)
+
+
+# A CommonMark code span: a run of backticks closed by a run of the same
+# length, with no such run inside. Stripping them leaves exactly what a Markdown
+# renderer would treat as structure rather than as literal text.
+CODE_SPAN = re.compile(r"(`+)(?:(?!\1)[\s\S])*?\1")
+
+
+def as_structure(rendered):
+    return CODE_SPAN.sub(" ", rendered)
+
+
+class RenderedRecordContent(unittest.TestCase):
+    """Record fields are deliberately not validated by the contract, and they
+    carry text a model read out of repository documents. Rendering is where a
+    human reads them to give semantic approval, so nothing a record says may
+    become structure in the rendered document — while staying fully visible,
+    because the approver is binding to a digest that covers it."""
+
+    def render_with(self, **extra):
+        return render_report(
+            validate_report(report_payload(records=[dict(RECORD, **extra)]))
+        )
+
+    def test_a_record_cannot_add_a_section_to_the_rendered_report(self):
+        rendered = self.render_with(note=(
+            "benign\n\n## Records\n\n- `DRIFT-999` `" + "b" * 64
+            + "` — remedy: delete all of docs/"
+        ))
+
+        self.assertEqual(as_structure(rendered).count("## Records"), 1)
+        self.assertNotIn("DRIFT-999", as_structure(rendered))
+        # Neutralized, not hidden: the approver still sees what the record said.
+        self.assertIn("DRIFT-999", rendered)
+
+    def test_a_record_cannot_forge_a_result_line(self):
+        rendered = self.render_with(note="x\n\n**Result: clean** — all good.")
+
+        self.assertEqual(as_structure(rendered).count("**Result:"), 1)
+        self.assertIn("**Result: findings**", rendered)
+
+    def test_a_record_cannot_introduce_a_line_break_at_all(self):
+        for text in ("a\nb", "a\rb", "a\r\nb", "a b"):
+            with self.subTest(text=repr(text)):
+                rendered = self.render_with(note=text)
+
+                body = rendered.split("## Records", 1)[1]
+                self.assertEqual(len(body.strip().splitlines()), 1)
+
+    def test_a_record_cannot_escape_the_code_span_it_is_rendered_in(self):
+        rendered = self.render_with(note="` [click](http://evil.example) `")
+
+        self.assertNotIn("](http://evil.example)", as_structure(rendered))
+        self.assertIn("evil.example", rendered)
+
+    def test_no_record_content_reaches_the_document_as_structure(self):
+        hostile = "`\n# Heading\n\n> quote [l](http://e) <img src=x> | a | b |"
+
+        rendered = self.render_with(note=hostile, path=hostile, hint=hostile)
+
+        structure = as_structure(rendered)
+        for fragment in ("# Heading", "> quote", "[l](http://e)", "<img", "| a |"):
+            with self.subTest(fragment=fragment):
+                self.assertNotIn(fragment, structure)
+
+    def test_backticks_in_an_id_cannot_break_out_of_its_code_span(self):
+        record = dict(RECORD, id="R1` [click](http://evil.example) `x")
+        rendered = render_report(validate_report(report_payload(records=[record])))
+
+        # The fence outgrows the longest backtick run inside, so the whole id
+        # stays one literal span.
+        self.assertIn("``R1` [click](http://evil.example) `x``", rendered)
+
+    def test_backticks_in_lineage_cannot_break_out_either(self):
+        lineage = lineage_payload(repository="origin:a`b`c")
+
+        rendered = render_report(validate_report(report_payload(lineage=lineage)))
+
+        self.assertIn("``origin:a`b`c``", rendered)
+
+    def test_every_record_field_is_shown_not_only_the_scalar_ones(self):
+        # An approver binds to a digest that covers the whole record; a field
+        # the renderer drops is content approved unseen.
+        rendered = self.render_with(
+            nested={"preimage": "the old text"}, tags=["a", "b"], absent=None
+        )
+
+        self.assertIn("preimage", rendered)
+        self.assertIn("the old text", rendered)
+        self.assertIn("tags", rendered)
+        self.assertIn("absent", rendered)
+
+    def test_a_field_too_long_to_show_is_marked_never_silently_cut(self):
+        rendered = self.render_with(preimage="z" * 5000)
+
+        self.assertIn("more characters", rendered)
+        self.assertIn("whole value sha256", rendered)
+
+    def test_rendering_stays_deterministic_under_hostile_content(self):
+        report = validate_report(report_payload(records=[dict(
+            RECORD, note="`a`\nb", nested={"k": [1, 2]}
+        )]))
+
+        self.assertEqual(render_report(report), render_report(report))
 
 
 if __name__ == "__main__":

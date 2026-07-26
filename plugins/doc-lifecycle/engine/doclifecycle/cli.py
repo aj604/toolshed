@@ -163,6 +163,11 @@ def main(argv=None):
     else:
         # ensure_ascii=False so a CI log shows the message a human wrote;
         # digests are taken over digest.canonical(), not over this rendering.
-        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        # allow_nan=False so the engine can never emit something no strict JSON
+        # parser will read — validation rejects non-finite numbers, and this
+        # makes any gap in that a loud failure rather than corrupt output.
+        print(json.dumps(
+            result.to_dict(), indent=2, ensure_ascii=False, allow_nan=False
+        ))
     _explain(result)
     return EXIT_CODES[result.status]

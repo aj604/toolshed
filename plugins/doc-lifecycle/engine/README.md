@@ -280,17 +280,19 @@ cannot self-assess them, and `invalid` always beats `stale` — an unreadable re
 to compare against a repository. A payload may still carry `stale` with its `stale_reasons`,
 because `validate-report` emits exactly that and a pipeline must be able to re-check the file
 it persisted: re-validating without `--repo` keeps the verdict (nothing can disprove it), and
-re-validating against a repository the lineage now matches clears it. `invalid` never appears
-in a report at all — an invalid run has no content to report — so declaring it is
-`report-invalid-status`.
+re-validating against a repository that matches on every field this run actually compared
+clears it. `invalid` never appears in a report at all — an invalid run has no content to
+report — so declaring it is `report-invalid-status`.
 
 Note that `plugin_version` is compared, so every plugin release marks prior reports stale.
 That is deliberate: cheaper than reasoning about which releases could have changed a verdict,
 and re-running an audit is cheap.
 
 Records are validated only as far as approval binding needs — a non-empty `id` and a sha256
-`digest`, both unique within the report. Every other field the audit engine or the segmenter
-(#63) puts on a record travels through untouched.
+`digest`, both unique within the report, and no `NaN`/`Infinity` anywhere inside (JSON defines
+neither, and the digest is taken over that encoding). Every other field the audit engine or the
+segmenter (#63) puts on a record travels through untouched — and is neutralized at the
+rendering boundary rather than at the contract boundary; see Commands below.
 
 ### Commands
 
@@ -306,9 +308,22 @@ python3 -m doclifecycle render-report --report report.json
 with the verdict's code from the table above (2 is a usage error), and repeat the reason —
 problems, stale reasons, or unexamined scopes — on stderr.
 
+These codes are the engine's own. The scripts it is absorbing (`scheduling-doc-sync`'s
+`sync-gate.py` and friends) use `2` for "cannot read the report" where the engine uses `1` and
+reserves `2` for a usage error; the two conventions coexist until #57 finishes absorbing them.
+
 `render-report` prints Markdown, and prints **nothing** when the report is invalid: rendering
-takes a validated `Report` and raises `TypeError` on anything else, so malformed content
-cannot reach a PR body or a CI summary wearing the appearance of a verdict.
+takes a validated `Report` and raises `TypeError` on anything else.
+
+Type-checking is not the whole guarantee, because the contract deliberately does not police
+record internals, and those fields carry text a model read out of repository documents. So
+every value the renderer interpolates — lineage, scopes, record ids, and every record field —
+is emitted inside a Markdown code span fenced longer than any backtick run inside it. A record
+cannot add a heading, a link, a table, a second `## Records` section, or a `**Result:**` line
+to what a human reads before approving. Nothing is withheld to achieve that: fields are shown
+as the canonical JSON the digest is taken over (so newlines arrive escaped, not as line
+breaks), and a value too long to show inline is truncated with a marker naming how many
+characters were elided and the sha256 of the whole value.
 
 The library calls behind them:
 
@@ -322,10 +337,23 @@ result.to_dict()                                     # → the payload above
 render_report(result)                                # → Markdown, or TypeError
 ```
 
-A run that cannot read the repository state — not a git repository, git unavailable, or a
-registry that no longer parses — is `repository-state-unavailable` and `invalid`. Freshness is
-a comparison against the world; a check that cannot see the world fails closed rather than
-certifying a report it did not check.
+A run that cannot read the repository state — not a git repository, git unavailable, git
+hanging past 30s, or a registry that no longer parses — is `repository-state-unavailable` and
+`invalid`. Freshness is a comparison against the world; a check that cannot see the world fails
+closed rather than certifying a report it did not check. The repository is the one `--repo`
+names and no other: `git` runs with `GIT_DIR`, `GIT_WORK_TREE`, and the rest of the redirecting
+variables scrubbed from its environment, so an exported variable cannot walk around the
+check that `--repo` is a repository root.
+
+Clearing a stale verdict is as thorough as setting it. A carried reason is only dropped when
+this run actually compared the lineage field that produced it — so re-validating a
+config-mismatch-stale report *without* `--audit-config-digest` leaves it stale rather than
+laundering it clean with a weaker check.
+
+Identity note: the `root-commit:` fallback is only as stable as the history it reads. A
+`--depth 1` clone of a remoteless repository reports its shallow boundary and so reads as a
+different repository — safe (stale, never certified), but a repository audited in CI wants
+either an origin remote or full history.
 
 ## Digests
 

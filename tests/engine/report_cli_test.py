@@ -39,6 +39,10 @@ EXIT_STALE = 3
 EXIT_PARTIAL = 4
 
 
+def _no_constants(name):
+    raise AssertionError(f"the engine emitted {name}, which is not JSON")
+
+
 class ReportCommandTestCase(GitRepoTestCase):
     def report_file(self, payload):
         root = self.repo({"report.json": json.dumps(payload, indent=2)})
@@ -134,6 +138,46 @@ class ValidateCommand(ReportCommandTestCase):
 
         self.assertEqual(result.returncode, EXIT_INVALID)
         self.assertIn("report-unreadable", result.stderr)
+
+    def test_a_report_that_is_not_utf8_is_a_verdict_not_a_traceback(self):
+        root = self.repo({"placeholder": ""})
+        path = os.path.join(root, "report.json")
+        with open(path, "wb") as fh:
+            fh.write(b'\xff\xfe{"status": "clean"}')
+
+        result = run("validate-report", "--report", path)
+
+        self.assertEqual(result.returncode, EXIT_INVALID)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("report-unreadable", result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "invalid")
+
+    def test_a_report_carrying_nan_is_rejected_rather_than_re_emitted(self):
+        root = self.repo({"placeholder": ""})
+        path = os.path.join(root, "report.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(report_payload(records=[{
+                "id": "DRIFT-001", "digest": "a" * 64, "measure": None,
+            }])).replace("null", "NaN"))
+
+        result = run("validate-report", "--report", path)
+
+        self.assertEqual(result.returncode, EXIT_INVALID)
+        self.assertIn("report-unparseable", result.stderr)
+        # The engine's own output stays readable by a strict parser.
+        json.loads(result.stdout, parse_constant=_no_constants)
+
+    def test_output_survives_a_strict_parser_under_hostile_record_content(self):
+        path = self.report_file(report_payload(records=[{
+            "id": "DRIFT-001", "digest": "a" * 64,
+            "note": "line\nbreak `tick`   😀",
+            "nested": {"deep": [1, 2.5, True, None]},
+        }]))
+
+        result = run("validate-report", "--report", path)
+
+        self.assertEqual(result.returncode, EXIT_OK, result.stderr)
+        json.loads(result.stdout, parse_constant=_no_constants)
 
     def test_the_report_argument_is_required(self):
         result = run("validate-report")

@@ -19,6 +19,7 @@ an interactive check and a CI check cannot reach different verdicts.
 """
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from typing import Tuple
@@ -86,6 +87,9 @@ COMPARABLE = (
     ("ruleset_version", "lineage-ruleset-mismatch", "ruleset version"),
     ("plugin_version", "lineage-plugin-mismatch", "plugin version"),
 )
+# Which lineage field produced a given stale reason, so a run can tell whether
+# it actually re-checked a carried verdict or merely failed to look.
+STALE_REASON_FIELDS = {code: field for field, code, _ in COMPARABLE}
 
 
 @dataclass(frozen=True)
@@ -214,6 +218,28 @@ def _printable(value):
     return _nonempty_str(value) and not any(c in value for c in "\n\r\x00")
 
 
+def _whole_number(value):
+    """An integer, and not a bool — `True == 1` in Python, but not in a schema."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _nonfinite(value):
+    """Whether `value` holds a float JSON cannot represent.
+
+    `json.loads` accepts `NaN` and `Infinity` by default and `json.dumps` emits
+    them back, so a record carrying one would make the engine's own output
+    unreadable to a strict parser — and the digest is taken over that same
+    encoding. Rejected at the door instead.
+    """
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, dict):
+        return any(_nonfinite(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_nonfinite(item) for item in value)
+    return False
+
+
 def _content_digest(lineage, records, incomplete):
     """The report's identity: what it says, not what a validator concluded.
 
@@ -325,9 +351,7 @@ def _lineage(raw, bad):
             invalid(field, "must be a sha256 digest (64 lowercase hex characters)")
             ok = False
     if "ruleset_version" in raw and not (
-        isinstance(raw["ruleset_version"], int)
-        and not isinstance(raw["ruleset_version"], bool)
-        and raw["ruleset_version"] >= 1
+        _whole_number(raw["ruleset_version"]) and raw["ruleset_version"] >= 1
     ):
         invalid("ruleset_version", "must be a positive integer")
         ok = False
@@ -379,6 +403,13 @@ def _records(raw, bad):
                 f"record {i} must carry a sha256 'digest' — an approval set "
                 f"selects records by digest, so a record without one cannot be "
                 f"approved",
+                where)
+            valid = False
+        if _nonfinite(entry):
+            bad("report-nonfinite-number",
+                f"record {i} carries NaN or Infinity — JSON defines neither, so "
+                f"the report would not survive its own digest or a strict "
+                f"parser",
                 where)
             valid = False
         if not valid:
@@ -540,6 +571,21 @@ def current_lineage(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
     return current, ()
 
 
+def _still_standing(carried, current):
+    """Carried stale reasons this run was not in a position to re-check.
+
+    Clearing a verdict must be at least as thorough as setting it. A run that
+    omits the audit-configuration digest never compares that field, so it
+    cannot honestly clear a reason that field produced — otherwise a *weaker*
+    check would launder a stale report clean. A reason naming a field this
+    engine does not compare at all stands for the same reason.
+    """
+    return tuple(
+        reason for reason in carried
+        if STALE_REASON_FIELDS.get(reason.code) not in current
+    )
+
+
 def _stale_reasons(lineage, current):
     """Every lineage field that no longer matches, not just the first."""
     reasons = []
@@ -599,11 +645,16 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
                 name)
 
     version = payload.get("schema_version")
-    if "schema_version" in payload and version != ARTIFACT_SCHEMA_VERSION:
+    # Type-guarded, not just compared: `True == 1` and `1.0 == 1` in Python, and
+    # neither is the integer a schema version is.
+    if "schema_version" in payload and not (
+        _whole_number(version) and version == ARTIFACT_SCHEMA_VERSION
+    ):
         bad("report-schema-version",
             f"report schema_version {version!r} is not supported; this engine "
-            f"reads version {ARTIFACT_SCHEMA_VERSION}. Migrate the report rather "
-            f"than guessing at the meaning of a shape it does not know.",
+            f"reads integer version {ARTIFACT_SCHEMA_VERSION}. Migrate the "
+            f"report rather than guessing at the meaning of a shape it does "
+            f"not know.",
             "schema_version")
 
     lineage = _lineage(payload["lineage"], bad) if "lineage" in payload else None
@@ -666,16 +717,28 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     if problems:
         return Invalid(tuple(problems))
     reasons = _stale_reasons(lineage, current)
+    found = {reason.code for reason in reasons}
+    reasons += tuple(
+        reason for reason in _still_standing(carried, current)
+        if reason.code not in found
+    )
     if reasons:
         return Report(
             status=STATE_STALE, lineage=lineage, records=records,
             incomplete=incomplete, digest=digest, stale_reasons=reasons,
         )
-    # Fresh against this repository, so any carried stale verdict is cleared and
-    # the state follows from the content again.
+    # Every comparable field matches, and every carried reason was re-checked,
+    # so the verdict is cleared and the state follows from the content again.
     return Report(
         status=_state_from_content(records, incomplete), lineage=lineage,
         records=records, incomplete=incomplete, digest=digest,
+    )
+
+
+def _reject_constant(name):
+    raise ValueError(
+        f"{name} is not JSON — a report must survive a strict parser and its "
+        f"own digest, which are taken over the same encoding"
     )
 
 
@@ -696,9 +759,22 @@ def load_report(path, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH,
             message=f"cannot read the report at {path}: {exc.strerror}",
             location=path,
         ),))
+    except UnicodeDecodeError as exc:
+        # A `ValueError`, not an `OSError`: without this the CLI would answer a
+        # malformed file with a traceback instead of a verdict.
+        return Invalid((Problem(
+            code="report-unreadable",
+            message=(
+                f"the report at {path} is not valid UTF-8 ({exc.reason} at byte "
+                f"{exc.start}) — re-encode it; JSON is a text format"
+            ),
+            location=path,
+        ),))
     try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as exc:
+        # JSON has no NaN or Infinity, whatever Python's decoder will accept:
+        # letting one in would make the engine's own output unparseable.
+        payload = json.loads(text, parse_constant=_reject_constant)
+    except (json.JSONDecodeError, ValueError) as exc:
         return Invalid((Problem(
             code="report-unparseable",
             message=f"the report is not valid JSON: {exc}",
