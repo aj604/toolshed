@@ -243,9 +243,9 @@ Every field below is required; omitting one is `report-missing-lineage-field`, n
 | `repository` | the origin remote (`origin:host/path`) if one is declared, else `root-commit:<sha>` | `lineage-repository-mismatch` |
 | `base_commit` | git HEAD when the evidence was read; 40 or 64 lowercase hex | `lineage-base-commit-mismatch` |
 | `audit_mode` | `full`, `incremental`, or `chunk` — what "the declared scope" meant | not compared |
-| `inventory_digest` | the corpus examined | `lineage-inventory-mismatch` |
+| `inventory_digest` | the document inventory examined | `lineage-inventory-mismatch` |
 | `audit_config_digest` | the consumer configuration the run used | `lineage-audit-config-mismatch`, only when the caller supplies the current one |
-| `registry_digest` | the classification that decided the corpus | `lineage-registry-mismatch` |
+| `registry_digest` | the classification that decided the inventory | `lineage-registry-mismatch` |
 | `ruleset_version` | the audit policy applied; positive integer | `lineage-ruleset-mismatch` (vs `RULESET_VERSION`) |
 | `plugin_version` | the engine that applied it | `lineage-plugin-mismatch` (vs `PLUGIN_VERSION`) |
 | `evidence_boundary` | `{"sources": [...], "excluded": [...]}` — the declared limit of what the run could consult; `sources` non-empty | not compared |
@@ -271,14 +271,26 @@ boundary is lineage here, never opened.
 
 A producing run declares only `clean`, `findings`, or `partial`, and the declaration must
 follow from the content — `incomplete` entries force `partial`, records force `findings`,
-neither is `clean`. Declaring anything else is `report-invalid-status`; disagreeing with the
-content is `report-state-inconsistent`. `stale` and `invalid` are verdicts a validator reaches
-about a report, so a run cannot self-assess them. `invalid` always beats `stale`: an
-unreadable report has nothing to compare against a repository.
+neither is `clean`. Disagreeing with the content is `report-state-inconsistent`. "The declared
+scope" is the one `audit_mode` names: a `chunk` run that finished its chunk is `clean` about
+that chunk, and a reader who needs more must read the mode.
+
+`stale` and `invalid` are verdicts a validator reaches about a report, so a producing run
+cannot self-assess them, and `invalid` always beats `stale` — an unreadable report has nothing
+to compare against a repository. A payload may still carry `stale` with its `stale_reasons`,
+because `validate-report` emits exactly that and a pipeline must be able to re-check the file
+it persisted: re-validating without `--repo` keeps the verdict (nothing can disprove it), and
+re-validating against a repository the lineage now matches clears it. `invalid` never appears
+in a report at all — an invalid run has no content to report — so declaring it is
+`report-invalid-status`.
+
+Note that `plugin_version` is compared, so every plugin release marks prior reports stale.
+That is deliberate: cheaper than reasoning about which releases could have changed a verdict,
+and re-running an audit is cheap.
 
 Records are validated only as far as approval binding needs — a non-empty `id` and a sha256
-`digest`, both unique within the report. Every other field a detector or the segmenter (#63)
-puts on a record travels through untouched.
+`digest`, both unique within the report. Every other field the audit engine or the segmenter
+(#63) puts on a record travels through untouched.
 
 ### Commands
 
@@ -342,6 +354,8 @@ python3 -m unittest discover -s tests/engine -p '*_test.py'
 Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `validate_report()`, `load_report()`, `current_lineage()`, `render_report()`), and the commands
 as subprocesses whose payload must equal the library result. Path authorization has no command
-of its own — it is substrate the other components call. Shared fixtures live in
-`tests/engine/support.py`; the report suites build real git repositories, because staleness is
-a comparison against a repository and a mocked one would prove nothing.
+of its own — it is substrate the other components call. `tests/engine/support.py` holds what
+every suite needs — the engine on `sys.path`, `RepoTestCase.repo()`, and `run_command()` for
+the subprocess seam; report fixtures live in `report_test.py`, which `report_cli_test.py`
+imports. The report suites build real git repositories, because staleness is a comparison
+against a repository and a mocked one would prove nothing.

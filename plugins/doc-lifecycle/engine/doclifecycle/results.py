@@ -13,7 +13,9 @@ rules — every other state is a reason not to act on the run as if it were:
 - `invalid`  the run cannot be trusted. Carries problems and *no* output.
 
 A producing run declares one of the first three; `stale` and `invalid` are
-verdicts a validator reaches about an artifact, never self-declared.
+verdicts a validator reaches about an artifact, never self-declared. A verdict
+of `stale` does read back in when a persisted verdict is re-checked, which is
+carrying a validator's judgment forward, not a run assessing itself.
 `Inventory` predates the model and reports the simpler `ok`/`invalid` pair.
 """
 

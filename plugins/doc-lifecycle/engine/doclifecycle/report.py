@@ -21,7 +21,7 @@ an interactive check and a CI check cannot reach different verdicts.
 import json
 import re
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION, PLUGIN_VERSION, RULESET_VERSION
 from . import repository as repository_mod
@@ -37,8 +37,18 @@ from .results import (
     Problem,
 )
 
-FIELDS = ("status", "schema_version", "lineage", "records", "incomplete", "digest")
+FIELDS = (
+    "status", "schema_version", "lineage", "records", "incomplete",
+    "stale_reasons", "digest",
+)
 REQUIRED_FIELDS = ("status", "schema_version", "lineage")
+
+# The states a report payload may carry. A producing run declares one of
+# `DECLARABLE_STATES`; `stale` additionally reads back in, because a validator
+# emits it and a pipeline that persists a verdict must be able to re-check the
+# file it wrote. `invalid` never appears in a report: an invalid run has no
+# report to carry it.
+CARRIED_STATES = DECLARABLE_STATES + (STATE_STALE,)
 
 # The audit modes a report may declare. Closed: an unrecognized mode means the
 # reader cannot know what "the declared scope" was, so nothing else it says is
@@ -48,10 +58,10 @@ AUDIT_MODES = ("full", "incremental", "chunk")
 REQUIRED_LINEAGE_FIELDS = (
     "repository",           # which repository the report is about
     "base_commit",          # the commit its evidence was read at
-    "audit_mode",           # how much of the corpus the run set out to examine
-    "inventory_digest",     # the corpus it examined
+    "audit_mode",           # how much of the documentation it set out to examine
+    "inventory_digest",     # the document inventory it examined
     "audit_config_digest",  # the consumer configuration it ran under
-    "registry_digest",      # the classification that decided the corpus
+    "registry_digest",      # the classification that decided the inventory
     "ruleset_version",      # the audit policy it applied
     "plugin_version",       # the engine that applied it
     "evidence_boundary",    # what it was permitted to consult as evidence
@@ -124,9 +134,9 @@ class Record:
     """One thing the audit found.
 
     The contract owns only what binds a record to approval — a display `id` and
-    the `digest` an approval set selects it by. Everything else a detector or
-    the segmenter (#63) puts on a record travels in `extra`, untouched, so this
-    module never becomes a second owner of record internals.
+    the `digest` an approval set selects it by. Everything else the audit
+    engine or the segmenter (#63) puts on a record travels in `extra`,
+    untouched, so this module never becomes a second owner of record internals.
     """
 
     id: str
@@ -358,10 +368,11 @@ def _records(raw, bad):
             bad("report-invalid-record", f"record {i} is not an object", where)
             ok = False
             continue
+        valid = True
         if not _printable(entry.get("id")):
             bad("report-invalid-record",
                 f"record {i} must carry a non-empty single-line 'id'", where)
-            ok = False
+            valid = False
         digest = entry.get("digest")
         if not (isinstance(digest, str) and DIGEST.match(digest)):
             bad("report-invalid-record",
@@ -369,13 +380,15 @@ def _records(raw, bad):
                 f"selects records by digest, so a record without one cannot be "
                 f"approved",
                 where)
+            valid = False
+        if not valid:
             ok = False
-        if ok:
-            records.append(Record(
-                id=entry["id"],
-                digest=digest,
-                extra={k: v for k, v in entry.items() if k not in ("id", "digest")},
-            ))
+            continue
+        records.append(Record(
+            id=entry["id"],
+            digest=digest,
+            extra={k: v for k, v in entry.items() if k not in ("id", "digest")},
+        ))
     if not ok:
         return None
     for field in ("id", "digest"):
@@ -423,12 +436,62 @@ def _incomplete(raw, bad):
     return entries if ok else None
 
 
-def _declared_state(records, incomplete):
+def _carried_stale_reasons(raw, bad, status):
+    """The stale reasons a report payload carries from a prior verdict.
+
+    A validator emits them, so they must read back in: a pipeline that persists
+    `validate-report`'s output and re-checks the file it wrote must get the same
+    verdict, not a parse failure. They are never part of the report digest, so
+    carrying one does not change the report's identity.
+    """
+    if not isinstance(raw, list):
+        bad("report-invalid-stale-reason",
+            "stale_reasons must be a list of drift reasons", "stale_reasons")
+        return None
+    reasons, ok = [], True
+    for i, entry in enumerate(raw):
+        where = f"stale_reasons[{i}]"
+        fields = {"code", "message", "reported", "current"}
+        if not isinstance(entry, dict) or set(entry) != fields:
+            bad("report-invalid-stale-reason",
+                f"stale_reasons[{i}] must be an object with exactly "
+                f"{sorted(fields)}",
+                where)
+            ok = False
+            continue
+        if not all(_printable(entry[f]) for f in fields):
+            bad("report-invalid-stale-reason",
+                f"stale_reasons[{i}] fields must each be a non-empty "
+                f"single-line string",
+                where)
+            ok = False
+            continue
+        reasons.append(StaleReason(**entry))
+    if not ok:
+        return None
+    if status == STATE_STALE and not reasons:
+        bad("report-state-inconsistent",
+            "a stale report must name every lineage field that drifted — "
+            "'stale' without a reason is an unfalsifiable claim",
+            "stale_reasons")
+        return None
+    if status != STATE_STALE and reasons:
+        bad("report-state-inconsistent",
+            f"only a stale report carries stale_reasons; this one declares "
+            f"{status!r}",
+            "stale_reasons")
+        return None
+    return reasons
+
+
+def _state_from_content(records, incomplete):
     """The only state the report's own content supports.
 
     Derived rather than trusted: a run cannot both leave part of its scope
     unexamined and call itself clean, and the state a reader acts on must
-    follow from what the report actually contains.
+    follow from what the report actually contains. "Clean" is relative to the
+    scope the audit mode declared — a `chunk` run that finished its chunk is
+    clean about that chunk, and says so by naming the mode in lineage.
     """
     if incomplete:
         return STATE_PARTIAL
@@ -450,8 +513,8 @@ def current_lineage(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
     a freshness check that cannot read the world fails closed rather than
     certifying a report it did not check.
     """
-    state, problems = repository_mod.state(repo_root)
-    state = dict(state)
+    current, problems = repository_mod.lineage(repo_root)
+    current = dict(current)
 
     inventory = build_inventory(repo_root, registry_path)
     if isinstance(inventory, Invalid):
@@ -464,17 +527,17 @@ def current_lineage(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
             location=p.location,
         ) for p in inventory.problems)
     else:
-        state["inventory_digest"] = inventory.digest
-        state["registry_digest"] = inventory.registry_digest
+        current["inventory_digest"] = inventory.digest
+        current["registry_digest"] = inventory.registry_digest
 
     if problems:
         return {}, tuple(problems)
 
-    state["ruleset_version"] = RULESET_VERSION
-    state["plugin_version"] = PLUGIN_VERSION
+    current["ruleset_version"] = RULESET_VERSION
+    current["plugin_version"] = PLUGIN_VERSION
     if audit_config_digest is not None:
-        state["audit_config_digest"] = audit_config_digest
-    return state, ()
+        current["audit_config_digest"] = audit_config_digest
+    return current, ()
 
 
 def _stale_reasons(lineage, current):
@@ -548,17 +611,20 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     incomplete = _incomplete(payload.get("incomplete", []), bad)
 
     status = payload.get("status")
-    if "status" in payload and status not in DECLARABLE_STATES:
+    if "status" in payload and status not in CARRIED_STATES:
         bad("report-invalid-status",
-            f"status {status!r} is not a state a run may declare — a producing "
-            f"run is {list(DECLARABLE_STATES)}; 'stale' and 'invalid' are "
-            f"verdicts a validator reaches about a report, not self-assessments",
+            f"status {status!r} is not a state a report may carry — a producing "
+            f"run declares {list(DECLARABLE_STATES)}, and a validator may have "
+            f"since marked it {STATE_STALE!r}; 'invalid' is never a report, "
+            f"because an invalid run has no content to report",
             "status")
     elif status in DECLARABLE_STATES and records is not None and (
         incomplete is not None
     ):
-        derived = _declared_state(payload.get("records", []),
-                                  payload.get("incomplete", []))
+        # Derived from the raw lists, not the parsed ones: a record this
+        # validator rejected is still a record the run claims to have found.
+        derived = _state_from_content(payload.get("records", []),
+                                      payload.get("incomplete", []))
         if derived != status:
             bad("report-state-inconsistent",
                 f"the report declares '{status}' but its content is '{derived}' "
@@ -568,10 +634,12 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
                 f"nothing found",
                 "status")
 
+    carried = _carried_stale_reasons(payload.get("stale_reasons", []), bad, status)
+
     if problems:
         return Invalid(tuple(problems))
 
-    records, incomplete = tuple(records), tuple(incomplete)
+    records, incomplete, carried = tuple(records), tuple(incomplete), tuple(carried)
     digest = _content_digest(lineage, records, incomplete)
     declared_digest = payload.get("digest")
     if declared_digest is not None and declared_digest != digest:
@@ -585,23 +653,29 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
             location="digest",
         ),))
 
-    report = Report(
-        status=status, lineage=lineage, records=records,
-        incomplete=incomplete, digest=digest,
-    )
     if repo_root is None:
-        return report
+        # Structural only: a carried stale verdict stands, because nothing here
+        # can disprove it, and keeping it is the fail-closed direction.
+        return Report(
+            status=status, lineage=lineage, records=records,
+            incomplete=incomplete, digest=digest, stale_reasons=carried,
+        )
 
     current, problems = current_lineage(repo_root, registry_path,
                                         audit_config_digest)
     if problems:
         return Invalid(tuple(problems))
     reasons = _stale_reasons(lineage, current)
-    if not reasons:
-        return report
+    if reasons:
+        return Report(
+            status=STATE_STALE, lineage=lineage, records=records,
+            incomplete=incomplete, digest=digest, stale_reasons=reasons,
+        )
+    # Fresh against this repository, so any carried stale verdict is cleared and
+    # the state follows from the content again.
     return Report(
-        status=STATE_STALE, lineage=lineage, records=records,
-        incomplete=incomplete, digest=digest, stale_reasons=reasons,
+        status=_state_from_content(records, incomplete), lineage=lineage,
+        records=records, incomplete=incomplete, digest=digest,
     )
 
 

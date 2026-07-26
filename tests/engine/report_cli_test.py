@@ -23,7 +23,7 @@ from report_test import (  # noqa: E402
     lineage_payload,
     report_payload,
 )
-from support import ENGINE  # noqa: E402
+from support import ENGINE, run_command as run  # noqa: E402
 
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import load_report  # noqa: E402
@@ -37,14 +37,6 @@ EXIT_INVALID = 1
 EXIT_USAGE = 2
 EXIT_STALE = 3
 EXIT_PARTIAL = 4
-
-
-def run(*argv, cwd=None):
-    env = dict(os.environ, PYTHONPATH=ENGINE)
-    return subprocess.run(
-        [sys.executable, "-m", "doclifecycle", *argv],
-        capture_output=True, text=True, env=env, cwd=cwd,
-    )
 
 
 class ReportCommandTestCase(GitRepoTestCase):

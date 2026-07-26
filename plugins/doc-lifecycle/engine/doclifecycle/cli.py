@@ -7,6 +7,8 @@ logic of its own, so an interactive import and a CI invocation cannot disagree.
 Exit codes name the result state, so a workflow can gate without parsing JSON:
 0 the run completed and its scope was examined (`ok`, `clean`, `findings` —
 findings are data, not a gate); 1 invalid; 2 a usage error; 3 stale; 4 partial.
+`inventory` reaches only 0, 1, and 2, as it always has; 3 and 4 belong to the
+report states.
 """
 
 import argparse
@@ -15,7 +17,7 @@ import sys
 
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .render import render_report
-from .report import load_report
+from .report import Report, load_report
 from .results import (
     STATE_CLEAN,
     STATE_FINDINGS,
@@ -23,6 +25,7 @@ from .results import (
     STATE_PARTIAL,
     STATE_STALE,
     STATUS_OK,
+    Invalid,
 )
 
 EXIT_CODES = {
@@ -134,16 +137,19 @@ def _explain(result):
     A CI log or terminal reader must not have to parse the payload to learn why
     a run is invalid, stale, or partial.
     """
-    for problem in getattr(result, "problems", ()):
-        where = f" [{problem.location}]" if problem.location else ""
-        print(f"{problem.code}: {problem.message}{where}", file=sys.stderr)
-    for reason in getattr(result, "stale_reasons", ()):
-        print(f"{reason.code}: {reason.message}", file=sys.stderr)
-    if getattr(result, "status", None) == STATE_PARTIAL:
-        for entry in result.incomplete:
-            print(
-                f"not-examined: {entry.scope} — {entry.reason}", file=sys.stderr
-            )
+    if isinstance(result, Invalid):
+        for problem in result.problems:
+            where = f" [{problem.location}]" if problem.location else ""
+            print(f"{problem.code}: {problem.message}{where}", file=sys.stderr)
+    elif isinstance(result, Report):
+        for reason in result.stale_reasons:
+            print(f"{reason.code}: {reason.message}", file=sys.stderr)
+        if result.status == STATE_PARTIAL:
+            for entry in result.incomplete:
+                print(
+                    f"not-examined: {entry.scope} — {entry.reason}",
+                    file=sys.stderr,
+                )
 
 
 def main(argv=None):

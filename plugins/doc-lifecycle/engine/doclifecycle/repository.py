@@ -60,8 +60,11 @@ def normalize_remote(url):
     return value.lower()
 
 
-def state(repo_root):
+def lineage(repo_root):
     """(`{repository, base_commit}`, problems) for the repository at `repo_root`.
+
+    The half of a report's lineage git owns. Named for what it produces, not
+    "state", which the result model already owns.
 
     Identity prefers the declared origin remote — stable across clones and
     shallow checkouts alike — and falls back to the root commit, which a

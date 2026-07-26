@@ -362,13 +362,13 @@ class ResultStates(unittest.TestCase):
 
         self.assertEqual(codes(result), ["report-state-inconsistent"])
 
-    def test_a_verdict_only_state_cannot_be_declared_by_a_producing_run(self):
-        for status in (STATE_STALE, STATE_INVALID):
-            with self.subTest(status=status):
-                result = validate_report(report_payload(status=status))
+    def test_invalid_is_never_a_state_a_report_can_carry(self):
+        # An invalid run has no content to report, so a report claiming to be
+        # invalid is a contradiction rather than a verdict.
+        result = validate_report(report_payload(status=STATE_INVALID))
 
-                self.assertIsInstance(result, Invalid)
-                self.assertEqual(codes(result), ["report-invalid-status"])
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["report-invalid-status"])
 
     def test_an_unknown_status_is_rejected(self):
         result = validate_report(report_payload(status="ok"))
@@ -550,6 +550,87 @@ class Staleness(GitRepoTestCase):
         self.assertEqual(result.status, STATE_STALE)
         self.assertEqual(
             [r.code for r in result.stale_reasons], ["lineage-inventory-mismatch"]
+        )
+
+    def test_a_stale_verdict_reads_back_in_unchanged(self):
+        # A pipeline persists what `validate-report` printed and re-checks it
+        # later; the artifact it wrote must not read as invalid.
+        repo = self.git_repo()
+        verdict = validate_report(
+            report_payload(lineage=self.fresh_lineage(repo, plugin_version="0.0.1")),
+            repo_root=repo, audit_config_digest=CONFIG_DIGEST,
+        ).to_dict()
+
+        self.assertEqual(validate_report(verdict).to_dict(), verdict)
+
+    def test_a_carried_stale_verdict_stands_when_nothing_can_disprove_it(self):
+        repo = self.git_repo()
+        verdict = validate_report(
+            report_payload(lineage=self.fresh_lineage(repo, plugin_version="0.0.1")),
+            repo_root=repo, audit_config_digest=CONFIG_DIGEST,
+        ).to_dict()
+
+        result = validate_report(verdict)
+
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(
+            [r.code for r in result.stale_reasons], ["lineage-plugin-mismatch"]
+        )
+
+    def test_a_carried_stale_verdict_is_cleared_by_a_repository_it_matches(self):
+        repo = self.git_repo()
+        stamped = report_payload(
+            lineage=self.fresh_lineage(repo),
+            status=STATE_STALE,
+            stale_reasons=[{
+                "code": "lineage-plugin-mismatch", "message": "drifted once",
+                "reported": "0.0.1", "current": PLUGIN_VERSION,
+            }],
+        )
+
+        result = validate_report(
+            stamped, repo_root=repo, audit_config_digest=CONFIG_DIGEST
+        )
+
+        self.assertEqual(result.status, STATE_FINDINGS)
+        self.assertEqual(result.stale_reasons, ())
+
+    def test_a_stale_report_that_names_no_drift_is_inconsistent(self):
+        result = validate_report(report_payload(status=STATE_STALE))
+
+        self.assertEqual(codes(result), ["report-state-inconsistent"])
+
+    def test_stale_reasons_on_a_report_that_is_not_stale_are_inconsistent(self):
+        result = validate_report(report_payload(stale_reasons=[{
+            "code": "lineage-plugin-mismatch", "message": "drifted",
+            "reported": "0.0.1", "current": PLUGIN_VERSION,
+        }]))
+
+        self.assertEqual(codes(result), ["report-state-inconsistent"])
+
+    def test_malformed_stale_reasons_are_rejected(self):
+        for reason in ({"code": "c"}, "drift", {
+            "code": "c", "message": "m", "reported": "", "current": "x",
+        }, {"code": "c", "message": "m", "reported": "a", "current": "b", "x": 1}):
+            with self.subTest(reason=reason):
+                result = validate_report(
+                    report_payload(status=STATE_STALE, stale_reasons=[reason])
+                )
+
+                self.assertEqual(codes(result), ["report-invalid-stale-reason"])
+
+    def test_a_carried_stale_verdict_does_not_change_the_report_digest(self):
+        # Approval binds to the digest, so a verdict recorded on top of a report
+        # must not re-key it.
+        repo = self.git_repo()
+        lineage = self.fresh_lineage(repo, plugin_version="0.0.1")
+
+        self.assertEqual(
+            validate_report(report_payload(lineage=lineage)).digest,
+            validate_report(
+                report_payload(lineage=lineage), repo_root=repo,
+                audit_config_digest=CONFIG_DIGEST,
+            ).digest,
         )
 
     def test_without_a_repository_the_verdict_is_never_stale(self):
