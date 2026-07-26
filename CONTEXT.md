@@ -35,6 +35,18 @@ _Avoid_: claim type
 An immutable statement of what was examined and what was found, pinned to the repository state and audit inputs that produced it. Proof of examination, not authority to change anything.
 _Avoid_: findings list, output, results
 
+**Document inventory**:
+The registry's verdict on a repository: every document under the declared roots with its kind, set, and content digest, plus a finding for each document no rule claims. Derived, deterministic, and digested — the inventory digest is part of every report's lineage. Says what exists, never whether it is accurate.
+_Avoid_: file list, corpus (as if it were the inventory), doc index
+
+**Result state**:
+The single named outcome a run resolves to — clean, findings, partial, stale, or invalid/unsafe. Only clean means the declared scope was examined successfully under the named mode and rules. A run that cannot be trusted reports invalid and carries no partial output.
+_Avoid_: status (unqualified), error, failure
+
+**Problem**:
+One typed reason a run is invalid: a code, a message that says how to recover, and where it was found. Reported exhaustively — a run names every problem it found, not the first.
+_Avoid_: error message, warning (a problem never degrades to advisory)
+
 **Approval set**:
 An immutable artifact binding selected record digests from one report, plus its lineage, to an allowed mutation scope. The sole authority the applier accepts. Never tracked in the repo: its digest and summary travel in the change it authorizes (commit, PR body), and it expires with that change's validity.
 _Avoid_: approval layer, dispatch list, approved records (informal)

@@ -1,10 +1,32 @@
 # Documentation Skills Suite — Handoff
 
-**Last updated:** 2026-07-12
-**HEAD at handoff:** grow-loop sensors + unowned-bucket owners (review findings 1,3,4,6) — see `git log`
+**Last updated:** 2026-07-26
+**HEAD at handoff:** engine package with registry-driven closed-world inventory — see `git log`
 **Repo:** `toolshed` (git)
 
-## Latest milestone (2026-07-12): review-finding grow-loop + disposition owners (v0.11.0)
+## Latest milestone (2026-07-26): engine package, #57 stage 1 first slice (v0.13.0)
+
+The re-architecture of issue #57 is under way, sliced into issues #59–#77. Authoritative spec:
+the "Distilled decisions (grilling session, 2026-07-26)" comment on #57 (the issue body is a
+review artifact it amends); vocabulary: `CONTEXT.md`; durable decisions: `docs/decisions.md`
+(two 2026-07-26 entries — stage 0, then this slice).
+
+Stage 0 landed first (#59, v0.12.0): the scheduled lanes' model steps hold no repository write
+authority — model jobs are `contents: read` and token-free, credentialed jobs run no model and
+stage only paths `authorize-paths.py` derives from the validated report.
+
+Landed (#60): `plugins/doc-lifecycle/engine/` — the stdlib-only `doclifecycle` package with the
+registry parser (globs → kind + set, fail-closed validation, meaning-based digest) and the
+closed-world inventory, plus thin `python3 -m doclifecycle` / `doc-lifecycle.py` entrypoints.
+Interface reference: `plugins/doc-lifecycle/engine/README.md`. Suites at `tests/engine/`, run by
+discovery in `release.yml`. The eight helper scripts are untouched — they are absorbed in later
+stages, so both generations coexist for now.
+
+**Next:** #61 (acceptance fixture) and #62 (report contract with lineage and the five result
+states), both of which build directly on the inventory. `gh issue list --label ready-for-agent`
+has the full sequence with its blocked-by edges.
+
+## Earlier milestone (2026-07-12): review-finding grow-loop + disposition owners (v0.11.0)
 
 Landed four of the six 2026-07-12 architecture-review findings; design + rationale:
 `docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md`, durable decisions:
