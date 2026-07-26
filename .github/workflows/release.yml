@@ -57,6 +57,10 @@ jobs:
           python3 tests/scripts/apply-upgrade_test.py
           python3 tests/scripts/render-report_test.py
           python3 tests/scripts/marketplace-pin_test.py
+      # The engine's suites are found by ordinary discovery, so a new suite is
+      # wired the moment its file lands — no enumeration to forget.
+      - name: Engine tests
+        run: python3 -m unittest discover -s tests/engine -p '*_test.py' --verbose
       - name: Validate plugin manifests
         run: |
           set -euo pipefail

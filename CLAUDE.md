@@ -1,7 +1,10 @@
 # CLAUDE.md
 
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
-Markdown; the only executable code published is eight skill helper scripts
+Markdown; the executable code published is the engine package
+(`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
+re-architecture is absorbing the helper scripts into; see its `README.md`) plus eight skill
+helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
 `.../detecting-doc-bloat/scripts/plan-chunks.py`, plus
@@ -27,10 +30,12 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
 - `.claude-plugin/marketplace.json` — marketplace manifest, lists plugins. **Must stay at repo
   root**: `/plugin marketplace add <owner>/<repo>` only finds `marketplace.json` there.
 - `plugins/doc-lifecycle/` — the one published plugin. `.claude-plugin/plugin.json` is its
-  manifest; `skills/` and `agents/` hold its contents.
+  manifest; `skills/`, `agents/`, and `engine/` hold its contents.
+- `CONTEXT.md` — the ubiquitous language for the #57 re-architecture (component, contract, and
+  document-model terms, each with an _Avoid_ list). Use its vocabulary in engine code and tests.
 - `docs/` — `plans/` (design docs + `HANDOFF.md`), `guides/` (narrative user guides). Not published.
-- `tests/` — `fixtures/` (runnable sample repos) and `baselines/` (RED/GREEN skill-test records).
-  Not published.
+- `tests/` — `fixtures/` (runnable sample repos), `baselines/` (RED/GREEN skill-test records),
+  `scripts/` (helper-script suites), `engine/` (engine suites). Not published.
 
 ## Working on the plugin
 
@@ -69,6 +74,11 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
   unextractable knobs). `plan-distill_test.py` covers the distill lane's grouping, dispatch
   rendering, sidecar seam, and patch-merge engine. `release.yml`'s CI runs every
   `tests/scripts/*_test.py` suite.
+- **The engine's tests live at `tests/engine/*_test.py`** and are found by discovery
+  (`python3 -m unittest discover -s tests/engine -p '*_test.py'`), which is how `release.yml`'s
+  "Engine tests" step runs them — a new suite is wired by landing the file, with no list to
+  update. They test only the two public seams (the library function, and `python3 -m
+  doclifecycle` as a subprocess); confirm new seams before adding a suite at one.
 - Sync PR bodies/titles render via `render-report.py`'s `pr-body`/`pr-title` subcommands, never
   inline YAML `jq` — keeping the logic unit-tested and the CI YAML allowlist thin.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
