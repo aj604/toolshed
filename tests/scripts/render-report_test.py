@@ -599,9 +599,13 @@ class DocSyncWaiverWiring(unittest.TestCase):
             self.assertIn("sync-gate.py stale-state", step, label)
             self.assertIn("--out .github/doc-sync/last-stales.json", step, label)
             # State must be staged before the PR commit, so it advances only
-            # when the fix merges.
-            self.assertLess(step.index("stale-state"),
-                            step.index("git add -A"), label)
+            # when the fix merges. The credentialed job stages by name — the
+            # model's own edits arrive as an authorized path list, never a
+            # broad add (tests/scripts/workflow-permissions_test.py).
+            staged = step.index("git add .github/doc-sync-marker "
+                                ".github/doc-sync/last-stales.json")
+            self.assertLess(step.index("stale-state"), staged, label)
+            self.assertLess(staged, step.index("git commit -m"), label)
 
 
 class DocBloatGrowthWiring(unittest.TestCase):

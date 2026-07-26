@@ -16,9 +16,11 @@ on:
     - cron: "0 2 * * 1"
   workflow_dispatch: {}
 
+# Least privilege by default; the one job widens what it needs. This lane runs
+# no model at all (the regeneration is deterministic), so its write scopes never
+# sit behind a model process.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: doc-sync-upgrade
@@ -27,6 +29,9 @@ concurrency:
 jobs:
   upgrade:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:

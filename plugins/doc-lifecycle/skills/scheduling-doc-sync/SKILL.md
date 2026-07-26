@@ -17,10 +17,26 @@ Orchestration lives in the shipped workflow YAML; every gate decision lives in t
 `sync-gate.py` / `upgrade-gate.py`; every run-surface string (summaries, notices, issue/PR
 bodies) lives in the shipped `render-report.py`; chunk planning lives in `plan-chunks.py`;
 distill-lane planning, dispatch rendering, and the deterministic patch merge live in
-`plan-distill.py`; doc
+`plan-distill.py`; the path authority for a model's edit set lives in `authorize-paths.py`; doc
 judgment lives in `detecting-doc-drift` / `fixing-doc-drift` / `detecting-doc-bloat` /
 `fixing-doc-bloat`, which the workflows invoke headlessly by name. Never inline detection or
 fixing method into workflow YAML — that forks the method from its one owner.
+
+**The model holds no repository write authority.** Every job that invokes a model runs with
+`permissions: contents: read` (plus `id-token: write` for the OAuth exchange only), checks out
+with `persist-credentials: false`, and hands its work forward as an artifact — a report, or a
+`git diff --binary --no-renames` patch of its edits. The credentialed jobs (`land`,
+`prune_land`, `distill_merge`) run **no model**: they derive the authorized path set from the
+validated report (`authorize-paths.py expected`), check every path the patch names against it
+(`authorize-paths.py check`), apply, and stage that explicit list —
+`git add --pathspec-from-file=`, never `git add -A`. A patch naming any other path fails the
+run before anything is applied: no PR, nothing staged. This is the boundary; the model step's
+`--allowedTools` list is ergonomics, not security. `distill_merge` is the one lane that
+cannot stage by pathspec — it transports per-record commits so the PR stays reviewable
+record by record — so it checks twice instead: every path in every group patch before the
+first `git am`, and every path in the landed diff after the last. What none of this
+establishes is that the *report* was honest — it is model output too; PR review is the
+backstop until the approval-set stage lands.
 
 **Installs are pinned, not floating.** Before each `claude-code-action` step, a
 `Pin plugin marketplace` step reads the version from `.github/doc-sync/installed-version` and
@@ -33,7 +49,7 @@ stay byte-identical across versions — a routine upgrade changes only the lockf
 `.github/workflows/` file (which the Actions token cannot push; see Upgrade mode). The upgrade
 lane is the exception: it clones the *target* release it's regenerating to (`steps.versions.latest`),
 since `installed-version` still holds the old version until the skill advances it. Clone under
-`$RUNNER_TEMP`, never inside the work tree, or the PR steps' `git add -A` captures it.
+`$RUNNER_TEMP`, never inside the work tree, or the exported edit set captures it.
 Pin via the local checkout, NOT a `plugin_marketplaces: …/toolshed.git#v<version>` ref —
 `claude-code-action`'s URL validator requires the value end in `.git`, so a `#<ref>` fragment is
 rejected outright. `doc-sync-upgrade.yml` is the only thing that advances the pin, and only via a
@@ -41,9 +57,9 @@ reviewable PR. The `plugins:` selector stays bare `doc-lifecycle@toolshed` (`cla
 has no `@version` selector there — `doc-lifecycle@toolshed@0.7.0` is invalid).
 
 The three workflow templates and this skill's own scripts (`sync-gate.py`, `upgrade-gate.py`,
-`render-report.py`, `plan-distill.py`) are in its base directory (announced when the skill
-loads); the chunk planner and the two output validators are copied from the sibling skills
-that own them (install steps 3–4). `apply-upgrade.py` (also in the base directory) is the deterministic upgrade
+`render-report.py`, `plan-distill.py`, `authorize-paths.py`) are in its base directory
+(announced when the skill loads); the chunk planner and the two output validators are copied
+from the sibling skills that own them (install steps 3–4). `apply-upgrade.py` (also in the base directory) is the deterministic upgrade
 engine — run from the pinned checkout by the upgrade lane, never vendored into the install (see
 Upgrade mode).
 
@@ -90,11 +106,13 @@ Upgrade mode).
 3. Copy `scripts/sync-gate.py` → `.github/doc-sync/sync-gate.py`,
    `scripts/upgrade-gate.py` → `.github/doc-sync/upgrade-gate.py`,
    `scripts/render-report.py` → `.github/doc-sync/render-report.py`,
-   `scripts/plan-distill.py` → `.github/doc-sync/plan-distill.py`, and
+   `scripts/plan-distill.py` → `.github/doc-sync/plan-distill.py`,
+   `scripts/authorize-paths.py` → `.github/doc-sync/authorize-paths.py`, and
    `../detecting-doc-bloat/scripts/plan-chunks.py` → `.github/doc-sync/plan-chunks.py`
    (gate decisions, the version-comparison gate, run-surface rendering, doc-bloat's
-   deterministic chunk planning, and the distill lane's planning + patch merge all run from
-   the repo, unit-tested upstream — across all three workflows).
+   deterministic chunk planning, the distill lane's planning + patch merge, and the
+   credentialed jobs' path authority all run from the repo, unit-tested upstream — across all
+   three workflows).
 4. Copy `../detecting-doc-drift/scripts/validate-drift-output.py` → `.github/doc-sync/validate-drift-output.py`
    and `../detecting-doc-bloat/scripts/validate-bloat-output.py` → `.github/doc-sync/validate-bloat-output.py`
    (each workflow's mechanical contract check runs from the repo, not the plugin cache).
@@ -122,10 +140,11 @@ Upgrade mode).
    the pin, so on a fresh install always write it. `doc-sync-upgrade.yml` reads it to decide
    whether a newer release exists; it advances only when an upgrade PR merges.
 9. Tell the user, concretely:
-   - the fourteen files to commit (`doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml`,
+   - the fifteen files to commit (`doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml`,
      `sync-gate.py`, `upgrade-gate.py`, `render-report.py`, `plan-chunks.py`, `plan-distill.py`,
-     `validate-drift-output.py`, `validate-bloat-output.py`, the seeded `audit-scope.json`, the
-     seeded `drift-waivers.json`, the seeded `doc-sync-marker`, and `installed-version`);
+     `authorize-paths.py`, `validate-drift-output.py`, `validate-bloat-output.py`, the seeded
+     `audit-scope.json`, the seeded `drift-waivers.json`, the seeded `doc-sync-marker`, and
+     `installed-version`);
    - first night: diff from the seeded marker; no drift → marker-only commit, drift → PR on
      `doc-sync/nightly` with evidence, over-cap → a `doc-sync` issue;
    - the weekly bloat sweep opens up to two **draft** PRs (`doc-bloat/prune`, `doc-bloat/distill`);
@@ -148,7 +167,7 @@ consumer-owned value alone. **It is not a fresh install** — skip the Preflight
 PR-permissions are already in place) and do not re-seed the marker or audit-scope.
 
 **The regeneration is deterministic — `scripts/apply-upgrade.py`, no model.** Once the workflow
-YAML went version-agnostic, an upgrade is pure mechanics (re-copy the seven scripts, re-render the
+YAML went version-agnostic, an upgrade is pure mechanics (re-copy the eight scripts, re-render the
 three templates with the consumer's preserved knobs, bump the lockfile), so a tested script owns
 it and the upgrade lane makes no model call — and needs no model auth. The workflow runs it from
 the pinned target checkout; a human forcing an upgrade runs the same script against their checkout
@@ -165,7 +184,7 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | File | Owner | Upgrade behavior |
 |------|-------|------------------|
 | `doc-sync.yml`, `doc-bloat.yml`, `doc-sync-upgrade.yml` | plugin (wiring) | **Regenerate** from the new templates, but re-inject the consumer's existing knobs (below), not the template defaults. No version to re-pin — the Pin steps read `installed-version` at runtime. |
-| `.github/doc-sync/*.py` (all seven scripts) | plugin (wiring) | **Overwrite** from the new version. |
+| `.github/doc-sync/*.py` (all eight scripts) | plugin (wiring) | **Overwrite** from the new version. |
 | `.github/doc-sync/installed-version` | version state | **Set** to `<target>` (bare semver). This is what advances the pin; on a version-only release it's the *only* file that changes. |
 | `.github/doc-sync-marker` | sync state | **Never touch.** |
 | `.github/doc-sync/audit-scope.json` | consumer (tuned config) | **Never touch.** |
@@ -219,10 +238,20 @@ and expected; don't try to "fix" it by widening the token — the restriction is
   unsupported).
 - **Don't customize the installed YAML beyond the cron/cap/bloat-cron/upgrade-cron knobs.** Real
   changes belong upstream in the plugin (aj604/toolshed) so every install gets them on next upgrade.
+- **The model never holds repository write authority.** A model job's `permissions:` stays
+  `contents: read` (+ `id-token: write`), its checkout sets `persist-credentials: false`, and it
+  carries no `GH_TOKEN`. Its output leaves as an artifact; a credentialed, model-free job
+  authorizes that artifact's paths against the report (`authorize-paths.py`) and stages exactly
+  them. Never widen a model job's token "so it can push", and never move a `claude-code-action`
+  step into a job holding a write scope — `tests/scripts/workflow-permissions_test.py` fails the
+  release if either happens.
+- **Staging is an explicit path list, never `git add -A`.** The credentialed jobs stage
+  `--pathspec-from-file` the authorized list and re-check what landed. A broad add would hand a
+  model's stray file the same authority as an approved doc edit.
 - **The drift report is a build artifact, never repo content.** The shipped workflow already
-  removes it before the marker-only commit and moves it out of the working tree before the PR
-  commit's `git add -A` — don't "simplify" that by dropping the artifact-upload step or letting
-  a hand edit reintroduce `drift-report.json`/`pr-body.md` into a commit.
+  removes it before the marker-only commit and before the edit-set export, and renders the PR
+  body from a copy under `$RUNNER_TEMP` — don't "simplify" that by dropping the artifact-upload
+  step or letting a hand edit reintroduce `drift-report.json`/`pr-body.md` into a commit.
 - **Mechanical gate failures fail the job red, never silently.** A malformed `drift-report.json`
   makes `validate-drift-output.py` exit nonzero, and the workflow's validate step carries no
   `continue-on-error` — don't add one.
@@ -244,6 +273,12 @@ and expected; don't try to "fix" it by widening the token — the restriction is
 - Adding a direct-commit mode, or dropping the cap/pending-work gates "to simplify" → the gates
   are the product; see the design doc in aj604/toolshed.
 - Committing `drift-report.json` or `pr-body.md` as repo content → artifact hygiene, not history.
+- Giving a model job `contents: write`, a `GH_TOKEN`, or a credential-persisting checkout "so the
+  fix step can just push" → that is the mutation path the job split closes; the fix leaves as a
+  patch artifact.
+- Replacing the `authorize-paths.py` check with a trusting `git apply` + `git add -A`, or
+  generating the edit-set patch without `--no-renames` → a rename reports only its destination to
+  the check, so the source path would go unexamined.
 - Dropping the `Pin plugin marketplace` clone step, or pointing `plugin_marketplaces` at
   `…/toolshed.git` (bare `main`) → an unpinned install that floats and drifts from the frozen
   wiring. Pin it via the local checkout of the release tag.

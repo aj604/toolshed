@@ -12,7 +12,13 @@
 # never the report, and the next sweep picks it up automatically. GitHub caps a matrix at 256
 # jobs; on a corpus that plans past that, set chunking.max_chunks (audit-scope.json) and sweep
 # in resumed passes. The distill apply lane fans out the same way (see the distill_plan
-# comment below). Design: docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md
+# comment below).
+# The model holds no repository write authority: every job that invokes a model runs
+# read-only, with the checkout's credential dropped, and hands its work forward as an
+# artifact. The two credentialed jobs (prune_land, distill_merge) run no model — they
+# authorize every path the model's patches name against the report (authorize-paths.py)
+# and stage exactly those, never `git add -A`.
+# Design: docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md
 # + docs/plans/2026-07-07-bloat-scale-hardening-design.md
 # + docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md in aj604/toolshed.
 name: doc-bloat
@@ -22,11 +28,9 @@ on:
     - cron: "{{BLOAT_CRON}}"
   workflow_dispatch: {}
 
+# Least privilege by default; each job widens only what it needs.
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write   # claude-code-action OAuth token exchange
-  actions: read     # resume step reads prior runs (gh run list/download) — 403s without it
+  contents: read
 
 concurrency:
   group: doc-bloat
@@ -35,6 +39,10 @@ concurrency:
 jobs:
   plan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read     # resume step reads prior runs (gh run list/download) — 403s without it
     env:
       GH_TOKEN: ${{ github.token }}
     outputs:
@@ -44,6 +52,8 @@ jobs:
       distill_pr: ${{ steps.facts.outputs.distill_pr }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Gather facts
         id: facts
         run: |
@@ -101,10 +111,14 @@ jobs:
           path: chunks/
           if-no-files-found: ignore
 
+  # Read-only model job: each chunk's findings leave as an artifact.
   sweep:
     needs: plan
     if: needs.plan.outputs.decision == 'detect' && needs.plan.outputs.pending != '[]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # claude-code-action OAuth exchange only — not repo write
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +127,8 @@ jobs:
       CHUNK_ID: ${{ matrix.chunk }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # no write-capable credential in a model job
       - uses: actions/download-artifact@v4
         with:
           name: bloat-manifest
@@ -198,13 +214,15 @@ jobs:
     # and open lanes, or the carried state silently self-perpetuates forever.
     if: always() && needs.plan.outputs.decision == 'detect'
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
+    permissions:
+      contents: read
     outputs:
       prune: ${{ steps.prune.outputs.decision }}
       distill: ${{ steps.distill.outputs.decision }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: bloat-manifest
@@ -249,14 +267,18 @@ jobs:
             python3 .github/doc-sync/render-report.py bloat-skip-summary --lane distill --reason "${DECISION}"
           fi
 
+  # Read-only model job: the prune edits leave as a patch artifact, never as a push.
   prune:
     needs: [plan, assemble]
     if: needs.assemble.outputs.prune == 'open'
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: bloat-report
@@ -282,8 +304,63 @@ jobs:
             Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in
             bloat-report.json whose verdict is CUT, CONDENSE, or EXTRACT-AND-MOVE — treat
             exactly those record IDs as the approved subset, and apply nothing else. Follow
-            the skill's rules exactly.
+            the skill's rules exactly. Edit files in place only — never commit, push, or
+            open a PR; the workflow transports your edits.
           claude_args: --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
+      - name: Export the edit set (artifact only — this job cannot write to the repo)
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/edits"
+          # The report is a build artifact, never repo content. The export below is
+          # deliberately total — anything else this run touched rides along, so the
+          # land job rejects it loudly instead of silently dropping it.
+          rm -f bloat-report.json
+          git add -A
+          # --no-renames: a rename record reports only its destination path to the
+          # authority check, leaving the source unexamined.
+          git diff --cached --binary --no-renames > "${RUNNER_TEMP}/edits/edits.patch"
+          echo "exported edit set:"
+          git diff --cached --name-only --no-renames
+      - name: Upload edit set
+        uses: actions/upload-artifact@v4
+        with:
+          name: bloat-prune-edits
+          path: ${{ runner.temp }}/edits/edits.patch
+
+  # Credentialed, model-free: authorize the prune patch against the report, stage
+  # exactly the paths it named, open the draft PR.
+  prune_land:
+    needs: [plan, assemble, prune]
+    if: needs.assemble.outputs.prune == 'open'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bloat-report
+      - uses: actions/download-artifact@v4
+        with:
+          name: bloat-prune-edits
+          path: ${{ runner.temp }}/edits
+      # The report is the authority: a prune edit may touch the docs its records
+      # name (and an EXTRACT-AND-MOVE target), nothing else. Checked before
+      # anything is applied, so a violation ends the run with no PR and no staged
+      # changes.
+      - name: Authorize the edit set against the report
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/authorize-paths.py expected \
+            --report bloat-report.json --lane prune \
+            --out "$RUNNER_TEMP/expected-paths.json"
+          python3 .github/doc-sync/authorize-paths.py check \
+            --expected "$RUNNER_TEMP/expected-paths.json" \
+            --patch "$RUNNER_TEMP/edits/edits.patch" --repo . \
+            > "$RUNNER_TEMP/authorized-paths.txt"
       - name: Open draft PR
         run: |
           set -euo pipefail
@@ -296,19 +373,20 @@ jobs:
             --report "$RUNNER_TEMP/lane.json" > "$RUNNER_TEMP/body.md"
           TITLE=$(python3 .github/doc-sync/render-report.py bloat-pr-title \
             --report "$RUNNER_TEMP/lane.json" --lane prune --date "${DATE}")
-          git config user.name "doc-bloat"
-          git config user.email "doc-bloat@users.noreply.github.com"
-          git checkout -b doc-bloat/prune
-          # Prune verdicts land inline (uncommitted); commit them. A clean index means the
-          # sweep produced no diff — skip cleanly rather than failing on an empty commit.
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "docs: bloat prune sweep (${DATE})"
-          fi
-          if git diff --quiet "${{ github.sha }}" HEAD; then
+          # An empty authorized list means the sweep produced no diff — skip cleanly
+          # rather than opening an empty PR.
+          if [ ! -s "$RUNNER_TEMP/authorized-paths.txt" ]; then
             python3 .github/doc-sync/render-report.py bloat-skip-summary --lane prune --reason skip-noop
             exit 0
           fi
+          git config user.name "doc-bloat"
+          git config user.email "doc-bloat@users.noreply.github.com"
+          git checkout -b doc-bloat/prune
+          git apply "$RUNNER_TEMP/edits/edits.patch"
+          # Explicit path-list staging — never `git add -A`: the list is what the
+          # report authorized and the check above re-derived from the patch.
+          git add --pathspec-from-file="$RUNNER_TEMP/authorized-paths.txt"
+          git commit -m "docs: bloat prune sweep (${DATE})"
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-bloat/prune
           PR_URL=$(gh pr create --draft \
             --title "${TITLE}" \
@@ -323,20 +401,25 @@ jobs:
   # residue rides one executor, mechanical verdicts in one inline group); each group
   # runs as its own matrix invocation with its slice rendered via --emit-prompt and
   # NO turn cap (an apply invocation is never truncated mid-judgment — the kill-switch
-  # is the job timeout); a deterministic merge job lands each group's format-patch
-  # series (docs/decisions.md append conflicts union-resolved; anything else skips
-  # that record loudly) and opens the one draft PR. There is deliberately no
-  # cross-run patch resume: an unapplied record's artifact survives, so the next
-  # sweep re-proposes it — convergence is re-detection.
+  # is the job timeout); a deterministic merge job authorizes every path the group
+  # patches name, lands each group's format-patch series (docs/decisions.md append
+  # conflicts union-resolved; anything else skips that record loudly) and opens the
+  # one draft PR. There is deliberately no cross-run patch resume: an unapplied
+  # record's artifact survives, so the next sweep re-proposes it — convergence is
+  # re-detection.
   # Design: docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md in aj604/toolshed.
   distill_plan:
     needs: [plan, assemble]
     if: needs.assemble.outputs.distill == 'open'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       pending: ${{ steps.groups.outputs.pending }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: bloat-report
@@ -352,10 +435,14 @@ jobs:
           name: distill-manifest
           path: distill-manifest.json
 
+  # Read-only model job: each group's per-record commits leave as a patch series.
   distill_sweep:
     needs: distill_plan
     if: needs.distill_plan.outputs.pending != '[]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     # Wall-clock kill-switch for a hung invocation — a bound on hangs, not on care;
     # there is no --max-turns on apply invocations by design.
     timeout-minutes: 60
@@ -367,6 +454,8 @@ jobs:
       GROUP_ID: ${{ matrix.group }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # local commits only; nothing to push with
       - uses: actions/download-artifact@v4
         with:
           name: distill-manifest
@@ -441,7 +530,9 @@ jobs:
           set -euo pipefail
           mkdir -p "patches/${GROUP_ID}" distill-results
           if [ -f "distill-results/${GROUP_ID}.json" ]; then
-            git format-patch "${{ github.sha }}..HEAD" -o "patches/${GROUP_ID}"
+            # --no-renames: a rename record reports only its destination path to the
+            # merge job's authority check, leaving the source unexamined.
+            git format-patch "${{ github.sha }}..HEAD" --no-renames -o "patches/${GROUP_ID}"
           fi
       - name: Upload group result
         if: always()
@@ -453,12 +544,17 @@ jobs:
             distill-results/${{ matrix.group }}.json
           if-no-files-found: ignore
 
+  # Credentialed, model-free: authorize the group patches against the report, land
+  # them deterministically, open the one draft PR.
   distill_merge:
     needs: [plan, assemble, distill_plan, distill_sweep]
     # No success guard on distill_sweep: a twice-failed group costs its own
     # records (dropped by the merge, bannered in the PR), never the lane.
     if: always() && needs.assemble.outputs.distill == 'open'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -473,6 +569,25 @@ jobs:
         with:
           pattern: distill-group-*
           merge-multiple: true
+      # The distiller chooses where residue lands and which inbound references it
+      # repoints, so the authority is the audited documentation scope plus the
+      # records' own docs — enforced over every patch before a single one is
+      # applied. A patch reaching outside it ends the lane with no PR.
+      # This lane transports per-record commits, not a working-tree diff (the PR
+      # has to stay reviewable record by record), so it cannot stage by pathspec
+      # the way land/prune_land do. The equivalent guarantee is the pair of
+      # checks: every path in every patch here, and every path in the landed diff
+      # after the merge — `git am` stages exactly what those checks cleared.
+      - name: Authorize the group patches against the report
+        run: |
+          set -euo pipefail
+          mkdir -p patches
+          python3 .github/doc-sync/authorize-paths.py expected \
+            --report bloat-report.json --lane distill \
+            --out "$RUNNER_TEMP/expected-paths.json"
+          python3 .github/doc-sync/authorize-paths.py check \
+            --expected "$RUNNER_TEMP/expected-paths.json" \
+            --patches-dir patches --repo . >/dev/null
       - name: Merge group patches (deterministic — gaps recorded, never silent)
         run: |
           set -euo pipefail
@@ -485,6 +600,12 @@ jobs:
             --patches-dir patches --repo . --out "$RUNNER_TEMP/distill-merge.json"
           python3 .github/doc-sync/render-report.py distill-merge-summary \
             --merge "$RUNNER_TEMP/distill-merge.json"
+          # Belt and braces: the landed diff must still be inside the authority —
+          # union-resolving a conflict must not smuggle a path past the pre-check.
+          git diff --name-only --no-renames "${{ github.sha }}" HEAD > "$RUNNER_TEMP/landed-paths.txt"
+          python3 .github/doc-sync/authorize-paths.py check \
+            --expected "$RUNNER_TEMP/expected-paths.json" \
+            --paths "$RUNNER_TEMP/landed-paths.txt" >/dev/null
       - name: Open draft PR
         run: |
           set -euo pipefail
