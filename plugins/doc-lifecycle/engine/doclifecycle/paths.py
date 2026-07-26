@@ -12,6 +12,7 @@ spelling; so the module names the one canonical form and refuses the rest.
 """
 
 import os
+import stat
 import unicodedata
 from dataclasses import dataclass, replace
 from typing import Optional
@@ -137,7 +138,6 @@ _SOURCE_SUFFIXES = (
 )
 _CONFIGURATION_NAMES = (
     "Makefile",
-    "makefile",
     "GNUmakefile",
     "Dockerfile",
     "Containerfile",
@@ -147,8 +147,12 @@ _CONFIGURATION_NAMES = (
     "Brewfile",
     "Vagrantfile",
     "justfile",
-    "Justfile",
     "CMakeLists.txt",
+    # `.txt` is a documentation suffix, so the well-known configuration files
+    # that wear it are named here rather than caught by shape.
+    "requirements.txt",
+    "constraints.txt",
+    "robots.txt",
 )
 _CONFIGURATION_SUFFIXES = (
     ".json",
@@ -175,6 +179,10 @@ _DOCUMENTATION_SUFFIXES = (
 )
 
 
+def _folded(names):
+    return tuple(name.casefold() for name in names)
+
+
 def classify_target(path):
     """The target class a canonical repository-relative path belongs to.
 
@@ -182,39 +190,46 @@ def classify_target(path):
     is wiring before it is source, and `.env.production` is a credential before
     it is configuration. The last resort is `other`, never `documentation` —
     an unrecognized shape is not evidence of safety.
+
+    Matching is case-folded throughout. The filesystems this runs on are
+    case-insensitive, so `.GIT/hooks/pre-commit` is the hooks directory; a
+    case-sensitive classifier would hand a capitalized spelling of the wiring
+    back as documentation.
     """
-    name = path.rpartition("/")[2]
-    probe = f"/{path}"
+    name = path.rpartition("/")[2].casefold()
+    probe = f"/{path}".casefold()
 
     def under(prefixes):
         # Anchored at a component boundary and matched anywhere in the path, so
         # burying the wiring under `docs/` does not reclassify it.
-        return any(f"/{prefix}" in probe for prefix in prefixes)
+        return any(f"/{prefix}" in probe for prefix in _folded(prefixes))
 
-    if under(_WORKFLOW_PREFIXES) or name in _WORKFLOW_NAMES:
+    if under(_WORKFLOW_PREFIXES) or name in _folded(_WORKFLOW_NAMES):
         return WORKFLOW
-    if under(_HOOK_PREFIXES) or name in _HOOK_NAMES:
+    if under(_HOOK_PREFIXES) or name in _folded(_HOOK_NAMES):
         return HOOK
     if under((_GIT_INTERNALS_PREFIX,)):
         return CONFIGURATION
     if (
-        name in _CREDENTIAL_NAMES
+        name in _folded(_CREDENTIAL_NAMES)
         or name == ".env"
         or name.startswith(".env.")
-        or name.endswith(_CREDENTIAL_SUFFIXES)
+        or name.endswith(_folded(_CREDENTIAL_SUFFIXES))
     ):
         return CREDENTIAL
-    if name.endswith(_EXECUTABLE_SUFFIXES):
+    if name.endswith(_folded(_EXECUTABLE_SUFFIXES)):
         return EXECUTABLE
-    if name.endswith(_SOURCE_SUFFIXES):
+    if name.endswith(_folded(_SOURCE_SUFFIXES)):
         return SOURCE
-    if name in _CONFIGURATION_NAMES or name.endswith(_CONFIGURATION_SUFFIXES):
+    if name in _folded(_CONFIGURATION_NAMES) or name.endswith(
+        _folded(_CONFIGURATION_SUFFIXES)
+    ):
         return CONFIGURATION
     if name.startswith("."):
         # A dotfile is configuration by convention; naming every one of them
         # would be a losing race.
         return CONFIGURATION
-    if name.endswith(_DOCUMENTATION_SUFFIXES):
+    if name.endswith(_folded(_DOCUMENTATION_SUFFIXES)):
         return DOCUMENTATION
     return OTHER
 
@@ -225,7 +240,9 @@ class Authorization:
 
     Authorized carries the canonical path, the declared root that contains it,
     and its target class. Refused carries a `Problem` and no path — there is no
-    partially trustworthy verdict a caller could use by mistake.
+    partially trustworthy verdict a caller could use by mistake. The one field
+    a refusal may still carry is `target_class`, and only for
+    `path-forbidden-class`, where the class detected instead is the diagnosis.
     """
 
     path: Optional[str]
@@ -361,10 +378,14 @@ def _folded_entry(parent, name):
     """
     try:
         entries = os.listdir(parent)
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         # Nothing there to collide with (yet): a create-document target under a
         # directory that does not exist is still authorizable.
         return None
+    except OSError:
+        # Anything else — a directory that cannot be listed — leaves the
+        # question unanswered, and an unanswered safety question is a refusal.
+        return ("path-unreadable", None)
     if name in entries:
         return None
     for entry in entries:
@@ -384,13 +405,6 @@ def _filesystem_problem(path, repo_root):
     resolving through it. Components that do not exist are fine — a
     create-document target is authorized before anything is written there.
     """
-    if not os.path.isdir(repo_root):
-        return (
-            "repo-root-missing",
-            f"the repository root {repo_root!r} is not a directory — without it "
-            f"every path would look like an unwritten create-document target",
-            None,
-        )
     components = path.split("/")
     current = repo_root
     for index, name in enumerate(components):
@@ -400,6 +414,14 @@ def _filesystem_problem(path, repo_root):
         folded = _folded_entry(parent, name)
         if folded:
             code, entry = folded
+            if code == "path-unreadable":
+                return (
+                    code,
+                    f"the directory holding {so_far!r} cannot be listed, so "
+                    f"whether an existing entry collides with it is unknown — "
+                    f"an unanswered safety question is a refusal",
+                    so_far,
+                )
             return (
                 code,
                 f"{so_far!r} differs from the existing entry {entry!r} only by "
@@ -425,14 +447,27 @@ def _filesystem_problem(path, repo_root):
 
     if not os.path.lexists(current):
         return None
-    if os.path.isdir(current):
+    info = os.stat(current)
+    if not stat.S_ISREG(info.st_mode):
+        # A directory, a fifo, a device: authorization names one document, and
+        # the applier's read-modify-write is only meaningful for a real file.
         return (
             "path-not-a-file",
-            f"{path!r} is a directory — authorization names one document, not a "
-            f"subtree",
+            f"{path!r} is not a regular file — authorization names one document, "
+            f"not a subtree or a special file",
             path,
         )
-    if os.stat(current).st_mode & 0o111:
+    if info.st_nlink > 1:
+        # The alias a symlink check misses. Two names for one inode means a
+        # write through the documentation-looking name lands in both places.
+        return (
+            "path-hardlinked",
+            f"{path!r} has {info.st_nlink} hard links — it is one name for a "
+            f"file that answers to another, so writing it writes somewhere this "
+            f"authorization never examined",
+            path,
+        )
+    if info.st_mode & 0o111:
         return (
             "path-executable-mode",
             f"{path!r} is marked executable — a document that runs is not a "
@@ -457,14 +492,15 @@ def authorize_path(path, *, repo_root, roots, target_class=DOCUMENTATION):
     verdict is a deterministic function of the path, the roots, the target
     class, and the state of `repo_root` on disk.
     """
-    problem = _spelling_problem(path)
-    if problem:
-        code, message = problem
-        return _refuse(path, code, f"{path!r} {message}")
+    fault = _spelling_problem(path)
+    if fault:
+        code, reason = fault
+        return _refuse(path, code, f"{path!r} {reason}")
 
-    problem = _roots_problem(roots)
-    if problem:
-        return _refuse(path, *problem)
+    fault = _roots_problem(roots)
+    if fault:
+        code, message, location = fault
+        return _refuse(path, code, message, location)
 
     if target_class not in DECLARABLE_TARGET_CLASSES:
         return _refuse(
@@ -473,6 +509,14 @@ def authorize_path(path, *, repo_root, roots, target_class=DOCUMENTATION):
             f"target class {target_class!r} cannot be declared — this engine "
             f"writes {list(DECLARABLE_TARGET_CLASSES)} and nothing else, so the "
             f"dangerous classes are not a default a caller can switch off",
+        )
+
+    if not os.path.isdir(repo_root):
+        return _refuse(
+            path,
+            "repo-root-missing",
+            f"the repository root {repo_root!r} is not a directory — without it "
+            f"every path would look like an unwritten create-document target",
         )
 
     root = _containing_root(path, roots)
@@ -485,12 +529,25 @@ def authorize_path(path, *, repo_root, roots, target_class=DOCUMENTATION):
             f"eligible",
         )
 
+    if not os.path.lexists(os.path.join(repo_root, root)):
+        # Containment is a claim about the repository, not about strings. With
+        # the root absent, `CLAUDE.md/evil.md` reads as a create-document target
+        # under a root that is really a file.
+        return _refuse(
+            path,
+            "root-missing",
+            f"declared root {root!r} is not in the repository — fix the roots "
+            f"rather than authorizing paths under one that is not there",
+            root,
+        )
+
     # What the path *is* comes before what class its spelling suggests: for a
     # directory or an alias, "it is a directory" is the answer a caller can act
     # on, and "it classifies as other" is not.
-    problem = _filesystem_problem(path, repo_root)
-    if problem:
-        return _refuse(path, *problem)
+    fault = _filesystem_problem(path, repo_root)
+    if fault:
+        code, message, location = fault
+        return _refuse(path, code, message, location)
 
     actual_class = classify_target(path)
     if actual_class != target_class:

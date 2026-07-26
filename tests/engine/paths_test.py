@@ -128,6 +128,25 @@ class Roots(RepoTestCase):
         self.assertTrue(decision.authorized)
         self.assertEqual(decision.root, "CLAUDE.md")
 
+    def test_a_single_file_root_authorizes_nothing_beneath_itself(self):
+        repo = self.repo({"CLAUDE.md": "# Claude\n"})
+
+        decision = authorize_path(
+            "CLAUDE.md/evil.md", repo_root=repo, roots=("CLAUDE.md",)
+        )
+
+        self.assertEqual(decision.problem.code, "path-not-a-file")
+
+    def test_a_declared_root_that_is_not_in_the_repository_refuses(self):
+        # Otherwise every path under the absent root reads as an authorizable
+        # create-document target, including paths beneath a file-shaped root.
+        repo = self.repo({"CLAUDE.md": "# Claude\n"})
+
+        decision = authorize_path("docs/a.md", repo_root=repo, roots=("docs",))
+
+        self.assertEqual(decision.problem.code, "root-missing")
+        self.assertEqual(decision.problem.location, "docs")
+
     def test_the_containing_root_is_named_when_several_are_declared(self):
         repo = self.repo({"guides/setup.md": "# Setup\n", "docs/a.md": "# A\n"})
 
@@ -189,6 +208,22 @@ FORBIDDEN_CLASSES = [
     ("docs/Dockerfile", "configuration"),
     ("docs/.gitignore", "configuration"),
     ("docs/CMakeLists.txt", "configuration"),
+    ("docs/requirements.txt", "configuration"),
+    ("docs/robots.txt", "configuration"),
+    # The filesystems this runs on fold case, so the classifier must too — a
+    # capitalized spelling of the wiring is the same file as the wiring.
+    ("docs/.GIT/hooks/pre-commit.md", "hook"),
+    ("docs/.GitHub/workflows/ci.md", "workflow"),
+    ("docs/.Husky/pre-push.md", "hook"),
+    ("docs/.Claude/Hooks/session-start.md", "hook"),
+    ("docs/JENKINSFILE", "workflow"),
+    ("docs/.Env", "credential"),
+    ("docs/ID_RSA", "credential"),
+    ("docs/deploy.KEY", "credential"),
+    ("docs/publish.SH", "executable"),
+    ("docs/generate.PY", "source"),
+    ("docs/settings.JSON", "configuration"),
+    ("docs/MAKEFILE", "configuration"),
     # Not documentation and not one of the named dangerous classes: still
     # refused, because eligibility is a positive list.
     ("docs/diagram.png", "other"),
@@ -306,6 +341,19 @@ class Symlinks(RepoTestCase):
         self.assertEqual(decision.problem.code, "symlinked-path")
         self.assertEqual(decision.problem.location, "docs")
 
+    def test_a_hardlinked_document_is_refused(self):
+        # The other alias. A hardlink to the wiring is a documentation-looking
+        # path whose bytes are the wiring's bytes; writing it edits both.
+        repo = self.repo({".github/workflows/ci.yml": "on: push\n", "docs/a.md": "#\n"})
+        os.link(
+            os.path.join(repo, ".github", "workflows", "ci.yml"),
+            os.path.join(repo, "docs", "innocent.md"),
+        )
+
+        decision = authorize_path("docs/innocent.md", repo_root=repo, roots=("docs",))
+
+        self.assertEqual(decision.problem.code, "path-hardlinked")
+
     def test_a_symlink_pointing_inside_the_repository_is_still_refused(self):
         # Harmless target today, a different file after one `ln -sf`. The
         # authorization is of the path, so the path must be the real one.
@@ -387,6 +435,30 @@ class WhatThePathIs(RepoTestCase):
         decision = authorize_path("docs/a.md", repo_root=repo, roots=("docs",))
 
         self.assertEqual(decision.problem.code, "path-executable-mode")
+
+    def test_a_path_that_is_not_a_regular_file_is_refused(self):
+        repo = self.repo({"docs/a.md": "# A\n"})
+        os.mkfifo(os.path.join(repo, "docs", "pipe.md"))
+
+        decision = authorize_path("docs/pipe.md", repo_root=repo, roots=("docs",))
+
+        self.assertEqual(decision.problem.code, "path-not-a-file")
+
+    def test_a_directory_that_cannot_be_listed_refuses_rather_than_assumes(self):
+        # The collision check is the only thing standing between a create and
+        # an existing case-folded twin, so it must never fail open.
+        if os.geteuid() == 0:
+            self.skipTest("root can list any directory")
+        repo = self.repo({"docs/locked/README.md": "# Readme\n"})
+        locked = os.path.join(repo, "docs", "locked")
+        os.chmod(locked, 0o000)
+        self.addCleanup(os.chmod, locked, 0o755)
+
+        decision = authorize_path(
+            "docs/locked/readme.md", repo_root=repo, roots=("docs",)
+        )
+
+        self.assertEqual(decision.problem.code, "path-unreadable")
 
     def test_a_document_that_does_not_exist_yet_is_authorizable(self):
         # create-document is a real operation: the applier must be able to

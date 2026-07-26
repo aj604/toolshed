@@ -121,9 +121,11 @@ def _normalize_path(value):
 def _unsafe_reason(value):
     """Why this path/glob is not a canonical repo-relative path, or None.
 
-    Registry-input hygiene only. The general path-authorization module (#67)
-    becomes the single owner of these rules for everything that reads or writes
-    on behalf of a record; these checks move behind it when it lands.
+    Registry-input hygiene only, and deliberately more forgiving than
+    `paths.authorize_path()`: a registry declares globs and repairs a trailing
+    `/` on a root, while authorization decides what may be written and refuses
+    every spelling but one. Absorbing this into that module is the applier
+    slice's work (#69), not a rename.
     """
     if not isinstance(value, str) or value.strip() == "":
         return "must be a non-empty string"

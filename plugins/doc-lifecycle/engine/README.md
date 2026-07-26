@@ -127,8 +127,9 @@ result.to_dict()                       # → the payload above, as a dict
 
 ## Path authorization
 
-`doclifecycle/paths.py` is the single owner of path safety: everything that reads or writes on
-behalf of a record asks it first.
+`doclifecycle/paths.py` decides what may be read or written on behalf of a record. It is the
+engine's one place for that decision by design; the applier slice (issue #69) is the caller that
+routes through it, and until then nothing in the engine calls it.
 
 For a repository where `docs/architecture.md` exists as a regular non-symlinked file:
 
@@ -145,16 +146,17 @@ decision.problem         # None, or a results.Problem with a typed code
 
 `roots` are repository-relative, each a subtree or a single file. `target_class` defaults to
 `"documentation"` and is the only value `DECLARABLE_TARGET_CLASSES` accepts — the dangerous
-classes are not a default a record, a plan, or a consumer config can switch off. A verdict is a
-function of the path, the roots, the target class, and the state of `repo_root` on disk; the same
-inputs always give the same `Authorization`.
+classes are not a default a record, a plan, or a consumer config can switch off.
+
+A verdict is a function of the path, the roots, the target class, and the state of `repo_root` on
+disk: the same inputs always give the same `Authorization`, and nothing else is consulted. The
+disk is part of the question because an alias is only visible there — `classify_target()` below is
+the half that is pure, and the rest of the checks resolve what the path actually points at.
 
 Refusal, not repair: `docs//a.md` is refused rather than rewritten to `docs/a.md`, so one file
 never has two authorizable spellings. There is no partial verdict — a refusal carries no path.
 
-Checks run in this order, and the first one that fires is the verdict: path spelling, the
-declared roots' own spelling, whether the target class may be declared, root containment, what
-the path is on disk, then its class.
+Checks run in the order below, and the first one that fires is the verdict.
 
 | Code | Refused because |
 |---|---|
@@ -169,22 +171,27 @@ the path is on disk, then its class.
 | `path-leading-dash` | a component starting with `-`, which reads as an option |
 | `roots-undeclared` | no roots were declared, so nothing is eligible |
 | `roots-invalid` | a declared root is not itself canonically spelled |
-| `path-outside-root` | canonical, but under none of the declared roots |
+| `target-class-undeclarable` | the caller named a class the engine never writes |
 | `repo-root-missing` | `repo_root` is not a directory |
-| `symlinked-path` | the path or one of its ancestors is a symlink |
+| `path-outside-root` | canonical, but under none of the declared roots |
+| `root-missing` | the containing root is not in the repository |
 | `path-case-mismatch` | an existing entry differs only by case |
 | `path-unicode-collision` | an existing entry differs only by Unicode normalization |
-| `path-not-a-file` | it is a directory, or an ancestor is a file |
+| `path-unreadable` | a directory on the way cannot be listed, so collisions are unknown |
+| `symlinked-path` | the path or one of its ancestors is a symlink |
+| `path-not-a-file` | not a regular file — a directory, a fifo, or an ancestor that is a file |
+| `path-hardlinked` | more than one name points at the file |
 | `path-executable-mode` | the file is marked executable |
 | `path-forbidden-class` | its class is not the declared target class |
-| `target-class-undeclarable` | the caller named a class the engine never writes |
 
-`classify_target(path)` is the pure classifier behind the last row, returning `documentation`,
-`workflow`, `source`, `configuration`, `credential`, `hook`, `executable`, or `other`. It is
-ordered most-dangerous-first, and matches directory prefixes at a component boundary anywhere in
-the path — so `docs/.github/workflows/ci.yml` is `workflow`, not documentation, and living under
-a documentation root launders nothing. `other` is the fallback rather than `documentation`:
-eligibility is a positive list, so an unrecognized shape is refused too.
+`classify_target(path)` is the pure classifier behind `path-forbidden-class`, returning
+`documentation`, `workflow`, `source`, `configuration`, `credential`, `hook`, `executable`, or
+`other`. It is ordered most-dangerous-first, matches case-folded (the filesystems this runs on
+fold case, so `.GIT/hooks/` is the hooks directory), and matches directory prefixes at a
+component boundary anywhere in the path — so `docs/.github/workflows/ci.yml` is `workflow`, not
+documentation, and living under a documentation root launders nothing. `other` is the fallback
+rather than `documentation`: eligibility is a positive list, so an unrecognized shape is refused
+too.
 
 A path that does not exist yet is authorizable — `create-document` must be able to name its
 target before anything is written there. Ancestors that do exist are still checked, so a new
