@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""Guards the trust split every shipped workflow depends on: the model steps
+hold no repository write authority.
+
+Contract asserted, over both the published templates and this repo's dogfooded
+install:
+
+1. A job that invokes `anthropics/claude-code-action` declares job-level
+   permissions, grants `contents: read`, and grants no write scope other than
+   `id-token: write` (the OAuth exchange, not repo write).
+2. Such a job carries no `GH_TOKEN` in its environment — job-level or
+   workflow-level.
+3. Every `actions/checkout` in such a job sets `persist-credentials: false`,
+   so the checkout leaves no write-capable credential in `.git/config`.
+4. A job holding a write scope invokes no model, and never stages with a broad
+   `git add -A` — the credentialed jobs stage an explicit authorized path list.
+5. The workflow-level `permissions:` block grants no write scope, so a job that
+   forgets to declare its own inherits nothing dangerous.
+
+The exception in (4) is `doc-sync-upgrade.yml`, whose write job stages the
+output of a deterministic script (apply-upgrade.py) and runs no model at all.
+
+Parsed with a line scanner rather than a YAML library: the test suite is
+stdlib-only, and the shipped workflows are uniformly 2-space indented.
+
+Run: python3 tests/scripts/workflow-permissions_test.py
+"""
+
+import glob
+import os
+import re
+import unittest
+
+ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
+
+WORKFLOW_GLOBS = [
+    # Published templates the scheduling-doc-sync skill installs.
+    "plugins/doc-lifecycle/skills/scheduling-doc-sync/*.yml",
+    # This repo's own dogfooded install.
+    ".github/workflows/doc-*.yml",
+]
+
+MODEL_ACTION = "anthropics/claude-code-action"
+# `git add -A` / `git add --all`, in any surrounding shell.
+BROAD_ADD = re.compile(r"git add\s+(-A|--all)\b")
+# Deterministic, model-free wiring regeneration — the one write job that stages
+# a script's output wholesale.
+BROAD_ADD_EXEMPT = {"doc-sync-upgrade.yml"}
+
+
+def workflow_files():
+    seen, files = set(), []
+    for pattern in WORKFLOW_GLOBS:
+        for path in sorted(glob.glob(os.path.join(ROOT, pattern))):
+            real = os.path.realpath(path)
+            if real in seen:
+                continue
+            seen.add(real)
+            files.append(path)
+    return files
+
+
+def indent_of(line):
+    return len(line) - len(line.lstrip(" "))
+
+
+def block_at(lines, start, indent):
+    """Lines strictly more indented than `indent`, starting at `start`."""
+    out = []
+    for line in lines[start:]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if indent_of(line) <= indent:
+            break
+        out.append(line)
+    return out
+
+
+def mapping_under(lines, key, indent):
+    """The `key:`-introduced mapping at `indent`, as {name: value}."""
+    for i, line in enumerate(lines):
+        if indent_of(line) == indent and line.strip() == f"{key}:":
+            entries = {}
+            for entry in block_at(lines, i + 1, indent):
+                name, _, value = entry.strip().partition(":")
+                entries[name.strip()] = value.strip()
+            return entries
+    return None
+
+
+def jobs_of(path):
+    """{job name: [body lines]} for one workflow file."""
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+    try:
+        start = lines.index("jobs:") + 1
+    except ValueError:
+        return {}
+    jobs, name = {}, None
+    for line in lines[start:]:
+        if indent_of(line) == 2 and line.rstrip().endswith(":") and line.strip():
+            name = line.strip().rstrip(":")
+            jobs[name] = []
+        elif name is not None:
+            jobs[name].append(line)
+    return jobs
+
+
+def write_scopes(permissions):
+    return {k: v for k, v in (permissions or {}).items() if v == "write"}
+
+
+class ModelJobsAreReadOnly(unittest.TestCase):
+    def setUp(self):
+        self.files = workflow_files()
+        # Guard against the globs silently matching nothing (renamed dirs).
+        self.assertTrue(self.files, "no workflow files found — did the layout move?")
+
+    def model_jobs(self):
+        found = []
+        for path in self.files:
+            for name, body in jobs_of(path).items():
+                if any(MODEL_ACTION in line for line in body):
+                    found.append((os.path.relpath(path, ROOT), name, body))
+        return found
+
+    def test_some_model_jobs_exist(self):
+        self.assertTrue(self.model_jobs(),
+                        "no claude-code-action job found — did the action move?")
+
+    def test_model_jobs_grant_only_read_and_id_token(self):
+        for path, name, body in self.model_jobs():
+            perms = mapping_under(body, "permissions", 4)
+            self.assertIsNotNone(
+                perms, f"{path}: job '{name}' runs a model with no job-level "
+                       f"permissions — it would inherit the workflow's")
+            self.assertEqual(
+                perms.get("contents"), "read",
+                f"{path}: job '{name}' runs a model with contents: "
+                f"{perms.get('contents')!r}")
+            self.assertEqual(
+                set(write_scopes(perms)) - {"id-token"}, set(),
+                f"{path}: job '{name}' runs a model with write scopes "
+                f"{sorted(write_scopes(perms))}")
+
+    def test_model_jobs_carry_no_gh_token(self):
+        for path, name, body in self.model_jobs():
+            self.assertNotIn(
+                "GH_TOKEN", mapping_under(body, "env", 4) or {},
+                f"{path}: job '{name}' runs a model with GH_TOKEN in its env")
+        for path in self.files:
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+            self.assertNotIn("GH_TOKEN", mapping_under(lines, "env", 0) or {},
+                             f"{os.path.relpath(path, ROOT)}: a workflow-level "
+                             f"GH_TOKEN reaches every job, model jobs included")
+
+    def test_model_jobs_drop_the_checkout_credential(self):
+        for path, name, body in self.model_jobs():
+            checkouts = sum(1 for line in body if "actions/checkout@" in line)
+            dropped = sum(1 for line in body if line.strip().startswith(
+                "persist-credentials: false"))
+            self.assertEqual(
+                checkouts, dropped,
+                f"{path}: job '{name}' runs a model with {checkouts} "
+                f"checkout(s) but {dropped} persist-credentials: false")
+
+
+class WriteJobsRunNoModel(unittest.TestCase):
+    def setUp(self):
+        self.files = workflow_files()
+        self.assertTrue(self.files)
+
+    def write_jobs(self):
+        found = []
+        for path in self.files:
+            for name, body in jobs_of(path).items():
+                perms = mapping_under(body, "permissions", 4) or {}
+                if set(write_scopes(perms)) - {"id-token"}:
+                    found.append((os.path.relpath(path, ROOT), name, body))
+        return found
+
+    def test_some_write_jobs_exist(self):
+        self.assertTrue(self.write_jobs(),
+                        "no credentialed job found — did the layout move?")
+
+    def test_write_jobs_invoke_no_model(self):
+        for path, name, body in self.write_jobs():
+            self.assertFalse(
+                any(MODEL_ACTION in line for line in body),
+                f"{path}: job '{name}' holds write scopes and runs a model")
+
+    def test_write_jobs_stage_explicit_paths(self):
+        for path, name, body in self.write_jobs():
+            if os.path.basename(path) in BROAD_ADD_EXEMPT:
+                continue
+            offenders = [line.strip() for line in body
+                         if BROAD_ADD.search(line)
+                         and not line.strip().startswith("#")]
+            self.assertEqual(
+                offenders, [],
+                f"{path}: job '{name}' holds write scopes and stages broadly "
+                f"({offenders}) — stage the authorized path list instead")
+
+
+class WorkflowDefaultsAreReadOnly(unittest.TestCase):
+    def test_workflow_level_permissions_grant_no_write(self):
+        for path in workflow_files():
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+            perms = mapping_under(lines, "permissions", 0)
+            self.assertIsNotNone(
+                perms, f"{os.path.relpath(path, ROOT)}: no workflow-level "
+                       f"permissions block")
+            self.assertEqual(
+                write_scopes(perms), {},
+                f"{os.path.relpath(path, ROOT)}: workflow-level permissions "
+                f"grant {sorted(write_scopes(perms))} to every job")
+
+
+if __name__ == "__main__":
+    unittest.main()

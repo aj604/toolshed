@@ -1,5 +1,46 @@
 # Decisions
 
+## 2026-07-26 — Stage 0: model steps hold no repository write authority
+- Evidence: issue #57's distilled decisions (2026-07-26) name the injection→mutation hole as the
+  one thing that must not wait for the re-architecture: the scheduled lanes combined repository
+  write permissions, a model process with broad tools, and `git add -A` staging, so a
+  prompt-injected or simply mistaken run could turn a documentation workflow into a general
+  repository mutation path. Issue #59 is that stage, landed on the legacy workflows.
+- Decided (job split): every job invoking `anthropics/claude-code-action` now runs with
+  `permissions: contents: read` (+ `id-token: write` for the OAuth exchange), checks out with
+  `persist-credentials: false`, and carries no `GH_TOKEN`. Its output leaves as an artifact — the
+  report, or a `git diff --binary --no-renames` patch of its edits. `doc-sync.yml` splits into
+  plan/detect/fix/land; `doc-bloat.yml` splits its prune lane into `prune` (model) and
+  `prune_land` (credentialed). The credentialed jobs (`land`, `prune_land`, `distill_merge`) run
+  no model.
+- Decided (the report is the authority): new `authorize-paths.py` derives the authorized path
+  set from the validated report per lane — drift takes each STALE record's file; prune takes each
+  record's `doc` plus `EXTRACT-AND-MOVE` targets; distill takes record docs, `POLICY` files,
+  `MERGE-DOC` targets, and `docs/decisions.md`, and because the distiller *chooses* where residue
+  lands and which inbound references it repoints, it authorizes the audited documentation scope
+  rather than an exact list. Paths under `.git/`, `.github/workflows/`, or `.github/doc-sync/`,
+  paths escaping the repo, and non-documentation files are never authorized — from a record or
+  from a patch. The credentialed job stages `git add --pathspec-from-file=` that list and
+  re-checks what actually landed.
+- Still binds: a patch naming an unexpected path fails the run *before* anything is applied — no
+  PR, nothing staged; patches are generated `--no-renames` (a rename record reports only its
+  destination to `git apply --numstat`, so `authorize-paths.py` refuses one outright); the
+  workflow-owned state files (marker, `last-stales.json`) are staged by the credentialed job
+  under `--allow-workflow-state`, never reachable from a model patch; `tests/scripts/
+  workflow-permissions_test.py` fails the release if a model job gains a write scope or a write
+  job gains a model, and `install-parity_test.py` fails it if the dogfood install and the
+  plugin's wiring diverge beyond the install's knobs.
+- Consequence: this upgrade changes the workflow templates themselves, so consumers take the
+  documented `blocked-workflows` path (patch artifact + fail-loud instructions) rather than an
+  auto-landing upgrade PR — the Actions token cannot push `.github/workflows/`.
+- Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat.yml,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync-upgrade.yml,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/authorize-paths.py,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md
+- Source: https://github.com/aj604/toolshed/issues/59 (parent: #57)
+
 ## 2026-07-12 — grow-loop sensors + unowned-bucket owners (review findings 1,3,4,6)
 - Evidence: 2026-07-12 architecture review — the shrink loops (drift, bloat) have sensors,
   gates, and cadence; the grow loop had only an in-session rule, and the buckets automation
