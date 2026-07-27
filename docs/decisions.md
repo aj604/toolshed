@@ -4,6 +4,50 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-27 — the audit lane declares tools without widening its grant (#118)
+- Evidence: `docs/plans/2026-07-26-shadow-parity-gate.md`, "Cause B" — its second forcing
+  condition, "the workers' tool set … did not include `gh`", which #115 left open. Six
+  `UNVERIFIABLE` findings over `docs/agents/issue-tracker.md` were settleable with
+  `gh <sub> --help`, and the model job's grant is
+  `Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)`.
+- Decided (the narrow option the issue asked to cost first, and it works): the lane may declare
+  tools, and it reaches them through `scheduling-doc-sync/scripts/probe-evidence-tool.py` under
+  the *existing* `Bash(python3 *)` allowance. The grant does not widen at all. What the probe
+  can reach is enumerable in two directions — which programs (only those named in
+  `.github/doc-sync/evidence-tools.json`, consumer-owned, seeded `{"tools": []}`, never
+  overwritten by an upgrade) and how (only `<tool> <subcommand words> --help|--version`, exec'd
+  directly with no shell, with credential-shaped variables stripped from its environment). The
+  same config renders `drift-audit --evidence-command`, so the boundary the report publishes
+  and the tools the model can run are one list rather than two that drift apart. This install
+  declares `gh`.
+- Rejected: adding `gh` to `--allowedTools`. Those patterns are prefix-matched, so `Bash(gh *)`
+  is not a grant for `gh <sub> --help` — it is `gh api` and `gh pr list` too, i.e. GitHub API
+  surface and network egress declared for a job kept deliberately token-free. The rejection is
+  now a checked claim, not a convention: `tests/scripts/workflow-permissions_test.py` refuses
+  any `--allowedTools` naming a Bash executable other than `git` or `python3`, across every
+  shipped template and this repo's install.
+- Rejected: leaving the lane tool-free. That was a legitimate outcome, and it stays the
+  *default* for every consumer — an install that declares nothing renders no
+  `--evidence-command`, exactly as before. But for this repository it would have preserved
+  Cause B's six false findings permanently, including the real `STALE` they hid, on the very
+  gate re-run (#117) that has to justify retiring the legacy lane.
+- Named limit, not papered over: the probe reads a program's own interface and nothing else, so
+  the one Cause B claim that needs `gh pr list --json bogus` to enumerate real field names
+  (`authorAssociation`) is still not settleable here and stays honestly `UNVERIFIABLE`. Widening
+  the probe to arbitrary flags would re-open exactly the surface the `--allowedTools` rejection
+  above closed; the six `--help`-settleable claims are what this change buys.
+- Still binds: `Bash(python3 *)` was already, in capability terms, local execution — which is
+  why the workflow's own comment calls the tool list "ergonomics, not the boundary", and why the
+  real boundary remains `contents: read`, no `GH_TOKEN`, and `persist-credentials: false`. This
+  change does not enlarge that boundary; it makes one route through it enumerated, tested, and
+  declared in the report's lineage instead of unavailable.
+- Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/probe-evidence-tool.py,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md,
+  tests/scripts/probe-evidence-tool_test.py, tests/scripts/workflow-permissions_test.py,
+  tests/scripts/audit-workflow_test.py
+
 ## 2026-07-27 — the evidence boundary grows a second half: declared tools (#115)
 - Evidence: `docs/plans/2026-07-26-shadow-parity-gate.md`, "Cause B" under criterion G4 — six
   false `UNVERIFIABLE` findings over `docs/agents/issue-tracker.md`, and one genuine `STALE`

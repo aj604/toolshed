@@ -16,6 +16,9 @@ install:
    `git add -A` — the credentialed jobs stage an explicit authorized path list.
 5. The workflow-level `permissions:` block grants no write scope, so a job that
    forgets to declare its own inherits nothing dangerous.
+6. No `--allowedTools` grant names a Bash executable beyond `git` and
+   `python3` — those patterns are prefix-matched, so naming a program grants
+   all of it (aj604/toolshed#118).
 
 The exception in (4) is `doc-sync-upgrade.yml`, whose write job stages the
 output of a deterministic script (apply-upgrade.py) and runs no model at all.
@@ -201,6 +204,45 @@ class WriteJobsRunNoModel(unittest.TestCase):
                 offenders, [],
                 f"{path}: job '{name}' holds write scopes and stages broadly "
                 f"({offenders}) — stage the authorized path list instead")
+
+
+class ModelToolGrantsStayLocal(unittest.TestCase):
+    """No model step may shell out to a program beyond git and python3.
+
+    `--allowedTools` patterns are prefix-matched, so `Bash(gh *)` is not a
+    grant for `gh <sub> --help` — it is a grant for `gh api` and `gh pr list`
+    too, i.e. GitHub API surface declared for a job the suite above keeps
+    deliberately token-free. aj604/toolshed#118 decided the audit lane reaches
+    Tier-2 tool evidence through a script under the existing `Bash(python3 *)`
+    allowance instead (`scripts/probe-evidence-tool.py`, which enumerates both
+    which programs and how), so this list is the decision written down where a
+    future widening has to argue with it.
+    """
+
+    ALLOWED_EXECUTABLES = {"git", "python3"}
+    GRANT = re.compile(r'--allowedTools\s+"([^"]*)"')
+    BASH_ENTRY = re.compile(r"Bash\(([^)]*)\)")
+
+    def test_some_grants_exist(self):
+        found = [p for p in workflow_files()
+                 if self.GRANT.search(open(p, encoding="utf-8").read())]
+        self.assertTrue(found, "no --allowedTools grant found — did it move?")
+
+    def test_no_grant_names_an_executable_beyond_git_and_python3(self):
+        for path in workflow_files():
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            for grant in self.GRANT.findall(text):
+                for entry in self.BASH_ENTRY.findall(grant):
+                    executable = entry.split()[0] if entry.split() else entry
+                    self.assertIn(
+                        executable, self.ALLOWED_EXECUTABLES,
+                        f"{os.path.relpath(path, ROOT)}: a model step grants "
+                        f"Bash({entry}) — prefix matching makes that the whole "
+                        f"program, not one subcommand. Reach a new tool "
+                        f"through probe-evidence-tool.py under the existing "
+                        f"python3 allowance, or argue the widening on its own "
+                        f"(aj604/toolshed#118)")
 
 
 class WorkflowDefaultsAreReadOnly(unittest.TestCase):

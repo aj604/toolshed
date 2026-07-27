@@ -3,7 +3,7 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture is absorbing the helper scripts into; see its `README.md`) plus twelve skill
+re-architecture is absorbing the helper scripts into; see its `README.md`) plus thirteen skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
@@ -17,7 +17,11 @@ the upgrade lane, not vendored into installs), `scripts/render-audit-summary.py`
 engine's read-only audit lane's run-surface rendering — #71),
 `scripts/render-apply-summary.py` (the new engine's apply lane's run surface — its refusals, its
 staged path list, and the PR title, body, and commit message that carry the approval set's digest
-and summary — #72), and
+and summary — #72),
+`scripts/probe-evidence-tool.py` (the audit lane's declared-tool probe — it renders
+`drift-audit --evidence-command` from `evidence-tools.json` and runs each declared tool only as
+a `--help`/`--version` read, under the model step's existing `Bash(python3 *)` grant rather than
+a wider one, #118), and
 `scripts/compare-shadow-lanes.py` (the shadow-mode parity comparison between the legacy lane
 and the new one, #76 — transitional, leaves with the legacy lane in #77), all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
@@ -32,11 +36,14 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
 `doc-sync/plan-chunks.py`, `doc-sync/plan-distill.py`, `doc-sync/authorize-paths.py`,
 `doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
 `doc-sync/render-audit-summary.py`, `doc-sync/render-apply-summary.py`,
+`doc-sync/probe-evidence-tool.py`,
 `doc-sync/engine/` (the `doclifecycle` package vendored wholesale from
 `plugins/doc-lifecycle/engine/`, byte-identical to it — the only copy the new lanes run, never
 edited in place),
 `doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `doc-sync/drift-waivers.json`
-(accepted-UNVERIFIABLE waivers the sync run surfaces consume), `doc-sync/installed-version`
+(accepted-UNVERIFIABLE waivers the sync run surfaces consume),
+`doc-sync/evidence-tools.json` (the local tools the audit lane may cite — `gh` here),
+`doc-sync/installed-version`
 (the plugin-version lockfile the upgrade workflow reads), `workflows/doc-sync.yml`,
 `workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`, `workflows/doc-audit.yml`,
 `workflows/doc-apply.yml`; the two legacy lanes are `if: false` at their entry job here,
@@ -101,7 +108,9 @@ the legacy lane in #77).
   rendering, sidecar seam, and patch-merge engine; `authorize-paths_test.py` covers the per-lane
   path authority the credentialed jobs enforce over a model's edit set. Three suites cover the
   wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
-  token-free, write jobs model-free and staging explicit paths), `install-parity_test.py`
+  token-free, write jobs model-free and staging explicit paths, and no `--allowedTools` grant
+  naming a Bash executable beyond `git`/`python3` — those patterns are prefix-matched, #118),
+  `install-parity_test.py`
   (the dogfooded `.github/` install is byte-identical to what `apply-upgrade.py` would lay down
   from the plugin with this install's knobs, plus a whole-tree comparison of the vendored engine
   and a recorded allowlist of this install's legacy-lane divergence, `LEGACY_LANES_DISABLED`),
@@ -115,9 +124,13 @@ the legacy lane in #77).
   plus an execution-based regression suite for the freshness-revalidation step (run under a
   real `bash -e` against a stubbed engine CLI: a stale/partial verdict must reach the
   published report, never laundered as the original's status, and an empty/absent
-  revalidated payload must not fail the step outright), alongside what
-  `workflow-permissions_test.py` already covers generically for every
-  `scheduling-doc-sync/*.yml` template. `render-apply-summary_test.py` covers the apply lane's
+  revalidated payload must not fail the step outright) and static guards on how this lane
+  reaches Tier-2 tool evidence (#118: the model grant unchanged, `--evidence-command` rendered
+  by `probe-evidence-tool.py` rather than typed into the YAML);
+  `probe-evidence-tool_test.py` covers that script itself (the declared list and its rendered
+  flags, the refusals for an undeclared tool or a non-`--help`/`--version` invocation, and the
+  credential scrub). Both suites sit alongside what `workflow-permissions_test.py` already
+  covers generically for every `scheduling-doc-sync/*.yml` template. `render-apply-summary_test.py` covers the apply lane's
   run surface (every refusal, the staged path list, and the rendered PR body, title, and commit
   message), and `apply-workflow_test.py` adds `doc-apply.yml`'s static checks (three-job trust
   split, no dispatch input in any `run:` block, staging confined to the apply result's paths, a

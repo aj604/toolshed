@@ -38,6 +38,9 @@ Ownership (total on wiring, idempotent on state):
     .doc-lifecycle/registry.json — also owns the new engine's lanes:
     .github/workflows/{doc-audit,doc-apply}.yml                  regenerate, knobs preserved
     .github/doc-sync/render-{audit,apply}-summary.py             overwrite
+    .github/doc-sync/probe-evidence-tool.py                      overwrite
+    .github/doc-sync/evidence-tools.json                         never touched
+    (seeded `{"tools": []}` when absent — the audit lane's declared local tools)
     .github/doc-sync/engine/                                     replaced wholesale
     .doc-lifecycle/registry.json is consumer judgment and is never touched here;
     the migration door (scheduling-doc-sync's Migration mode) is what produces it.
@@ -103,6 +106,7 @@ NEW_LANE_PLACEHOLDERS = {
 NEW_LANE_SCRIPTS = {
     "render-audit-summary.py": "scheduling-doc-sync/scripts",
     "render-apply-summary.py": "scheduling-doc-sync/scripts",
+    "probe-evidence-tool.py": "scheduling-doc-sync/scripts",
 }
 
 # Before doc-sync's 03:00 daily, so a nightly reader sees the new lane's report
@@ -274,6 +278,20 @@ def seed_waivers(repo):
         path.write_text('{"waivers": []}\n')
 
 
+def seed_evidence_tools(repo):
+    """Seed an empty evidence-tools.json — only if absent.
+
+    The audit lane's declared local tools (probe-evidence-tool.py reads this,
+    and the same list renders `drift-audit --evidence-command`). Seeded empty
+    because tool-free is what a consumer opts *out* of, never something an
+    upgrade hands them: an existing file is their declaration and is never
+    touched, same discipline as audit-scope.json.
+    """
+    path = repo / ".github" / "doc-sync" / "evidence-tools.json"
+    if not path.is_file():
+        path.write_text('{"tools": []}\n')
+
+
 def write_version(repo, target):
     # Trailing newline matches the install-time lockfile; bash `$(cat …)` strips it
     # either way, but keep the file identical so a version-only upgrade diffs cleanly.
@@ -287,6 +305,7 @@ def apply_upgrade(plugin_root, repo, target):
     copy_scripts(plugin_root, repo, new_lane=new_lane)
     if new_lane:
         copy_engine(plugin_root, repo)
+        seed_evidence_tools(repo)
     seed_waivers(repo)
     write_version(repo, target)
     workflows = len(_wiring(TEMPLATE_PLACEHOLDERS, NEW_LANE_PLACEHOLDERS, new_lane))

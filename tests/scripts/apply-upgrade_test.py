@@ -38,11 +38,23 @@ TPL_DOC_UPGRADE = (
     "on:\n  schedule:\n    - cron: \"{{UPGRADE_CRON}}\"\n"
 )
 
+TPL_DOC_AUDIT = (
+    "name: doc-audit\n"
+    "on:\n  schedule:\n    - cron: \"{{AUDIT_CRON}}\"\n"
+)
+TPL_DOC_APPLY = "name: doc-apply\non:\n  workflow_dispatch: {}\n"
+
 SCRIPT_SOURCES = {
     "scheduling-doc-sync/scripts": ["sync-gate.py", "upgrade-gate.py", "render-report.py",
                                    "plan-distill.py", "authorize-paths.py"],
     "detecting-doc-bloat/scripts": ["plan-chunks.py", "validate-bloat-output.py"],
     "detecting-doc-drift/scripts": ["validate-drift-output.py"],
+}
+
+# Wiring only an install that adopted `.doc-lifecycle/registry.json` receives.
+NEW_LANE_SCRIPT_SOURCES = {
+    "scheduling-doc-sync/scripts": ["render-audit-summary.py", "render-apply-summary.py",
+                                    "probe-evidence-tool.py"],
 }
 
 
@@ -55,15 +67,25 @@ def make_plugin_root(base, version_tag="NEW"):
     (sds / "doc-sync.yml").write_text(TPL_DOC_SYNC)
     (sds / "doc-bloat.yml").write_text(TPL_DOC_BLOAT)
     (sds / "doc-sync-upgrade.yml").write_text(TPL_DOC_UPGRADE)
-    for subdir, names in SCRIPT_SOURCES.items():
+    (sds / "doc-audit.yml").write_text(TPL_DOC_AUDIT)
+    (sds / "doc-apply.yml").write_text(TPL_DOC_APPLY)
+    sources = dict(SCRIPT_SOURCES)
+    for subdir, names in NEW_LANE_SCRIPT_SOURCES.items():
+        sources[subdir] = sources.get(subdir, []) + names
+    for subdir, names in sources.items():
         d = root / "skills" / subdir
         d.mkdir(parents=True, exist_ok=True)
         for n in names:
             (d / n).write_text(f"# {n} @ {version_tag}\n")
+    # The engine is vendored wholesale into an install that carries a registry.
+    engine = root / "engine" / "doclifecycle"
+    engine.mkdir(parents=True)
+    (root / "engine" / "doc-lifecycle.py").write_text(f"# entry @ {version_tag}\n")
+    (engine / "__init__.py").write_text(f"# engine @ {version_tag}\n")
     return root
 
 
-def make_install(base, upgrade_yml=True):
+def make_install(base, upgrade_yml=True, registry=False):
     """A synthetic install whose workflows carry non-default knobs, plus consumer
     state (marker, audit-scope) that must survive untouched."""
     repo = base / "repo"
@@ -89,6 +111,14 @@ def make_install(base, upgrade_yml=True):
     for names in SCRIPT_SOURCES.values():
         for n in names:
             (ds / n).write_text(f"# {n} @ OLD\n")
+    if registry:
+        # The one signal that switches the new engine's lanes on: an install
+        # that has been through the migration door.
+        reg = repo / ".doc-lifecycle"
+        reg.mkdir(parents=True)
+        (reg / "registry.json").write_text('{"roots": [], "rules": []}\n')
+        (wf / "doc-audit.yml").write_text(
+            "name: doc-audit\non:\n  schedule:\n    - cron: \"5 1 * * *\"\n")
     return repo
 
 
@@ -182,6 +212,47 @@ class ApplyUpgrade(unittest.TestCase):
         self.assertEqual(
             (repo2 / ".github/doc-sync/drift-waivers.json").read_text(), tuned
         )
+
+    # --- the new engine's lanes (an install that adopted the registry) ------
+
+    def test_new_lane_install_gets_the_evidence_tool_probe(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        r = run(pr, repo, "0.36.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            (repo / ".github/doc-sync/probe-evidence-tool.py").read_text(),
+            "# probe-evidence-tool.py @ NEW\n",
+        )
+
+    def test_seeds_declared_evidence_tools_empty_only_if_absent(self):
+        # Tool-free is the default a consumer opts out of, never one they
+        # inherit: the seeded file declares nothing, and an install that has
+        # already declared a tool keeps its declaration through the upgrade.
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        run(pr, repo, "0.36.0")
+        self.assertEqual(
+            (repo / ".github/doc-sync/evidence-tools.json").read_text(),
+            '{"tools": []}\n',
+        )
+        repo2 = make_install(self.base / "second-install", registry=True)
+        declared = '{"tools": ["gh"]}\n'
+        (repo2 / ".github/doc-sync/evidence-tools.json").write_text(declared)
+        run(pr, repo2, "0.36.0")
+        self.assertEqual(
+            (repo2 / ".github/doc-sync/evidence-tools.json").read_text(),
+            declared,
+        )
+
+    def test_a_legacy_only_install_gets_no_evidence_tools_file(self):
+        # The config is the audit lane's, and that lane is not installable in a
+        # repository that has not been through the migration door.
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base)
+        run(pr, repo, "0.36.0")
+        self.assertFalse(
+            (repo / ".github/doc-sync/evidence-tools.json").exists())
 
     # --- absent upgrade.yml (pre-self-upgrade install) ----------------------
 
