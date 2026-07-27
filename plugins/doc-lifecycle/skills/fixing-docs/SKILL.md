@@ -81,6 +81,48 @@ or it is `plan-span-outside-approved-units`. Widen nothing: an adjacent passage 
 approval did not cover is a separate record's business even when the two sit one
 paragraph apart.
 
+**The text inside the operation is the report's, not yours.** A `STALE` record's `fix`
+and a `CONDENSE` record's `proposal` are complete replacement text drafted to the
+writing-docs bar — place them byte-verbatim and stop at their final character. The hull
+bounds *where* you may write; nothing bounds *what*, so authoring your own sentence
+inside an approved span produces a diff the applier certifies and no reviewer approved.
+Compose text only where the record supplies none (a merged remainder, a distillation's
+residue), and route it through **writing-docs**.
+
+This is the one artifact you author, so here is the whole shape — a `STALE` record
+remedied by a single `replace`:
+
+```json
+{
+  "artifact": "edit-plan",
+  "schema_version": 1,
+  "approval_digest": "<the approval set's own digest, verbatim>",
+  "operations": [
+    {
+      "op": "replace",
+      "record": "<the approved record's digest>",
+      "target_class": "documentation",
+      "path": "docs/architecture.md",
+      "start_line": 7,
+      "end_line": 7,
+      "preimage": "The service charges a flat 2% fee.\n",
+      "text": "The service charges a flat 2.5% fee.\n"
+    }
+  ],
+  "postimages": {"docs/architecture.md": "<sha256 of the file's bytes after the plan>"},
+  "digest": "<sha256 of everything above except digest, canonical JSON>"
+}
+```
+
+`preimage` is the exact current bytes of lines `start_line`..`end_line`, newlines
+included; `text` is what replaces them. Each operation's field set is exact and closed —
+`delete` drops `text`, `insert` takes `after_line` and `text` and no preimage,
+`create-document` takes `path` and `text`, `retire-document` takes the whole document as
+`preimage`, `move-with-provenance` adds `destination` — and an extra or missing field is
+`plan-invalid-operation`. `postimages` names every written path (`null` for a retired
+document) and is re-derived, not believed: compute it from the bytes your operations
+produce, or it is `plan-postimages-not-derived`.
+
 ### 3. Run the applier
 
 ```bash
@@ -97,6 +139,10 @@ discard first.
 
 Exit codes: `0` applied (or already applied — the no-op verdict is derived, so
 re-running an interrupted lane is safe), `1` invalid, `2` usage, `3` stale.
+
+`already_applied: true` on a run you have not made before is a **tripwire, not a
+success**: the bytes were already on disk, which means something other than the applier
+put them there. Say so rather than presenting the diff as this run's work.
 
 ### 4. Present the staged diff for change approval
 
@@ -124,6 +170,25 @@ refusal go away.** Repairing a stale `base_commit`, recomputing a digest over al
 records, or hand-widening `scope.paths` is forging authority — the exact attack the
 contract exists to refuse. The same goes for hand-applying a fix "since the approval
 was fine ten minutes ago": a stale approval set authorizes nothing at all.
+
+**And never move the repository to match the approval.** Resetting, reverting, or
+checking out an older commit so `approval-base-commit-changed` stops firing is the same
+forgery from the other side, and it is the one the "clean working tree" requirement in
+step 3 most invites — that requirement means *commit or discard your own edits*, never
+*rewind history until the refusal goes away*. The approval set names the world it was
+minted against; when the world moved, the artifact is what gets remade.
+
+**Minting is somebody's act, not a field you fill in.** `--minter` names who performed
+the semantic approval, so you may not run `mint-approval` on an absent person's behalf,
+however confident you are of what they would say — a reviewer who approved this morning's
+report has not approved this afternoon's. Re-running the audit is yours; minting against
+the new report is theirs. (`--minter-kind policy` is the standing auto-apply policy's,
+and the engine documents it as not yet gated for use — it is not your workaround either.)
+
+**Use the approval set you minted, or the one you were handed.** Another approval-set
+file on disk that happens to validate is not a substitute for the one covering the
+records you were asked to land; check what it selects and what report it binds to, and
+say so, rather than shopping for whichever artifact clears the gate.
 
 ## Distillation — the distiller returns operations, it does not write
 
@@ -161,11 +226,16 @@ approved.
   is the only writer, always.
 - "There's no approval set, but the report says STALE and the fix is one number" → the
   report is proof of examination, deliberately not authority. Mint first.
-- "The lead approved it in the issue / in Slack / in review" → that is how an approval
-  set is minted. Mint it, with them named as minter.
+- "The lead approved it in the issue / in Slack / in review" → ask which record digests.
+  An approver who named no digest approved no record, and minting in their name notarizes
+  authority they never exercised. Go back with the report; the selection is the approval.
 - Exit 3 and you are about to apply the edit anyway → stale authorizes nothing. Re-run
   the audit, mint afresh.
 - About to open `approval.json` in an editor → forging authority. Never.
+- About to `git reset`, `git revert`, or check out an older commit so the approval stops
+  reading stale → same forgery, other side. The artifact gets remade, not the repository.
+- About to mint with an absent reviewer's name because "they already approved this
+  morning" → minting is their act. Re-run the audit and hand it back.
 - Attaching a `retire-document` (or any operation the table does not list) to a
   record's plan because it is what the fix "really needs" → the remedy is the record's;
   a plan that picks the operation puts the choice back with the model.
@@ -184,9 +254,14 @@ approved.
 |--------|---------|
 | "The report already lists the record, so it's approved" | A report is proof of what was examined, not authority. Only an approval set authorizes, and only a person or a configured auto-apply policy mints one. |
 | "The ID list I was handed *is* the approval" | It is how an approval set is minted, never a substitute for one. Mint it and let the engine validate it. |
+| "The lane is blocked / it ships today — minting costs minutes I don't have" | Minting is one command over digests the report already carries; the flow is a couple of minutes, and it is the same couple of minutes whether or not anyone is waiting. Deadline pressure is when an unauthorized diff is least likely to be caught, which is exactly why it is not when the rule bends. |
+| "I'll place my own wording in the approved span — it reads better than the report's `fix`" | The hull bounds where, not what. Text you authored inside an approved span is a diff the applier certified and nobody approved. |
 | "It's one line — the applier is overkill for this" | The applier is what makes it one *reviewable* line: preimage checked, scope confined, provenance recorded. A hand edit is an unauthorized diff of exactly the same size. |
 | "The approval went stale on an unrelated commit — the doc didn't change" | Stale authorizes nothing, and you do not get to decide which staleness was harmless. Re-run the audit and mint afresh; it is cheap. |
 | "I'll just fix the base_commit field so it validates" | That is forging authority. The digest exists so every tamper is "delete one field". |
+| "I'll roll the repo back to the commit the approval names, apply, then roll forward" | Moving the world to match the artifact is the same forgery as moving the artifact to match the world. The remedy is a fresh mint, in both directions. |
+| "The reviewer approved this morning, so I'll re-mint in their name" | A reviewer who approved this morning's report has not approved this afternoon's. Re-run the audit; hand the mint back to them. |
+| "There's another approval set on disk and it validates clean" | Check what it selects and which report it binds to. An artifact that clears the gate is not an artifact covering your records. |
 | "The working tree has an unrelated edit, I'll apply on top" | `apply-working-tree-not-clean`. The applier certifies the whole diff, so it applies onto the committed baseline only. Commit or discard first. |
 | "This is a bloat record, so I need the bloat fix skill" | There is one door. The finding code routes the remedy inside it. |
 | "Distilling inline is faster than dispatching" | The distiller owns the method — re-verify, insight walk, dedup, decision log. Inlining drops all four, and writing files drops the applier. |
