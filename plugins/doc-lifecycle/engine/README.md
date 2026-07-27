@@ -26,7 +26,7 @@ slices of the re-architecture (issue #57).
 | `doclifecycle/migrate.py` | `draft_registry()`, `dry_run_migration()`, the legacy-install inference and the migration contract |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/render.py` | `render_report()` — Markdown from a validated `Report`, and nothing else |
-| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()` — everything read from git |
+| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracked_files()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the five result states, the `ok`/`invalid` status strings |
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
@@ -385,10 +385,16 @@ boundary is lineage here, never opened.
 
 `doclifecycle/repository.py` is the only place that runs `git`, and only to read.
 `lineage(root)` gives identity and HEAD, `resolve_commit(root, revision)` turns a revision into
-a full object id, `changed_paths(root, since)` lists what a range touched, and
-`last_change(root, path)` gives the committer date and commit of a path's last change. Each
+a full object id, `changed_paths(root, since)` lists what a range touched,
+`last_change(root, path)` gives the committer date and commit of a path's last change, and
+`tracked_files(root)` lists every path the repository tracks beneath it. Each
 returns `(answer, problem)`; a problem means the repository state is unknown, and the caller
-fails closed rather than certifying what it could not read.
+fails closed rather than certifying what it could not read. For `tracked_files` that distinction
+is the whole point: reading "nothing is tracked" off a directory that is not a repository
+(`repository-listing-unavailable`) would report a corpus as fully covered exactly when nothing
+could be checked. It reads `ls-files -z` and, alone among these, does not trim git's output:
+quoting is git's default for an unusual path, and trimming a whole listing would eat a leading
+space off the first path in it — either mangling makes a tracked file look absent.
 
 Two disciplines make "only to read" true rather than intended. The environment is **scrubbed**
 of every variable that could point git at another tree (`GIT_DIR`, `GIT_WORK_TREE`, and the six
@@ -1242,6 +1248,26 @@ refuses overlapping roots outright. `--root` (repeatable) replaces inference ent
 checked before anything is walked: `migration-unsafe-root` for a spelling outside the repository,
 `migration-missing-root` for a tree that is not there. No inferable root is `migration-no-roots`.
 
+**The draft states what its roots leave behind.** Every source they are inferred from describes
+the legacy *bloat* corpus or narrower; the legacy *drift* lane had no root concept at all — it
+was diff-scoped over the whole repository, and `audit-scope.json` reached it only through
+`authorize-paths.py`, as a write-authorization filter. So a drafted registry all but always
+narrows drift coverage, and one that said nothing would be ratified as if it changed nothing.
+`migration-coverage-narrowed` counts the tracked files carrying a drafted extension that no root
+claims, and names up to `COVERAGE_SAMPLE` (10) of them, sorted: the count is exact and the paths
+are an example, so five thousand unclaimed files are not five thousand lines. A note, never a
+refusal and never an inferred root — dropping vendored, generated, and third-party markdown is
+usually the right call, so the reviewer ratifies the narrowing or re-drafts with `--root`.
+Enumeration is `repository.tracked_files()`, so generated and ignored markdown does not count;
+the legacy lane never saw it either. Exclusions do not enter into the check, which cuts both
+ways on purpose: a path excluded from *inside* a root stays claimed and unreported, because the
+draft prints that exclusion in its own `exclude` for the reviewer to read, while a subtree named
+only in `exclude` is under no root at all — an exclusion is not root evidence — and is reported
+like any other omission. When the repository cannot be listed, `migration-coverage-unchecked`
+says so; silence would read as nothing-left-behind, the one conclusion this note exists to
+prevent. It stays a note rather than a problem downgraded into one: a draft does not need this
+answer to be a draft, so what cannot be established is the coverage statement, not the registry.
+
 `audit-scope.json`'s `exclude` becomes the registry's `exclude`; a planning directory becomes a
 declared set named after it; an `include` entry that names neither `.md` nor a wildcard suffix is
 a note, since the draft declares `.md` only. An audit scope or waivers file that will not parse invalidates the draft
@@ -1367,7 +1393,7 @@ Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `bloat.load_chunk()`, `bloat.store_chunk()`, `plan_drift_audit()`, `audit_drift()`,
 `load_verdicts()`, `draft_registry()`, `dry_run_migration()`, `repository.lineage()`,
 `repository.resolve_commit()`,
-`repository.changed_paths()`, `repository.last_change()`), and the commands as subprocesses
+`repository.changed_paths()`, `repository.last_change()`, `repository.tracked_files()`), and the commands as subprocesses
 whose payload must equal the library result. Path authorization, the git reads, the cache,
 finding identity, and verdict recording have no command of their own — they are substrate the other components (and, for the cache, the bloat lane)
 call. `tests/engine/support.py` holds what every suite needs — the engine on `sys.path`,
