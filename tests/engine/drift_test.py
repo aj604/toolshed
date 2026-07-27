@@ -84,6 +84,10 @@ NARRATIVE_TEXT = "# Tour\n\n> As of 2026-01-01 (initial commit)\n\nWelcome aboar
 # Anchors the module the living document also cites, so a commit touching that
 # module leaves this anchor behind.
 ANCHORED_TEXT = "# Tour\n\n> As of 2026-01-01 (`src/fees.py`)\n\nWelcome aboard.\n"
+# Anchors that same module by its bare filename: the module is in the
+# repository, but not at the path the anchor spells.
+ABBREVIATED = os.path.basename(SOURCE)
+ABBREVIATED_TEXT = f"# Tour\n\n> As of 2026-01-01 (`{ABBREVIATED}`)\n\nHi.\n"
 
 FILES = {
     ".doc-lifecycle/registry.json": REGISTRY,
@@ -811,8 +815,7 @@ class NarrativeAnchors(DriftRepoTestCase):
         """Issue #97: `fees.py` names a file that is in the repository under
         `src/`, so "is no longer in the repository" is a false claim — the
         shorthand is what is wrong, not the target."""
-        root = self.drift_repo(**{
-            NARRATIVE: "# Tour\n\n> As of 2026-01-01 (`fees.py`)\n\nHi.\n"})
+        root = self.drift_repo(**{NARRATIVE: ABBREVIATED_TEXT})
 
         report = self.audit(root)
 
@@ -826,8 +829,7 @@ class NarrativeAnchors(DriftRepoTestCase):
     def test_an_unresolvable_reference_asks_for_a_repo_relative_path(self):
         """The finding has to say what a correct anchor looks like: the fix for
         a shorthand is the full path, and nothing else in the run says so."""
-        root = self.drift_repo(**{
-            NARRATIVE: "# Tour\n\n> As of 2026-01-01 (`fees.py`)\n\nHi.\n"})
+        root = self.drift_repo(**{NARRATIVE: ABBREVIATED_TEXT})
 
         report = self.audit(root)
 
@@ -838,8 +840,8 @@ class NarrativeAnchors(DriftRepoTestCase):
         """Two defects in one anchor stay two findings: fixing the spelling of
         one reference does not refresh the date the other is behind."""
         root = self.drift_repo(**{
-            NARRATIVE:
-                "# Tour\n\n> As of 2026-01-01 (`fees.py`, `src/fees.py`)\n\nHi.\n"})
+            NARRATIVE: "# Tour\n\n"
+                       f"> As of 2026-01-01 (`{ABBREVIATED}`, `{SOURCE}`)\n\nHi.\n"})
         self.write(root, SOURCE, "RATE = 0.025\n")
         self.commit(root, "raise the rate")
 
@@ -847,7 +849,7 @@ class NarrativeAnchors(DriftRepoTestCase):
 
         records = self.anchor_records(report)
         self.assertEqual(records["ANCHOR-UNRESOLVABLE-REFERENCE"]
-                         .extra["references"], ["fees.py"])
+                         .extra["references"], [ABBREVIATED])
         self.assertEqual(records["ANCHOR-STALE"].extra["references"], [SOURCE])
 
     def test_a_narrative_document_without_an_anchor_is_a_finding(self):

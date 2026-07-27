@@ -1124,8 +1124,8 @@ otherwise read as drift.
 
 The anchor's references are its backticked tokens, and only those: reading unbackticked prose as
 filenames would open paths a sentence merely mentioned. A token is a path when it contains a `/`
-or ends in an extension starting with a letter, which is what keeps `` `v1.2` `` from being read
-as a file that has gone missing. A trailing `:<line>` is trimmed, and an absolute path or one
+or ends in an extension starting with a letter, which is what keeps `` `v1.2` `` from being
+opened as a path at all. A trailing `:<line>` is trimmed, and an absolute path or one
 containing `..` is not a repository reference at all. Anchor findings group the anchor's own
 unit, so they point at the line to fix; the prose around it is never read as an assertion.
 
@@ -1134,8 +1134,8 @@ unresolvable, never as a removal, and a shorthand is not resolved against a pref
 token established. Both halves of that are the same refusal to guess — the engine cannot see the
 difference between `doc-sync.yml` written for a file three directories down and one that was
 deleted, and carrying a prefix forward would make an anchor's meaning depend on token order and
-silently pick between same-named files whose histories, which is what the date check reads,
-differ.
+silently pick between same-named files whose histories differ — and history is what the date
+check reads.
 
 ### Coverage gaps
 

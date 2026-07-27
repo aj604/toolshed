@@ -933,14 +933,10 @@ def _anchor_findings(repo_root, path, anchor, as_of, references):
     stale, unverifiable, unresolvable = [], [], []
     for reference in references:
         if not os.path.exists(os.path.join(repo_root, reference)):
-            # A shorthand (`doc-sync.yml` for a file that lives three
-            # directories down) and a target that has been removed are the
-            # same observation here, so neither is claimed: what is reported
-            # is that the reference does not resolve. Reading it as a removal
-            # is what made abbreviated anchors false STALE findings (#97), and
-            # resolving it against a prefix the anchor named earlier would
-            # make its meaning depend on token order and pick silently between
-            # same-named files with different histories.
+            # An abbreviation and a removed target are the same observation
+            # here, so neither is claimed and no prefix an earlier reference
+            # established is carried forward to resolve one (#97; the engine
+            # README's "Narrative documents" holds why).
             unresolvable.append((
                 reference,
                 "does not resolve to a path in the repository — an anchor "
