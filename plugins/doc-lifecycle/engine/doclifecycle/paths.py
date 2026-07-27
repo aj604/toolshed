@@ -374,6 +374,30 @@ def repository_relative_problem(path):
     return _spelling_problem(path)
 
 
+def write_target_problem(path):
+    """Why `path` may not be named as a write target, or None.
+
+    The spelling rules above, plus one location: a git directory is inside the
+    repository and is spelled canonically, so nothing above refuses it — and a
+    single write to `.git/hooks/post-commit` or `.git/config` is arbitrary
+    code execution on the next commit. No document lives there, at any depth
+    (a nested repository's is the same hazard), under any casing (a
+    case-insensitive filesystem makes `.GIT` the same directory). One owner,
+    shared by the approval set's record and scope paths and the edit plan's
+    operation targets, so a spelling cannot mean one thing to the artifact
+    that authorizes a write and another to the component that performs it.
+    """
+    problem = repository_relative_problem(path)
+    if problem is not None:
+        return problem[1]
+    if any(c.casefold() == ".git" for c in path.split("/")):
+        return (
+            "is inside a git directory — the repository's own state is not "
+            "documentation, and a write there executes on the next commit"
+        )
+    return None
+
+
 def _roots_problem(roots):
     """Why the roots cannot decide containment, as (code, message, location)."""
     if not roots:
