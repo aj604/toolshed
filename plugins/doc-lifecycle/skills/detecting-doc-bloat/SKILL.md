@@ -1,6 +1,6 @@
 ---
 name: detecting-doc-bloat
-description: Use when auditing documentation for low-value content — redundant, verbose, duplicated, or past its useful form — proposing pruning/condensing/distillation, and whenever bloat analysis runs programmatically (nightly sweep, PR gate, or a chunk-executor invocation handed its chunk slice) and must emit a structured, parseable proposal. Read-only — it proposes, a human approves, fixing-doc-bloat applies.
+description: Use when auditing documentation for low-value content — redundant, verbose, duplicated, or past its useful form — proposing pruning/condensing/distillation, and whenever bloat analysis runs programmatically (nightly sweep, PR gate, or a chunk-executor invocation handed its chunk slice) and must emit a structured, parseable proposal. Read-only — it proposes, a human approves, fixing-docs applies.
 ---
 
 # Detecting Doc Bloat
@@ -16,7 +16,7 @@ judgment one bounded chunk at a time. Three non-negotiables:
    validated mechanically at every seam. Approval of record IDs is the only
    bridge from a finding to a file change.
 3. **Read-only — this skill never edits.** A human approves IDs;
-   **`fixing-doc-bloat`** applies the approved subset.
+   **`fixing-docs`** applies the approved subset.
 
 ## Doc kinds (the planner hints these; override only with stated evidence)
 
@@ -97,7 +97,7 @@ status, files`; verdicts are `CUT / CONDENSE / EXTRACT-AND-MOVE / RETIRE-DOC /
 MERGE-DOC / DISTILL / POLICY`; the final report is wrapped with `"schema": 2`.
 `DISTILL` records carry classification + landed-code evidence **only** — the
 claims/insights/decision-entry authoring is the `doc-distiller` agent's
-post-approval job, dispatched by `fixing-doc-bloat`. Field rules, the worked
+post-approval job, dispatched by `fixing-docs`. Field rules, the worked
 example, and the chunk-result seam shape: **`output-contract.md`**. Never hand
 off anything the validator rejects.
 
@@ -116,7 +116,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scheduling-doc-sync/scripts/render-report.p
 ```
 
 Then ask for the approved IDs. Nothing you present is authorization on its
-own; the human's ID list is what `fixing-doc-bloat` receives.
+own; the human's ID list is what `fixing-docs` receives.
 
 ## Red flags — STOP
 

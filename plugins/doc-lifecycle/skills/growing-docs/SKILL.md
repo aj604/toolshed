@@ -16,7 +16,7 @@ runbook — the doc set grows by exactly the artifact that absorbs the signal, a
 
 | What you found | Owner |
 |----------------|-------|
-| An existing doc line is now **false** | detecting-doc-drift → fixing-doc-drift |
+| An existing doc line is now **false** | detecting-doc-drift → fixing-docs |
 | The fact is simply **absent** — no doc line contradicts reality | **this skill** |
 
 Drift tooling audits claims that exist; a pure gap has nothing to flag. Do not wait for a

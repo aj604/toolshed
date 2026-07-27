@@ -78,12 +78,12 @@ Not "the docs look a bit stale" — a machine-checkable record per claim. This i
 Three properties make this more than a report:
 
 - **Every verdict carries evidence** — including `VERIFIED`. "Looks consistent" is not a verdict.
-- **`fix` is the complete replacement line**, not an instruction — so `fixing-doc-drift` can land it as a one-hunk diff without re-deciding anything.
+- **`fix` is the complete replacement line**, not an instruction — so `fixing-docs` can land it as a one-hunk diff without re-deciding anything.
 - **The shape is enforced mechanically** — a bundled validator ([`validate-drift-output.py`](plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py), stdlib-only) rejects malformed records and emits a recomputed `summary` line automation can gate on.
 
-Closing the loop is one more request — "apply that drift report" — and `fixing-doc-drift` lands each `STALE` record's `fix` at its `location`, touching nothing the report didn't flag.
+Closing the loop is one more request — "apply that drift report" — and `fixing-docs` lands each approved `STALE` record's `fix` at its `location`, touching nothing the report didn't flag.
 
-Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum, cited evidence, [their own validator](plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py) — and you approve fixes **by record ID**; the [bloat guide](docs/guides/auditing-doc-bloat.md) walks one end to end.
+Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum, cited evidence, [their own validator](plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py) — and go through the same door: you approve fixes **by record ID**, and `fixing-docs` mints that selection into the approval set the applier will not write without — the ID is how you say it, the record's digest is what gets bound. The [bloat guide](docs/guides/auditing-doc-bloat.md) walks one end to end.
 
 ## What's in it
 
@@ -93,12 +93,11 @@ Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum
 | `growing-docs` | skill | Baseline docs exist but a demand signal says they fall short — writes the one artifact that absorbs the signal, then stops. The demand-driven counterpart to `bootstrapping-docs`. |
 | `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
 | `detecting-doc-drift` | skill | Auditing docs against the code for **accuracy** — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
-| `fixing-doc-drift` | skill | Applying a drift report — lands each STALE fix surgically, never deletes, never touches what the report didn't flag, stops on a large blast radius. |
 | `detecting-doc-bloat` | skill | Auditing docs for low-value content — redundant, verbose, duplicated, or past its useful form — emits a structured prune/condense/distill proposal. Read-only: it proposes, a human approves. |
-| `fixing-doc-bloat` | skill | Applying a human-approved subset of a bloat report — lands approved cuts/condenses/moves/merges and dispatches distillations. Approval by record ID is the only mandate. |
+| `fixing-docs` | skill | Applying an audit report — drift and bloat records alike, through one door: the IDs you approve mint an approval set, which becomes an edit plan the applier (`python3 -m doclifecycle apply-plan`) lands, and you get the staged diff back. The approval set is the only authority; nothing the report didn't flag gets touched. |
 | `scheduling-doc-sync` | skill | Wiring a repo for unattended sync — installs the nightly drift Action (detect → gate → fix → evidence PR) and the weekly bloat sweep (draft PRs per lane), marker-idempotent, with a blast-radius stop. |
 | `llm-doc-writer` | agent | A dispatchable subagent that produces LLM-optimized documentation with maximum context efficiency. |
-| `doc-distiller` | agent | Applies one approved DISTILL record — verifies each durable claim, lands the extractions in their living docs, retires the planning artifact, all as one commit. Dispatched by `fixing-doc-bloat`. |
+| `doc-distiller` | agent | Handles one approved DISTILL record — verifies each durable claim, then returns the edit-plan operations that put the extractions in their living docs and retire the planning artifact, landed by the same applier as every other approved record. Dispatched by `fixing-docs`. |
 
 ## Why this works where "keep the docs updated" doesn't
 
@@ -108,12 +107,13 @@ The same contract is what lets the pieces compose instead of fight:
 
 ```
 writing-docs          mandates verifiable claims
-detecting-doc-drift   audits those claims for accuracy   → fixing-doc-drift lands approved fixes
-detecting-doc-bloat   audits those claims for weight     → fixing-doc-bloat lands approved fixes
+detecting-doc-drift   audits those claims for accuracy   ┐
+                                                         ├→ fixing-docs lands approved fixes
+detecting-doc-bloat   audits those claims for weight     ┘
 scheduling-doc-sync   installs the Actions that run both loops on a schedule and open evidence PRs
 ```
 
-All of the above ships today. The automation layer — `scheduling-doc-sync` — installs a nightly GitHub Action that runs detect→fix unattended on the commits since the last sync and opens a docs-update PR with the evidence (PR-only; past the blast-radius cap it files an issue instead), and a weekly bloat sweep that only ever opens draft PRs; both are wiring on top of the contract, which lives in the detect/fix skill pairs.
+All of the above ships today. The automation layer — `scheduling-doc-sync` — installs a nightly GitHub Action that runs detect→fix unattended on the commits since the last sync and opens a docs-update PR with the evidence (PR-only; past the blast-radius cap it files an issue instead), and a weekly bloat sweep that only ever opens draft PRs; both are wiring on top of the contract, which lives in the detect skills and the one fix door.
 
 ## How it was built
 
@@ -129,7 +129,7 @@ And the loop is closed in this repo's own history: on its first nightly run here
 .claude-plugin/marketplace.json   # the toolshed marketplace
 plugins/doc-lifecycle/            # the published plugin
   .claude-plugin/plugin.json
-  skills/                         # 8 skills
+  skills/                         # 7 skills
   agents/                         # llm-doc-writer, doc-distiller
 assets/                           # social-card.png (hero + GitHub social preview),
                                   #   drift-audit-demo.svg + demo/make_cast.py (its generator)

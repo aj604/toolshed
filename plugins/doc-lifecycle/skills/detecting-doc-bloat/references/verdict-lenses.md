@@ -42,7 +42,7 @@ no yes, not that you never asked.
 name *what proof to cite* — but every passage record's `evidence` must first
 **open with the passage's full extent**, `file:start-end` (`file:start` if one
 line), starting on the same line as `location`, and *then* the proof. That
-leading span is normative — it is the exact text `fixing-doc-bloat` deletes or
+leading span is normative — it is the exact text `fixing-docs` deletes or
 replaces — and the validator rejects any passage evidence that omits it
 (`output-contract.md`).
 

@@ -1,6 +1,6 @@
-# Auditing and fixing bloat with `detecting-doc-bloat` and `fixing-doc-bloat`
+# Auditing and fixing bloat with `detecting-doc-bloat` and `fixing-docs`
 
-> As of 2026-07-06 (doc-lifecycle contract v2; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/skills/fixing-doc-bloat/SKILL.md`)
+> As of 2026-07-27 (doc-lifecycle 0.28.0, detector contract v2; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`)
 
 **You should already have:** the plugin installed and [the principles](principles.md)
 read — especially §3, because this loop *is* the propose → approve → apply contract.
@@ -52,7 +52,9 @@ line it restates, the quoted overlap, the grep. "Feels redundant" is not admissi
 
 > apply B1 and B3
 
-`fixing-doc-bloat` applies **exactly the approved records**. B2 above stays untouched —
+`fixing-docs` — the same door drift fixes go through — applies **exactly the approved
+records**; your ID list is minted into the approval set the applier will not write without.
+B2 above stays untouched —
 even if it's obviously right, even if B1's edit lands one paragraph away. `CONDENSE`
 replacement text lands byte-verbatim; nothing gets reworded, blended, or "rounded out."
 
@@ -60,12 +62,17 @@ Two special cases worth knowing before your first approval:
 
 - **`DISTILL` (ready)** is the big one: the record itself carries only the
   classification and the landed-code proof — nothing expensive was authored before you
-  approved. On approval the fixer dispatches the `doc-distiller` agent, which walks the
-  artifact, drafts the durable claims and insights (verifying each claim against the
-  code it cites), lands them in their target docs, appends one entry to
-  `docs/decisions.md`, and retires the artifact — staged as a single commit whose draft
-  PR shows you exactly what was extracted. Decisions survive; scaffolding goes to git
-  history, where it still lives if you ever need it.
+  approved. On approval `fixing-docs` dispatches the `doc-distiller` agent, which walks
+  the artifact, drafts the durable claims and insights (verifying each claim against the
+  code it cites), and **returns them as edit-plan operations rather than writing
+  anything**. What it may place is bounded by the record: one record authorizes its own
+  document and its `destination`, and residue belonging anywhere else comes back
+  reported, for its own approval rather than a silent edit. Today that bound is the whole
+  story — the bloat audit cannot put a `destination` on a `DISTILL` record
+  (`bloat.DESTINATION_VERDICTS`), so the residue is entirely unplaceable and only the
+  retirement is plannable. **Expect the drafted residue back as text to route yourself,
+  and do not accept a retire-only diff without deciding where its residue goes** — the
+  scaffolding is in git history either way, but the decisions are not.
 - **`DISTILL` (pending-implementation)** — a design doc for code that *hasn't* landed —
   is never actionable, even if you approve it. A pending design is accurate about the
   future; the record exists to say so, not to propose an edit.

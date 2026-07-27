@@ -49,4 +49,4 @@ with the `summary` so the whole thing is one parseable object:
 
 Validate before handoff — see SKILL.md step 4 for the command and rules.
 
-`location` is the only field `fixing-doc-drift` uses to place an edit (see SKILL.md for the field's shape).
+`location` is the only field `fixing-docs` uses to place a drift edit (see SKILL.md for the field's shape).
