@@ -1,0 +1,14 @@
+{
+  "lane": "legacy doc-sync.yml (detect job)",
+  "run": "28847329392",
+  "run_url": "https://github.com/aj604/toolshed/actions/runs/28847329392",
+  "created_at": "2026-07-07T06:50:13Z",
+  "base_commit": "6d525c9dfa92e995631398ff877927b459f95d0f",
+  "marker": "e63285c4a4c2b35183aab492f459bbeb63eed22e",
+  "mode": "diff-scoped over marker..HEAD (21 commits)",
+  "model": "claude-sonnet-5",
+  "cost_usd": 2.7202237,
+  "turns": 60,
+  "duration_ms": 480741,
+  "note": "the most recent doc-sync run that produced a drift report at all; every scheduled run from 2026-07-12 to 2026-07-26 failed in the model step (is_error, 1 turn, $0) and uploaded no artifact"
+}

@@ -51,7 +51,7 @@ def _problem(repo_root, detail):
     )
 
 
-def _run(repo_root, *args):
+def _run(repo_root, *args, raw=False):
     """Run git in `repo_root`. Returns (exit code, stdout, detail).
 
     The exit code is `None` exactly when git could not be run at all, which is
@@ -62,6 +62,11 @@ def _run(repo_root, *args):
     The repository is the one named here and nowhere else: the environment is
     scrubbed of every variable that could point git at another tree, so the
     `--show-toplevel` guard below cannot be walked around.
+
+    Output is trimmed, because a one-value read wants the value and not the
+    newline git ends it with. `raw` is for a *listing*, where the whole listing
+    arrives as one string and trimming it would eat leading whitespace from the
+    first path in it — a path git is perfectly willing to track.
     """
     env = {k: v for k, v in os.environ.items() if k not in REDIRECTING_VARS}
     try:
@@ -76,12 +81,12 @@ def _run(repo_root, *args):
     if result.returncode != 0:
         detail = result.stderr.strip().splitlines()
         return result.returncode, "", detail[0] if detail else f"git {args[0]} failed"
-    return 0, result.stdout.strip(), None
+    return 0, (result.stdout if raw else result.stdout.strip()), None
 
 
-def _git(repo_root, *args):
+def _git(repo_root, *args, raw=False):
     """Run git in `repo_root`. Returns (stdout, error detail or None)."""
-    code, out, detail = _run(repo_root, *args)
+    code, out, detail = _run(repo_root, *args, raw=raw)
     return (out, None) if code == 0 else (None, detail)
 
 
@@ -270,6 +275,37 @@ def tracking(path):
             # failing to answer, and a refusal is the only safe reading.
             return None, _problem(top, detail)
     return TRACKING_TRACKABLE, None
+
+
+def tracked_files(repo_root):
+    """(every path the repository tracks under `repo_root`, None), or (None, problem).
+
+    Sorted and repository-relative, the same spelling every other path in an
+    artifact carries. `-z` and a raw read, because git renders an unusual path
+    in a quoted, escaped form by default and trimming the listing would eat a
+    leading space off the first path in it — either way a caller comparing the
+    result against a real path concludes the file is not tracked.
+
+    Tracked, not present: a generated or ignored markdown file is not something
+    the repository claims, so counting it would overstate what any lane covered.
+
+    Failing is a distinct answer from an empty listing, and callers must keep it
+    that way — reading "nothing is tracked" off a directory that is not a
+    repository reports a corpus as fully covered exactly when it could not be
+    checked. `repo_root` inside a larger repository lists what that repository
+    tracks beneath it, which is the same question asked of a smaller tree.
+    """
+    out, detail = _git(repo_root, "ls-files", "-z", "--", raw=True)
+    if detail is not None:
+        return None, Problem(
+            code="repository-listing-unavailable",
+            message=(
+                f"cannot list the files tracked in {repo_root}: {detail} — what "
+                f"a repository holds cannot be established here"
+            ),
+            location=repo_root,
+        )
+    return tuple(sorted(p for p in out.split("\0") if p)), None
 
 
 def last_change(repo_root, path):

@@ -1,6 +1,6 @@
 # Turning on nightly automation with `scheduling-doc-sync`
 
-> As of 2026-07-26 (doc-lifecycle contract v2 + bloat scale hardening + distill-lane fan-out + read-only model steps; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `doc-sync.yml`, `doc-bloat.yml`)
+> As of 2026-07-26 (doc-lifecycle contract v2 + bloat scale hardening + distill-lane fan-out + read-only model steps; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat.yml`)
 
 **You should already have:** run a drift audit or [bloat sweep](auditing-doc-bloat.md)
 by hand at least once. Automation is those same loops on a cron with you as the PR

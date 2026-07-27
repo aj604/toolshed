@@ -88,6 +88,16 @@ repo's `.github/` — vendoring the `doclifecycle` engine package, copying
 `render-audit-summary.py`, and rendering the `{{AUDIT_CRON}}` knob — is aj604/toolshed#75's job.
 Until then this file is the reviewable template only; don't hand-install it ahead of that door.
 
+**Before retiring a repo's legacy lane, run the shadow comparison.** Both lanes look at the
+same documentation while only one may write; `scripts/compare-shadow-lanes.py compare` answers
+from their two artifacts what they agree on, what each saw alone, and how their coverage and
+cost differ, and splits the new lane's records into an adjudication worklist by whether an
+auto-apply policy could land them with no human (`render` prints the same as Markdown). It
+judges nothing — a false positive is a claim about the repository, and only a reader with the
+repository open settles one. This repository's own gate record, criteria and verdict, is
+`docs/plans/2026-07-26-shadow-parity-gate.md`. The script leaves with the legacy lane
+(aj604/toolshed#77).
+
 ## Preflight (run all; report failures, don't silently skip)
 
 1. Target repo has a GitHub remote: `git remote get-url origin`. No remote → stop; this

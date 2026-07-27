@@ -1,0 +1,15 @@
+{
+  "lane": "new engine audit (doclifecycle drift-audit --mode full)",
+  "base_commit": "90ead6d4ec48e5cd2fd7b69551e6a03f6dc358b6",
+  "registry": "tests/baselines/shadow-parity-gate/registry.json",
+  "model": "claude-sonnet-5 (claude -p --model sonnet, the same runner shape doc-audit.yml uses)",
+  "rounds": 3,
+  "tasks": 41,
+  "repair_tasks": 14,
+  "cost_usd": 50.4773,
+  "cost_usd_round_1": 45.0476,
+  "cost_usd_repair_rounds": 5.5197,
+  "turns": null,
+  "duration_ms": null,
+  "note": "cost is the sum of total_cost_usd over every headless worker session in all three rounds, including the one round-1 worker whose answer was unparseable ($0.5886, re-run for $0.6050). turns/duration are not comparable to the legacy lane's single-session figures: this cycle ran 55 sessions, so a turn total would sum unrelated sessions and a duration would report wall-clock under 8-way parallelism."
+}

@@ -45,6 +45,21 @@ def run(*cmd):
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+def run_isolated(*cmd):
+    """Like run(), but strips $GITHUB_STEP_SUMMARY first.
+
+    For subcommands that call write_summary(): on a laptop this env var is
+    unset so it's a no-op, but on real Actions runners it always points at
+    the job's actual summary file — without this, these subprocesses would
+    silently append test content into it. The ambient-env-without-isolation
+    bug class fixed in #94 (render-audit-summary_test.py); these three call
+    sites were the ones that slipped through.
+    """
+    env = dict(os.environ)
+    env.pop("GITHUB_STEP_SUMMARY", None)
+    return subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+
 class RenderReportTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -532,16 +547,16 @@ class BloatRender(unittest.TestCase):
 
     def test_skip_summary_known_reasons(self):
         for reason in ("skip-empty", "skip-pending", "skip-noop"):
-            out = run(sys.executable, SCRIPT, "bloat-skip-summary", "--lane", "distill", "--reason", reason)
+            out = run_isolated(sys.executable, SCRIPT, "bloat-skip-summary", "--lane", "distill", "--reason", reason)
             self.assertEqual(out.returncode, 0)
 
     def test_skip_summary_rejects_unknown_reason(self):
-        out = run(sys.executable, SCRIPT, "bloat-skip-summary", "--lane", "prune", "--reason", "bogus")
+        out = run_isolated(sys.executable, SCRIPT, "bloat-skip-summary", "--lane", "prune", "--reason", "bogus")
         self.assertEqual(out.returncode, 2)
 
     def test_pre_summary_known_decisions(self):
         for d in ("detect", "skip-pending"):
-            out = run(sys.executable, SCRIPT, "bloat-pre-summary", "--decision", d)
+            out = run_isolated(sys.executable, SCRIPT, "bloat-pre-summary", "--decision", d)
             self.assertEqual(out.returncode, 0)
 
 

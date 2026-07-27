@@ -3,8 +3,9 @@
 
 Seam: the library functions in `doclifecycle.repository`, which the engine
 README names as its public surface (`lineage`, `resolve_commit`,
-`changed_paths`, `last_change`). Every one of them is a question about a real
-repository, so every repository here is a real one with real commits.
+`changed_paths`, `last_change`, `tracked_files`). Every one of them is a
+question about a real repository, so every repository here is a real one with
+real commits.
 
 The module's own README line is "Nothing here writes to a repository", and the
 suite holds it to that: an argument reaching git in flag position is the one way
@@ -267,6 +268,79 @@ class Tracking(RepositoryTestCase):
         state, _ = repository.tracking(os.path.join(root, "a.txt"))
 
         self.assertEqual(state, repository.TRACKING_TRACKED)
+
+
+class TrackedFiles(RepositoryTestCase):
+    def test_reports_every_path_the_repository_tracks(self):
+        root, _ = self.history()
+
+        paths, problem = repository.tracked_files(root)
+
+        self.assertIsNone(problem)
+        self.assertEqual(paths, ("a.txt", "b.txt"))
+
+    def test_an_untracked_file_is_not_a_tracked_path(self):
+        root, _ = self.history()
+        with open(os.path.join(root, "generated.txt"), "w", encoding="utf-8") as fh:
+            fh.write("built, not committed\n")
+
+        paths, problem = repository.tracked_files(root)
+
+        self.assertIsNone(problem)
+        self.assertNotIn("generated.txt", paths)
+
+    def test_a_path_git_would_quote_is_reported_as_it_is_spelled(self):
+        """git renders a non-ASCII path as `"a\\303\\251.txt"` unless it is
+        asked for raw output, and a caller comparing that against a real path
+        would decide the file is not tracked."""
+        root, _ = self.history()
+        with open(os.path.join(root, "café notes.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("accented\n")
+        self.commit(root, "add accented")
+
+        paths, problem = repository.tracked_files(root)
+
+        self.assertIsNone(problem)
+        self.assertIn("café notes.txt", paths)
+
+    def test_a_path_whose_name_begins_with_a_space_keeps_it(self):
+        """The whole listing arrives as one string, so trimming that string
+        eats the first path's leading whitespace — and a caller comparing the
+        trimmed spelling against the tree decides the file is not there."""
+        root, _ = self.history()
+        with open(os.path.join(root, " leading.txt"), "w", encoding="utf-8") as fh:
+            fh.write("space\n")
+        self.commit(root, "add leading space")
+
+        paths, problem = repository.tracked_files(root)
+
+        self.assertIsNone(problem)
+        self.assertIn(" leading.txt", paths)
+
+    def test_a_directory_with_no_repository_is_a_problem_not_an_empty_listing(self):
+        """The distinction is load-bearing: a caller that read "no tracked
+        files" from an unreadable repository would report a corpus as fully
+        covered precisely when it could not check."""
+        root = self.repo({"a.txt": "one\n"})
+
+        paths, problem = repository.tracked_files(root)
+
+        self.assertIsNone(paths)
+        self.assertEqual(problem.code, "repository-listing-unavailable")
+
+    def test_reads_the_repository_it_was_named_rather_than_an_enclosing_one(self):
+        root, _ = self.history()
+        nested = os.path.join(root, "nested")
+        os.makedirs(nested)
+        with open(os.path.join(nested, "inner.txt"), "w", encoding="utf-8") as fh:
+            fh.write("inner\n")
+        self.commit(root, "add nested")
+
+        paths, problem = repository.tracked_files(nested)
+
+        self.assertIsNone(problem)
+        self.assertEqual(paths, ("inner.txt",))
 
 
 if __name__ == "__main__":

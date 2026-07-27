@@ -45,21 +45,11 @@ jobs:
             exit 1
           fi
           echo "✅ **Version guard:** plugin content changed and version bumped \`${BASE_VERSION}\` → \`${HEAD_VERSION}\`." >> "$GITHUB_STEP_SUMMARY"
+      # Discovery-driven (aj604/toolshed#99): globs tests/scripts/*_test.py itself,
+      # so a new suite is wired the moment its file lands — no list to forget. Fails
+      # loudly, including when the glob comes back empty.
       - name: Unit tests
-        run: |
-          set -euo pipefail
-          python3 tests/scripts/validate-drift-output_test.py
-          python3 tests/scripts/validate-bloat-output_test.py
-          python3 tests/scripts/plan-chunks_test.py
-          python3 tests/scripts/plan-distill_test.py
-          python3 tests/scripts/sync-gate_test.py
-          python3 tests/scripts/upgrade-gate_test.py
-          python3 tests/scripts/apply-upgrade_test.py
-          python3 tests/scripts/authorize-paths_test.py
-          python3 tests/scripts/render-report_test.py
-          python3 tests/scripts/marketplace-pin_test.py
-          python3 tests/scripts/workflow-permissions_test.py
-          python3 tests/scripts/install-parity_test.py
+        run: python3 .github/scripts/run-script-suites.py
       # The engine's suites are found by ordinary discovery, so a new suite is
       # wired the moment its file lands — no enumeration to forget.
       - name: Engine tests

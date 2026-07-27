@@ -28,7 +28,7 @@ lands in a later slice of the re-architecture (issue #57).
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
 | `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope and the minter kinds |
 | `doclifecycle/render.py` | `render_report()`, `render_approval_set()`, `approval_trailers()` — Markdown and git trailers from validated artifacts, and nothing else |
-| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()` — everything read from git |
+| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the five result states, the `ok`/`invalid` status strings |
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
@@ -387,10 +387,16 @@ boundary is lineage here, never opened.
 
 `doclifecycle/repository.py` is the only place that runs `git`, and only to read.
 `lineage(root)` gives identity and HEAD, `resolve_commit(root, revision)` turns a revision into
-a full object id, `changed_paths(root, since)` lists what a range touched, and
-`last_change(root, path)` gives the committer date and commit of a path's last change. Each
+a full object id, `changed_paths(root, since)` lists what a range touched,
+`last_change(root, path)` gives the committer date and commit of a path's last change, and
+`tracked_files(root)` lists every path the repository tracks beneath it. Each
 returns `(answer, problem)`; a problem means the repository state is unknown, and the caller
-fails closed rather than certifying what it could not read.
+fails closed rather than certifying what it could not read. For `tracked_files` that distinction
+is the whole point: reading "nothing is tracked" off a directory that is not a repository
+(`repository-listing-unavailable`) would report a corpus as fully covered exactly when nothing
+could be checked. It reads `ls-files -z` and, alone among these, does not trim git's output:
+quoting is git's default for an unusual path, and trimming a whole listing would eat a leading
+space off the first path in it — either mangling makes a tracked file look absent.
 
 Two disciplines make "only to read" true rather than intended. The environment is **scrubbed**
 of every variable that could point git at another tree (`GIT_DIR`, `GIT_WORK_TREE`, and the six
@@ -1108,8 +1114,9 @@ one, and a verdict offered for one is refused. Its `> As of <YYYY-MM-DD> (<ancho
 | `ANCHOR-MISSING` | no `As of` line, so nothing says what the document was true of |
 | `ANCHOR-MALFORMED` | no readable `YYYY-MM-DD` date, or no parenthesized anchors |
 | `ANCHOR-FUTURE-DATED` | dated after the repository's latest commit — nothing could have been checked then |
-| `ANCHOR-STALE` | a path the anchor names is gone, or last changed after the as-of date |
+| `ANCHOR-STALE` | a path the anchor names last changed after the as-of date |
 | `ANCHOR-UNVERIFIABLE` | a path the anchor names has no commit history to check against |
+| `ANCHOR-UNRESOLVABLE-REFERENCE` | a reference that is no path in the repository — an abbreviation, or a target that has moved |
 
 Honest dating has two directions, which is why the future-dated check exists at all: no
 reference comparison would catch it, since every file's last change is behind such a date. What
@@ -1119,10 +1126,18 @@ otherwise read as drift.
 
 The anchor's references are its backticked tokens, and only those: reading unbackticked prose as
 filenames would open paths a sentence merely mentioned. A token is a path when it contains a `/`
-or ends in an extension starting with a letter, which is what keeps `` `v1.2` `` from being read
-as a file that has gone missing. A trailing `:<line>` is trimmed, and an absolute path or one
+or ends in an extension starting with a letter, which is what keeps `` `v1.2` `` from being
+opened as a path at all. A trailing `:<line>` is trimmed, and an absolute path or one
 containing `..` is not a repository reference at all. Anchor findings group the anchor's own
 unit, so they point at the line to fix; the prose around it is never read as an assertion.
+
+References are repository-relative and complete: a token that resolves to nothing is reported as
+unresolvable, never as a removal, and a shorthand is not resolved against a prefix an earlier
+token established. Both halves of that are the same refusal to guess — the engine cannot see the
+difference between `doc-sync.yml` written for a file three directories down and one that was
+deleted, and carrying a prefix forward would make an anchor's meaning depend on token order and
+silently pick between same-named files whose histories differ — and history is what the date
+check reads.
 
 ### Coverage gaps
 
@@ -1243,6 +1258,26 @@ first, since it is the obvious spelling. A root inside another is dropped, becau
 refuses overlapping roots outright. `--root` (repeatable) replaces inference entirely, and is
 checked before anything is walked: `migration-unsafe-root` for a spelling outside the repository,
 `migration-missing-root` for a tree that is not there. No inferable root is `migration-no-roots`.
+
+**The draft states what its roots leave behind.** Every source they are inferred from describes
+the legacy *bloat* corpus or narrower; the legacy *drift* lane had no root concept at all — it
+was diff-scoped over the whole repository, and `audit-scope.json` reached it only through
+`authorize-paths.py`, as a write-authorization filter. So a drafted registry all but always
+narrows drift coverage, and one that said nothing would be ratified as if it changed nothing.
+`migration-coverage-narrowed` counts the tracked files carrying a drafted extension that no root
+claims, and names up to `COVERAGE_SAMPLE` (10) of them, sorted: the count is exact and the paths
+are an example, so five thousand unclaimed files are not five thousand lines. A note, never a
+refusal and never an inferred root — dropping vendored, generated, and third-party markdown is
+usually the right call, so the reviewer ratifies the narrowing or re-drafts with `--root`.
+Enumeration is `repository.tracked_files()`, so generated and ignored markdown does not count;
+the legacy lane never saw it either. Exclusions do not enter into the check, which cuts both
+ways on purpose: a path excluded from *inside* a root stays claimed and unreported, because the
+draft prints that exclusion in its own `exclude` for the reviewer to read, while a subtree named
+only in `exclude` is under no root at all — an exclusion is not root evidence — and is reported
+like any other omission. When the repository cannot be listed, `migration-coverage-unchecked`
+says so; silence would read as nothing-left-behind, the one conclusion this note exists to
+prevent. It stays a note rather than a problem downgraded into one: a draft does not need this
+answer to be a draft, so what cannot be established is the coverage statement, not the registry.
 
 `audit-scope.json`'s `exclude` becomes the registry's `exclude`; a planning directory becomes a
 declared set named after it; an `include` entry that names neither `.md` nor a wildcard suffix is
@@ -1647,12 +1682,13 @@ Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `bloat.load_chunk()`, `bloat.store_chunk()`, `plan_drift_audit()`, `audit_drift()`,
 `load_verdicts()`, `draft_registry()`, `dry_run_migration()`, `repository.lineage()`,
 `repository.resolve_commit()`, `repository.changed_paths()`, `repository.last_change()`,
-`repository.tracking()`, `reconcile()`, `mint_approval_set()`, `validate_approval_set()`,
-`load_approval_set()`, `write_approval_set()`, `render_approval_set()`,
-`approval_trailers()`), and the commands as subprocesses whose payload must equal the library
-result. Path authorization, the git reads, the cache, finding identity, and verdict recording
-have no command of their own — they are substrate the other components (and, for the cache,
-the bloat lane) call. `tests/engine/support.py` holds what every suite needs — the engine on `sys.path`,
+`repository.tracking()`, `repository.tracked_files()`, `reconcile()`, `mint_approval_set()`,
+`validate_approval_set()`, `load_approval_set()`, `write_approval_set()`,
+`render_approval_set()`, `approval_trailers()`), and the commands as subprocesses whose payload
+must equal the library result. Path authorization, the git reads, the cache, finding identity,
+and verdict recording have no command of their own — they are substrate the other components
+(and, for the cache, the bloat lane) call. `tests/engine/support.py` holds what every suite
+needs — the engine on `sys.path`,
 `RepoTestCase.repo()`, and `run_command()` for the subprocess seam; report fixtures live in
 `report_test.py`, which `report_cli_test.py`, `cache_test.py`, and `bloat_test.py` all import
 (`GitRepoTestCase`, for a real repository to check freshness against). The report, cache,
