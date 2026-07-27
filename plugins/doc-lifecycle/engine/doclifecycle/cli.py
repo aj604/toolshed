@@ -19,6 +19,14 @@ import argparse
 import json
 import sys
 
+from .approval import (
+    MINTER_HUMAN,
+    MINTER_KINDS,
+    Minter,
+    load_approval_set,
+    mint_approval_set,
+    write_approval_set,
+)
 from .bloat import (
     DEFAULT_MAX_DOCUMENTS,
     DEFAULT_MAX_UNITS,
@@ -40,7 +48,8 @@ from .migrate import (
     draft_registry,
     dry_run_migration,
 )
-from .render import render_report
+from .reconcile import reconcile
+from .render import approval_trailers, render_approval_set, render_report
 from .report import Report, load_report
 from .segment import segment_document
 from .results import (
@@ -95,6 +104,93 @@ def _add_report_arguments(command):
         registry_path=args.registry,
         audit_config_digest=args.audit_config_digest,
     ))
+
+
+def _add_approval_arguments(command):
+    """`--approval`, plus the optional things it can be checked against."""
+    command.add_argument(
+        "--approval", required=True, help="path to the approval-set JSON"
+    )
+    command.add_argument(
+        "--report", default=None,
+        help=(
+            "the report the approval set was minted from; supply it to check "
+            "the selection against the records it names"
+        ),
+    )
+    command.add_argument(
+        "--repo", default=None,
+        help=(
+            "the repository the approval set authorizes changes to; supply it "
+            "to check freshness (without it the check is structural only and "
+            "can never return stale)"
+        ),
+    )
+    command.add_argument(
+        "--registry", default=DEFAULT_REGISTRY_PATH,
+        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
+    )
+    command.add_argument(
+        "--audit-config-digest", default=None,
+        help="the consumer's current audit-configuration digest",
+    )
+    command.set_defaults(run=_validate_approval)
+
+
+def _validate_approval(args):
+    """Load the approval set, and the report it is checked against if named."""
+    report = None
+    if args.report is not None:
+        report = load_report(
+            args.report, repo_root=args.repo, registry_path=args.registry,
+            audit_config_digest=args.audit_config_digest,
+        )
+        if isinstance(report, Invalid):
+            return report
+    return load_approval_set(
+        args.approval, report=report, repo_root=args.repo,
+        registry_path=args.registry,
+        audit_config_digest=args.audit_config_digest,
+    )
+
+
+def _reconcile_report(args):
+    report = load_report(
+        args.report, repo_root=args.repo, registry_path=args.registry,
+        audit_config_digest=args.audit_config_digest,
+    )
+    if isinstance(report, Invalid):
+        return report
+    # Reconciliation is a property of the records, so it is answered for any
+    # report that validates. Whether the report is still fresh enough to act on
+    # is `validate-report`'s question, and minting's gate.
+    return reconcile(report)
+
+
+def _mint_approval(args):
+    report = load_report(
+        args.report, repo_root=args.repo, registry_path=args.registry,
+        audit_config_digest=args.audit_config_digest,
+    )
+    if isinstance(report, Invalid):
+        return report
+    approval = mint_approval_set(
+        report, args.record, repo_root=args.repo,
+        minter=Minter(kind=args.minter_kind, id=args.minter),
+        registry_path=args.registry,
+    )
+    if isinstance(approval, Invalid) or args.out is None:
+        return approval
+    written = write_approval_set(approval, args.out)
+    return written if isinstance(written, Invalid) else approval
+
+
+def _render_report(result, args):
+    return render_report(result)
+
+
+def _render_approval(result, args):
+    return approval_trailers(result) if args.trailers else render_approval_set(result)
 
 
 def _add_corpus_arguments(command):
@@ -169,7 +265,7 @@ def _parser():
     )
     _add_corpus_arguments(inventory)
     inventory.set_defaults(
-        run=lambda args: build_inventory(args.repo, args.registry), render=False
+        run=lambda args: build_inventory(args.repo, args.registry), render=None
     )
 
     segment = commands.add_parser(
@@ -191,7 +287,7 @@ def _parser():
     )
     segment.set_defaults(
         run=lambda args: segment_document(args.repo, args.path, args.registry),
-        render=False,
+        render=None,
     )
 
     context = commands.add_parser(
@@ -207,7 +303,7 @@ def _parser():
     )
     _add_corpus_arguments(context)
     context.set_defaults(
-        run=lambda args: build_context_index(args.repo, args.registry), render=False
+        run=lambda args: build_context_index(args.repo, args.registry), render=None
     )
 
     plan = commands.add_parser(
@@ -235,7 +331,7 @@ def _parser():
             args.repo, args.registry,
             max_documents=args.max_documents, max_units=args.max_units,
         ),
-        render=False,
+        render=None,
     )
 
     drift_plan = commands.add_parser(
@@ -257,7 +353,7 @@ def _parser():
             args.repo, mode=args.mode, since=args.since,
             registry_path=args.registry,
         ),
-        render=False,
+        render=None,
     )
 
     audit = commands.add_parser(
@@ -295,7 +391,7 @@ def _parser():
         "--exclude-evidence", action="append", default=None, metavar="GLOB",
         help="a source glob the run was not permitted to consult (repeatable)",
     )
-    audit.set_defaults(run=_drift_audit, render=False)
+    audit.set_defaults(run=_drift_audit, render=None)
 
     validate = commands.add_parser(
         "validate-report",
@@ -309,7 +405,7 @@ def _parser():
         ),
     )
     _add_report_arguments(validate)
-    validate.set_defaults(render=False)
+    validate.set_defaults(render=None)
 
     draft = commands.add_parser(
         "migration-draft",
@@ -342,7 +438,7 @@ def _parser():
         run=lambda args: draft_registry(
             args.repo, roots=args.root, registry_path=args.registry,
         ),
-        render=False,
+        render=None,
     )
 
     dry_run = commands.add_parser(
@@ -376,7 +472,7 @@ def _parser():
             args.repo, registry_path=args.registry, waivers=args.waivers,
             installed_version=args.installed_version,
         ),
-        render=False,
+        render=None,
     )
 
     render = commands.add_parser(
@@ -390,7 +486,104 @@ def _parser():
         ),
     )
     _add_report_arguments(render)
-    render.set_defaults(render=True)
+    render.set_defaults(render=_render_report)
+
+    reconcile_command = commands.add_parser(
+        "reconcile-report",
+        help="group a report's records by what they would change",
+        description=(
+            "Emit the reconciliation as JSON: every record in the report "
+            "assigned to exactly one group, with the relations that put it "
+            "there and the selection rule the group carries. An `atomic` group "
+            "is approved whole or not at all; an `exclusive` group holds "
+            "records that contradict and may not be approved at all. "
+            "Deterministic and model-free. Exits 1 if the report is invalid."
+        ),
+    )
+    _add_report_arguments(reconcile_command)
+    reconcile_command.set_defaults(run=_reconcile_report, render=None)
+
+    mint = commands.add_parser(
+        "mint-approval",
+        help="mint an approval set from selected record digests",
+        description=(
+            "Emit an approval set as JSON: the selected record digests, the "
+            "report lineage they came from, and the enumerated allowed "
+            "mutation scope, bound under one digest. The selection must "
+            "respect the report's reconciliation groups, every target must "
+            "authorize as documentation inside a declared root, and every "
+            "target's text must still be what the record was written about. "
+            "With --out the artifact is also written to a file — never inside "
+            "the repository's tracked or trackable state."
+        ),
+    )
+    mint.add_argument(
+        "--report", required=True, help="path to the report JSON to select from"
+    )
+    mint.add_argument(
+        "--repo", required=True,
+        help="the repository the approval authorizes changes to",
+    )
+    mint.add_argument(
+        "--record", action="append", required=True, metavar="DIGEST",
+        help="a record digest to approve (repeatable)",
+    )
+    mint.add_argument(
+        "--minter", required=True,
+        help="who is approving: a person, or the name of an auto-apply policy",
+    )
+    mint.add_argument(
+        "--minter-kind", default=MINTER_HUMAN, choices=list(MINTER_KINDS),
+        help=f"what kind of minter that is (default: {MINTER_HUMAN})",
+    )
+    mint.add_argument(
+        "--registry", default=DEFAULT_REGISTRY_PATH,
+        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
+    )
+    mint.add_argument(
+        "--audit-config-digest", default=None,
+        help="the consumer's current audit-configuration digest",
+    )
+    mint.add_argument(
+        "--out", default=None,
+        help=(
+            "also write the approval set here; refused for any path git would "
+            "track, since an approval set is never repository state"
+        ),
+    )
+    mint.set_defaults(run=_mint_approval, render=None)
+
+    validate_approval = commands.add_parser(
+        "validate-approval",
+        help="check an approval set against its report and the repository",
+        description=(
+            "Validate an approval set and emit it as JSON. With --report, "
+            "check the selection against the records it names; with --repo, "
+            "check it against the repository — base commit, rules, "
+            "configuration, allowed scope, and every selected record's target "
+            "text. The verdict is clean, stale, or invalid, and is the exit "
+            "code as well as the payload's status."
+        ),
+    )
+    _add_approval_arguments(validate_approval)
+    validate_approval.set_defaults(render=None)
+
+    render_approval = commands.add_parser(
+        "render-approval",
+        help="render an approval set as the summary that travels with a change",
+        description=(
+            "Validate an approval set and print it as Markdown for a PR body, "
+            "or as git trailers for a commit message (--trailers). An invalid "
+            "approval set renders nothing at all. The exit code is the "
+            "verdict, as for validate-approval."
+        ),
+    )
+    _add_approval_arguments(render_approval)
+    render_approval.add_argument(
+        "--trailers", action="store_true",
+        help="print git trailers for a commit message instead of Markdown",
+    )
+    render_approval.set_defaults(render=_render_approval)
 
     return parser
 
@@ -405,10 +598,13 @@ def _explain(result):
         for problem in result.problems:
             where = f" [{problem.location}]" if problem.location else ""
             print(f"{problem.code}: {problem.message}{where}", file=sys.stderr)
-    elif isinstance(result, Report):
-        for reason in result.stale_reasons:
+    else:
+        # Every artifact that can go stale says which field moved — a report
+        # and an approval set alike, since both reach a reader as an exit code
+        # first and a payload second.
+        for reason in getattr(result, "stale_reasons", ()):
             print(f"{reason.code}: {reason.message}", file=sys.stderr)
-        if result.status == STATE_PARTIAL:
+        if isinstance(result, Report) and result.status == STATE_PARTIAL:
             for entry in result.incomplete:
                 print(
                     f"not-examined: {entry.scope} — {entry.reason}",
@@ -429,7 +625,7 @@ def main(argv=None):
         # Rendering takes validated typed objects only, so an invalid result
         # prints nothing: there is no rendered form of a report that failed.
         if result.status != STATE_INVALID:
-            print(render_report(result))
+            print(args.render(result, args))
     else:
         # ensure_ascii=False so a CI log shows the message a human wrote;
         # digests are taken over digest.canonical(), not over this rendering.

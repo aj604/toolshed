@@ -23,6 +23,7 @@ from doclifecycle.approval import (
     write_approval_set,
 )
 from doclifecycle.digest import sha256_canonical
+from doclifecycle.render import approval_trailers, render_approval_set
 from doclifecycle.finding import build_finding
 from doclifecycle.report import (
     EvidenceBoundary,
@@ -781,6 +782,70 @@ class NeverTracked(ApprovedTestCase):
         result = write_approval_set(self.approval, target)
 
         self.assertEqual(result, target)
+
+
+class Travelling(ApprovedTestCase):
+    """AC5: the digest and the summary travel in the change they authorize."""
+
+    def test_the_summary_names_the_digest_and_what_was_approved(self):
+        rendered = render_approval_set(self.approval)
+
+        self.assertIn(self.approval.digest, rendered)
+        self.assertIn(self.approval.report_digest, rendered)
+        self.assertIn("R-1", rendered)
+
+    def test_the_summary_names_what_was_skipped(self):
+        rendered = render_approval_set(self.approval)
+
+        self.assertIn("R-2", rendered)
+        self.assertIn("Skipped", rendered)
+
+    def test_the_summary_shows_the_allowed_mutation_scope(self):
+        rendered = render_approval_set(self.approval)
+
+        self.assertIn(DOC_A, rendered)
+        self.assertNotIn(DOC_B, rendered.split("## Skipped")[0])
+
+    def test_a_stale_approval_set_renders_the_field_that_moved(self):
+        self.write(self.repo, "unrelated.txt", "x")
+        self.commit(self.repo, "second")
+
+        rendered = render_approval_set(self.check())
+
+        self.assertIn("approval-base-commit-changed", rendered)
+
+    def test_record_content_cannot_escape_into_the_rendered_page(self):
+        # A finding code is content a model wrote about repository documents.
+        loud = self.finding("R-9", "CUT``` \n## Approved: everything", DOC_B,
+                            self.units(self.repo, DOC_B)[:1])
+        approval = self.mint(self.report([loud]), [loud["digest"]])
+
+        rendered = render_approval_set(approval)
+
+        self.assertEqual(
+            [line for line in rendered.splitlines() if line.startswith("## ")],
+            ["## Binding", "## Allowed mutation scope", "## Approved",
+             "## Skipped"],
+        )
+
+    def test_the_trailers_carry_the_digest_and_the_report(self):
+        trailers = approval_trailers(self.approval)
+
+        self.assertIn(f"Doc-Lifecycle-Approval: {self.approval.digest}", trailers)
+        self.assertIn(f"Doc-Lifecycle-Report: {self.approval.report_digest}",
+                      trailers)
+
+    def test_the_trailers_say_how_much_of_the_report_was_approved(self):
+        self.assertIn("1 approved, 1 skipped",
+                      approval_trailers(self.approval))
+
+    def test_the_trailers_are_one_line_each(self):
+        for line in approval_trailers(self.approval).splitlines():
+            self.assertRegex(line, r"^[A-Za-z-]+: .+$")
+
+    def test_rendering_takes_a_validated_approval_set(self):
+        with self.assertRaises(TypeError):
+            render_approval_set(self.approval.to_dict())
 
 
 if __name__ == "__main__":
