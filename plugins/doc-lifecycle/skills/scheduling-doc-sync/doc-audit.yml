@@ -216,16 +216,37 @@ jobs:
         if: hashFiles('drift-report.json') != ''
         run: |
           set -uo pipefail
-          # `|| true`, not a bare call: the runner's shell is `bash -e`, and
-          # `set -uo pipefail` does not clear it — validate-report's
-          # non-zero (stale/partial) exits are typed outcomes to capture via
-          # the written payload, not crashes to abort this step on (#107).
+          # Two independent traps here, both #107: (1) the runner's shell is
+          # `bash -e`, and `set -uo pipefail` does not clear it, so a bare
+          # validate-report call would abort before its typed non-zero exits
+          # (1 invalid, 3 stale, 4 partial) ever reached the `mv` below —
+          # laundering a stale/partial verdict as the original report's
+          # unchanged (and possibly clean-looking) status. `code=0; cmd ||
+          # code=$?` survives -e and the payload is captured regardless.
+          # (2) a step's own exit status is its *last* command's, with or
+          # without -e — `[ -s revalidated.json ] && mv ...` as the last
+          # command would fail the whole step whenever revalidated.json is
+          # empty or absent (validate-report wrote nothing), even though
+          # that is itself a legitimate outcome. A full `if`/`fi` (not a
+          # `&&` short-circuit list) exits 0 when its condition is false.
           if grep -q '"status":[[:space:]]*"invalid"' drift-report.json; then
             echo "report is already invalid — nothing to re-validate freshness against"
           else
+            code=0
             python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
-              --report drift-report.json --repo . > revalidated.json || true
-            [ -s revalidated.json ] && mv revalidated.json drift-report.json
+              --report drift-report.json --repo . > revalidated.json || code=$?
+            case "$code" in
+              0|1|3|4)
+                echo "validate-report exit code: $code (typed report)"
+                ;;
+              *)
+                echo "validate-report exit code: $code (unexpected — not a typed report state)"
+                exit "$code"
+                ;;
+            esac
+            if [ -s revalidated.json ]; then
+              mv revalidated.json drift-report.json
+            fi
           fi
 
       - name: Render job summary
