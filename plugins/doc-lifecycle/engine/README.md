@@ -801,13 +801,16 @@ index.repo_root, index.registry             # what it was built from; how an unw
 `repo_root` and `registry` are not part of the index's identity (the digest already covers
 everything they produced). They are there for the one question the indexed documents cannot
 answer: whether a path holding *no* document could hold one — which is what a distillation's
-residue destination is. Both are `None` on an index assembled without them, and a caller must
-read that as "unanswerable", never as "no objection".
+residue destination is. Either being `None` (an index assembled without it) must read as
+"unanswerable", never as "no objection". The registry is the one the inventory classified by,
+carried on `inventory.Inventory.registry` rather than parsed a second time.
 
 ## Bloat audit
 
 `doclifecycle/bloat.py` is the value lane. The model supplies judgment — is this worth keeping,
-and what should replace it — and nothing else; every fact comes from the index.
+and what should replace it — and nothing else; every fact comes from the index, including
+whether a path holding no document could hold one, which the index answers from the registry
+and repository it was built from.
 
 | Verdict | Means | Names a destination |
 |---|---|---|
@@ -889,9 +892,11 @@ cannot be swapped after the fact. The unwritten-path checks:
 | `bloat-destination-occupied` | the index does not hold the path but something is on disk there — a file no audit read and no registry claims |
 | `bloat-destination-unclassified` / `bloat-destination-kind-ineligible` | no registry rule claims the path (classification is closed-world), or the kind it assigns is not one content durably lives in |
 
-`bloat-destination-uncheckable` is the fail-closed case: an index carrying neither the
-repository it was built from nor its registry cannot answer any of them, and an unanswered
-safety question is a refusal. `build_context_index` always carries both.
+`bloat-destination-uncheckable` is the fail-closed case: an index missing the repository it was
+built from or its registry cannot answer any of them, and an unanswered safety question is a
+refusal. `build_context_index` always carries both, and the registry it carries is the one the
+inventory classified by (`inventory.Inventory.registry`) — not a second parse of the same file,
+which could answer differently.
 
 Either way the applier accepts a `create-document` whose path is exactly that destination and
 nothing else (`plan-target-not-record-target`) — a record with no destination authorizes no

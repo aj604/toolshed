@@ -1,7 +1,7 @@
 """The document inventory: what documentation exists, and what kind it is."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
@@ -36,6 +36,14 @@ class Inventory:
     documents: Tuple[Document, ...]
     findings: Tuple[Finding, ...]
     digest: str
+    # The parsed registry this inventory was classified by. Not identity — the
+    # digest above is — and not part of the wire form; it is here so a caller
+    # that must classify a path the inventory does *not* hold reads the same
+    # rules that produced it, rather than parsing the file a second time and
+    # risking a different answer.
+    registry: Optional[registry_mod.Registry] = field(
+        default=None, compare=False, repr=False
+    )
 
     def to_dict(self):
         """The wire form. Both the library and the CLI hand back exactly this."""
@@ -215,4 +223,5 @@ def build_inventory(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
             "documents": _document_payload(documents),
             "findings": [{"code": f.code, "path": f.path} for f in findings],
         }),
+        registry=reg,
     )

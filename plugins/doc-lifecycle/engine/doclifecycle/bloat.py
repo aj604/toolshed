@@ -15,7 +15,11 @@ The division of labor is the same one `finding.record_classifications()` draws.
 The model supplies judgment — is this worth keeping, and what should replace it
 — and nothing else. The engine supplies every fact: which documents exist, where
 a unit occurs, which document owns it, who else is merging into a destination,
-and exactly which files a bulk scope covers. `record_verdicts()` is where the
+and exactly which files a bulk scope covers. All of it comes from the index —
+including the two facts about a path holding no document at all, which the index
+answers from the registry and repository it was built from
+(`context.ContextIndex.registry` / `.repo_root`), because a distillation's
+residue destination is a document nobody has written yet. `record_verdicts()` is where the
 two meet, and it fails closed: a destination the index contradicts, a unit that
 is not in the document it is claimed against, or a bulk judgment backed by a
 sample rather than an enumeration is refused, exhaustively, recording nothing.
@@ -697,23 +701,18 @@ class _Recorder:
         inventory does not claim is still a file a creation would land on, and
         the index may have been built before it appeared.
         """
-        repo_root = getattr(self.index, "repo_root", None)
-        registry = getattr(self.index, "registry", None)
+        repo_root, registry = self.index.repo_root, self.index.registry
         if repo_root is None or registry is None:
             self.bad("bloat-destination-uncheckable",
-                     f"this index carries neither the repository it was built "
-                     f"from nor its registry, so whether {destination!r} could "
-                     f"hold a new document is unanswerable — and an unanswered "
-                     f"safety question is a refusal", where)
+                     f"this index is missing the repository it was built from "
+                     f"or its registry, so whether {destination!r} could hold a "
+                     f"new document is unanswerable — and an unanswered safety "
+                     f"question is a refusal", where)
             return None
 
-        if destination == source:
-            self.bad("bloat-destination-is-source",
-                     f"{destination} is the planning artifact being distilled — "
-                     f"its residue cannot be the document the same record "
-                     f"retires", where)
-            return None
-
+        # No source check here: the record's own document is an indexed one, so
+        # a destination equal to it took the inventoried route above and was
+        # refused there (`bloat-destination-is-source`).
         authorization = authorize_path(
             destination, repo_root=repo_root, roots=registry.roots,
             target_class=DOCUMENTATION,
