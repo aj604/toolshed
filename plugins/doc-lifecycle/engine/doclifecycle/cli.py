@@ -21,6 +21,14 @@ from .bloat import (
     plan_repository_chunks,
 )
 from .context import build_context_index
+from .drift import (
+    DEFAULT_EVIDENCE,
+    MODE_FULL,
+    MODES,
+    audit_drift,
+    load_verdicts,
+    plan_drift_audit,
+)
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .render import render_report
 from .report import Report, load_report
@@ -91,11 +99,42 @@ def _add_corpus_arguments(command):
     )
 
 
+def _add_drift_scope_arguments(command):
+    """The corpus pair, plus how much of it a drift run declares."""
+    _add_corpus_arguments(command)
+    command.add_argument(
+        "--mode", default=MODE_FULL, choices=list(MODES),
+        help=f"how much of the inventory to declare (default: {MODE_FULL})",
+    )
+    command.add_argument(
+        "--since", default=None,
+        help="the commit a diff-scoped audit derives its scope from",
+    )
+
+
 def _positive(value):
     number = int(value)
     if number < 1:
         raise argparse.ArgumentTypeError(f"must be a positive integer, not {value}")
     return number
+
+
+def _drift_audit(args):
+    """The audit command's one call, plus reading the verdicts file it names."""
+    verdicts = None
+    if args.verdicts is not None:
+        verdicts = load_verdicts(args.verdicts)
+        if isinstance(verdicts, Invalid):
+            return verdicts
+    # `append` cannot have a non-empty default without appending to it, so the
+    # engine's default boundary is applied here instead of in argparse.
+    sources = tuple(args.evidence) if args.evidence else DEFAULT_EVIDENCE
+    return audit_drift(
+        args.repo, mode=args.mode, since=args.since, verdicts=verdicts,
+        waivers=args.waivers, evidence_sources=sources,
+        evidence_excluded=tuple(args.exclude_evidence or ()),
+        registry_path=args.registry,
+    )
 
 
 def _parser():
@@ -185,6 +224,65 @@ def _parser():
         ),
         render=False,
     )
+
+    drift_plan = commands.add_parser(
+        "drift-plan",
+        help="declare which documents a drift audit would examine",
+        description=(
+            "Emit the drift audit's scope as JSON: every living and narrative "
+            "document the audit declares, with the obligation its kind owes, "
+            "and every document it deliberately leaves out with the reason. "
+            "Deterministic — no model is involved — so a report's declared "
+            "scope can be re-derived rather than trusted. A diff-scoped run "
+            "(--mode incremental --since <commit>) declares only the documents "
+            "the range changed or that name a path it changed."
+        ),
+    )
+    _add_drift_scope_arguments(drift_plan)
+    drift_plan.set_defaults(
+        run=lambda args: plan_drift_audit(
+            args.repo, mode=args.mode, since=args.since,
+            registry_path=args.registry,
+        ),
+        render=False,
+    )
+
+    audit = commands.add_parser(
+        "drift-audit",
+        help="audit documentation against the code, and report what it examined",
+        description=(
+            "Emit a validated drift report as JSON. Living documents are judged "
+            "from the verdicts a lane returns (--verdicts); narrative documents "
+            "are checked here, deterministically, for a valid and honestly "
+            "dated as-of anchor. A document that was not validly examined is "
+            "named in the report's unexamined scopes, so the result is partial "
+            "rather than clean. The audit writes nothing to the repository."
+        ),
+    )
+    _add_drift_scope_arguments(audit)
+    audit.add_argument(
+        "--verdicts", default=None,
+        help=(
+            "path to the verdicts a lane returned for the declared living "
+            "documents; without it none of them were examined"
+        ),
+    )
+    audit.add_argument(
+        "--waivers", default=None,
+        help=(
+            "repo-relative waivers file; accepted claims are annotated in the "
+            "report, never removed from it"
+        ),
+    )
+    audit.add_argument(
+        "--evidence", action="append", default=None, metavar="GLOB",
+        help="a source glob the run was permitted to consult (repeatable)",
+    )
+    audit.add_argument(
+        "--exclude-evidence", action="append", default=None, metavar="GLOB",
+        help="a source glob the run was not permitted to consult (repeatable)",
+    )
+    audit.set_defaults(run=_drift_audit, render=False)
 
     validate = commands.add_parser(
         "validate-report",

@@ -150,3 +150,47 @@ def lineage(repo_root):
         identity = f"root-commit:{','.join(sorted(roots.split()))}"
 
     return {"repository": identity, "base_commit": head}, ()
+
+
+def resolve_commit(repo_root, revision):
+    """(full commit id, None) for `revision`, or (None, problem).
+
+    A baseline a diff-scoped audit was handed must exist in *this* repository
+    before the audit declares a scope derived from it — a scope derived from a
+    revision nobody has is not a scope.
+    """
+    resolved, detail = _git(repo_root, "rev-parse", "--verify", f"{revision}^{{commit}}")
+    if detail is not None:
+        return None, _problem(repo_root, f"{revision} is not a commit in it")
+    return resolved, None
+
+
+def changed_paths(repo_root, since):
+    """(paths changed between `since` and HEAD, None), or (None, problem).
+
+    Repository-relative, sorted, including deleted paths — a document citing a
+    file that a commit removed is exactly the case a diff-scoped audit must
+    still reach.
+    """
+    out, detail = _git(repo_root, "diff", "--name-only", "--no-renames",
+                       f"{since}..HEAD")
+    if detail is not None:
+        return None, _problem(repo_root, detail)
+    return tuple(sorted(line for line in out.splitlines() if line.strip())), None
+
+
+def last_change(repo_root, path):
+    """((committer date `YYYY-MM-DD`, commit id), None) for `path`'s last commit.
+
+    `(None, None)` when the path has no history at all — untracked, or never
+    committed — which is a different answer from a failure to look, and the
+    caller must be able to tell those apart. Dates are committer dates, whole
+    days, because an as-of anchor is written to the day.
+    """
+    out, detail = _git(repo_root, "log", "-1", "--format=%cs %H", "--", path)
+    if detail is not None:
+        return None, _problem(repo_root, detail)
+    if not out:
+        return None, None
+    date, _, commit = out.partition(" ")
+    return (date, commit), None
