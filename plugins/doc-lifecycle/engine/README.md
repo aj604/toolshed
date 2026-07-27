@@ -1517,6 +1517,18 @@ because nothing in the world moved — the selection is one no minter would have
 applier reads the report anyway (a record's remedy text lives there, not in the approval set),
 so this is the path it takes.
 
+Every one of those re-runs is a comparison against the report the artifact *names*. Supplied
+that report, a selected record it does not carry, a lineage it did not run under, a hidden
+`skipped` entry, or an invented `destination` is `invalid`
+(`approval-record-not-reported`, `approval-lineage-not-reported`,
+`approval-skipped-not-derived`, `approval-destination-not-reported`) — the report digest pins
+all four, so none of them can be the world moving. Supplied a *different* report — the
+ordinary result of an honest re-run — none of them can be derived truthfully, so every check
+stands down behind the one fact a reader can act on: `stale` `approval-report-changed`, re-run
+the audit and mint afresh. Standing down is safe because `stale` authorizes nothing and cannot
+heal: no report digests to a corrupted claim, so corrupting `report_digest` buys a forger a
+verdict that only a fresh mint replaces.
+
 **A record's target is re-derived, not believed.** A finding's digest *is* its lineage, code,
 document, and units, so `validate_approval_set` recomputes `finding_digest()` over every
 approved record and refuses `approval-record-digest-mismatch` on any mismatch — the same check
@@ -1563,7 +1575,7 @@ every selected record is still in it, and that the report still reconciles the s
 | `approval-scope-changed` | a scope path no longer authorizes, or the declared roots moved |
 | `approval-preimage-mismatch` | a selected record's units are no longer in its document |
 | `approval-preimage-unreadable` | a selected record's document cannot be read as one |
-| `approval-report-changed` | the report supplied is not the one this binds to, or carries a different lineage |
+| `approval-report-changed` | the report supplied is not the one this binds to |
 | `approval-reconciliation-changed` | the report's records no longer group the same way |
 
 The inventory digest is deliberately **not** compared, and it is the one exception. It covers

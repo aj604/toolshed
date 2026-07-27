@@ -696,10 +696,39 @@ class Freshness(ApprovedTestCase):
         self.assertIn("approval-ruleset-changed", reasons(result))
 
     def test_a_different_report_makes_it_stale_naming_the_report(self):
-        other = self.report([self.two])
+        # An honest re-run drifts: it finds a record this set never saw, so
+        # the skipped list no longer derives against it. The supplied report
+        # is not the one the artifact names, so nothing about the selection
+        # can be checked against it — the verdict is the root cause alone,
+        # `stale`: re-run the audit and mint afresh. Deriving the skipped
+        # list against a report the approval never bound would accuse an
+        # honest approver of hiding what they declined.
+        extra = self.finding(
+            "R-3", "CONDENSE", DOC_A, self.units(self.repo, DOC_A)[1:2],
+            proposal="Refunds reverse the fee.")
+        other = self.report([self.two, extra])
 
         result = self.check(report=other)
 
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(reasons(result), ["approval-report-changed"])
+
+    def test_an_honest_refresh_with_a_contradiction_is_still_stale(self):
+        # The re-run contests the approved record: a CUT over the same unit
+        # makes {R-1, R-4} an exclusive pair in the new report, and this set
+        # takes the R-1 leg. Against the bound report that split is a forgery;
+        # against a report this set never bound it proves nothing — the group
+        # discipline stands down with the other derivations, and the refresh
+        # lane keeps its exit-3 verdict.
+        cut = self.finding("R-4", "CUT", DOC_A,
+                           self.units(self.repo, DOC_A)[:1])
+        other = self.report([self.one, cut])
+
+        result = self.check(report=other)
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_STALE)
         self.assertEqual(reasons(result), ["approval-report-changed"])
 
     def test_rewriting_the_approved_passage_names_the_preimage(self):
@@ -779,11 +808,12 @@ class Freshness(ApprovedTestCase):
         self.assertIsInstance(result, Invalid)
         self.assertEqual(codes(result), ["approval-digest-mismatch"])
 
-    def test_a_selection_the_report_no_longer_carries_is_stale(self):
-        # The report is the one the digest names, but the record is not in it:
-        # nothing the applier could look up, so the authority does not stand.
-        # A real finding under the right lineage, so this is the report check
-        # answering and not the record's own digest.
+    def test_a_record_the_bound_report_does_not_carry_is_refused(self):
+        # The report is the one the digest names, and a report digest pins its
+        # record set — so a selected record it does not carry cannot be the
+        # world moving: no mint from this report could have produced the
+        # selection. A real finding under the right lineage, so this is the
+        # report check answering and not the record's own digest.
         absent = self.finding("R-9", "CONDENSE", DOC_B,
                               self.units(self.repo, DOC_B)[:1],
                               proposal="The worker retries five times.")
@@ -792,7 +822,8 @@ class Freshness(ApprovedTestCase):
             self.rebuilt(absent), report=self.source
         )
 
-        self.assertIn("approval-report-changed", reasons(result))
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-record-not-reported"])
 
 
 class ReconciledOnReadBack(ApprovedTestCase):
@@ -857,6 +888,13 @@ class InvalidBeatsStale(ApprovedTestCase):
     `lineage`, and `reconciliation_digest` — so whoever writes the file
     chooses them. If any of them ends the check early, corrupting one costs an
     attacker nothing and downgrades every forgery below it to `stale`.
+
+    `report_digest` is the one field where standing down is the honest
+    answer: a supplied report that is not the named one can prove neither
+    honesty nor forgery, and running the derivations against it would accuse
+    every honest refresh of forgery (see `Staleness`). The forger gains only
+    `stale`, which authorizes nothing and cannot heal — no report digests to
+    a corrupted claim, so the only way forward is a fresh mint.
     """
 
     def full(self, payload):
@@ -900,7 +938,11 @@ class InvalidBeatsStale(ApprovedTestCase):
         self.assertIsInstance(result, Invalid, result)
         self.assertEqual(codes(result), ["approval-destination-not-reported"])
 
-    def test_a_corrupted_report_digest_still_refuses_a_hidden_record(self):
+    def test_a_corrupted_report_digest_gains_only_the_root_cause(self):
+        # The skipped list is hidden *and* the report digest is corrupted.
+        # Nothing can be derived against a report the artifact does not name,
+        # so the verdict is the root cause — never `clean`, and never a
+        # verdict that would also fire on an honest refresh.
         payload = self.approval.to_dict()
         payload["report_digest"] = "9" * 64
         payload["skipped"] = []
@@ -908,14 +950,16 @@ class InvalidBeatsStale(ApprovedTestCase):
 
         result = self.full(payload)
 
-        self.assertIsInstance(result, Invalid, result)
-        self.assertEqual(codes(result), ["approval-skipped-not-derived"])
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(reasons(result), ["approval-report-changed"])
 
     def test_a_forged_lineage_still_refuses_a_hidden_record(self):
         # The record digests are re-derived under the forged lineage, so the
         # artifact's own arithmetic is repaired and only the report can tell.
-        # Without the lineage forgery the same shortened `skipped` is refused
-        # outright; the forgery must not buy the attacker a softer verdict.
+        # Every consequence is named — the lineage the report never ran
+        # under, the records it therefore cannot carry, and the shortened
+        # `skipped` — so the forgery buys the attacker nothing softer.
         other = self.lineage_for(self.repo, audit_mode="incremental")
         record = self.finding("R-1", "STALE", DOC_A,
                               self.units(self.repo, DOC_A)[:1],
@@ -924,7 +968,11 @@ class InvalidBeatsStale(ApprovedTestCase):
         result = self.full(self.rebuilt(record, lineage=other, skipped=[]))
 
         self.assertIsInstance(result, Invalid, result)
-        self.assertEqual(codes(result), ["approval-skipped-not-derived"])
+        self.assertEqual(codes(result), [
+            "approval-lineage-not-reported",
+            "approval-record-not-reported",
+            "approval-skipped-not-derived",
+        ])
 
     def test_a_report_that_cannot_be_reconciled_still_refuses_a_hidden_record(self):
         # The one case with no reconciliation to check groups against. The
@@ -944,7 +992,7 @@ class InvalidBeatsStale(ApprovedTestCase):
         self.assertIsInstance(result, Invalid, result)
         self.assertEqual(codes(result), ["approval-skipped-not-derived"])
 
-    def test_no_combination_of_the_three_softens_a_forged_selection(self):
+    def test_no_combination_of_corrupted_fields_authorizes_a_forgery(self):
         report, cut, _ = self.contested()
         fields = ("report_digest", "reconciliation_digest")
 
@@ -960,8 +1008,16 @@ class InvalidBeatsStale(ApprovedTestCase):
                     audit_config_digest=CONFIG_DIGEST,
                 )
 
-                self.assertIsInstance(result, Invalid, result)
-                self.assertIn("approval-exclusive-group", codes(result))
+                if "report_digest" in corrupted:
+                    # Unprobeable: the root cause alone, and never `clean`.
+                    self.assertIsInstance(result, ApprovalSet, result)
+                    self.assertEqual(result.status, STATE_STALE)
+                    self.assertEqual(
+                        reasons(result), ["approval-report-changed"]
+                    )
+                else:
+                    self.assertIsInstance(result, Invalid, result)
+                    self.assertIn("approval-exclusive-group", codes(result))
 
 
 class NotAnApprovalSet(ApprovedTestCase):
@@ -1383,9 +1439,11 @@ class ReadBackBindsTheTarget(ApprovedTestCase):
         self.assertIn("approval-invalid-scope",
                       codes(validate_approval_set(payload)))
 
-    def test_a_lineage_that_diverges_from_the_report_is_stale(self):
+    def test_a_lineage_that_diverges_from_the_report_is_refused(self):
         # Two lineage fields describe how a run was conducted, so nothing in
-        # the world could ever contradict them. Only the report can.
+        # the world could ever contradict them. Only the report can — and
+        # minting copies the named report's lineage verbatim, so a copy that
+        # differs is a run that did not happen, not a world that moved.
         # Rebuilt under the diverging lineage, so the record's own digest
         # re-derives and this is the report comparison answering.
         other = self.lineage_for(self.repo, audit_mode="incremental")
@@ -1397,9 +1455,10 @@ class ReadBackBindsTheTarget(ApprovedTestCase):
             self.rebuilt(record, lineage=other), report=self.source
         )
 
+        self.assertIsInstance(result, Invalid, result)
         self.assertIn(
             "carries a lineage the report it names does not",
-            result.stale_reasons[0].message,
+            result.problems[0].message,
         )
 
     def test_the_divergence_does_not_short_circuit_the_checks_after_it(self):
@@ -1416,11 +1475,10 @@ class ReadBackBindsTheTarget(ApprovedTestCase):
             self.rebuilt(record, lineage=other), report=self.source
         )
 
-        self.assertEqual(
-            [r.message.split(" — ")[0] for r in result.stale_reasons],
-            ["the approval set carries a lineage the report it names does not",
-             "the approval set selects 1 record(s) the report does not carry"],
-        )
+        self.assertEqual(codes(result), [
+            "approval-lineage-not-reported",
+            "approval-record-not-reported",
+        ])
 
 
 class SelfDescribingVerdicts(ApprovedTestCase):
