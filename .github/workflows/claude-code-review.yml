@@ -21,7 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      # write, not read: the review posts its findings back to the PR (inline
+      # comments plus a summary via `gh pr comment`). Read-only silently drops
+      # them — the run goes green having said nothing.
+      pull-requests: write
       issues: read
       id-token: write
 
@@ -44,7 +47,17 @@ jobs:
           allowed_bots: 'github-actions,claude'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # --comment is what makes the review land on the PR. Without it the
+          # command prints its findings to the runner log and exits (see the
+          # plugin's step 7), which is invisible in an unattended run.
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
+          # Mirrors the allowed-tools frontmatter of the upstream /code-review
+          # command, plus Task (steps 1-5 do all their work in subagents) and the
+          # read-only git it needs for the full-SHA permalinks in step 9. The
+          # action's defaults are narrower than the command: a 2026-07-26 run
+          # logged 72 permission denials without this list.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(git log:*),Bash(git blame:*),Bash(git rev-parse:*),Task,Read,Grep,Glob"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
