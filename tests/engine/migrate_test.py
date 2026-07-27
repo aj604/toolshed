@@ -4,12 +4,17 @@ Every test builds a real legacy consumer on disk — the `.github/doc-sync/`
 config and state a scheduled install carries, plus the documents it managed —
 and asks the door what the new contract would look like. Nothing here writes to
 the consumer; the suite asserts that, byte for byte.
+
+`CoverageNarrowingTest` builds that consumer as a real git repository, because
+what a repository *tracks* is the question the door asks there, and a fixture
+that mocked it would prove nothing about the answer.
 """
 
 import json
 import os
 import unittest
 
+from report_test import GitRepoTestCase
 from support import RepoTestCase
 
 from doclifecycle import PLUGIN_VERSION
@@ -256,6 +261,142 @@ class DraftRegistryTest(RepoTestCase):
         before = tree_digest(root)
         draft_registry(root)
         self.assertEqual(tree_digest(root), before)
+
+
+class CoverageNarrowingTest(GitRepoTestCase):
+    """What the drafted roots leave behind that the legacy drift lane reached.
+
+    Roots come from evidence the consumer wrote down, and every one of those
+    sources describes the bloat corpus or narrower. The legacy drift lane had no
+    root concept at all — it was diff-scoped over the whole repository — so any
+    drafted registry narrows it. The draft must say so; it must not respond by
+    inferring the missing tree, which is a decision only the human can make.
+    """
+
+    def tracked(self, files=None):
+        """A legacy consumer whose files the repository actually tracks."""
+        return self.git_repo(files or legacy_consumer())
+
+    def notes(self, root, **kwargs):
+        draft = draft_registry(root, **kwargs)
+        self.assertNotIsInstance(draft, Invalid, getattr(draft, "problems", None))
+        return {n["code"]: n for n in draft.to_dict()["notes"]}
+
+    def test_counts_and_names_the_documents_outside_the_drafted_roots(self):
+        root = self.tracked(legacy_consumer({
+            "plugins/one/SKILL.md": "# One\n\nDoes a thing.\n",
+            "plugins/two/SKILL.md": "# Two\n\nDoes another thing.\n",
+        }))
+
+        note = self.notes(root)["migration-coverage-narrowed"]
+
+        self.assertIn("2", note["message"])
+        self.assertIn("plugins/one/SKILL.md", note["message"])
+        self.assertIn("plugins/two/SKILL.md", note["message"])
+
+    def test_says_the_legacy_drift_lane_reached_them_so_this_is_a_narrowing(self):
+        root = self.tracked(legacy_consumer({
+            "plugins/one/SKILL.md": "# One\n\nDoes a thing.\n",
+        }))
+
+        message = self.notes(root)["migration-coverage-narrowed"]["message"]
+
+        self.assertIn("drift", message)
+        self.assertIn("narrow", message)
+
+    def test_the_omission_is_reported_rather_than_inferred_into_a_root(self):
+        """The whole constraint: roots come from written-down evidence, and
+        `--root` is the override. A sweep that adopted the tree would decide for
+        the human the thing this note exists to put in front of them."""
+        root = self.tracked(legacy_consumer({
+            "plugins/one/SKILL.md": "# One\n\nDoes a thing.\n",
+        }))
+
+        draft = draft_registry(root)
+
+        self.assertEqual(draft.to_dict()["registry"]["roots"],
+                         ["README.md", "docs"])
+
+    def test_says_nothing_when_the_drafted_roots_reach_every_document(self):
+        """`docs/vendor/upstream.md` is tracked and the draft drops it, but the
+        exclusion doing that is the consumer's own and is printed in the draft's
+        `exclude`. This note is for the narrowing nothing else in the draft
+        shows — a document under no root at all."""
+        root = self.tracked()
+
+        self.assertTrue(
+            os.path.isfile(os.path.join(root, "docs/vendor/upstream.md"))
+        )
+        self.assertNotIn("migration-coverage-narrowed", self.notes(root))
+
+    def test_reads_as_a_sentence_when_exactly_one_document_is_left_behind(self):
+        """This note reaches a reviewer verbatim, in a PR body."""
+        root = self.tracked(legacy_consumer({
+            "plugins/one/SKILL.md": "# One\n\nDoes a thing.\n",
+        }))
+
+        message = self.notes(root)["migration-coverage-narrowed"]["message"]
+
+        self.assertIn("1 tracked .md file is under no drafted root", message)
+        self.assertNotIn("files are", message)
+        self.assertNotIn("they are", message)
+
+    def test_a_document_excluded_from_outside_every_root_is_still_reported(self):
+        """An exclusion is not root evidence, so a subtree named only in
+        `exclude` is under no root — and the legacy drift lane still reached
+        it, since the audit scope only ever filtered that lane's writes."""
+        root = self.tracked(legacy_consumer({
+            ".github/doc-sync/audit-scope.json":
+                '{"exclude": ["vendor/**"], "include": []}\n',
+            "vendor/upstream/NOTES.md": "# Upstream\n\nVendored.\n",
+        }))
+
+        message = self.notes(root)["migration-coverage-narrowed"]["message"]
+
+        self.assertIn("vendor/upstream/NOTES.md", message)
+
+    def test_caps_the_sample_of_paths_however_many_are_left_behind(self):
+        root = self.tracked(legacy_consumer({
+            f"handbook/page-{i:03d}.md": f"# Page {i}\n\nSomething.\n"
+            for i in range(60)
+        }))
+
+        message = self.notes(root)["migration-coverage-narrowed"]["message"]
+
+        self.assertIn("60", message)
+        self.assertEqual(message.count("handbook/page-"), 10)
+
+    def test_counts_only_files_the_drafted_registry_calls_documents(self):
+        root = self.tracked(legacy_consumer({
+            "plugins/one/SKILL.md": "# One\n\nDoes a thing.\n",
+            "plugins/one/run.py": "print('hi')\n",
+            "plugins/one/logo.svg": "<svg/>\n",
+        }))
+
+        message = self.notes(root)["migration-coverage-narrowed"]["message"]
+
+        self.assertNotIn("run.py", message)
+        self.assertNotIn("logo.svg", message)
+
+    def test_an_untracked_document_is_not_counted_against_the_draft(self):
+        """Generated and ignored markdown is not something the repository
+        claims, and the legacy drift lane never saw it either."""
+        root = self.tracked()
+        with open(os.path.join(root, "BUILD-OUTPUT.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("# Generated\n\nWritten by the build.\n")
+
+        self.assertNotIn("migration-coverage-narrowed", self.notes(root))
+
+    def test_says_coverage_is_unchecked_when_the_tree_is_not_a_repository(self):
+        """Silence would read as "nothing was left behind" — the one reading
+        this note exists to prevent."""
+        root = self.repo(legacy_consumer())
+
+        notes = self.notes(root)
+
+        self.assertNotIn("migration-coverage-narrowed", notes)
+        self.assertIn("migration-coverage-unchecked", notes)
 
 
 class DryRunTest(RepoTestCase):

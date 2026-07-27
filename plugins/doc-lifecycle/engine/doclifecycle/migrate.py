@@ -39,6 +39,7 @@ from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION, PLUGIN_VERSION
 from . import registry as registry_mod
+from . import repository
 from .digest import sha256_file
 from .drift import (
     ANCHOR_PREFIX,
@@ -142,6 +143,12 @@ ANCHOR_HEAD_LINES = 6
 
 # Directory names the legacy bloat planner reads as planning artifacts.
 PLANNING_SEGMENTS = ("plans", "specs")
+
+# How many left-behind paths the coverage note names. The count is exact; the
+# paths are an example, because this note is read in a PR body and a terminal
+# and a repository with five thousand unclaimed markdown files must not emit
+# five thousand lines of them.
+COVERAGE_SAMPLE = 10
 
 # What a planning document owes. The drift audit has no obligation for it —
 # `KIND_OBLIGATIONS` covers living and narrative only, because a planning
@@ -496,6 +503,89 @@ def _group_rules(documents, extension):
     return rules, claimed
 
 
+def _unclaimed(paths, roots, extension):
+    """The documents among `paths` that no root claims, sorted.
+
+    A root is a file or a subtree, so it claims a path by being it or by being
+    a prefix of it. Exclusions do not enter into it, and the asymmetry that
+    produces is the intended one: an exclusion *inside* a root leaves the path
+    claimed and unreported, because the draft prints that exclusion in its own
+    `exclude` for the reviewer to read, while a subtree named only in `exclude`
+    is under no root at all — an exclusion is not root evidence — and is
+    reported like any other omission.
+    """
+    return tuple(sorted(
+        path for path in paths
+        if path.endswith(extension)
+        and not any(path == root or path.startswith(f"{root}/") for root in roots)
+    ))
+
+
+def _coverage_note(repo_root, roots, extension):
+    """What these roots leave behind that the legacy drift lane reached, or None.
+
+    Every source the roots are inferred from — the audit scope, the scope
+    record, the waivers, the policy scope — describes the legacy *bloat* corpus
+    or narrower. The legacy *drift* lane had no root concept at all: it was
+    diff-scoped over the whole repository, and the audit scope reached it only
+    as a write-authorization filter. So a drafted registry all but always
+    narrows drift coverage, and a draft that did not say so would be ratified as
+    if it changed nothing.
+
+    A note, never a refusal, and never an inferred root. The narrowing is
+    usually correct — vendored, generated, and third-party markdown is exactly
+    what a corpus should not carry — so the reviewer decides, with `--root` as
+    the instrument. Refusing here would block every repository with a vendored
+    tree; sweeping the tree into the roots would make the decision for them.
+
+    Enumeration is what the repository tracks, so generated and ignored files
+    are not counted; the legacy lane never saw those either. Failing to
+    enumerate is reported rather than passed over — silence reads as "nothing
+    was left behind", which is the one conclusion this note exists to prevent.
+    That report is a note and not a problem downgraded into one: the draft does
+    not need this answer to be a draft, so what cannot be established is the
+    coverage statement, not the registry.
+    """
+    tracked, problem = repository.tracked_files(repo_root)
+    if tracked is None:
+        return Note(
+            code="migration-coverage-unchecked",
+            message=(
+                f"whether these roots narrow what is audited could not be "
+                f"checked: {problem.message}. The legacy drift lane was "
+                f"diff-scoped over the whole repository and had no roots, so a "
+                f"drafted root set can leave documents behind — compare the "
+                f"roots against the tree by hand before landing this."
+            ),
+        )
+
+    left = _unclaimed(tracked, roots, extension)
+    if not left:
+        return None
+    sample = left[:COVERAGE_SAMPLE]
+    if len(left) == 1:
+        counted = f"1 tracked {extension} file is"
+        instruction = "Add it with --root if it is documentation (it is)"
+    else:
+        counted = f"{len(left)} tracked {extension} files are"
+        listing = (f"the first {len(sample)}, sorted" if len(left) > len(sample)
+                   else "they are")
+        instruction = f"Add them with --root if they are documentation ({listing})"
+    return Note(
+        code="migration-coverage-narrowed",
+        message=(
+            f"{counted} under no drafted root, so this registry narrows what is "
+            f"audited. The legacy drift lane had no roots at all — it was "
+            f"diff-scoped over the whole repository — so everything counted "
+            f"here was inside its scope, while these roots come from evidence "
+            f"describing the legacy bloat corpus or narrower. Dropping "
+            f"vendored and generated markdown is usually the right call, but "
+            f"it is a narrowing to ratify, not a gap in the inference. "
+            f"{instruction}: {', '.join(sample)}"
+        ),
+    )
+
+
 def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
                    scope_record=SCOPE_RECORD_PATH, audit_scope=AUDIT_SCOPE_PATH,
                    waivers=WAIVERS_PATH):
@@ -598,6 +688,10 @@ def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
             ),
             location=audit_scope,
         ))
+
+    coverage = _coverage_note(repo_root, roots, extension)
+    if coverage is not None:
+        notes.append(coverage)
 
     rules, claimed = _group_rules(documents, extension)
     sets = sorted({r.doc_set for r in rules if r.doc_set})
