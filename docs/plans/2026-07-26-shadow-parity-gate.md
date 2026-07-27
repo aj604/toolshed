@@ -389,13 +389,42 @@ lands.**
 
 The second half is a design call, not a patch. Either resolve an abbreviated reference against
 the directory of an already-resolved reference in the same anchor, or rule abbreviated
-references illegal and give them their own code. This record recommends the second: resolution
-would make an anchor's meaning depend on the order its tokens appear in, and a bare
-`doc-sync.yml` is genuinely ambiguous in a repository that has two of them. Either way the
-`exists=False` branch must stop saying "is no longer in the repository" when the truth is that
-the token never named anything resolvable — those are different facts, and the report contract
-refuses that conflation everywhere else. Ruling them illegal turns the four anchors in this
-repository into honest findings whose fix is to spell the paths in full.
+references illegal and give them their own code.
+
+**This record recommends the second**, and the ambiguity behind it is not hypothetical. This
+repository holds two files for each of those basenames — the installed copy and the template:
+
+```
+.github/workflows/doc-sync.yml        plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml
+.github/workflows/doc-bloat.yml       plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat.yml
+```
+
+`install-parity_test.py` holds each pair byte-identical, so no content check distinguishes
+them, but they are separate paths with separate histories — and history is exactly what
+`_anchor_findings` dates an anchor against. The anchor naming them
+(`docs/guides/scheduling-doc-sync.md:3`) is a guide about the *skill* and establishes the skill
+directory with its first reference, so it means the templates. A rule keyed on the repository
+root or on first match lands on `.github/workflows/` instead, binding the anchor to a file the
+author did not name, with nothing saying it did.
+
+Stated precisely, because the overstated version is tempting: at this commit the two copies'
+last-change dates coincide, so today the wrong resolution happens to yield the right date. That
+is a property of this repository's install-parity discipline and of both copies changing in one
+commit — not of the resolution rule. A rule that is correct only while an unrelated invariant
+holds is the kind that fails quietly once it stops.
+
+The hit rate makes it worse: the other two abbreviated references (`growing-docs/SKILL.md`,
+`fixing-doc-bloat/SKILL.md`) have exactly one match each, so a resolution rule works for two of
+four — good enough to look correct. (Ambiguity measured by #74.)
+
+Either way the `exists=False` branch must stop saying "is no longer in the repository" when the
+truth is that the token never named anything resolvable — those are different facts, and the
+report contract refuses that conflation everywhere else. Ruling them illegal turns the four
+anchors in this repository into honest findings whose fix is to spell the paths in full; on the
+reading above, `doc-sync.yml` and `doc-bloat.yml` in `docs/guides/scheduling-doc-sync.md:3`
+mean the two templates under `plugins/doc-lifecycle/skills/scheduling-doc-sync/`. Those anchor
+edits only *become* findings once the illegality rule lands, so they belong in the same change
+as the rule — that is what keeps the release gate green across it.
 
 **Cause B — a contract gap: the evidence boundary cannot name non-repository evidence
 (6 records).** `docs/agents/issue-tracker.md`'s claims about `gh` flags were all returned
