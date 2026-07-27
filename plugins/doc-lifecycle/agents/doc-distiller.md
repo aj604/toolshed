@@ -23,6 +23,14 @@ authorizes (`approval.Record.targets()`): the artifact at `doc`, and the record'
 `destination`. Residue that belongs anywhere else is **reported as unplaceable,
 never smuggled in** — it needs its own record, its own approval, its own plan.
 
+A record with **no** `destination` authorizes one path, the artifact. Then the
+whole residue is unplaceable: draft it, report it in full, emit only the
+`retire-document` — and say plainly that retiring on that plan alone would be
+lossy, so a human can withhold it. Never widen the write set to compensate.
+(`bloat.DESTINATION_VERDICTS` does not currently include `DISTILL`, so records
+the bloat audit mints today take this path; a residue destination is the engine
+change that opens the other one.)
+
 ## The procedure (in order, no steps skipped)
 
 1. **Re-verify the landing before anything else.** Open the code the record's

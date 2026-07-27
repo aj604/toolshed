@@ -81,6 +81,37 @@ engine README it cites carried a field set or example, so both GREEN runners had
 to read `applier.py` source — is now a worked plan JSON in step 2 with the
 per-operation field rules.
 
+## The engine gap scenario C's RED run found
+
+RED-C probed the applier directly and got a refusal worth recording:
+
+> `RECORD_REMEDIES[DISTILL]` includes `create-document`, but
+> `bloat.DESTINATION_VERDICTS` is only `(EXTRACT-AND-MOVE, MERGE-DOC)` — a
+> `DISTILL` record can *never* carry a `destination`. So `create-document`
+> resolves to an empty target set […] `apply-plan` refused my probe with
+> `plan-target-not-record-target: record BLOAT-002 approves a 'create-document'
+> of []`.
+
+Verified against source: `bloat.py:65`, and `applier.py:405` maps `OP_CREATE` to
+`(record.destination,) if record.destination else ()`. So **the residue-authoring
+half of the distiller's contract is unreachable for records the bloat audit mints
+today** — only `retire-document` is executable, which alone is lossy.
+
+GREEN-C exercised `create-document` only because this run's report carries a
+hand-added `destination` on the `DISTILL` record (documented in `README.md`).
+That proves the contract works end to end once a record can name one; it does not
+prove the bloat audit can produce such a record, and it cannot.
+
+Closing it is an engine change, not a text change, and a real one:
+`_destination_record()` refuses any path the inventory does not already contain
+(`bloat-destination-not-a-document`), which is exactly what a *new* residue
+document is. So adding `DISTILL` to `DESTINATION_VERDICTS` is not sufficient — a
+residue destination needs to be its own concept, permitting a not-yet-existing
+path. Left for a follow-up; `agents/doc-distiller.md` states the consequence
+plainly in the meantime (a destination-less record makes the whole residue
+unplaceable, and the distiller must say that retiring on that plan alone is
+lossy).
+
 **Honest status of this GREEN.** Scenarios A and C were graded against the text
 as it stood at the runs; the closers above are not covered by them. Only
 scenario B was re-verified against the hardened text — `regreen-b.md` records a
