@@ -110,12 +110,14 @@ def walk_root(repo_root, root, registry):
             yield rel, os.path.islink(path)
 
 
-def build_inventory(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
-    """Inventory every document under the registry's declared roots.
+def load_registry(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
+    """Read and parse the registry at `repo_root`. Returns a `Registry`/`Invalid`.
 
-    Returns an `Inventory` (status "ok"), or `Invalid` when the registry cannot
-    be trusted — the whole run fails, rather than degrading to a partial
-    inventory a reader could mistake for the corpus.
+    Public because the registry answers one question no other module can:
+    which subtrees are declared documentation. Path authorization needs that
+    list, and an approval set's allowed mutation scope is authorized against
+    it — so both read the registry through here rather than each learning where
+    the file lives and what an unparseable one means.
     """
     try:
         with open(os.path.join(repo_root, registry_path), encoding="utf-8") as fh:
@@ -130,10 +132,22 @@ def build_inventory(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
             ),
             location=registry_path,
         ),))
-
     reg, problems = registry_mod.parse(text, location=registry_path)
     if problems:
         return Invalid(tuple(problems))
+    return reg
+
+
+def build_inventory(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
+    """Inventory every document under the registry's declared roots.
+
+    Returns an `Inventory` (status "ok"), or `Invalid` when the registry cannot
+    be trusted — the whole run fails, rather than degrading to a partial
+    inventory a reader could mistake for the corpus.
+    """
+    reg = load_registry(repo_root, registry_path)
+    if isinstance(reg, Invalid):
+        return reg
 
     missing_roots = [
         root for root in reg.roots
