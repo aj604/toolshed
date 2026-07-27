@@ -14,7 +14,7 @@ Two duties:
 1. Derive the authority from the report:
        authorize-paths.py expected --report FILE --lane {drift|prune|distill}
                           [--config PATH] --out FILE
-   drift    the file of every STALE record's location — fixing-doc-drift edits
+   drift    the file of every STALE record's location — the fix lane edits
             those locations and nothing else.
    prune    every prune-lane record's doc, plus each EXTRACT-AND-MOVE target.
    distill  every distill-lane record's doc (POLICY: its files), each MERGE-DOC

@@ -18,9 +18,14 @@ Orchestration lives in the shipped workflow YAML; every gate decision lives in t
 bodies) lives in the shipped `render-report.py`; chunk planning lives in `plan-chunks.py`;
 distill-lane planning, dispatch rendering, and the deterministic patch merge live in
 `plan-distill.py`; the path authority for a model's edit set lives in `authorize-paths.py`; doc
-judgment lives in `detecting-doc-drift` / `fixing-doc-drift` / `detecting-doc-bloat` /
-`fixing-doc-bloat`, which the workflows invoke headlessly by name. Never inline detection or
-fixing method into workflow YAML — that forks the method from its one owner.
+judgment lives in `detecting-doc-drift` / `detecting-doc-bloat` / `fixing-docs` — the workflows
+invoke the detectors headlessly by name; `fixing-docs`'s remedy table (which operation each
+finding code implies, and that the report's drafted text is placed byte-verbatim) is the
+reference the fix/prune/distill lanes' prompts point to, not restate — its own mint-approval →
+edit plan → applier flow does not run headlessly here (no approval-set authority exists in these
+read-only jobs), so those lanes edit directly and rely on the workflow's own path authorization
+and PR review instead. Never inline detection or fixing method into workflow YAML — that forks
+the method from its one owner.
 
 **The model holds no repository write authority.** Every job that invokes a model runs with
 `permissions: contents: read` (plus `id-token: write` for the OAuth exchange only), checks out
@@ -150,7 +155,7 @@ repository open settles one. This repository's own gate record, criteria and ver
 
 1. Confirm the knobs with the user (defaults are fine unattended):
    - cron: default `0 3 * * *` (03:00 UTC nightly)
-   - blast-radius cap: default `10` (matches fixing-doc-drift's default of ~10 passages)
+   - blast-radius cap: default `10`
    - bloat cron: default `0 4 * * 1` (04:00 UTC Mondays); replaces `{{BLOAT_CRON}}` in doc-bloat.yml
    - upgrade cron: default `0 2 * * 1` (02:00 UTC Mondays); replaces `{{UPGRADE_CRON}}` in
      doc-sync-upgrade.yml. Earliest of the three (before the 03:00 nightly sync and 04:00 bloat
