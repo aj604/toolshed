@@ -410,7 +410,7 @@ A result state says whether the *declared* scope completed. Only the optional
   "basis": "full inventory: every living and narrative document the registry classifies",
   "coverage": "whole-inventory",
   "documents": ["docs/architecture.md", "docs/guides/onboarding.md"],
-  "excluded": [{"path": "docs/plans/next.md", "reason": "a planning document carries lifecycle state"}]
+  "excluded": [{"path": "docs/plans/next.md", "reason": "a planning document carries lifecycle state", "code": "planning-kind"}]
 }
 ```
 
@@ -421,11 +421,30 @@ names part of the inventory and claims nothing about the rest). Prose cannot car
 claim, because "every living and narrative document" is a sentence a scope listing one of six
 documents can also carry.
 
-Shape is checked exactly: those four fields and no others, a non-empty single-line basis, a
-`coverage` from the closed set, single-line paths no two of which repeat, and exclusions that
-each name a path and a reason and never a path `documents` also declares
-(`report-invalid-scope`). An empty `documents` list is a real answer — a diff-scoped run whose
-range touched no document declared nothing.
+Each exclusion is split the same way. `reason` is prose for a reader; `code` is the token a
+validator acts on, one of `planning-kind` (the document is currently classified `planning`, which
+drift never examines) or `unaffected-by-range` (a living or narrative document an incremental
+run's commit range did not touch). Free prose alone let a living document be moved into
+`excluded` with a reason like "not relevant to this run" and validate as `whole-inventory`
+coverage with no stale reason — the coverage token was closed, but what it was allowed to leave
+out was not (independent Fable review of PR #87, finding N1). The code is what closes that: given a
+`repo_root`, it is checked against the document's actual current kind (below), not just its shape.
+
+**This is a breaking shape change, not a re-key.** Earlier reports' `scope.excluded` entries
+carried only `path` and `reason`; `code` is now required, so a report holding the old two-field
+shape is `report-invalid-scope` outright, not merely digested under a new identity. Every producer
+in this repository (`drift.audit_drift`) emits `code` alongside this change, so nothing produced
+here breaks — a persisted report from before it, or an external consumer still writing the old
+shape, must re-run to get a validating one.
+
+Shape is checked exactly: those four `Scope` fields and no others, a non-empty single-line basis,
+a `coverage` from the closed set, single-line paths no two of which repeat, and exclusions —
+each exactly `path`, `reason`, and a `code` from the closed set, never a path `documents` also
+declares (`report-invalid-scope`). An empty `documents` list is a real answer — a diff-scoped run
+whose range touched no document declared nothing. `declared-only` coverage may not carry any
+exclusions at all: the token means the scope "claims nothing about the rest", and naming a
+specific exclusion with a reason is claiming something about it — only `whole-inventory` accounts
+for what it leaves out that way.
 
 **Given a `repo_root`, the scope is re-derived against the current inventory.** Shape alone
 would let a report claim full-corpus coverage over one document, or enumerate documents the
@@ -436,6 +455,13 @@ claims truthful would be the one field nothing checked. So:
 |---|---|
 | `scope-document-unknown` | a declared or excluded path is not in the current inventory |
 | `scope-inventory-unaccounted` | `coverage` is `whole-inventory` and some inventory document is neither declared nor excluded |
+| `scope-exclusion-kind-mismatch` | an exclusion's `code` disagrees with the document it names — a `planning-kind` exclusion whose current kind is not `planning`, or (regardless of code) a living or narrative document excluded from a `full`-mode `whole-inventory` report |
+
+`scope-exclusion-kind-mismatch` is deliberately narrower than "no living/narrative exclusion
+ever": an incremental audit's `whole-inventory` claim legitimately excludes living and narrative
+documents its commit range did not touch (`unaffected-by-range`), so the rule only refuses that
+shape under `full`, where every living and narrative document is declared and nothing of that
+kind is ever legitimately left out.
 
 The verdict is `stale`, not `invalid`, and the direction is deliberate: the check needs a
 repository in hand, and from there a document that was deleted and a document that never existed
@@ -449,6 +475,17 @@ different scopes are not the same report: one examined more than the other. It i
 a report that declares no scope digests exactly as it did before the field existed — so a
 producing run that says nothing about scope is not silently re-keyed, and the reader falls back
 to `audit_mode`, which is required.
+
+**Residual gap, honestly stated (independent Fable review of PR #87, finding N2):** `coverage` is the closed token a validator acts
+on precisely because `basis` cannot be. Nothing stops a payload from pairing an accurate
+`declared-only` token with a `basis` string that still reads like a full-coverage description —
+turning `basis` into a parsed language to catch that would trade one unconstrained-prose problem
+for another. What the contract does catch mechanically (above) is the shape-level contradiction —
+`declared-only` cannot carry exclusions at all. The prose-level contradiction is disclosed, not
+caught: `render_report` puts `- Basis:` directly above `- Coverage:` in the same section
+specifically so a reviewer sees them side by side. A validator that cannot tell truth from a
+forged sentence is not a gap in this check; it is the reason `coverage` exists as a separate
+field in the first place.
 
 ### Recorded coverage
 
@@ -474,6 +511,14 @@ NaN/Infinity, and nesting within `MAX_NESTING` (`report-invalid-examined`) — a
 is declared, that each entry names a document that scope declared: recorded coverage must not be
 able to inflate a scope. Like `scope`, it is in the digest and omitted when empty, so a report
 that records no coverage digests exactly as it did before the field existed.
+
+A non-empty `examined` requires a declared `scope` (`report-invalid-examined`). The containment
+check above needs one to check against; without it, it was simply skipped, so a scope-less report
+could record coverage of arbitrary paths nothing had enumerated (independent Fable review of
+PR #87, finding N3). Requiring a scope is the structural fix rather than constraining `examined` to the
+current inventory, because the latter would need a `repo_root` this validation phase does not
+have — and costs nothing in practice, because `audit_drift` always emits a scope alongside its
+recorded coverage.
 
 ### The five result states
 
@@ -922,7 +967,11 @@ Each declared document carries the obligation its kind owes: `assertions` for a 
 (every unit that can carry a claim needs a verdict), `anchor` for a narrative one. A planning
 document is *excluded* — listed with its reason rather than dropped, because a scope is only
 checkable when what it leaves out is visible beside what it takes in. Drift never examines one:
-its obligation is distillation or retirement.
+its obligation is distillation or retirement. Every exclusion also carries the closed `code`
+`report.py` cross-checks against the repository (*Declared scope* above): `planning-kind` for a
+planning document, `unaffected-by-range` for a living or narrative one an incremental run's
+commit range did not touch — a full run never emits the latter, since it declares every living
+and narrative document.
 
 Diff scope is a lower bound, and the basis says so: a document is affected when the range
 changed it, when its text contains a path the range changed, or when it cannot be read at all
@@ -1023,7 +1072,13 @@ passage it is about. The recorded class travels on the record too, as `assertion
 
 Any of these — or any `classification-*` problem — means that document was **not validly
 examined**, so it becomes a coverage gap rather than a silently missing finding, and the run is
-partial, not clean.
+partial, not clean. `incomplete[].reason` is codes only, by design — no prose drift — with one
+exception: for `drift-verdict-invalid-evidence` and `drift-evidence-outside-boundary` the
+offending `evidence.source` is folded into the reason too, because the code alone says a
+`source` broke a rule, not which one — losing that is exactly the detail an operator debugging
+the gap needs first (independent Fable review of PR #87, finding N4). The fixture's own hostile
+filenames (a leading dash, `; rm -rf ~`) are documents drift declares and examines that cannot
+ever be cited as evidence sources; before this, the gap they produced named only the code.
 
 Five things invalidate the whole run instead, because they leave the report unable to describe
 what happened: `drift-verdicts-invalid-shape` (the payload is not

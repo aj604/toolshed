@@ -194,7 +194,7 @@ def render_report(report):
             + (", ".join(_code(d) for d in report.scope.documents) or "none"),
             f"- Excluded documents ({len(report.scope.excluded)}): "
             + (", ".join(
-                f"{_code(e.path)} ({_code(e.reason)})"
+                f"{_code(e.path)} ({_code(e.code)}: {_code(e.reason)})"
                 for e in report.scope.excluded
             ) or "none"),
         ]

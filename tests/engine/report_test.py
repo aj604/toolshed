@@ -32,10 +32,13 @@ from doclifecycle.digest import sha256_canonical  # noqa: E402
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import (  # noqa: E402
     AUDIT_MODES,
+    EXCLUSION_PLANNING_KIND,
+    EXCLUSION_UNAFFECTED_BY_RANGE,
     MAX_NESTING,
     REQUIRED_LINEAGE_FIELDS,
     SCOPE_DECLARED_ONLY,
     SCOPE_DOCUMENT_UNKNOWN,
+    SCOPE_EXCLUSION_KIND_MISMATCH,
     SCOPE_INVENTORY_UNACCOUNTED,
     SCOPE_WHOLE_INVENTORY,
     Report,
@@ -1446,14 +1449,31 @@ class ScopeAgainstTheRepository(GitRepoTestCase):
 
         self.assertIn("docs/extra.md", result.stale_reasons[0].current)
 
+    # A registry that classifies `docs/plan.md` planning and everything else
+    # under `docs/` living — last match wins, so the broad rule goes first.
+    PLANNING_REGISTRY = json.dumps({
+        "schema_version": 1,
+        "roots": ["docs"],
+        "rules": [
+            {"glob": "docs/**/*.md", "kind": "living"},
+            {"glob": "docs/plan.md", "kind": "planning"},
+        ],
+    })
+
     def test_documents_the_scope_excluded_still_account_for_the_inventory(self):
         """An exclusion is the visible half of a coverage claim: a document
-        left out *with its reason* is accounted for, and a document simply
-        omitted is not."""
-        repo = self.git_repo(dict(REPO_FILES, **{"docs/plan.md": "# Plan\n"}))
+        left out *with its reason and code* is accounted for, and a document
+        simply omitted is not."""
+        repo = self.git_repo(dict(
+            REPO_FILES, **{
+                ".doc-lifecycle/registry.json": self.PLANNING_REGISTRY,
+                "docs/plan.md": "# Plan\n",
+            },
+        ))
 
         result = self.scoped(repo, excluded=[
-            {"path": "docs/plan.md", "reason": "a planning document"},
+            {"path": "docs/plan.md", "reason": "a planning document",
+             "code": EXCLUSION_PLANNING_KIND},
         ])
 
         self.assertEqual(result.stale_reasons, ())
@@ -1462,10 +1482,69 @@ class ScopeAgainstTheRepository(GitRepoTestCase):
         repo = self.git_repo()
 
         result = self.scoped(repo, excluded=[
-            {"path": "docs/never-existed.md", "reason": "a planning document"},
+            {"path": "docs/never-existed.md", "reason": "a planning document",
+             "code": EXCLUSION_PLANNING_KIND},
         ])
 
         self.assertEqual(self.reasons(result), [SCOPE_DOCUMENT_UNKNOWN])
+
+    def test_a_living_document_moved_to_excluded_is_stale_not_free_coverage(self):
+        """The reviewer's N1 probe on PR #87: moving a living document from
+        `documents` into `excluded` with a free-prose reason validated as
+        `whole-inventory` coverage with no stale reason. The prose is now
+        accompanied by a closed `code`, and a `planning-kind` code naming a
+        document the registry classifies `living` is exactly the lie that
+        code exists to catch."""
+        repo = self.git_repo()
+
+        result = self.scoped(repo, documents=[], excluded=[
+            {"path": self.INVENTORY[0], "reason": "not relevant to this run",
+             "code": EXCLUSION_PLANNING_KIND},
+        ])
+
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(self.reasons(result), [SCOPE_EXCLUSION_KIND_MISMATCH])
+
+    def test_a_living_document_excluded_as_unaffected_in_full_mode_is_stale(self):
+        """Relabeling the same forgery `unaffected-by-range` does not launder
+        it: that code only ever legitimately applies under an incremental
+        audit, and a `full`-mode `whole-inventory` claim never legitimately
+        excludes a living or narrative document under any code."""
+        repo = self.git_repo()
+
+        result = self.scoped(repo, documents=[], excluded=[
+            {"path": self.INVENTORY[0], "reason": "unchanged by a..HEAD",
+             "code": EXCLUSION_UNAFFECTED_BY_RANGE},
+        ])
+
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(self.reasons(result), [SCOPE_EXCLUSION_KIND_MISMATCH])
+
+    def test_an_unaffected_by_range_exclusion_is_legitimate_under_incremental(self):
+        """The same code and the same document are fine once the audit mode
+        the rule is scoped to actually applies — an incremental run's
+        `whole-inventory` claim legitimately excludes documents its range did
+        not touch."""
+        repo = self.git_repo()
+        scope = {
+            "basis": "documents affected by a..HEAD",
+            "coverage": SCOPE_WHOLE_INVENTORY,
+            "documents": [],
+            "excluded": [
+                {"path": self.INVENTORY[0], "reason": "unchanged by a..HEAD",
+                 "code": EXCLUSION_UNAFFECTED_BY_RANGE},
+            ],
+        }
+
+        result = validate_report(
+            report_payload(
+                lineage=self.fresh_lineage(repo, audit_mode="incremental"),
+                scope=scope,
+            ),
+            repo_root=repo,
+        )
+
+        self.assertEqual(result.stale_reasons, ())
 
     def test_a_declared_only_scope_claims_nothing_about_the_rest(self):
         """The narrower coverage token is a real answer, not a way out: it
@@ -1537,34 +1616,90 @@ class ScopeAgainstTheRepository(GitRepoTestCase):
 
 class ScopeExclusions(unittest.TestCase):
     def test_an_exclusion_names_the_document_and_why_it_was_left_out(self):
+        result = validate_report(report_payload(scope=dict(
+            SCOPE, coverage=SCOPE_WHOLE_INVENTORY, excluded=[
+                {"path": "docs/plans/next.md", "reason": "a planning document",
+                 "code": EXCLUSION_PLANNING_KIND},
+            ],
+        )))
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.scope.excluded[0].path, "docs/plans/next.md")
+        self.assertEqual(result.scope.excluded[0].code, EXCLUSION_PLANNING_KIND)
+
+    def test_an_exclusion_with_no_reason_is_refused(self):
+        result = validate_report(report_payload(scope=dict(SCOPE, excluded=[
+            {"path": "docs/plans/next.md", "code": EXCLUSION_PLANNING_KIND},
+        ])))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_an_exclusion_with_no_code_is_refused(self):
+        """The closed vocabulary is not optional: a `reason` alone is exactly
+        the unconstrained prose the PR #87 review's N1 finding exploited."""
         result = validate_report(report_payload(scope=dict(SCOPE, excluded=[
             {"path": "docs/plans/next.md", "reason": "a planning document"},
         ])))
 
-        self.assertIsInstance(result, Report)
-        self.assertEqual(result.scope.excluded[0].path, "docs/plans/next.md")
+        self.assertEqual(codes(result), ["report-invalid-scope"])
 
-    def test_an_exclusion_with_no_reason_is_refused(self):
+    def test_an_exclusion_code_outside_the_closed_set_is_refused(self):
         result = validate_report(report_payload(scope=dict(SCOPE, excluded=[
-            {"path": "docs/plans/next.md"},
+            {"path": "docs/plans/next.md", "reason": "not relevant to this run",
+             "code": "not-relevant"},
         ])))
 
         self.assertEqual(codes(result), ["report-invalid-scope"])
 
     def test_a_document_cannot_be_both_declared_and_excluded(self):
         result = validate_report(report_payload(scope=dict(SCOPE, excluded=[
-            {"path": SCOPE["documents"][0], "reason": "also excluded"},
+            {"path": SCOPE["documents"][0], "reason": "also excluded",
+             "code": EXCLUSION_PLANNING_KIND},
         ])))
 
         self.assertEqual(codes(result), ["report-invalid-scope"])
 
     def test_the_same_exclusion_twice_is_refused(self):
         result = validate_report(report_payload(scope=dict(SCOPE, excluded=[
-            {"path": "docs/plans/next.md", "reason": "a planning document"},
-            {"path": "docs/plans/next.md", "reason": "a planning document"},
+            {"path": "docs/plans/next.md", "reason": "a planning document",
+             "code": EXCLUSION_PLANNING_KIND},
+            {"path": "docs/plans/next.md", "reason": "a planning document",
+             "code": EXCLUSION_PLANNING_KIND},
         ])))
 
         self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_declared_only_coverage_may_not_carry_an_exclusion(self):
+        """PR #87 review, N2: mechanically catchable without parsing `basis`
+        — `declared-only` claims nothing about the rest of the inventory, so
+        naming a specific exclusion with a reason contradicts the token
+        itself, independent of what `basis` says."""
+        result = validate_report(report_payload(scope=dict(
+            SCOPE, coverage=SCOPE_DECLARED_ONLY, excluded=[
+                {"path": "docs/plans/next.md", "reason": "a planning document",
+                 "code": EXCLUSION_PLANNING_KIND},
+            ],
+        )))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_declared_only_basis_that_still_reads_like_full_coverage_validates(self):
+        """PR #87 review, N2, reproduced: a `basis` that still reads "full
+        inventory: every living and narrative document the registry
+        classifies" validates fine alongside an accurate `declared-only`
+        token — the contract cannot tell a stale sentence from a true one,
+        and does not pretend to; `coverage` is what it acts on, and it is
+        accurate here. The rendering discloses the mismatch beside it."""
+        result = validate_report(report_payload(scope={
+            "basis": ("full inventory: every living and narrative document "
+                      "the registry classifies"),
+            "coverage": SCOPE_DECLARED_ONLY,
+            "documents": [SCOPE["documents"][0]],
+            "excluded": [],
+        }))
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.stale_reasons, ())
 
     def test_a_coverage_that_is_not_a_closed_token_is_refused(self):
         """Prose is what `basis` is for. A validator has to act on the coverage
@@ -1683,13 +1818,23 @@ class RecordedCoverage(unittest.TestCase):
 
         self.assertEqual(codes(result), ["report-invalid-examined"])
 
-    def test_coverage_survives_without_a_declared_scope(self):
-        """The scope is optional, so the containment check is too — but the
-        coverage itself still reads back."""
+    def test_coverage_of_a_document_is_refused_without_a_declared_scope(self):
+        """PR #87 review, N3, reproduced: the containment check above is
+        skipped when no scope is declared, so a scope-less report could
+        record coverage of an arbitrary path nothing had enumerated. A scope
+        is now required whenever `examined` is non-empty — the same category
+        error as inflating a declared scope, just with no scope to inflate."""
         result = validate_report(report_payload(examined=[dict(self.ENTRY)]))
 
+        self.assertEqual(codes(result), ["report-invalid-examined"])
+
+    def test_an_empty_examined_list_needs_no_declared_scope(self):
+        """Recording nothing is not a claim of coverage, so it needs no frame
+        to check it against."""
+        result = validate_report(report_payload(examined=[]))
+
         self.assertIsInstance(result, Report)
-        self.assertEqual(len(result.examined), 1)
+        self.assertEqual(result.examined, ())
 
 
 class RenderedCoverage(unittest.TestCase):
