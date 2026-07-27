@@ -96,7 +96,13 @@ the legacy lane in #77).
   engine's audit lane's run-surface rendering (every report result state, plus the
   report-never-produced case, and cost/turn observability); `audit-workflow_test.py` adds
   `doc-audit.yml`-specific static checks (SHA-pinned third-party actions, no direct branch
-  commits) alongside what `workflow-permissions_test.py` already covers generically for every
+  commits; no step reading `$?` or calling the engine CLI with later logic depending on it,
+  anywhere `bash -e`'s inherited abort would already have skipped that read or logic — #107)
+  plus an execution-based regression suite for the freshness-revalidation step (run under a
+  real `bash -e` against a stubbed engine CLI: a stale/partial verdict must reach the
+  published report, never laundered as the original's status, and an empty/absent
+  revalidated payload must not fail the step outright), alongside what
+  `workflow-permissions_test.py` already covers generically for every
   `scheduling-doc-sync/*.yml` template. `compare-shadow-lanes_test.py` covers the shadow-mode
   parity comparison (assertion correspondence across two commits, coverage and cost deltas,
   auto-apply-eligibility split, determinism). `release.yml`'s CI runs every

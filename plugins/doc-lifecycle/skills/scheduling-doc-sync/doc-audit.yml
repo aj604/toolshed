@@ -138,10 +138,26 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
+          # No -e: the runner's shell is `bash -e`, and `set -uo pipefail`
+          # does not clear it, so a bare `$?` read after this command would
+          # never run on the very exits that matter — 1 (invalid) and 4
+          # (partial) are each a legitimate typed report drift-audit can
+          # emit (see EXIT_CODES in doclifecycle/cli.py), not a crash to
+          # abort the step on. `|| code=$?` survives `-e`; reading $?
+          # afterward would not.
+          code=0
           python3 .github/doc-sync/engine/doc-lifecycle.py drift-audit --repo . --mode full \
             $( [ -f verdicts.json ] && echo "--verdicts verdicts.json" ) \
-            > drift-report.json
-          echo "exit code: $?"
+            > drift-report.json || code=$?
+          case "$code" in
+            0) echo "drift-audit exit code: 0 (ok/clean/findings — typed report)" ;;
+            1) echo "drift-audit exit code: 1 (invalid — typed report)" ;;
+            4) echo "drift-audit exit code: 4 (partial — typed report)" ;;
+            *)
+              echo "drift-audit exit code: $code (unexpected — not a typed report state)"
+              exit "$code"
+              ;;
+          esac
 
       - name: Upload report artifact
         if: always()
@@ -199,14 +215,38 @@ jobs:
       - name: Re-validate freshness before publishing
         if: hashFiles('drift-report.json') != ''
         run: |
-          set -uo pipefail   # no -e: validate-report's non-zero (stale/partial/invalid)
-                              # exit codes are typed outcomes to capture, not crashes to abort on
+          set -uo pipefail
+          # Two independent traps here, both #107: (1) the runner's shell is
+          # `bash -e`, and `set -uo pipefail` does not clear it, so a bare
+          # validate-report call would abort before its typed non-zero exits
+          # (1 invalid, 3 stale, 4 partial) ever reached the `mv` below —
+          # laundering a stale/partial verdict as the original report's
+          # unchanged (and possibly clean-looking) status. `code=0; cmd ||
+          # code=$?` survives -e and the payload is captured regardless.
+          # (2) a step's own exit status is its *last* command's, with or
+          # without -e — `[ -s revalidated.json ] && mv ...` as the last
+          # command would fail the whole step whenever revalidated.json is
+          # empty or absent (validate-report wrote nothing), even though
+          # that is itself a legitimate outcome. A full `if`/`fi` (not a
+          # `&&` short-circuit list) exits 0 when its condition is false.
           if grep -q '"status":[[:space:]]*"invalid"' drift-report.json; then
             echo "report is already invalid — nothing to re-validate freshness against"
           else
+            code=0
             python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
-              --report drift-report.json --repo . > revalidated.json
-            [ -s revalidated.json ] && mv revalidated.json drift-report.json
+              --report drift-report.json --repo . > revalidated.json || code=$?
+            case "$code" in
+              0|1|3|4)
+                echo "validate-report exit code: $code (typed report)"
+                ;;
+              *)
+                echo "validate-report exit code: $code (unexpected — not a typed report state)"
+                exit "$code"
+                ;;
+            esac
+            if [ -s revalidated.json ]; then
+              mv revalidated.json drift-report.json
+            fi
           fi
 
       - name: Render job summary
