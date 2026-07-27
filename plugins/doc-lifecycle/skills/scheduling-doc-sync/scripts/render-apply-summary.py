@@ -20,6 +20,7 @@ that is not its `clean` verdict.
 Usage:
     render-apply-summary.py verify-report --report FILE --expected-digest HEX
     render-apply-summary.py gate --stage NAME --payload FILE --exit-code N
+    render-apply-summary.py run-id --run-id STR --out FILE
     render-apply-summary.py record-args --records STR --out FILE
     render-apply-summary.py config-digest --report FILE --out FILE
     render-apply-summary.py approval-digest --approval FILE --out FILE
@@ -48,6 +49,7 @@ import sys
 import unicodedata
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+RUN_ID = re.compile(r"^[0-9]+$")
 DRIVE_LETTER = re.compile(r"^[A-Za-z]:")
 # The report states an approval set can be minted from, per the engine's
 # `approval-report-not-approvable`. `mint-approval` re-checks this and owns the
@@ -211,6 +213,28 @@ def gate(args):
             args.stage, "apply-stage-produced-nothing",
             f"{code_span(args.stage)} reported success but left no artifact "
             f"to carry forward — {reason}")
+    return 0
+
+
+def run_id(args):
+    """The dispatched report run id, shape-checked before it names a run.
+
+    The raw input reaches two consumers that read it differently: a
+    `gh api repos/.../actions/runs/<id>` path, where a `/`-bearing value walks
+    to another run's path, and `download-artifact`'s `run-id`, which `parseInt`s
+    it — so `1/../../repos/other/repo/actions/runs/999` is one run to the API
+    and the integer `1` to the download, and the lane could bind one run while
+    the artifact comes from another. A run is named by decimal digits and
+    nothing else; validated here, both consumers read the one value this wrote.
+    """
+    if not RUN_ID.fullmatch(args.run_id):
+        return refuse(
+            "dispatch", "apply-run-id-not-numeric",
+            f"{code_span(args.run_id)} is not a run id — a run is named by its "
+            f"decimal id, never by a path a command could walk to another run")
+    # Appended: the caller points this at $GITHUB_OUTPUT, which accumulates
+    # every output a step declares.
+    write_file(args.out, f"report_run_id={args.run_id}\n", mode="a")
     return 0
 
 
@@ -677,6 +701,11 @@ def _parser():
         "--accept-exit-code", action="append", type=int, default=None,
         help="a further engine exit code this stage proceeds from (repeatable)")
     gate_cmd.set_defaults(run=gate)
+
+    runid = sub.add_parser("run-id")
+    runid.add_argument("--run-id", required=True)
+    runid.add_argument("--out", required=True)
+    runid.set_defaults(run=run_id)
 
     records = sub.add_parser("record-args")
     records.add_argument("--records", required=True)

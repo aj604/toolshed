@@ -352,6 +352,57 @@ class RecordArgs(ScriptTestCase):
         self.assertIn("apply-duplicate-selection", self.summary())
 
 
+class RunId(ScriptTestCase):
+    """The dispatched report run id is shape-checked before it names a run."""
+
+    def test_a_numeric_run_id_is_emitted_as_a_step_output(self):
+        out = self.path("output.txt")
+        proc = self.run_script("run-id", "--run-id", "1234567890", "--out", out)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.read("output.txt"), "report_run_id=1234567890\n")
+
+    def test_the_output_file_is_appended_to_not_truncated(self):
+        # $GITHUB_OUTPUT accumulates every step output; truncating it would
+        # drop whatever an earlier step in the same context wrote.
+        out = self.write_text("output.txt", "earlier=value\n")
+        proc = self.run_script("run-id", "--run-id", "42", "--out", out)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.read("output.txt"),
+                         "earlier=value\nreport_run_id=42\n")
+
+    def test_a_path_walking_run_id_is_refused(self):
+        # One string to `gh api .../actions/runs/<id>`, the integer 1 to
+        # download-artifact's parseInt — the two must not name different runs.
+        out = self.path("output.txt")
+        proc = self.run_script(
+            "run-id", "--run-id",
+            "1/../../repos/attacker/repo/actions/runs/999", "--out", out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-run-id-not-numeric", self.summary())
+        self.assertFalse(os.path.exists(out))
+
+    def test_a_non_numeric_run_id_is_refused(self):
+        proc = self.run_script("run-id", "--run-id", "abc",
+                               "--out", self.path("output.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-run-id-not-numeric", self.summary())
+
+    def test_a_run_id_with_surrounding_whitespace_is_refused(self):
+        proc = self.run_script("run-id", "--run-id", " 42 ",
+                               "--out", self.path("output.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-run-id-not-numeric", self.summary())
+
+    def test_a_trailing_newline_run_id_is_refused(self):
+        # `^[0-9]+$` with re.match accepts a trailing newline ($ before \n);
+        # a value like "42\n" must still refuse, or it lands two lines in
+        # $GITHUB_OUTPUT and slips a newline past the shape check.
+        proc = self.run_script("run-id", "--run-id", "42\n",
+                               "--out", self.path("output.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-run-id-not-numeric", self.summary())
+
+
 class ConfigDigest(ScriptTestCase):
     """Configuration drift is only compared when the lane supplies the digest."""
 

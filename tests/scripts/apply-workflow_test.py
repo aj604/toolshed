@@ -124,17 +124,95 @@ def _logical_commands(block):
 
 
 def download_paths(body):
-    """The `path:` each `download-artifact` step in `body` extracts into."""
-    paths = []
+    """The normalized `path:` each `download-artifact` step extracts into.
+
+    A thin projection of `download_specs` so the download-step scan has one
+    owner; the RUNNER_TEMP normalization also makes two spellings of the same
+    directory compare equal in the two-artifacts-one-directory guard."""
+    return [path for _, path in download_specs(body) if path]
+
+
+def norm_temp(text):
+    """`${{ runner.temp }}` and `${RUNNER_TEMP}` collapsed to one token.
+
+    A path the same directory is spelled two ways — `${{ runner.temp }}` in an
+    action `with:` value, `${RUNNER_TEMP}` in a shell command — must compare
+    equal, so the artifact layout can be checked across both."""
+    text = re.sub(r"\$\{\{\s*runner\.temp\s*\}\}", "/T", text)
+    return text.replace("${RUNNER_TEMP}", "/T").replace("$RUNNER_TEMP", "/T")
+
+
+def upload_specs(body):
+    """Each `upload-artifact` step in `body` as `(name, [path entries])`.
+
+    A `path: |` block lists one normalized entry per following, more-indented
+    line; a single-line `path: X` is a one-entry list."""
+    specs = []
+    for i, line in enumerate(body):
+        if "actions/upload-artifact@" not in line:
+            continue
+        name, entries = None, []
+        j = i + 1
+        while j < len(body):
+            stripped = body[j].strip()
+            if j != i + 1 and (stripped.startswith("- name:")
+                               or stripped.startswith("- uses:")):
+                break
+            nm = re.match(r"name:\s*(\S.+?)\s*$", stripped)
+            if nm and name is None:
+                name = nm.group(1)
+            pm = re.match(r"path:\s*(\|)?\s*(.*)$", stripped)
+            if pm:
+                if pm.group(1):
+                    base = WPT.indent_of(body[j])
+                    k = j + 1
+                    while k < len(body):
+                        if not body[k].strip():
+                            k += 1
+                            continue
+                        if WPT.indent_of(body[k]) <= base:
+                            break
+                        entries.append(norm_temp(body[k].strip()))
+                        k += 1
+                elif pm.group(2).strip():
+                    entries.append(norm_temp(pm.group(2).strip()))
+            j += 1
+        specs.append((name, entries))
+    return specs
+
+
+def download_specs(body):
+    """Each `download-artifact` step as `(name, normalized extract path)`."""
+    specs = []
     for i, line in enumerate(body):
         if "actions/download-artifact@" not in line:
             continue
+        name, path = None, None
         for follow in body[i + 1:i + 12]:
-            match = re.search(r"^\s*path:\s*(\S.*?)\s*$", follow)
-            if match:
-                paths.append(match.group(1))
+            stripped = follow.strip()
+            if stripped.startswith("- name:") or stripped.startswith("- uses:"):
                 break
-    return paths
+            nm = re.match(r"name:\s*(\S.+?)\s*$", stripped)
+            if nm and name is None:
+                name = nm.group(1)
+            pm = re.match(r"path:\s*(\S.+?)\s*$", stripped)
+            if pm and path is None:
+                path = norm_temp(pm.group(1))
+        specs.append((name, path))
+    return specs
+
+
+def uploaded_internal_paths(entries):
+    """The path each uploaded entry lands at *inside* the artifact.
+
+    `upload-artifact` roots a multi-path artifact at the least-common-ancestor
+    of its search paths and preserves each file's path relative to it; a single
+    path is stored at its basename. This is the exact `getMultiPathLCA`
+    behaviour a consumer must extract back out of."""
+    if len(entries) == 1:
+        return {os.path.basename(entries[0])}
+    lca = os.path.commonpath(entries)
+    return {os.path.relpath(e, lca) for e in entries}
 
 
 class FileExists(unittest.TestCase):
@@ -229,6 +307,24 @@ class DispatchInputsNeverReachAShell(unittest.TestCase):
         # The validated file is what supplies argv, never the raw input.
         self.assertIn("record-args.txt", body)
 
+    def test_the_report_run_id_is_shape_validated_before_it_names_a_run(self):
+        # `report_run_id` reaches both a `gh api .../actions/runs/<id>` path and
+        # `download-artifact`'s `run-id` (parseInt); a raw value could make the
+        # two name different runs. It must be validated to decimal digits first,
+        # and both consumers must read the validated step output — the raw
+        # dispatch input may reach only the validation step's own env.
+        body = jobs()["revalidate"]
+        text = "\n".join(body)
+        self.assertIn("render-apply-summary.py run-id", text,
+                      "report_run_id is never shape-validated before use")
+        self.assertIn("steps.runid.outputs.report_run_id", text,
+                      "the validated run id is never consumed")
+        raw = [l for l in body if "inputs.report_run_id" in l]
+        self.assertEqual(
+            len(raw), 1,
+            "the raw report_run_id dispatch input is read outside the single "
+            f"validation step that shape-checks it: {raw}")
+
 
 class StagingIsLimitedToTheApplyResult(unittest.TestCase):
     def test_staging_reads_the_path_list_the_renderer_wrote(self):
@@ -282,6 +378,62 @@ class StagingIsLimitedToTheApplyResult(unittest.TestCase):
                 f"job '{name}' downloads two artifacts into the same path "
                 f"{paths}; a model-authored artifact extracted over a trusted "
                 f"one is an overwrite — give each its own directory")
+
+    def test_a_multi_path_upload_lists_only_siblings(self):
+        # upload-artifact roots a multi-path artifact at the least-common
+        # ancestor of its search paths, so an entry one directory deeper than
+        # its siblings is stored under that subdirectory rather than flat. A
+        # consumer that names `<download>/<basename>` then reads the wrong path
+        # and the file is silently absent. Every entry of one upload list must
+        # therefore share a single parent directory: one directory, one flat
+        # artifact.
+        offenders = []
+        for name, body in jobs().items():
+            for artifact, entries in upload_specs(body):
+                if len(entries) < 2:
+                    continue
+                parents = {os.path.dirname(e) for e in entries}
+                if len(parents) != 1:
+                    offenders.append(
+                        f"job '{name}' artifact '{artifact}': entries span "
+                        f"parents {sorted(parents)} — {entries}")
+        self.assertEqual(
+            offenders, [],
+            "a multi-path upload-artifact list mixes directories, so its "
+            "artifact is not flat and a consumer reading <download>/<basename> "
+            "reads the wrong path:\n  " + "\n  ".join(offenders))
+
+    def test_every_bundle_read_resolves_to_an_uploaded_entry(self):
+        # The complement of the sibling rule: model the exact extract path of
+        # every uploaded entry (LCA-rooted, as upload-artifact stores it) and
+        # require every path a downstream job reads out of a downloaded bundle
+        # to equal one of them. This catches the read side directly — a
+        # consumer naming `<download>/drift-report.json` for a report the
+        # artifact actually stored at `dispatch/drift-report.json`.
+        uploads = {}
+        for _, body in jobs().items():
+            for artifact, entries in upload_specs(body):
+                if entries:
+                    uploads[artifact] = uploaded_internal_paths(entries)
+        offenders = []
+        for name, body in jobs().items():
+            text = norm_temp("\n".join(body))
+            for artifact, dp in download_specs(body):
+                if artifact not in uploads or not dp:
+                    continue
+                valid = {f"{dp}/{internal}" for internal in uploads[artifact]}
+                for match in re.finditer(
+                        re.escape(dp) + r"/([A-Za-z0-9._/-]+)", text):
+                    ref = (dp + "/" + match.group(1)).rstrip("./,")
+                    if ref not in valid:
+                        offenders.append(
+                            f"job '{name}' reads {ref}, which artifact "
+                            f"'{artifact}' does not store — it holds "
+                            f"{sorted(valid)}")
+        self.assertEqual(
+            sorted(set(offenders)), [],
+            "a downstream job reads a bundle path the artifact never stored "
+            "there:\n  " + "\n  ".join(sorted(set(offenders))))
 
 
 class ProvenanceTravelsWithTheChange(unittest.TestCase):
@@ -364,11 +516,23 @@ class RefusalsReachTheRunSurface(unittest.TestCase):
 
     def test_the_report_run_is_bound_to_its_audit_lane(self):
         # `report_run_id` must name a run of *this repo's* doc-audit lane, not
-        # any run that happens to publish an `audit-report` artifact.
-        body = "\n".join(jobs()["revalidate"])
-        self.assertIn("doc-audit.yml", body,
-                      "the revalidate job never binds report_run_id to the "
-                      "doc-audit workflow it must come from")
+        # any run that happens to publish an `audit-report` artifact. Assert
+        # the executable form, not a comment that merely mentions the file:
+        # deleting the whole binding step while leaving its surrounding comments
+        # must fail this guard. `_logical_commands` strips comment lines, so the
+        # query and the comparison below have to survive as real commands.
+        commands = [text for block in run_blocks(jobs()["revalidate"])
+                    for _, text in _logical_commands(block)]
+        self.assertTrue(
+            any("gh api" in c and "actions/runs/" in c and ".path" in c
+                for c in commands),
+            "the revalidate job never queries the dispatched run's workflow "
+            "path (`gh api .../actions/runs/... --jq '.path'`) on a real "
+            "command line")
+        self.assertTrue(
+            any(".github/workflows/doc-audit.yml" in c for c in commands),
+            "the queried workflow path is never compared against "
+            "`.github/workflows/doc-audit.yml` on a non-comment line")
 
     def test_the_report_artifact_is_bound_to_the_dispatched_digest(self):
         self.assertIn("verify-report", "\n".join(jobs()["revalidate"]))
