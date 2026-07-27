@@ -85,6 +85,19 @@ legacy `sync-gate.py`/`render-report.py`/`validate-drift-output.py` trio, and ev
 action it invokes is pinned to an immutable commit SHA (a stricter bar than the legacy
 templates currently meet — see `tests/scripts/audit-workflow_test.py`).
 
+**Tier-2 tool evidence is declared, not granted.** A drift verdict may cite `evidence.command`
+— a local tool it ran — instead of a repository path, but only for a tool the run declared
+(`plugins/doc-lifecycle/engine/README.md`, "Lineage"). The declaration lives in
+`.github/doc-sync/evidence-tools.json` (`{"tools": []}` when seeded — tool-free until a consumer
+adds to it), and `scripts/probe-evidence-tool.py` is both halves of the wiring: `declared
+--flags` renders `drift-audit --evidence-command …`, and `run <tool> <words> --help` is how the
+model reaches the tool, refusing any undeclared program and any invocation that is not a
+`--help`/`--version` read. It runs under the model step's existing `Bash(python3 *)` allowance,
+so the tool grant stays `Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)` — widening it
+instead was rejected in aj604/toolshed#118, because those patterns are prefix-matched and
+naming `gh` would grant `gh api` in a job deliberately given no credential
+(`tests/scripts/workflow-permissions_test.py` refuses any other executable).
+
 **Installed only into a repo that has been through the migration door.** This template requires
 a landed `.doc-lifecycle/registry.json` (the new document model's classification manifest),
 which no consumer has until it runs the migration door (aj604/toolshed#74 — "Migration to the
@@ -264,7 +277,8 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | `.github/doc-sync/audit-scope.json` | consumer (tuned config) | **Never touch.** |
 | `.github/doc-sync/drift-waivers.json` | consumer (accepted-claim record) | **Never touch.** Seed `{"waivers": []}` only if absent (pre-0.11 installs lack it). |
 | `doc-audit.yml`, `doc-apply.yml` | plugin (wiring) | **Regenerate**, knobs preserved — but only for an install holding `.doc-lifecycle/registry.json`. An install without one is left exactly as it was. |
-| `.github/doc-sync/render-audit-summary.py`, `render-apply-summary.py` | plugin (wiring) | **Overwrite**, on the same registry condition. |
+| `.github/doc-sync/render-audit-summary.py`, `render-apply-summary.py`, `probe-evidence-tool.py` | plugin (wiring) | **Overwrite**, on the same registry condition. |
+| `.github/doc-sync/evidence-tools.json` | consumer (declared tools) | **Never touch.** Seed `{"tools": []}` only if absent, on the same registry condition — tool-free is what a consumer opts out of, never what an upgrade hands them. |
 | `.github/doc-sync/engine/` | plugin (wiring) | **Replace wholesale**, on the same registry condition — the destination is emptied first, so a module deleted upstream stops being importable. Never edited in place. |
 | `.doc-lifecycle/registry.json` | consumer (classification) | **Never touch.** Migration mode produces it; this mode only reads whether it exists. |
 

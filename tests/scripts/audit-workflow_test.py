@@ -175,6 +175,57 @@ class ConcurrencyAndFailureSurface(unittest.TestCase):
                 f"has")
 
 
+class DeclaredEvidenceTools(unittest.TestCase):
+    """How this lane reaches Tier-2 tool evidence (aj604/toolshed#118).
+
+    A drift verdict may cite `evidence.command`, but only for a tool the
+    report's `evidence_boundary.commands` declares. This lane declares those
+    tools from a consumer-owned config through a tested script, under the
+    model job's *existing* `Bash(python3 *)` allowance — the grant itself does
+    not widen, which is the decision these guards hold in place.
+    """
+
+    EXPECTED_GRANT = ('--allowedTools '
+                      '"Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"')
+
+    def test_the_model_grant_did_not_widen_for_tool_evidence(self):
+        # `workflow-permissions_test.py` already refuses any Bash executable
+        # beyond git and python3 generically; this pins the audit lane's grant
+        # exactly, so even a same-executable widening is a visible diff here.
+        grants = [line.strip() for line in lines() if "--allowedTools" in line
+                  and not line.strip().startswith("#")]
+        self.assertEqual(
+            [g for g in grants if g.endswith(self.EXPECTED_GRANT)], grants,
+            f"doc-audit.yml's model grant changed — expected it to end "
+            f"{self.EXPECTED_GRANT!r}, got {grants}")
+
+    def test_the_boundary_is_rendered_by_the_script_not_hand_written(self):
+        text = "\n".join(jobs()["audit"])
+        self.assertIn("probe-evidence-tool.py declared --flags", text,
+                      "the audit step must render --evidence-command from the "
+                      "declared-tools config, so the boundary the report "
+                      "publishes and the tools the probe will run are one list")
+        hand_written = [line.strip() for line in lines()
+                        if "--evidence-command" in line
+                        and "probe-evidence-tool.py" not in line
+                        and not line.strip().startswith("#")]
+        self.assertEqual(
+            hand_written, [],
+            f"a tool name is hard-coded into the workflow YAML ({hand_written}) "
+            f"— declare it in evidence-tools.json instead")
+
+    def test_the_prompt_routes_command_citations_through_the_probe(self):
+        prompt = "\n".join(jobs()["audit"])
+        self.assertIn("probe-evidence-tool.py declared", prompt,
+                      "the model has no other way to learn which tools this "
+                      "run declared")
+        self.assertIn("probe-evidence-tool.py run", prompt,
+                      "the model has no other way to reach a declared tool")
+        self.assertNotIn("This lane declares no tools", prompt,
+                         "that sentence is now false whenever a consumer "
+                         "declares one — the prompt must not assert it")
+
+
 class RenderScriptWired(unittest.TestCase):
     def test_publish_job_renders_through_the_tested_script(self):
         body = jobs()["publish"]

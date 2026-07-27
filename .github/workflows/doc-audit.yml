@@ -18,6 +18,13 @@
 # state table). Cost/turn/duration figures ride along as observability only: they never narrow
 # the declared scope `drift-plan` already committed to before the model ran a single turn.
 #
+# The model's tool grant is `Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)` and
+# aj604/toolshed#118 kept it that way. A verdict may still cite a *declared* local tool
+# (evidence.command, #115): probe-evidence-tool.py reads which programs this install declared
+# and will run each one only as a `--help`/`--version` read, under the python3 allowance
+# already granted. Widening the grant instead was rejected — those patterns are prefix-matched,
+# so naming `gh` grants `gh api` too, in a job deliberately given no credential.
+#
 # Design: the distilled-decisions comment on aj604/toolshed#57 (2026-07-26); this workflow's
 # ticket is aj604/toolshed#71.
 name: doc-audit
@@ -112,11 +119,15 @@ jobs:
             "command"|"path"|"symbol"|"behavior"|"structure"|"value", "tier": 1|2|3,
             "evidence": {"source": <repo path>, "line": <int>, "observed": <what you read>},
             "fix": <complete replacement line, STALE only>}]}]}.
-            VERIFIED and STALE each need a citation — "source", or "command" (the single
-            command line you ran) where the evidence boundary declares that tool. This lane
-            declares no tools, so cite a repository path: a claim only an external program
-            could settle is genuinely UNVERIFIABLE here, and the report's evidence boundary
-            says why.
+            VERIFIED and STALE each need a citation — "source" (a repository path), or
+            "command" (the single command line you ran) for a tool this run declares. Run
+            `python3 .github/doc-sync/probe-evidence-tool.py declared` for the declared tools;
+            each may be read with `python3 .github/doc-sync/probe-evidence-tool.py run <tool>
+            <subcommand words> --help` (or `--version`), and the line it prints after
+            "citation:" is what you put in evidence.command — the tool's own command line, not
+            that wrapper. Nothing else is reachable: the probe refuses an undeclared tool and
+            any invocation that is not a --help/--version read. A claim no declared tool can
+            settle is genuinely UNVERIFIABLE here, and the report's evidence boundary says why.
             For every document drift-plan.json lists under "documents" with obligation
             "assertions": run `python3 .github/doc-sync/engine/doc-lifecycle.py segment --repo .
             --path <path>` to get its assertion units, and answer for each by its "ordinal" field
@@ -141,6 +152,11 @@ jobs:
       # answered nothing) still yields a validated report: partial about the living documents,
       # examined about the narrative ones. Captured regardless of exit code — 1 (invalid), 4
       # (partial), and 0 (clean/findings) are each a legitimate typed report, never a crash.
+      #
+      # `--evidence-command` comes from probe-evidence-tool.py's own config read, never a tool
+      # name typed into this YAML: the boundary the report publishes and the tools the probe
+      # will run for the model are then one list that cannot drift apart. An install that
+      # declared nothing renders no flag at all, which is the tool-free lane (aj604/toolshed#118).
       - name: Run the drift audit (engine's public CLI)
         if: always()
         run: |
@@ -155,6 +171,7 @@ jobs:
           code=0
           python3 .github/doc-sync/engine/doc-lifecycle.py drift-audit --repo . --mode full \
             $( [ -f verdicts.json ] && echo "--verdicts verdicts.json" ) \
+            $(python3 .github/doc-sync/probe-evidence-tool.py declared --flags) \
             > drift-report.json || code=$?
           case "$code" in
             0) echo "drift-audit exit code: 0 (ok/clean/findings — typed report)" ;;
