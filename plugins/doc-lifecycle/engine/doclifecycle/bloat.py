@@ -15,7 +15,11 @@ The division of labor is the same one `finding.record_classifications()` draws.
 The model supplies judgment — is this worth keeping, and what should replace it
 — and nothing else. The engine supplies every fact: which documents exist, where
 a unit occurs, which document owns it, who else is merging into a destination,
-and exactly which files a bulk scope covers. `record_verdicts()` is where the
+and exactly which files a bulk scope covers. All of it comes from the index —
+including the two facts about a path holding no document at all, which the index
+answers from the registry and repository it was built from
+(`context.ContextIndex.registry` / `.repo_root`), because a distillation's
+residue destination is a document nobody has written yet. `record_verdicts()` is where the
 two meet, and it fails closed: a destination the index contradicts, a unit that
 is not in the document it is claimed against, or a bulk judgment backed by a
 sample rather than an enumeration is refused, exhaustively, recording nothing.
@@ -36,6 +40,7 @@ index, and for duplicated content it is *derived* from the index — so two chun
 that never see each other reach the same answer.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
@@ -45,6 +50,7 @@ from .context import KIND_PRECEDENCE, build_context_index
 from .digest import sha256_canonical
 from .finding import Finding, build_finding
 from .inventory import DEFAULT_REGISTRY_PATH
+from .paths import DOCUMENTATION, authorize_path
 from .registry import compile_glob
 from .report import state_from_content
 from .results import STATUS_OK, Invalid, Problem
@@ -63,6 +69,12 @@ VERDICTS = (CUT, CONDENSE, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC, DISTILL)
 # Verdicts that move content somewhere, and so must name where. These are
 # exactly the ones a worker cannot decide from its slice.
 DESTINATION_VERDICTS = (EXTRACT_AND_MOVE, MERGE_DOC)
+# Verdicts whose destination is a document that does not exist yet: a
+# distillation authors the durable residue of a planning artifact, so its
+# destination is *optional* (the residue may already have a home) and is checked
+# as an unwritten path rather than looked up in the inventory, which by
+# definition does not hold it.
+RESIDUE_VERDICTS = (DISTILL,)
 # Verdicts that replace text, and so must carry the replacement.
 PROPOSAL_VERDICTS = (CONDENSE, EXTRACT_AND_MOVE)
 # Verdicts eligible for bulk expansion over a deterministic scope. Retirement
@@ -76,6 +88,31 @@ DISTILL_STATUSES = ("pending-implementation", "ready")
 # documents are temporary and end in distillation or retirement, so nothing is
 # ever moved *into* one — the move would be undone by the target's own lifecycle.
 DESTINATION_KINDS = ("living", "narrative")
+
+
+def residue_destination_ineligibility(registry, destination):
+    """Why the registry refuses `destination` as distilled residue, or None.
+
+    The single reading — closed-world classification, then kind-eligibility —
+    that the audit plans a DISTILL destination against
+    (`_residue_destination_record`) and the applier re-answers at
+    create-document time, so the two seams cannot diverge on what the registry
+    says a residue path is. Confinement (`paths.authorize_path`) and occupancy
+    (a path already there) are separate owners, re-answered separately.
+
+    Returns `(reason, rule)`: `reason` is `"unclassified"` (no rule claims the
+    path as documentation, or a rule excludes it — `rule` is then None or the
+    excluded rule and not to be trusted), `"kind-ineligible"` (classified, but
+    of a kind residue is never authored into — `rule` is that rule), or None
+    (eligible — `rule` is the classifying rule the caller records).
+    """
+    rule = registry.classify(destination)
+    if (rule is None or not registry.is_document(destination)
+            or registry.excludes(destination)):
+        return "unclassified", rule
+    if rule.kind not in DESTINATION_KINDS:
+        return "kind-ineligible", rule
+    return None, rule
 
 VERDICT_FIELDS = (
     "id", "verdict", "path", "units", "evidence",
@@ -601,11 +638,25 @@ class _Recorder:
         """
         proposed = raw.get("destination")
 
+        if verdict in RESIDUE_VERDICTS:
+            if proposed is None:
+                # Retire-only distillation: nothing is authored, so nothing is
+                # named. Legal, and lossy only if residue was never landed
+                # under its own record — a judgment for the person approving.
+                return None
+            if not _nonempty(proposed):
+                self.bad("bloat-invalid-shape",
+                         f"{verdict}'s destination must be the path of the "
+                         f"residue document, or absent", where)
+                return None
+            return self._residue_destination_record(proposed, path, where)
+
         if verdict not in DESTINATION_VERDICTS:
             if proposed is not None:
                 self.bad("bloat-destination-forbidden",
                          f"{verdict} moves nothing, so it names no destination — "
-                         f"only {list(DESTINATION_VERDICTS)} do", where)
+                         f"only {list(DESTINATION_VERDICTS + RESIDUE_VERDICTS)} "
+                         f"do", where)
             return None
 
         owners = {
@@ -642,6 +693,109 @@ class _Recorder:
                      where)
             return None
         return self._destination_record(proposed, "model-proposed", path, where)
+
+    def _residue_destination_record(self, destination, source, where):
+        """Check a destination that must name a document nobody has written yet.
+
+        A residue destination is create-only, and that is a *bound on authority*,
+        not a limitation. `RECORD_REMEDIES[DISTILL]` includes the span edits — an
+        approved distillation legitimately rewrites the artifact it retires — and
+        the applier bounds a positioned edit to the hull of the record's approved
+        units only on the record's *own* document. A record's units segment that
+        document alone, so a destination that already existed would take
+        `replace`/`insert`/`delete` at any line of it, with no passage anyone
+        reviewed: naming a decision log as the destination would authorize
+        deleting an unrelated sentence from it. An unwritten path cannot: its
+        whole content is the `create-document` text the approval covers, and the
+        applier refuses a creation over a document that is there
+        (`apply-create-exists`).
+
+        So the inventory not vouching for this path is the requirement, not an
+        obstacle to work around — and residue belonging in a document that does
+        exist stays what it was before this route existed: unplaceable under this
+        record, needing its own record and its own approval.
+
+        Confinement is not re-derived here: `paths.authorize_path` is the single
+        owner of path safety, and it already reasons about unwritten
+        create-document targets (canonical spelling, containment in a declared
+        root, no symlinked component, no case-folded collision, documentation
+        class). The approval set authorizes the same path through the same
+        function before an applier ever sees it; this is the audit-time half, so
+        a record that could never be applied is never minted in the first place.
+
+        The rest are the registry's and the repository's: the registry
+        classifies the path — closed-world, so a path no rule claims is refused
+        rather than assumed living — the kind it assigns must be one content
+        durably lives in, and the path must be free both in the index and *on
+        disk*, since a file the inventory does not claim is still a file a
+        creation would land on and the index may predate it.
+        """
+        repo_root, registry = self.index.repo_root, self.index.registry
+        if repo_root is None or registry is None:
+            self.bad("bloat-destination-uncheckable",
+                     f"this index is missing the repository it was built from "
+                     f"or its registry, so whether {destination!r} could hold a "
+                     f"new document is unanswerable — and an unanswered safety "
+                     f"question is a refusal", where)
+            return None
+
+        if destination == source:
+            self.bad("bloat-destination-is-source",
+                     f"{destination} is the planning artifact being distilled — "
+                     f"its residue cannot be the document the same record "
+                     f"retires", where)
+            return None
+
+        authorization = authorize_path(
+            destination, repo_root=repo_root, roots=registry.roots,
+            target_class=DOCUMENTATION,
+        )
+        if not authorization.authorized:
+            self.bad("bloat-destination-unauthorized",
+                     f"{destination!r} cannot be a residue document: "
+                     f"{authorization.problem.message}", where)
+            return None
+
+        reason, rule = residue_destination_ineligibility(registry, destination)
+        if reason == "unclassified":
+            self.bad("bloat-destination-unclassified",
+                     f"no registry rule claims {destination!r} as documentation "
+                     f"— classification is closed-world, so a residue document "
+                     f"at an unclassified path would be born outside the corpus "
+                     f"every later audit reads", where)
+            return None
+        if reason == "kind-ineligible":
+            self.bad("bloat-destination-kind-ineligible",
+                     f"the registry classifies {destination} as a {rule.kind} "
+                     f"document — residue is never authored into one, because "
+                     f"its own lifecycle ends in distillation or retirement and "
+                     f"would take the residue with it", where)
+            return None
+
+        if (self.index.document(destination) is not None
+                or os.path.lexists(os.path.join(repo_root, destination))):
+            self.bad("bloat-destination-occupied",
+                     f"{destination} already exists — a residue destination is "
+                     f"a document this distillation *authors*, so an occupied "
+                     f"path would either be overwritten or take span edits "
+                     f"nobody reviewed a passage of; land the residue there "
+                     f"under its own record instead", where)
+            return None
+
+        return {
+            "path": destination,
+            "kind": rule.kind,
+            "set": rule.doc_set,
+            "selected_by": "model-proposed-residue",
+            "constraints": {
+                "is_inventoried_document": False,
+                "is_authorized_new_document": True,
+                "differs_from_source": True,
+                "kind_accepts_content": True,
+                "eligible_kinds": list(DESTINATION_KINDS),
+                "registry_rule": rule.glob,
+            },
+        }
 
     def _destination_record(self, destination, selected_by, source, where):
         """Check a destination against every constraint, and record which held."""

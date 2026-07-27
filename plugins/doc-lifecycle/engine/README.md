@@ -795,12 +795,22 @@ index.occurrences_of(unit_digest)           # every place that content appears
 index.duplicated_units()                    # units occurring more than once
 index.owner_of(unit_digest)                 # the document it belongs in
 index.context_digest(path)                  # the corpus, as it bears on one document
+index.repo_root, index.registry             # what it was built from; how an unwritten path classifies
 ```
+
+`repo_root` and `registry` are not part of the index's identity (the digest already covers
+everything they produced). They are there for the one question the indexed documents cannot
+answer: whether a path holding *no* document could hold one — which is what a distillation's
+residue destination is. Either being `None` (an index assembled without it) must read as
+"unanswerable", never as "no objection". The registry is the one the inventory classified by,
+carried on `inventory.Inventory.registry` rather than parsed a second time.
 
 ## Bloat audit
 
 `doclifecycle/bloat.py` is the value lane. The model supplies judgment — is this worth keeping,
-and what should replace it — and nothing else; every fact comes from the index.
+and what should replace it — and nothing else; every fact comes from the index, including
+whether a path holding no document could hold one, which the index answers from the registry
+and repository it was built from.
 
 | Verdict | Means | Names a destination |
 |---|---|---|
@@ -809,7 +819,7 @@ and what should replace it — and nothing else; every fact comes from the index
 | `EXTRACT-AND-MOVE` | right content, wrong document | yes |
 | `MERGE-DOC` | near-duplicate; fold into the survivor | yes |
 | `RETIRE-DOC` | carries nothing another document lacks | no |
-| `DISTILL` | planning artifact; `ready` or `pending-implementation` | no |
+| `DISTILL` | planning artifact; `ready` or `pending-implementation` | optional — the residue document it authors |
 
 The legacy skill's `POLICY` verdict is deliberately absent. A bulk judgment no longer rides on
 a hand-declared directory whose file list the model echoes back: it declares an enumerable
@@ -860,6 +870,51 @@ nowhere else the model names one and the index checks it: it must be an inventor
 (`bloat-destination-is-source`), and of a kind that accepts content
 (`bloat-destination-kind-ineligible` — `bloat.DESTINATION_KINDS` is living and narrative). The
 checks that held travel on the record, under `destination.constraints`.
+
+`DISTILL` (`bloat.RESIDUE_VERDICTS`) names the document its residue is authored into. Two things
+make it unlike every other destination. It is **optional** — a distillation whose residue already
+has a home retires the artifact alone, which is lossy only if the residue was never landed, a
+judgment for the person approving. And it must name a document that **does not exist yet**:
+inventory membership is checked and refused rather than required, which is the opposite of every
+other destination.
+
+Create-only is a bound on authority, not a limitation. `DISTILL`'s remedy set includes the span
+edits (an approved distillation legitimately rewrites the artifact it retires), and a positioned
+edit is bounded by the passage the record's approved units are — units that segment the record's
+*own* document. A destination that already existed would therefore take `replace`/`insert`/
+`delete` at any line of it: naming a decision log as the residue destination would authorize
+deleting an unrelated sentence from it. An unwritten path cannot, because its whole content is
+the `create-document` text the approval covers. Residue belonging in a document that does exist
+is unplaceable under this record and needs its own. The checks, recorded on the record as
+`selected_by: model-proposed-residue` with `is_inventoried_document: false` and
+`is_authorized_new_document: true`:
+
+| Refusal | Why |
+|---|---|
+| `bloat-destination-is-source` | the residue cannot be the artifact the same record retires |
+| `bloat-destination-unauthorized` | `paths.authorize_path` refused it — canonical spelling, containment in a declared root, no symlinked component, no case-folded collision, documentation class. The same owner the approval set's scope is authorized by, so a record that could never be applied is never minted |
+| `bloat-destination-occupied` | a document is already there — in the index, or on disk since it was built (the index may predate the file) |
+| `bloat-destination-unclassified` / `bloat-destination-kind-ineligible` | no registry rule claims the path (classification is closed-world), or the kind it assigns is not one content durably lives in |
+
+`bloat-destination-uncheckable` is the fail-closed case: an index missing the repository it was
+built from or its registry cannot answer any of them, and an unanswered safety question is a
+refusal. `build_context_index` always carries both, and the registry it carries is the one the
+inventory classified by (`inventory.Inventory.registry`) — not a second parse of the same file,
+which could answer differently.
+
+The applier accepts a `create-document` whose path is exactly that destination and nothing else
+(`plan-target-not-record-target`) — a record with no destination authorizes no creation at all —
+and refuses a creation over a document that is there (`apply-create-exists`), so a path occupied
+between audit and apply fails closed rather than overwriting. It also re-classifies the
+destination against the registry at create time, refusing one no rule claims
+(`apply-destination-unclassified`) or of a kind residue is never authored into
+(`apply-destination-kind-ineligible`) — the same reading the audit uses
+(`bloat.residue_destination_ineligibility`, the single owner both share), because the record digest
+does not cover the destination and a tampered or stale report could otherwise repoint an approved
+create at a planning or unclassified path. Confinement is re-answered too, through the approval
+scope (`paths.authorize_path`). So all four audit-time destination refusals hold at apply as well —
+a destination the audit rejects is not creatable by any downstream stage — and an unreadable
+registry is `apply-destination-unclassifiable`, the fail-closed case.
 
 `chunk`, when supplied, binds the record's *own* document to the slice
 (`bloat-document-outside-chunk`). Destinations are deliberately not bound that way: a
@@ -1698,8 +1753,11 @@ The order of refusals is the contract:
    or it is `plan-span-outside-approved-units`. The hull is measured against HEAD, and checked
    *before* the idempotency step below: measured against the working tree it would be
    unavailable on exactly the re-run an attacker arranges, by pre-placing the result of an
-   out-of-passage edit on disk. On a move's destination, or the residue document a
-   distillation authors, the record's units locate nothing, so there is no hull.
+   out-of-passage edit on disk. A record's units locate nothing in the document it names as a
+   destination, so there is no hull to measure there — which is why a positioned operation may
+   name only the record's own document (`plan-target-not-record-target`). A destination is
+   written by the whole-document operations and by a move's append, both of which the approval
+   covers entire.
 4. **Idempotency.** `postimages` maps every written path to the sha256 of its bytes after the
    plan (`null` for a retired document). The no-op verdict is *derived*, never declared: this
    plan is applied to each written path **as HEAD has it** (`repository.head_bytes()`), and the

@@ -75,11 +75,14 @@ belongs to the record, not to you**:
 | `DISTILL` | `create-document`, `replace`, `insert`, `delete`, `retire-document` |
 
 Picking an operation the code does not list is `plan-operation-not-record-remedy` and
-the run refuses. A positioned operation on the record's own document must also lie
-within the hull of that record's approved assertion units — first line through last —
-or it is `plan-span-outside-approved-units`. Widen nothing: an adjacent passage the
-approval did not cover is a separate record's business even when the two sit one
-paragraph apart.
+the run refuses. A positioned operation — `replace`, `insert`, `delete` — may name only
+the record's own document, and must lie within the hull of that record's approved
+assertion units — first line through last — or it is
+`plan-span-outside-approved-units` / `plan-target-not-record-target`. The record's units
+locate nothing in its `destination`, so there is no passage to bound an edit there:
+a destination is written whole, by `create-document`, or by a move's append. Widen
+nothing: an adjacent passage the approval did not cover is a separate record's business
+even when the two sit one paragraph apart.
 
 **The text inside the operation is the report's, not yours.** A `STALE` record's `fix`
 and a `CONDENSE` record's `proposal` are complete replacement text drafted to the
@@ -208,10 +211,11 @@ distiller owns the method — the landing re-verify, the per-section insight wal
 code-verified claims, one decision-log entry.
 
 **What comes back is edit-plan operations, not a changed working tree**: the residue as
-`create-document` text (a durable document that does not exist yet, carrying its
-`> As of` first line) or `insert`/`replace` into the record's `destination`, and the
-planning artifact as `retire-document`. You fold those operations into the plan the
-applier executes. The distiller writes no files, `git rm`s nothing, stages nothing.
+one `create-document` at the record's `destination` (a durable document that does not
+exist yet — the audit refuses a destination that does — carrying its `> As of` first
+line), and the planning artifact as `retire-document`. You fold those operations into the
+plan the applier executes. The distiller writes no files, `git rm`s nothing, stages
+nothing.
 
 One record authorizes exactly two paths — its own document and its `destination` — so
 residue belonging in a third document (a decision-log entry when the destination is not

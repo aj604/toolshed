@@ -37,12 +37,13 @@ a destination a reviewer cannot re-derive is a destination nobody can check.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .digest import sha256_canonical
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
+from .registry import Registry
 from .results import STATUS_OK, Invalid
 from .segment import segment_text
 
@@ -158,6 +159,15 @@ class ContextIndex:
     # `documents` so ownership questions are not linear scans.
     _occurrences: Dict[str, Tuple[Occurrence, ...]]
     _by_path: Dict[str, IndexedDocument]
+    # What the index was built from. Not identity — the digest already covers
+    # everything they produced — but a question about a path holding *no*
+    # document (a distillation's residue) can be answered from nothing else:
+    # the registry classifies it, and the repository says whether it is free.
+    # `None` when an index was assembled without either, which the caller must
+    # treat as "unanswerable", never as "no objection". The registry is the one
+    # the inventory classified by, never a second parse of the file.
+    repo_root: Optional[str] = field(default=None, compare=False, repr=False)
+    registry: Optional[Registry] = field(default=None, compare=False, repr=False)
 
     def occurrences_of(self, unit_digest):
         """Every place this content appears, in (path, position) order.
@@ -350,4 +360,6 @@ def build_context_index(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
         digest=_index_digest(inventory.digest, documents, unexamined),
         _occurrences=frozen,
         _by_path={d.path: d for d in documents},
+        repo_root=repo_root,
+        registry=inventory.registry,
     )

@@ -54,10 +54,11 @@ from . import ARTIFACT_SCHEMA_VERSION
 from .approval import UNCHECKED_MEANING, validate_approval_set
 from .bloat import (
     CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC,
+    residue_destination_ineligibility,
 )
 from .digest import sha256_canonical
 from .drift import VERDICT_STALE, VERDICT_UNVERIFIABLE
-from .inventory import DEFAULT_REGISTRY_PATH
+from .inventory import DEFAULT_REGISTRY_PATH, load_registry
 from .paths import DECLARABLE_TARGET_CLASSES, write_target_problem
 from .report import DIGEST, StaleReason
 from .repository import head_bytes, worktree_changes
@@ -400,9 +401,19 @@ def _binding_problems(i, operation, by_digest, bad):
     # A retirement retires the document the record is about, and a creation
     # brings the document the record names as its destination into being.
     # Neither is a path the other end of the record can stand in for.
+    #
+    # A positioned edit is narrower still: it is bounded by the passage the
+    # record's approved units are (`_approved_span_problems`), and those units
+    # segment the record's own document — a destination has no such passage, so
+    # a span edit there is one no reviewer could have read. Refusing it here is
+    # what keeps "an approval approves a passage" true of a record that names
+    # two documents.
     expected = {
         OP_RETIRE: (record.path,),
         OP_CREATE: (record.destination,) if record.destination else (),
+        # `move-with-provenance` returned above; these are the rest of
+        # `POSITIONED_OPS`, the ones a hull can and must bound.
+        **{positioned: (record.path,) for positioned in _PASSAGE_REMEDY},
     }.get(op, record.targets())
     if operation["path"] not in expected:
         bad("plan-target-not-record-target",
@@ -457,11 +468,12 @@ def _approved_span_problems(repo_root, operations, by_digest):
     part of the passage, and a remedy that removes two sentences legitimately
     removes what separated them.
 
-    Only operations on the record's *own* document are bounded this way. A
-    record's units segment that document alone, so on a move's destination —
-    or the residue document a distillation authors — they locate nothing; the
-    path is approved, the postimage is declared, and there is no passage to
-    measure against.
+    Only operations on the record's *own* document reach this check, and that
+    is not a gap: a record's units segment that document alone, so a
+    destination has no passage to measure against — and `_binding_problems`
+    refuses a positioned operation there rather than letting one through
+    unbounded. What may write a destination is the whole-document operations
+    and a move's append, each of which the approval covers entire.
     """
     problems = []
     hulls = {}
@@ -509,6 +521,79 @@ def _approved_span_problems(repo_root, operations, by_digest):
                 f"approved a remedy for. Narrow the operation to the approved "
                 f"passage, or mint an approval that covers the rest",
                 f"operations[{i}]")
+    return tuple(problems)
+
+
+def _residue_destination_problems(repo_root, operations, registry_path):
+    """Create-document targets, re-classified against the registry at apply time.
+
+    A `create-document` brings a new document into being, and the only finding
+    whose remedy authorizes one is `DISTILL` — so every create is distilled
+    residue, landing at a path a person approved as its destination. The audit
+    already refuses a destination the registry does not classify as an
+    eligible-kind document (`bloat-destination-unclassified` /
+    `bloat-destination-kind-ineligible`), but those hold at *audit* time only:
+    the record digest does not cover `destination`, so a tampered or stale
+    report could repoint an approved record's create at a planning or
+    unclassified path. Confinement (`authorize_path`, via the approval scope)
+    and occupancy (`apply-create-exists`) are already re-answered by the
+    applier elsewhere; this closes the two that were not, reusing the audit's
+    own reading (`residue_destination_ineligibility`) so the two seams cannot
+    diverge.
+
+    An unreadable registry answers none of it, and an unanswered safety
+    question is a refusal — the same fail-closed stance the whole module takes.
+    """
+    creates = [op for op in operations if op["op"] == OP_CREATE]
+    if not creates:
+        return ()
+    registry = load_registry(repo_root, registry_path)
+    if isinstance(registry, Invalid):
+        # Approval validation re-loaded the registry to re-authorize the scope
+        # and staled the run if it could not; only a race that unreads it
+        # between there and here reaches this, and it fails closed like the
+        # rest of the module.
+        return (Problem(
+            code="apply-destination-unclassifiable",
+            message=(
+                f"a create-document lands a new document, but the registry that "
+                f"classifies where documents may live cannot be read "
+                f"({registry.problems[0].message}) — whether the destination is "
+                f"an eligible-kind document is unanswerable, and an unanswered "
+                f"safety question is a refusal"
+            ),
+            location=registry_path,
+        ),)
+    problems = []
+    for operation in creates:
+        path = operation["path"]
+        reason, rule = residue_destination_ineligibility(registry, path)
+        if reason == "unclassified":
+            problems.append(Problem(
+                code="apply-destination-unclassified",
+                message=(
+                    f"create-document targets {path!r}, which no registry rule "
+                    f"claims as documentation — classification is closed-world, "
+                    f"so a document created at an unclassified path would be "
+                    f"born outside the corpus every later audit reads. The "
+                    f"audit refuses this destination; so does the applier, "
+                    f"whatever report routed it here"
+                ),
+                location=path,
+            ))
+        elif reason == "kind-ineligible":
+            problems.append(Problem(
+                code="apply-destination-kind-ineligible",
+                message=(
+                    f"create-document targets {path}, which the registry "
+                    f"classifies as a {rule.kind} document — residue is never "
+                    f"authored into one, because its own lifecycle ends in "
+                    f"distillation or retirement and would take the residue "
+                    f"with it. The audit refuses this destination; so does the "
+                    f"applier, whatever report routed it here"
+                ),
+                location=path,
+            ))
     return tuple(problems)
 
 
@@ -1141,6 +1226,15 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
     )
     if spans:
         return Invalid(spans)
+
+    # A create-document's destination is re-classified against the registry
+    # here, before idempotency: like the span bound, this must hold even when
+    # nothing has to be written — an attacker who pre-places the file at an
+    # ineligible destination would otherwise have the run certify it as
+    # already applied.
+    dests = _residue_destination_problems(repo_root, operations, registry_path)
+    if dests:
+        return Invalid(dests)
 
     if _already_applied(repo_root, operations, plan["postimages"]):
         # This plan applied to the committed baseline is exactly what is on
