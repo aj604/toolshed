@@ -17,7 +17,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from support import ENGINE, RepoTestCase  # noqa: E402
+from support import ENGINE, RepoTestCase, run_command as run  # noqa: E402
 
 from doclifecycle.inventory import build_inventory  # noqa: E402
 
@@ -30,14 +30,6 @@ REGISTRY = json.dumps({
         {"glob": "docs/adr/*.md", "kind": "narrative", "set": "adr"},
     ],
 })
-
-
-def run(*argv, cwd=None):
-    env = dict(os.environ, PYTHONPATH=ENGINE)
-    return subprocess.run(
-        [sys.executable, "-m", "doclifecycle", *argv],
-        capture_output=True, text=True, env=env, cwd=cwd,
-    )
 
 
 class InventoryCommand(RepoTestCase):

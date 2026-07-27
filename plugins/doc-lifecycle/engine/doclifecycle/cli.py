@@ -4,8 +4,11 @@ Deliberately thin: a command parses argv, calls one library function, prints its
 `to_dict()` payload, and maps the result state to an exit code. No command holds
 logic of its own, so an interactive import and a CI invocation cannot disagree.
 
-Exit codes: 0 the run completed (findings are data, not a gate), 1 the run is
-invalid, 2 a usage error.
+Exit codes name the result state, so a workflow can gate without parsing JSON:
+0 the run completed and its scope was examined (`ok`, `clean`, `findings` —
+findings are data, not a gate); 1 invalid; 2 a usage error; 3 stale; 4 partial.
+`inventory` reaches only 0, 1, and 2, as it always has; 3 and 4 belong to the
+report states.
 """
 
 import argparse
@@ -13,7 +16,60 @@ import json
 import sys
 
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
-from .results import STATUS_INVALID
+from .render import render_report
+from .report import Report, load_report
+from .results import (
+    STATE_CLEAN,
+    STATE_FINDINGS,
+    STATE_INVALID,
+    STATE_PARTIAL,
+    STATE_STALE,
+    STATUS_OK,
+    Invalid,
+)
+
+EXIT_CODES = {
+    STATUS_OK: 0,
+    STATE_CLEAN: 0,
+    STATE_FINDINGS: 0,
+    STATE_INVALID: 1,
+    STATE_STALE: 3,
+    STATE_PARTIAL: 4,
+}
+
+
+def _add_report_arguments(command):
+    command.add_argument(
+        "--report", required=True, help="path to the report JSON to check"
+    )
+    command.add_argument(
+        "--repo",
+        default=None,
+        help=(
+            "repository the report claims to describe; supply it to check "
+            "freshness (without it the check is structural only and can never "
+            "return stale)"
+        ),
+    )
+    command.add_argument(
+        "--registry",
+        default=DEFAULT_REGISTRY_PATH,
+        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
+    )
+    command.add_argument(
+        "--audit-config-digest",
+        default=None,
+        help=(
+            "the consumer's current audit-configuration digest; supply it to "
+            "include configuration drift in the freshness check"
+        ),
+    )
+    command.set_defaults(run=lambda args: load_report(
+        args.report,
+        repo_root=args.repo,
+        registry_path=args.registry,
+        audit_config_digest=args.audit_config_digest,
+    ))
 
 
 def _parser():
@@ -41,21 +97,77 @@ def _parser():
         default=DEFAULT_REGISTRY_PATH,
         help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
     )
-    inventory.set_defaults(run=lambda args: build_inventory(args.repo, args.registry))
+    inventory.set_defaults(
+        run=lambda args: build_inventory(args.repo, args.registry), render=False
+    )
+
+    validate = commands.add_parser(
+        "validate-report",
+        help="check a report against the contract, and optionally a repository",
+        description=(
+            "Validate a report's lineage, schema version, and result state, and "
+            "emit the validated payload as JSON. With --repo, also check the "
+            "lineage against the repository's current state. The verdict is one "
+            "of clean, findings, partial, stale, or invalid, and is the exit "
+            "code as well as the payload's status."
+        ),
+    )
+    _add_report_arguments(validate)
+    validate.set_defaults(render=False)
+
+    render = commands.add_parser(
+        "render-report",
+        help="render a validated report as Markdown",
+        description=(
+            "Validate a report and print it as Markdown. An invalid report "
+            "renders nothing at all — malformed content must not reach a PR "
+            "body or a CI summary. The exit code is the verdict, as for "
+            "validate-report."
+        ),
+    )
+    _add_report_arguments(render)
+    render.set_defaults(render=True)
+
     return parser
+
+
+def _explain(result):
+    """State the outcome and its reason on the run surface.
+
+    A CI log or terminal reader must not have to parse the payload to learn why
+    a run is invalid, stale, or partial.
+    """
+    if isinstance(result, Invalid):
+        for problem in result.problems:
+            where = f" [{problem.location}]" if problem.location else ""
+            print(f"{problem.code}: {problem.message}{where}", file=sys.stderr)
+    elif isinstance(result, Report):
+        for reason in result.stale_reasons:
+            print(f"{reason.code}: {reason.message}", file=sys.stderr)
+        if result.status == STATE_PARTIAL:
+            for entry in result.incomplete:
+                print(
+                    f"not-examined: {entry.scope} — {entry.reason}",
+                    file=sys.stderr,
+                )
 
 
 def main(argv=None):
     args = _parser().parse_args(argv)
     result = args.run(args)
-    # ensure_ascii=False so a CI log shows the message a human wrote; digests are
-    # taken over digest.canonical(), not over this rendering.
-    print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
-    if result.status == STATUS_INVALID:
-        # Say why on the run surface too: a CI log or terminal reader must not
-        # have to parse the payload to learn what went wrong.
-        for problem in result.problems:
-            where = f" [{problem.location}]" if problem.location else ""
-            print(f"{problem.code}: {problem.message}{where}", file=sys.stderr)
-        return 1
-    return 0
+    if args.render:
+        # Rendering takes validated typed objects only, so an invalid result
+        # prints nothing: there is no rendered form of a report that failed.
+        if result.status != STATE_INVALID:
+            print(render_report(result))
+    else:
+        # ensure_ascii=False so a CI log shows the message a human wrote;
+        # digests are taken over digest.canonical(), not over this rendering.
+        # allow_nan=False so the engine can never emit something no strict JSON
+        # parser will read — validation rejects non-finite numbers, and this
+        # makes any gap in that a loud failure rather than corrupt output.
+        print(json.dumps(
+            result.to_dict(), indent=2, ensure_ascii=False, allow_nan=False
+        ))
+    _explain(result)
+    return EXIT_CODES[result.status]

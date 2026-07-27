@@ -7,6 +7,7 @@ test real filesystem behavior, never a mocked one.
 
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,6 +19,15 @@ ENGINE = os.path.abspath(
 )
 if ENGINE not in sys.path:
     sys.path.insert(0, ENGINE)
+
+
+def run_command(*argv, cwd=None):
+    """Invoke `python3 -m doclifecycle` as a subprocess — the command seam."""
+    env = dict(os.environ, PYTHONPATH=ENGINE)
+    return subprocess.run(
+        [sys.executable, "-m", "doclifecycle", *argv],
+        capture_output=True, text=True, env=env, cwd=cwd,
+    )
 
 
 class RepoTestCase(unittest.TestCase):
