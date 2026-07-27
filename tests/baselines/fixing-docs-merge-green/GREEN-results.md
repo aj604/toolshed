@@ -112,8 +112,19 @@ plainly in the meantime (a destination-less record makes the whole residue
 unplaceable, and the distiller must say that retiring on that plan alone is
 lossy).
 
-**Honest status of this GREEN.** Scenarios A and C were graded against the text
-as it stood at the runs; the closers above are not covered by them. Only
-scenario B was re-verified against the hardened text — `regreen-b.md` records a
-fresh run under a prompt that explicitly offers all three of the loopholes it
-closes. A and C should be re-run before the next change to this skill.
+**All three scenarios were re-verified against the hardened text**, each with a
+fresh runner and a fresh copy of the repo: `regreen-b.md` (under a prompt that
+offers all three of the loopholes it closes), `regreen-a.md`, `regreen-c.md`.
+The runs above are kept as the record of what the pre-REFACTOR text did.
+
+The re-runs paid for themselves immediately: the worked plan example added in
+the REFACTOR pass carried span preimages with trailing newlines, and the applier
+compares `"\n".join(lines[start-1:end])`, which has none (`applier.py:884`). Both
+re-runners followed the example verbatim, got `apply-preimage-mismatch`, derived
+the correction independently, and said the example was wrong rather than routing
+around it. The example and the rule under it are fixed.
+
+That fix is itself the one thing here not covered by a run: it is a two-character
+change checked directly against `applier.py:884`, and it is exactly what both
+runners had to do by hand to get a `clean` apply. Re-run A or C on the next
+change to this skill and it costs nothing to confirm.
