@@ -1560,9 +1560,9 @@ the applier's own writes — and turning that into a verdict would make the seco
 report unapplyable.
 
 **Expiry.** `validate_approval_set(payload, report=…, repo_root=…)` is structural first and
-exhaustive; `invalid` always beats `stale`. With `report` it compares the report digest, that
-every selected record is still in it, and that the report still reconciles the same way. With
-`repo_root` it names every field that moved:
+exhaustive; `invalid` always beats `stale`. With `report` it compares the report digest and,
+when that matches, that the report still reconciles the same way — selection membership is the
+`invalid` re-derivation above, not expiry. With `repo_root` it names every field that moved:
 
 | Stale reason | What moved |
 |---|---|
