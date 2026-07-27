@@ -6,8 +6,8 @@ add nothing, so an import and a command cannot disagree. The one external progra
 `git`, and only to read a repository's identity and HEAD when checking a report's freshness.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
-contract, and the lineage-keyed cache. Segmenter, approval sets, and the applier land in later
-slices of the re-architecture (issue #57).
+contract, the lineage-keyed cache, the segmenter, and finding identity. Approval sets and the
+applier land in later slices of the re-architecture (issue #57).
 
 ## Modules
 
@@ -16,6 +16,8 @@ slices of the re-architecture (issue #57).
 | `doclifecycle/registry.py` | registry parsing, validation, classification, glob matching, registry digest |
 | `doclifecycle/inventory.py` | `build_inventory()`, the closed-world walk, document/inventory digests |
 | `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, the canonical path form and target classes |
+| `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
+| `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, lineage and report digests |
 | `doclifecycle/render.py` | `render_report()` — Markdown from a validated `Report`, and nothing else |
 | `doclifecycle/repository.py` | repository identity and base commit, read from git |
@@ -207,6 +209,109 @@ A path that does not exist yet is authorizable — `create-document` must be abl
 target before anything is written there. Ancestors that do exist are still checked, so a new
 file cannot be created behind an alias or under a case-folded twin of an existing directory.
 
+## Assertion units
+
+Segmentation splits a document into the smallest pieces an audit can reach a verdict about. It
+is a fixed structural parser and nothing else: no model, no network, no subprocess, so the same
+bytes always produce the same units and the same digests.
+
+| Kind | Is | Can carry a claim |
+|---|---|---|
+| `sentence` | one sentence of a paragraph | yes |
+| `list_item` | one list item, its continuation lines folded in | yes |
+| `table_row` | one body row of a pipe table | yes |
+| `block_quote` | one sentence inside a block quote | yes |
+| `heading` | an ATX or setext heading | no |
+| `table_header` | a table's header row | no |
+| `code_block` | a fenced or indented block | no |
+| `front_matter` | the metadata fence at the top of a file | no |
+| `html_block` | an HTML block or comment | no |
+
+The right-hand column is the point. A heading names a section, a code block is an example, an
+HTML comment is not prose: those kinds are *non-assertive capable*, and
+`record_classifications()` below refuses any class but `non-assertive` against them — so
+structure cannot be turned into a claim and then "verified". What a capable unit actually
+asserts is the model's call, never the parser's: connective prose ("For example:", "See the
+runbook.") is structurally a sentence, and reaches `non-assertive` as a recorded class rather
+than by being detected here — the parser has no way to tell connective prose from a claim, and
+a parser that guessed would be the judgment this module exists to keep out. Fence markers,
+table delimiter rows, and thematic breaks carry no content and are not units at all.
+
+Unit text is whitespace-normalized (runs collapse to one space), so re-wrapping a paragraph,
+renumbering a list, and repadding a table column all preserve identity. `code_block` and
+`front_matter` keep their text verbatim, because there the whitespace is content.
+
+Sentence boundaries follow one fixed rule: a terminator run (`.`, `!`, `?`) plus any closing
+quotes or brackets ends a sentence when it is followed by whitespace or the end of the text,
+the word it closes is neither a known abbreviation nor an initial, and the next visible
+character opens a sentence (a capital, a digit, or an opening delimiter). Terminators inside an
+inline code span are invisible to it. Everything else is one sentence.
+
+A unit's digest covers its kind and its normalized text, and nothing else — not the document,
+not the line, not the schema version, not what a model said. Two documents holding the same
+sentence therefore hold one unit identity, which is exactly what a duplication audit needs;
+`ordinal`, `line`, and `end_line` travel alongside for a reader and never inside the digest. A
+segmentation's own digest covers the ordered list of unit digests, so moving a sentence keeps
+that sentence's identity and re-keys the document.
+
+### Segment command
+
+```bash
+python3 -m doclifecycle segment --repo . --path docs/architecture.md
+```
+
+`--path` must be a document in the inventory: the registry decides what a document is, so an
+unregistered, excluded, or symlinked path is `document-not-inventoried` and exits 1 rather than
+being opened, and an invalid registry invalidates the run as it does everywhere else. A
+document that is not valid UTF-8 is `document-unreadable`.
+
+Real output for a repository whose registry declares root `docs` with one rule
+`docs/**/*.md → living`, and whose `docs/architecture.md` holds `# Architecture`, a blank line,
+and `The service charges a flat 2% fee.`:
+
+```json
+{
+  "status": "ok",
+  "schema_version": 1,
+  "path": "docs/architecture.md",
+  "kind": "living",
+  "document_digest": "58202ed1a03a7f70aa61f0aa04ac8ca05daf1e51d97f7eaf4be24e4f4f8ffe04",
+  "digest": "ce97bf28f7e9ac2a1a10ea750e0c1d5a49f344cc735d7eeb170e99b4022ebbf2",
+  "units": [
+    {
+      "ordinal": 0,
+      "kind": "heading",
+      "text": "Architecture",
+      "line": 1,
+      "end_line": 1,
+      "assertion_capable": false,
+      "digest": "fa282a374fb12b2e52801ec0daf273b933c41a5d2304f5936bd3bd53608de415"
+    },
+    {
+      "ordinal": 1,
+      "kind": "sentence",
+      "text": "The service charges a flat 2% fee.",
+      "line": 3,
+      "end_line": 3,
+      "assertion_capable": true,
+      "digest": "b99ecee54f68805635513f5e2e8a93d4e7d6ae037d0d05fa0a3426254b7b155a"
+    }
+  ]
+}
+```
+
+`document_digest` is the sha256 of the file's bytes — the same digest the inventory reports for
+that document.
+
+The library calls behind it:
+
+```python
+from doclifecycle.segment import segment_document, segment_text
+
+segment_text("Fees are 2%.\n")                   # → Segmentation; pure and model-free
+segment_document(".", "docs/architecture.md")    # → Segmentation or Invalid
+```
+
 ## Report contract
 
 A report states what an audit examined and what it found, pinned to everything that could have
@@ -224,7 +329,7 @@ changed a verdict. It is proof of examination, never authority to change anythin
     "audit_config_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "registry_digest": "1d9176534bcc15f5fe5062503110be01ea198bb8ce65179230af4b226f56d85e",
     "ruleset_version": 1,
-    "plugin_version": "0.14.0",
+    "plugin_version": "0.17.0",
     "evidence_boundary": {"sources": ["src/**"], "excluded": []}
   },
   "records": [
@@ -294,7 +399,7 @@ Records are validated only as far as approval binding needs — a non-empty `id`
 neither, and the digest is taken over that encoding); and no nesting past 64 levels
 (`report-nesting-too-deep`), since the digest and the renderer both walk the structure and a
 few kilobytes of brackets must be a verdict rather than a stack overflow. Every other field the
-audit engine or the segmenter (#63) puts on a record travels through untouched — and is
+audit engine or `finding.py` puts on a record travels through untouched — and is
 neutralized at the rendering boundary rather than at the contract boundary; see Commands below.
 
 ### Commands
@@ -399,6 +504,72 @@ never written (`MISS_NOT_FOUND`), or its JSON does not parse (`MISS_CORRUPT`) �
 There is no path that returns a stale or unverified payload; a hit is exactly the case where every
 check above passed.
 
+## Finding identity
+
+A finding groups one or more assertion units in one document under one finding code. Its digest
+is taken over exactly that, plus the report lineage it was produced under
+(`report.lineage_digest()`, the lineage digested alone — a record cannot use the report's own
+digest, which covers the records).
+
+| Moves a finding digest | Cannot move it |
+|---|---|
+| a unit's content (a unit digest *is* its content) | the display id |
+| the grouping — which units, how many | the message and any evidence prose |
+| the document | the recorded assertion classes |
+| the finding code | the order the units were listed in |
+| any lineage field | listing the same unit twice |
+| `ARTIFACT_SCHEMA_VERSION` | |
+
+The document and the finding code are in there because unit identity deliberately is not:
+the same sentence in two documents is one unit, and a drift finding and a bloat finding can
+group the same units — without both fields those would collide into one digest, which the
+report contract rejects as `report-duplicate-record` and an approval set could not tell apart.
+Both err toward a digest that moves too readily, and the failure that produces is an approval
+honestly refused.
+
+The group is normalized — sorted and deduplicated — before hashing, because it is a set of
+units rather than a sequence. That split is what approval rests on: an approval set selects a
+record by digest, and no renumbering, rewording, or re-classification can point that selection
+at a different finding.
+
+```python
+from doclifecycle.finding import build_finding, record_classifications
+
+finding = build_finding(lineage=lineage, code="STALE", path="docs/architecture.md",
+                        units=(unit_digest,), record_id="DRIFT-001",
+                        extra={"message": "the rate is 2.5%, not 2%"})
+finding.digest        # the identity approval binds to
+finding.to_record()   # the report record: id, digest, code, path, units, and extra
+```
+
+`build_finding()` returns a `Finding` or an `Invalid` naming every problem
+(`finding-invalid-field`, `finding-no-units`, `finding-invalid-unit`,
+`finding-reserved-field`); a `lineage` that is not a `Lineage` is a `TypeError`, because
+identity not pinned to a run is a programming error rather than bad data. `extra` is the
+reviewable data the record carries and may not shadow a field the record owns.
+
+### Assertion classes
+
+The model's only role in the document model is saying what each capable unit is: `factual`
+(needs evidence), `normative` (needs an owner or source), `rationale` (explains why), or
+`non-assertive` (connective, illustrative, or signposting prose — a real answer, not the
+absence of one). `record_classifications(segmentation, entries)` validates that answer before
+it is written down anywhere, over entries shaped `{"unit": <digest>, "assertion_class": <one of
+the four>}`.
+
+| Code | Refused because |
+|---|---|
+| `classification-invalid-shape` | not a list of `{unit, assertion_class}` objects |
+| `classification-unknown-class` | not one of the four |
+| `classification-unknown-unit` | no unit in this segmentation has that digest |
+| `classification-not-assertion-capable` | a class other than `non-assertive` against structure |
+| `classification-duplicate` | one unit, two answers |
+| `classification-missing` | a capable unit nobody classified |
+
+Every problem in one response is reported in one pass, and any problem records nothing: a
+partially trusted classification set is one nobody can tell the trustworthy half of. The result
+is keyed to the segmentation digest, and recording a class changes no unit or finding digest.
+
 ## Digests
 
 `digest.sha256_canonical` hashes the canonical JSON form (sorted keys, compact separators),
@@ -414,6 +585,12 @@ identity whether a validator reads it fresh or long after it went stale. A repor
 a `digest` which does not match its content is `report-digest-mismatch`: altered since it was
 produced.
 
+A unit digest covers a unit's kind and normalized text; a segmentation digest covers its
+ordered unit digests; a lineage digest covers the lineage alone; and a finding digest covers
+the lineage digest, the finding code, the document, and the normalized unit group. What each
+one deliberately leaves out is in the two sections above, and it is always the same kind of
+thing: position, prose, and judgment.
+
 ## Tests
 
 `tests/engine/*_test.py` (stdlib `unittest`), run by ordinary discovery, which is also how
@@ -425,14 +602,20 @@ python3 -m unittest discover -s tests/engine -p '*_test.py'
 
 Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `validate_report()`, `load_report()`, `current_lineage()`, `render_report()`, `cache.cache_key()`,
-`cache.put()`, `cache.get()`), and the commands as subprocesses whose payload must equal the
-library result. Path authorization and the cache have no command of their own — they are
-substrate the other components (and, for the cache, the not-yet-built audit engine) call.
-`tests/engine/support.py` holds what every suite needs — the engine on `sys.path`,
+`cache.put()`, `cache.get()`, `segment_text()`, `segment_document()`, `build_finding()`,
+`record_classifications()`), and the commands as subprocesses whose payload must equal the
+library result. Path authorization, the cache, and finding identity have no command of their own
+— they are substrate the other components (and, for the cache, the not-yet-built audit engine)
+call. `tests/engine/support.py` holds what every suite needs — the engine on `sys.path`,
 `RepoTestCase.repo()`, and `run_command()` for the subprocess seam; report fixtures live in
 `report_test.py`, which `report_cli_test.py` and `cache_test.py` both import (`GitRepoTestCase`,
 for a real repository to check freshness against). The report and cache suites build real git
 repositories, because staleness is a comparison against a repository and a mocked one would
-prove nothing. `tests/engine/acceptance/scenario_cache_test.py` holds the cache's acceptance-
-fixture scenario (issue #64): changing only source evidence, or only configuration/ruleset,
-prevents reuse of a prior semantic result.
+prove nothing.
+
+`tests/engine/acceptance/` is the repository-level fixture (a real `git init`, real commits,
+real symlinks, real prompt-injection content) and the scenarios built on it: scenario one is
+inventory, scenario two is the document model — segmentation, the four assertion classes, and
+finding identity bound to a lineage read from actual git — and `scenario_cache_test.py` is the
+cache's (issue #64): changing only source evidence, or only configuration/ruleset, prevents
+reuse of a prior semantic result.

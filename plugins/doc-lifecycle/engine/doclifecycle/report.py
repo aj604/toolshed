@@ -145,7 +145,7 @@ class Record:
 
     The contract owns only what binds a record to approval — a display `id` and
     the `digest` an approval set selects it by. Everything else the audit
-    engine or the segmenter (#63) puts on a record travels in `extra`,
+    engine or `finding.py` puts on a record travels in `extra`,
     untouched, so this module never becomes a second owner of record internals.
     """
 
@@ -256,6 +256,21 @@ def _scan(value):
         elif isinstance(item, list):
             pending.extend((child, depth + 1) for child in item)
     return too_deep, nonfinite
+
+
+def lineage_digest(lineage):
+    """The digest of a lineage on its own, for artifacts that bind to a run.
+
+    A report's own digest covers its records, so a record cannot use it —
+    that is circular. This is the same lineage, digested alone, and it is what
+    `finding.build_finding` mixes into every finding digest: a finding produced
+    under a different repository state, registry, ruleset, or engine is a
+    different finding, even when it groups the same units.
+    """
+    return sha256_canonical({
+        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "lineage": lineage.to_dict(),
+    })
 
 
 def _content_digest(lineage, records, incomplete):
