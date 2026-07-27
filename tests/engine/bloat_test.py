@@ -25,7 +25,7 @@ from support import (  # noqa: E402  (also puts the engine on sys.path)
 from finding_test import lineage as finding_lineage  # noqa: E402
 from report_test import GitRepoTestCase  # noqa: E402  (a real git repository)
 
-from doclifecycle import bloat  # noqa: E402
+from doclifecycle import RULESET_VERSION, bloat  # noqa: E402
 from doclifecycle.context import build_context_index  # noqa: E402
 from doclifecycle.report import EvidenceBoundary, current_lineage  # noqa: E402
 from doclifecycle.results import Invalid  # noqa: E402
@@ -640,7 +640,7 @@ class TheChunkCache(GitRepoTestCase):
         bloat.store_chunk(self.cache_dir, self.index, state, self.chunk,
                           {"docs/a.md": [], "docs/b.md": []})
 
-        rerun = self.load(self.current(ruleset_version=2))
+        rerun = self.load(self.current(ruleset_version=RULESET_VERSION + 1))
 
         self.assertEqual(rerun.misses, ("docs/a.md", "docs/b.md"))
 

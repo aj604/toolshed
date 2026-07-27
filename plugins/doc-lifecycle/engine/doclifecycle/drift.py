@@ -145,6 +145,7 @@ CODE_ANCHOR_MALFORMED = "ANCHOR-MALFORMED"
 CODE_ANCHOR_STALE = "ANCHOR-STALE"
 CODE_ANCHOR_UNVERIFIABLE = "ANCHOR-UNVERIFIABLE"
 CODE_ANCHOR_FUTURE_DATED = "ANCHOR-FUTURE-DATED"
+CODE_ANCHOR_UNRESOLVABLE_REFERENCE = "ANCHOR-UNRESOLVABLE-REFERENCE"
 
 # `> As of <YYYY-MM-DD> (<anchors current at writing>)`, as growing-docs writes
 # it — matched against the segmenter's normalized block-quote text, where the
@@ -929,10 +930,19 @@ def _anchor_references(text):
 
 def _anchor_findings(repo_root, path, anchor, as_of, references):
     """Findings about one well-formed anchor: what has moved under it."""
-    stale, unverifiable = [], []
+    stale, unverifiable, unresolvable = [], [], []
     for reference in references:
         if not os.path.exists(os.path.join(repo_root, reference)):
-            stale.append((reference, "is no longer in the repository"))
+            # An abbreviation and a removed target are the same observation
+            # here, so neither is claimed and no prefix an earlier reference
+            # established is carried forward to resolve one (#97; the engine
+            # README's "Narrative documents" holds why).
+            unresolvable.append((
+                reference,
+                "does not resolve to a path in the repository — an anchor "
+                "names repository-relative paths in full, so this is either "
+                "an abbreviation or a target that has moved",
+            ))
             continue
         # A directory anchor's freshness is the most recent change to
         # anything beneath it — `last_change` already gets this for free,
@@ -954,7 +964,9 @@ def _anchor_findings(repo_root, path, anchor, as_of, references):
 
     specs = []
     for code, offenders in (
-        (CODE_ANCHOR_STALE, stale), (CODE_ANCHOR_UNVERIFIABLE, unverifiable)
+        (CODE_ANCHOR_STALE, stale),
+        (CODE_ANCHOR_UNVERIFIABLE, unverifiable),
+        (CODE_ANCHOR_UNRESOLVABLE_REFERENCE, unresolvable),
     ):
         if not offenders:
             continue

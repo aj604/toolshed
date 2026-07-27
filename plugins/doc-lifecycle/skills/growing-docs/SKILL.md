@@ -104,7 +104,10 @@ be mistaken for a retire-on-landing planning artifact. Its home:
    (today's drift skills audit repo-tracking claims, not narrative docs). This line
    is also the doc's **durable-narrative marker**: bloat tooling classifies an
    anchored doc as narrative — never as a planning artifact to distill — wherever
-   it sits.
+   it sits. **Every backticked path anchor is repository-relative and written in
+   full**, each one, including siblings of the one before it: an abbreviation is
+   indistinguishable from a target that has moved, so the audit refuses it rather
+   than guess which same-named file was meant.
 2. **Every command, path, symbol, and output inside the narrative is true of the repo now
    and was actually run.** Narrative structure is exempt from the claim bar; fabrication
    is not.

@@ -1112,8 +1112,9 @@ one, and a verdict offered for one is refused. Its `> As of <YYYY-MM-DD> (<ancho
 | `ANCHOR-MISSING` | no `As of` line, so nothing says what the document was true of |
 | `ANCHOR-MALFORMED` | no readable `YYYY-MM-DD` date, or no parenthesized anchors |
 | `ANCHOR-FUTURE-DATED` | dated after the repository's latest commit — nothing could have been checked then |
-| `ANCHOR-STALE` | a path the anchor names is gone, or last changed after the as-of date |
+| `ANCHOR-STALE` | a path the anchor names last changed after the as-of date |
 | `ANCHOR-UNVERIFIABLE` | a path the anchor names has no commit history to check against |
+| `ANCHOR-UNRESOLVABLE-REFERENCE` | a reference that is no path in the repository — an abbreviation, or a target that has moved |
 
 Honest dating has two directions, which is why the future-dated check exists at all: no
 reference comparison would catch it, since every file's last change is behind such a date. What
@@ -1123,10 +1124,18 @@ otherwise read as drift.
 
 The anchor's references are its backticked tokens, and only those: reading unbackticked prose as
 filenames would open paths a sentence merely mentioned. A token is a path when it contains a `/`
-or ends in an extension starting with a letter, which is what keeps `` `v1.2` `` from being read
-as a file that has gone missing. A trailing `:<line>` is trimmed, and an absolute path or one
+or ends in an extension starting with a letter, which is what keeps `` `v1.2` `` from being
+opened as a path at all. A trailing `:<line>` is trimmed, and an absolute path or one
 containing `..` is not a repository reference at all. Anchor findings group the anchor's own
 unit, so they point at the line to fix; the prose around it is never read as an assertion.
+
+References are repository-relative and complete: a token that resolves to nothing is reported as
+unresolvable, never as a removal, and a shorthand is not resolved against a prefix an earlier
+token established. Both halves of that are the same refusal to guess — the engine cannot see the
+difference between `doc-sync.yml` written for a file three directories down and one that was
+deleted, and carrying a prefix forward would make an anchor's meaning depend on token order and
+silently pick between same-named files whose histories differ — and history is what the date
+check reads.
 
 ### Coverage gaps
 

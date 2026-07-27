@@ -84,6 +84,10 @@ NARRATIVE_TEXT = "# Tour\n\n> As of 2026-01-01 (initial commit)\n\nWelcome aboar
 # Anchors the module the living document also cites, so a commit touching that
 # module leaves this anchor behind.
 ANCHORED_TEXT = "# Tour\n\n> As of 2026-01-01 (`src/fees.py`)\n\nWelcome aboard.\n"
+# Anchors that same module by its bare filename: the module is in the
+# repository, but not at the path the anchor spells.
+ABBREVIATED = os.path.basename(SOURCE)
+ABBREVIATED_TEXT = f"# Tour\n\n> As of 2026-01-01 (`{ABBREVIATED}`)\n\nHi.\n"
 
 FILES = {
     ".doc-lifecycle/registry.json": REGISTRY,
@@ -794,15 +798,59 @@ class NarrativeAnchors(DriftRepoTestCase):
 
         self.assertNotIn(NARRATIVE, [i.scope for i in report.incomplete])
 
-    def test_an_anchor_naming_a_file_that_is_gone_is_stale(self):
+    def test_an_anchor_naming_a_path_the_repository_lacks_is_unresolvable(self):
+        """Issue #97: a reference the repository cannot resolve is reported
+        under its own code. The engine cannot tell a deleted file from a
+        shorthand spelling, so it claims neither."""
         root = self.drift_repo(**{NARRATIVE: ANCHORED_TEXT})
         os.remove(os.path.join(root, SOURCE))
         self.commit(root, "drop the module")
 
         report = self.audit(root)
 
-        record = self.anchor_records(report)["ANCHOR-STALE"]
-        self.assertIn("no longer", record.extra["evidence"]["observed"])
+        record = self.anchor_records(report)["ANCHOR-UNRESOLVABLE-REFERENCE"]
+        self.assertEqual(record.extra["evidence"]["source"], SOURCE)
+
+    def test_an_abbreviated_reference_is_not_reported_as_a_gone_file(self):
+        """Issue #97: `fees.py` names a file that is in the repository under
+        `src/`, so "is no longer in the repository" is a false claim — the
+        shorthand is what is wrong, not the target."""
+        root = self.drift_repo(**{NARRATIVE: ABBREVIATED_TEXT})
+
+        report = self.audit(root)
+
+        records = self.anchor_records(report)
+        self.assertNotIn("ANCHOR-STALE", records)
+        self.assertNotIn(
+            "no longer",
+            records["ANCHOR-UNRESOLVABLE-REFERENCE"].extra["evidence"]["observed"],
+        )
+
+    def test_an_unresolvable_reference_asks_for_a_repo_relative_path(self):
+        """The finding has to say what a correct anchor looks like: the fix for
+        a shorthand is the full path, and nothing else in the run says so."""
+        root = self.drift_repo(**{NARRATIVE: ABBREVIATED_TEXT})
+
+        report = self.audit(root)
+
+        record = self.anchor_records(report)["ANCHOR-UNRESOLVABLE-REFERENCE"]
+        self.assertIn("repository-relative", record.extra["evidence"]["observed"])
+
+    def test_an_unresolvable_reference_does_not_absorb_a_stale_sibling(self):
+        """Two defects in one anchor stay two findings: fixing the spelling of
+        one reference does not refresh the date the other is behind."""
+        root = self.drift_repo(**{
+            NARRATIVE: "# Tour\n\n"
+                       f"> As of 2026-01-01 (`{ABBREVIATED}`, `{SOURCE}`)\n\nHi.\n"})
+        self.write(root, SOURCE, "RATE = 0.025\n")
+        self.commit(root, "raise the rate")
+
+        report = self.audit(root)
+
+        records = self.anchor_records(report)
+        self.assertEqual(records["ANCHOR-UNRESOLVABLE-REFERENCE"]
+                         .extra["references"], [ABBREVIATED])
+        self.assertEqual(records["ANCHOR-STALE"].extra["references"], [SOURCE])
 
     def test_a_narrative_document_without_an_anchor_is_a_finding(self):
         root = self.drift_repo(**{NARRATIVE: "# Tour\n\nWelcome aboard.\n"})
