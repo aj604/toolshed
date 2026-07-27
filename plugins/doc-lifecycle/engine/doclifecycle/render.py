@@ -154,6 +154,18 @@ def render_report(report):
         f"- Report digest: {_code(report.digest)}",
     ]
 
+    if report.scope is not None:
+        # What the run set out to examine, so "the declared scope" in the
+        # headline above is a claim the reader can check rather than take.
+        lines += [
+            "",
+            "## Scope",
+            "",
+            f"- Basis: {_code(report.scope.basis)}",
+            f"- Declared documents ({len(report.scope.documents)}): "
+            + (", ".join(_code(d) for d in report.scope.documents) or "none"),
+        ]
+
     if report.stale_reasons:
         lines += ["", "## Lineage drift", ""]
         lines += [

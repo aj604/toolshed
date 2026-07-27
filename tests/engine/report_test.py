@@ -1245,5 +1245,129 @@ class RenderedRecordContent(unittest.TestCase):
         self.assertEqual(render_report(report), render_report(report))
 
 
+SCOPE = {
+    "basis": "every living and narrative document in the inventory",
+    "documents": ["docs/architecture.md", "docs/guides/onboarding.md"],
+}
+
+
+class DeclaredScope(unittest.TestCase):
+    """What the run set out to examine, enumerated in the report itself.
+
+    A result state says whether the *declared* scope completed; only the scope
+    says what was declared. Optional, because it is the audit engine that
+    declares one — but once present it is part of the report's identity.
+    """
+
+    def test_a_report_may_enumerate_the_documents_it_declared(self):
+        result = validate_report(report_payload(scope=dict(SCOPE)))
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.scope.basis, SCOPE["basis"])
+        self.assertEqual(result.scope.documents, tuple(SCOPE["documents"]))
+
+    def test_a_report_without_a_scope_says_nothing_about_one(self):
+        result = validate_report(report_payload())
+
+        self.assertIsInstance(result, Report)
+        self.assertIsNone(result.scope)
+        self.assertNotIn("scope", result.to_dict())
+
+    def test_the_declared_scope_round_trips_through_the_payload(self):
+        result = validate_report(report_payload(scope=dict(SCOPE)))
+
+        self.assertEqual(result.to_dict()["scope"], SCOPE)
+
+    def test_an_empty_declared_scope_is_a_real_answer(self):
+        """A diff-scoped run whose diff touched no document declared nothing —
+        that is truthful, and different from declining to say."""
+        result = validate_report(report_payload(
+            status=STATE_CLEAN, records=[],
+            scope={"basis": "documents affected by a..b", "documents": []},
+        ))
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.scope.documents, ())
+
+    def test_the_scope_is_part_of_the_reports_identity(self):
+        """Two runs finding the same records over different declared scopes are
+        not the same report: one examined more than the other."""
+        wide = validate_report(report_payload(scope=dict(SCOPE)))
+        narrow = validate_report(report_payload(scope=dict(
+            SCOPE, documents=["docs/architecture.md"]
+        )))
+
+        self.assertNotEqual(wide.digest, narrow.digest)
+
+    def test_omitting_the_scope_leaves_a_reports_digest_where_it_was(self):
+        """Additive: a report that declares no scope digests as it always did."""
+        self.assertEqual(
+            validate_report(report_payload()).digest,
+            "79c9a42eaf74ff65f10e97df58dcdf84bf43d95434d5639a86734af217490110",
+        )
+
+    def test_a_scope_that_is_not_an_object_is_refused(self):
+        result = validate_report(report_payload(scope=["docs/architecture.md"]))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_scope_must_carry_both_a_basis_and_its_documents(self):
+        result = validate_report(report_payload(scope={"documents": []}))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_scope_may_not_carry_a_field_the_contract_does_not_know(self):
+        result = validate_report(report_payload(
+            scope=dict(SCOPE, coverage="complete")
+        ))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_basis_that_does_not_say_how_the_scope_was_derived_is_refused(self):
+        result = validate_report(report_payload(scope=dict(SCOPE, basis="  ")))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_document_that_is_not_a_printable_path_is_refused(self):
+        result = validate_report(report_payload(
+            scope=dict(SCOPE, documents=["docs/a.md", "docs/b\nc.md"])
+        ))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_the_same_document_declared_twice_is_refused(self):
+        """A declared scope is a set of documents; a repeat makes the count of
+        what was examined disagree with the list of it."""
+        result = validate_report(report_payload(
+            scope=dict(SCOPE, documents=["docs/a.md", "docs/a.md"])
+        ))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+
+class RenderedScope(unittest.TestCase):
+    def test_the_declared_scope_is_rendered_for_the_reader(self):
+        rendered = render_report(validate_report(report_payload(scope=dict(SCOPE))))
+
+        self.assertIn("## Scope", rendered)
+        self.assertIn(SCOPE["basis"], rendered)
+        self.assertIn("docs/guides/onboarding.md", rendered)
+
+    def test_a_report_that_declares_no_scope_renders_no_scope_section(self):
+        rendered = render_report(validate_report(report_payload()))
+
+        self.assertNotIn("## Scope", rendered)
+
+    def test_a_hostile_document_path_cannot_break_out_of_the_scope_section(self):
+        """A path is a filename on a filesystem the audit walked, so it can hold
+        anything a filesystem allows."""
+        rendered = render_report(validate_report(report_payload(scope=dict(
+            SCOPE, documents=["docs/`a`[x](http://evil.example).md"]
+        ))))
+
+        self.assertIn("``docs/`a`[x](http://evil.example).md``", rendered)
+        self.assertEqual(rendered.count("## Records"), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

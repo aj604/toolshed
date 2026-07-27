@@ -22,7 +22,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION, PLUGIN_VERSION, RULESET_VERSION
 from . import repository as repository_mod
@@ -40,7 +40,7 @@ from .results import (
 
 FIELDS = (
     "status", "schema_version", "lineage", "records", "incomplete",
-    "stale_reasons", "digest",
+    "scope", "stale_reasons", "digest",
 )
 REQUIRED_FIELDS = ("status", "schema_version", "lineage")
 
@@ -158,6 +158,26 @@ class Record:
 
 
 @dataclass(frozen=True)
+class Scope:
+    """What the run set out to examine, enumerated.
+
+    The result state says whether the *declared* scope completed; only this
+    says what was declared. Without it a reader has to infer coverage from the
+    audit mode, and "full" is exactly the claim most worth checking — so a scope
+    names how it was derived (`basis`) and lists every document it covers.
+    """
+
+    basis: str
+    documents: Tuple[str, ...]
+
+    def to_dict(self):
+        return {"basis": self.basis, "documents": list(self.documents)}
+
+
+SCOPE_FIELDS = ("basis", "documents")
+
+
+@dataclass(frozen=True)
 class Incomplete:
     """One part of the declared scope the run did not examine."""
 
@@ -200,6 +220,7 @@ class Report:
     incomplete: Tuple[Incomplete, ...]
     digest: str
     stale_reasons: Tuple[StaleReason, ...] = ()
+    scope: Optional[Scope] = None
 
     def to_dict(self):
         payload = {
@@ -210,6 +231,8 @@ class Report:
             "incomplete": [i.to_dict() for i in self.incomplete],
             "digest": self.digest,
         }
+        if self.scope is not None:
+            payload["scope"] = self.scope.to_dict()
         if self.status == STATE_STALE:
             payload["stale_reasons"] = [r.to_dict() for r in self.stale_reasons]
         return payload
@@ -273,19 +296,27 @@ def lineage_digest(lineage):
     })
 
 
-def _content_digest(lineage, records, incomplete):
+def _content_digest(lineage, records, incomplete, scope=None):
     """The report's identity: what it says, not what a validator concluded.
 
     Excludes the result state and the stale reasons, so the same report keeps
     one digest whether it is read fresh or years later — approval binds to this
     digest, and a verdict changing underneath must not re-key it.
+
+    The declared scope is *in*, because two runs finding the same records over
+    different scopes are not the same report — one examined more than the
+    other. A report that declares no scope is digested exactly as it was before
+    the field existed, so adding one re-keys nothing that did not use it.
     """
-    return sha256_canonical({
+    payload = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "lineage": lineage.to_dict(),
         "records": [r.to_dict() for r in records],
         "incomplete": [i.to_dict() for i in incomplete],
-    })
+    }
+    if scope is not None:
+        payload["scope"] = scope.to_dict()
+    return sha256_canonical(payload)
 
 
 def _evidence_boundary(raw, bad):
@@ -508,6 +539,55 @@ def _incomplete(raw, bad):
     return entries if ok else None
 
 
+def _scope(raw, bad):
+    """Parse and validate the declared scope. Returns a Scope or None.
+
+    Exhaustive like every other section: a scope with three things wrong says
+    all three, so one round of fixes addresses them.
+    """
+    if not isinstance(raw, dict) or set(raw) != set(SCOPE_FIELDS):
+        bad("report-invalid-scope",
+            f"scope must be an object with exactly {list(SCOPE_FIELDS)} — the "
+            f"basis says how the scope was derived, and the documents "
+            f"enumerate it",
+            "scope")
+        return None
+    ok = True
+    if not _printable(raw["basis"]):
+        bad("report-invalid-scope",
+            "scope.basis must be a non-empty single-line statement of how the "
+            "scope was derived — a scope nobody can re-derive is not checkable",
+            "scope.basis")
+        ok = False
+    documents = raw["documents"]
+    if not isinstance(documents, list):
+        bad("report-invalid-scope",
+            "scope.documents must be a list of the repository-relative "
+            "documents the run declared",
+            "scope.documents")
+        return None
+    seen = set()
+    for i, value in enumerate(documents):
+        if not _printable(value):
+            bad("report-invalid-scope",
+                f"scope.documents[{i}] must be a non-empty single-line "
+                f"repository-relative path",
+                f"scope.documents[{i}]")
+            ok = False
+            continue
+        if value in seen:
+            bad("report-invalid-scope",
+                f"scope.documents names {value!r} twice — a declared scope is a "
+                f"set of documents, and a repeat makes the count of what was "
+                f"examined disagree with the list of it",
+                f"scope.documents[{i}]")
+            ok = False
+        seen.add(value)
+    if not ok:
+        return None
+    return Scope(basis=raw["basis"], documents=tuple(documents))
+
+
 def _carried_stale_reasons(raw, bad, status):
     """The stale reasons a report payload carries from a prior verdict.
 
@@ -706,6 +786,9 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     lineage = _lineage(payload["lineage"], bad) if "lineage" in payload else None
     records = _records(payload.get("records", []), bad)
     incomplete = _incomplete(payload.get("incomplete", []), bad)
+    # Optional: a report that declares no scope says nothing about one, and is
+    # read exactly as it was before the field existed.
+    scope = _scope(payload["scope"], bad) if "scope" in payload else None
 
     status = payload.get("status")
     if "status" in payload and status not in CARRIED_STATES:
@@ -737,7 +820,7 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
         return Invalid(tuple(problems))
 
     records, incomplete, carried = tuple(records), tuple(incomplete), tuple(carried)
-    digest = _content_digest(lineage, records, incomplete)
+    digest = _content_digest(lineage, records, incomplete, scope)
     declared_digest = payload.get("digest")
     if declared_digest is not None and declared_digest != digest:
         return Invalid((Problem(
@@ -756,6 +839,7 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
         return Report(
             status=status, lineage=lineage, records=records,
             incomplete=incomplete, digest=digest, stale_reasons=carried,
+            scope=scope,
         )
 
     current, problems = current_lineage(repo_root, registry_path,
@@ -772,12 +856,13 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
         return Report(
             status=STATE_STALE, lineage=lineage, records=records,
             incomplete=incomplete, digest=digest, stale_reasons=reasons,
+            scope=scope,
         )
     # Every comparable field matches, and every carried reason was re-checked,
     # so the verdict is cleared and the state follows from the content again.
     return Report(
         status=state_from_content(records, incomplete), lineage=lineage,
-        records=records, incomplete=incomplete, digest=digest,
+        records=records, incomplete=incomplete, digest=digest, scope=scope,
     )
 
 
