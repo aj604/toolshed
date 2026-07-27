@@ -171,19 +171,27 @@ def plan(records, cfg, in_lane):
 
 
 DISPATCH_PROMPT = """\
-You are a headless apply executor. Invoke the doc-lifecycle:fixing-doc-bloat
-skill and treat EXACTLY the record IDs below as the human-approved subset of
-the report at {report} — this list is your entire mandate; apply nothing
-else, and never re-audit or widen scope.
+You are a headless apply executor. Treat EXACTLY the record IDs below as this
+run's entire mandate over the report at {report} — apply nothing else, and
+never re-audit or widen scope. This run holds no approval-set authority
+(doc-lifecycle:fixing-docs's mint-approval / applier flow needs one), so you
+edit and commit directly instead; the group's own commits, the merge job's
+path authorization, and the draft PR review are this run's confinement.
 
 Group {id}:
 {record_lines}
 
-Apply each record per the skill's routing table (DISTILL records dispatch the
-doc-lifecycle:doc-distiller agent; it stages, you commit). Make exactly one
-commit per applied record, in the order listed, message
-"docs: bloat distill <id> — <doc>". A record you cannot apply is skipped or
-failed with a stated reason — never a stopper for its siblings.
+Apply each non-DISTILL record per doc-lifecycle:fixing-docs's remedy table,
+placing its drafted text byte-verbatim. For a DISTILL record, dispatch the
+doc-lifecycle:doc-distiller agent with that one record, its artifact path,
+its evidence, and the report path — it returns edit-plan operations, never
+files, so write and stage each one yourself exactly as it specifies
+(create-document as a new file, retire-document as its removal, a positioned
+edit at the span it names), and carry any residue it reports as unplaceable
+into your group result rather than landing it. Make exactly one commit per
+applied record, in the order listed, message "docs: bloat distill <id> —
+<doc>". A record you cannot apply is skipped or failed with a stated reason —
+never a stopper for its siblings.
 
 Then write the group result object {{"group": "{id}", "applied": [ids],
 "skipped": [{{"id": ..., "reason": ...}}], "failed": [{{"id": ...,

@@ -1,8 +1,9 @@
 # doc-bloat — weekly documentation bloat sweep (plan → chunked detect → assemble → propose).
 # Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill; re-run that skill to
 # upgrade this file. Sibling to doc-sync.yml (drift): bloat is detect-and-propose only —
-# fixing-doc-bloat applies a human-approved subset, so each lane opens a DRAFT PR and the
-# merge is the approval.
+# fixing-docs applies a human-approved subset — but headlessly, with no approval-set
+# authority to mint, so each lane edits directly and opens a DRAFT PR whose merge is the
+# approval.
 # Orchestration is deterministic: plan-chunks.py plans bounded chunks (no model) with
 # content-addressed ids and per-chunk turn budgets, resuming past any prior run's checkpoint
 # artifacts; each sweep invocation gets its slice verbatim via --emit-prompt; a failed attempt
@@ -301,11 +302,15 @@ jobs:
           plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
           prompt: >-
-            Use the doc-lifecycle:fixing-doc-bloat skill to apply EVERY record in
-            bloat-report.json whose verdict is CUT, CONDENSE, or EXTRACT-AND-MOVE — treat
-            exactly those record IDs as the approved subset, and apply nothing else. Follow
-            the skill's rules exactly. Edit files in place only — never commit, push, or
-            open a PR; the workflow transports your edits.
+            Apply EVERY record in bloat-report.json whose verdict is CUT, CONDENSE, or
+            EXTRACT-AND-MOVE — treat exactly those record IDs as this run's entire mandate,
+            and apply nothing else. Follow doc-lifecycle:fixing-docs's remedy table for each
+            verdict and place its drafted text byte-verbatim — author nothing yourself. This
+            run holds no approval-set authority (fixing-docs's mint-approval / applier flow
+            needs one), so edit files directly with Edit/Write instead; the workflow's
+            read-only permissions and the draft PR review are this run's confinement.
+            Edit files in place only — never commit, push, or open a PR; the workflow
+            transports your edits.
           claude_args: --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
       - name: Export the edit set (artifact only — this job cannot write to the repo)
         run: |

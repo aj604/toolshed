@@ -207,8 +207,12 @@ jobs:
           plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
           plugins: doc-lifecycle@toolshed
           prompt: >-
-            Use the doc-lifecycle:fixing-doc-drift skill to apply the drift report at
-            drift-report.json to this repository's docs. Follow the skill's rules exactly.
+            Apply the drift report at drift-report.json to this repository's docs. Follow
+            doc-lifecycle:fixing-docs's remedy table for STALE/UNVERIFIABLE records and place
+            each record's drafted fix byte-verbatim — author nothing yourself. This run holds
+            no approval-set authority (fixing-docs's mint-approval / applier flow needs one),
+            so edit files directly with Edit/Write instead; the workflow's read-only
+            permissions and the land job's path authorization are this run's confinement.
             Edit files in place only — never commit, push, or open a PR; the workflow
             transports your edits.
           claude_args: --allowedTools "Read,Grep,Glob,Edit,Write,Bash(git *),Bash(python3 *)"
