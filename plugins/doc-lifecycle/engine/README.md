@@ -15,7 +15,7 @@ slices of the re-architecture (issue #57).
 
 | Module | Owns |
 |---|---|
-| `doclifecycle/registry.py` | registry parsing, validation, classification, glob matching, registry digest |
+| `doclifecycle/registry.py` | registry parsing, validation, classification, glob matching, `without_rules()`, registry digest |
 | `doclifecycle/inventory.py` | `build_inventory()`, the closed-world walk, document/inventory digests |
 | `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, `repository_relative_problem()`, the canonical path form and target classes |
 | `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
@@ -1223,12 +1223,20 @@ exempting a document. The precedence is the legacy bloat planner's, and `ANCHOR_
 from `drift.ANCHOR_PREFIX`, so the door and the audit cannot disagree about what marks a document
 narrative.
 
+A document the door cannot read still gets a kind from its location, because refusing a whole
+migration over one unreadable file would block it on something the audit refuses anyway — but it
+is never silent: `migration-unreadable-document` names the path in `notes`, so the classification
+is reviewed rather than trusted.
+
 Roots come from evidence the consumer wrote, not from a filesystem sweep: every markdown file at
 the top of the repository, the directory holding `docs/doc-scope.md`, and any directory the
 waivers, `policy_scope`, or audit-scope `include` entries reach into. Exclusions are deliberately
-not evidence — naming a subtree to keep it out is not a declaration that it is a root. A root
-inside another is dropped, because the registry refuses overlapping roots outright. `--root`
-(repeatable) replaces inference entirely. No inferable root is `migration-no-roots`.
+not evidence — naming a subtree to keep it out is not a declaration that it is a root. Evidence
+is filtered through `paths.repository_relative_problem()`, path safety's one owner, so a waiver
+naming `../elsewhere/x.md` declares no root; a trailing `/` on a directory prefix is repaired
+first, since it is the obvious spelling. A root inside another is dropped, because the registry
+refuses overlapping roots outright. `--root` (repeatable) replaces inference entirely. No
+inferable root is `migration-no-roots`.
 
 `audit-scope.json`'s `exclude` becomes the registry's `exclude`; a planning directory becomes a
 declared set named after it; an `include` entry that is not `.md` is a note, since the draft
@@ -1236,12 +1244,17 @@ declares `.md` only. An audit scope or waivers file that will not parse invalida
 rather than defaulting: the exclusions are the only record of what a consumer kept out, and a
 draft that lost them proposes auditing vendored documentation.
 
-Two things make the draft trustworthy. Every rule carries the `basis` it was inferred from and
-the `documents` it claims, so a wrong rule is traceable to its evidence. And the drafted text is
-run back through `registry.parse()` before it is returned — the review is of glob rules, not of
-whether the file parses — so `--registry-only` on an invalid draft prints nothing at all.
+Three things make the draft trustworthy. Every rule carries the `basis` it was inferred from and
+the `documents` it claims, so a wrong rule is traceable to its evidence. The drafted text is run
+back through `registry.parse()` before it is returned — the review is of glob rules, not of
+whether the file parses — so `--registry-only` on an invalid draft prints nothing at all. And
+every claim is then re-derived through the *parsed* registry: a per-file override is still a
+glob, so a document whose name contains `*` or `?` emits a rule that also claims its neighbours,
+and overrides sort last, so it would win silently. Parsing cannot catch that — the file is
+perfectly well formed — so a rule that classifies something other than what the draft says is
+`migration-draft-inconsistent`, naming the document.
 
-The draft walks the corpus through `registry.unclassified()` and `inventory.walk_root()`, the
+The draft walks the corpus through `registry.without_rules()` and `inventory.walk_root()`, the
 same enumeration `build_inventory()` uses, so the documents a draft proposes rules for are
 exactly the documents the resulting inventory will hold.
 
@@ -1263,27 +1276,35 @@ python3 -m doclifecycle migration-dry-run --repo .
   narrative" is part of what the registry commits the consumer to.
 - **`waivers`** — which acceptances survive the move onto assertion-unit identity. A legacy
   waiver names a file and quotes claim text; the new contract keys a finding to a document and a
-  group of units identified by content digest. So an acceptance re-keys cleanly exactly when its
-  text lands on **one** assertion-capable unit, and needs re-waiving otherwise:
+  group of units identified by content digest. So an acceptance re-keys cleanly when its text
+  lands on determinate assertion-capable units, and needs re-waiving otherwise:
   `waiver-document-not-inventoried`, `waiver-document-carries-no-assertions` (narrative and
   planning documents are never line-verified), `waiver-document-unreadable`,
-  `waiver-claim-not-found`, `waiver-claim-ambiguous`. Each carries the message saying what to do.
+  `waiver-claim-not-found`, `waiver-claim-too-broad`. Each carries the message saying what to do.
   The waivers file is read through `drift.load_waivers()` — the audit's own reader, so a dry run
   cannot promise the audit something else.
-- **`artifacts`** — the three classes of old artifact, each with why it stops here, how to
-  regenerate it, and every instance found. Closed-world over `.github/doc-sync/`: anything there
-  the contract does not carry across and that is not a vendored script is an artifact of the old
-  world, plus `drift-report.json` and `bloat-report.json` at the repository root. Nothing is
-  coerced — a report that predates lineage cannot be given one after the fact.
-- **`preserved`** — the consumer files the contract carries across untouched
-  (`audit-scope.json`, `drift-waivers.json`, `.github/doc-sync-marker`), each with the digest it
-  had when read. `tests/engine/migrate_test.py` compares the whole tree byte for byte before and
-  after every call, refusal paths included.
+- **`artifacts`** — the three classes of old artifact, each stating `carried: false`, why it
+  stops here, how to regenerate it, and every instance found. Closed-world over
+  `.github/doc-sync/`: anything there the contract does not carry across and that is not a
+  vendored script is an artifact of the old world. The repository root is not a directory this
+  contract owns, so there the scan is the named list of working files the legacy workflows write
+  into it (`drift-report.json`, `bloat-report.json`, `manifest.json`, `distill-manifest.json`).
+  Every class reports its disposition whether or not an instance was found — a reader learns that
+  approvals do not survive the move without having to leave one lying around. Nothing is coerced:
+  a report that predates lineage cannot be given one after the fact.
+- **`preserved`** — every consumer file the contract accounts for, with the digest it had when
+  read and what happens to it: `audit-scope.json`, `drift-waivers.json`, and
+  `.github/doc-sync-marker` are `unchanged`; `installed-version` is `set-to-target`, the one
+  consumer file the migration moves. `tests/engine/migrate_test.py` compares the whole tree byte
+  for byte before and after every call, refusal paths included.
 
-A cleanly re-keyed waiver reports the **unit** its acceptance now names, not a finding digest: a
-finding digest also covers the report lineage and the finding code, which are bound when an audit
-runs. Naming them here would be a promise about a run nobody has made; the document-and-unit half
-is the part that has to be stable, and is what "re-keys cleanly" can mean before an audit.
+A re-keyed waiver reports the **units** its acceptance now names and how many (`matched`), not a
+finding digest: a finding digest also covers the report lineage and the finding code, which are
+bound when an audit runs. Naming them here would be a promise about a run nobody has made; the
+document-and-unit half is the part that has to be stable, and is what "re-keys cleanly" can mean
+before an audit. The breadth bound is the audit's own `MAX_WAIVER_UNITS`, not a stricter one:
+calling anything past a single unit ambiguous would report waivers as broken that will keep
+working, overstating the very cost this dry run exists to state accurately.
 
 **Unclassified documents block the upgrade.** Every `unregistered-document` the inventory found
 becomes a `migration-unclassified-document` problem naming the path, and the run is `invalid`

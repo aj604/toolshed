@@ -48,7 +48,9 @@ from .drift import (
     UNREGISTERED_DOCUMENT,
     load_waivers,
 )
+from .drift import MAX_WAIVER_UNITS
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory, walk_root
+from .paths import repository_relative_problem
 from .registry import KINDS
 from .results import STATUS_OK, Invalid, Problem
 from .segment import segment_document
@@ -73,15 +75,34 @@ LEGACY_SOURCES = (
     SCOPE_RECORD_PATH,
 )
 
-# The consumer files the contract carries across untouched. Everything else the
-# legacy state directory holds is an artifact of the old contract, and the door
-# says so rather than leaving a reader to guess which files still mean anything.
-PRESERVED = (AUDIT_SCOPE_PATH, WAIVERS_PATH, MARKER_PATH)
+# What happens to each consumer file the contract carries across. Everything
+# else the legacy state directory holds is an artifact of the old contract, and
+# the door says so rather than leaving a reader to guess which files still mean
+# anything. `installed-version` is here too — it is not left alone, but it is
+# not discarded either, and a table that showed neither would hide the one
+# consumer file the migration does move.
+UNCHANGED = "unchanged"
+SET_TO_TARGET = "set-to-target"
+PRESERVED = (
+    (AUDIT_SCOPE_PATH, UNCHANGED),
+    (WAIVERS_PATH, UNCHANGED),
+    (MARKER_PATH, UNCHANGED),
+    (INSTALLED_VERSION_PATH, SET_TO_TARGET),
+)
+# The files inside the legacy state directory the contract accounts for; the
+# rest of that directory is old-world artifact by the closed-world rule below.
+CARRIED_IN_LEGACY_ROOT = frozenset(
+    path for path, _ in PRESERVED if path.startswith(f"{LEGACY_ROOT}/")
+)
 
-# Reports the legacy workflows write into the working tree. Named here because
-# they are the artifacts most likely to be sitting in a tree at migration time,
-# and the ones a reader is most tempted to keep.
-LEGACY_REPORTS = ("drift-report.json", "bloat-report.json")
+# Working files the legacy workflows write into the repository root. Named
+# rather than swept, because the root is not a directory this contract owns —
+# these are the artifacts most likely to be sitting in a tree at migration
+# time, and the ones a reader is most tempted to keep.
+LEGACY_WORKING_FILES = (
+    "drift-report.json", "bloat-report.json",
+    "manifest.json", "distill-manifest.json",
+)
 
 # Why each artifact class cannot cross the contract boundary, and what to do
 # instead. Regeneration is always cheap; coercion never is, because none of
@@ -122,10 +143,14 @@ ANCHOR_HEAD_LINES = 6
 # Directory names the legacy bloat planner reads as planning artifacts.
 PLANNING_SEGMENTS = ("plans", "specs")
 
-# What a planning document owes, stated for symmetry with the drift
-# obligations: it is out of drift's scope, and this is the reason the audit
-# gives for leaving it out.
+# What a planning document owes. The drift audit has no obligation for it —
+# `KIND_OBLIGATIONS` covers living and narrative only, because a planning
+# document is out of drift's scope — but a migration must still tell a reader
+# what the kind commits them to, so the third row is named here.
 OBLIGATION_LIFECYCLE = "lifecycle"
+# Total over the document kinds, deliberately not a defaulting lookup: a fourth
+# kind must be given an obligation here rather than silently inheriting one.
+OBLIGATION_BY_KIND = {**KIND_OBLIGATIONS, "planning": OBLIGATION_LIFECYCLE}
 
 
 @dataclass(frozen=True)
@@ -157,6 +182,7 @@ class DraftRule:
             "kind": self.kind,
             "set": self.doc_set,
             "basis": self.basis,
+            "override": self.override,
             "documents": list(self.documents),
         }
 
@@ -268,9 +294,17 @@ def _load_audit_scope(repo_root, path):
 
 
 def _top_segment(path):
-    """The first path segment of a repo-relative path, or None if it has one."""
-    head = path.strip().lstrip("./").split("/")[0]
-    return head or None
+    """The first segment of `path`, or None if it is not a path in this repo.
+
+    Path safety has one owner, so a spelling `paths.repository_relative_problem`
+    refuses — absolute, `..`, a backslash separator, a control character — is
+    not evidence of anything and contributes no root. Trimming the string by
+    hand here is how a waiver naming `../elsewhere/x.md` would end up declaring
+    a root outside the repository.
+    """
+    if not isinstance(path, str) or repository_relative_problem(path) is not None:
+        return None
+    return path.split("/")[0] or None
 
 
 def _infer_roots(repo_root, audit_scope, waivers, scope_record):
@@ -296,10 +330,16 @@ def _infer_roots(repo_root, audit_scope, waivers, scope_record):
         ):
             roots.add(name)
 
+    # A trailing `/` is the obvious spelling of a directory prefix, and the
+    # canonical-path rule refuses it, so it is repaired before the check rather
+    # than costing the consumer a root they plainly declared.
+    declared = (
+        [w["file"] for w in waivers]
+        + list(audit_scope.get("policy_scope", []))
+        + list(audit_scope.get("include", []))
+    )
     candidates = [posixpath.dirname(scope_record)]
-    candidates += [_top_segment(w["file"]) for w in waivers]
-    candidates += [_top_segment(p) for p in audit_scope.get("policy_scope", [])]
-    candidates += [_top_segment(p) for p in audit_scope.get("include", [])]
+    candidates += [_top_segment(value.rstrip("/")) for value in declared]
     for candidate in candidates:
         if not candidate:
             continue
@@ -335,25 +375,42 @@ def _anchored(text):
 
 
 def _classify(repo_root, path, policy_scopes):
-    """(kind, basis) for one document, from evidence the consumer already wrote.
+    """(kind, basis, note or None) for one document, from written-down evidence.
 
     Precedence follows the legacy bloat planner's: an anchored document is
     narrative wherever it sits, then a declared policy scope or a planning
     directory makes it planning, and everything else is living. Living last is
     the safe default — it is the kind that owes the most, so a misclassification
     here over-audits rather than quietly exempting a document.
+
+    A document this cannot read still gets a kind, from its location, because
+    refusing the whole draft over one unreadable file would block a migration
+    on something the audit will refuse anyway. But it is never silent: the
+    reader is told which evidence was unavailable, so the classification is
+    reviewed rather than trusted.
     """
-    text, _ = _read(repo_root, path)
+    note = None
+    text, reason = _read(repo_root, path)
+    if reason is not None:
+        note = Note(
+            code="migration-unreadable-document",
+            message=(
+                f"{path} could not be read ({reason}), so its kind is inferred "
+                f"from its location alone — no narrative marker could be "
+                f"checked. Confirm the rule that claims it."
+            ),
+            location=path,
+        )
     if text is not None and _anchored(text):
-        return "narrative", BASIS_NARRATIVE_ANCHOR
+        return "narrative", BASIS_NARRATIVE_ANCHOR, note
     directory = posixpath.dirname(path)
     for prefix in policy_scopes:
         trimmed = prefix.rstrip("/")
         if directory == trimmed or directory.startswith(f"{trimmed}/"):
-            return "planning", BASIS_POLICY_SCOPE
+            return "planning", BASIS_POLICY_SCOPE, note
     if any(segment in PLANNING_SEGMENTS for segment in directory.split("/")):
-        return "planning", BASIS_PLANNING_LOCATION
-    return "living", BASIS_LIVING_DEFAULT
+        return "planning", BASIS_PLANNING_LOCATION, note
+    return "living", BASIS_LIVING_DEFAULT, note
 
 
 def _set_for(directory, basis):
@@ -371,7 +428,9 @@ def _set_for(directory, basis):
 
 
 def _group_rules(documents, extension):
-    """Turn classified documents into glob rules, broad first, overrides after.
+    """(rules, what each rule claims about each document it was written for).
+
+    Turns classified documents into glob rules, broad first, overrides after.
 
     One rule per directory, carrying that directory's dominant classification,
     plus a per-file rule for each document that disagrees with it. Precedence is
@@ -426,9 +485,15 @@ def _group_rules(documents, extension):
                     basis=key[1], documents=(path,), override=True,
                 ))
 
-    return tuple(sorted(
+    rules = tuple(sorted(
         rules, key=lambda r: (r.glob.count("/"), r.override, r.glob)
     ))
+    # What the draft asserts about each document, so the caller can check the
+    # parsed registry actually says it rather than assume the globs behave.
+    claimed = {
+        path: (rule.kind, rule.doc_set) for rule in rules for path in rule.documents
+    }
+    return rules, claimed
 
 
 def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
@@ -468,7 +533,7 @@ def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
 
     exclude = tuple(scope.get("exclude", []))
     extension = registry_mod.DEFAULT_EXTENSIONS[0]
-    walker = registry_mod.unclassified(roots, exclude)
+    walker = registry_mod.without_rules(roots, exclude)
 
     notes = []
     documents = []
@@ -484,7 +549,11 @@ def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
                     location=rel,
                 ))
                 continue
-            kind, basis = _classify(repo_root, rel, scope.get("policy_scope", []))
+            kind, basis, note = _classify(
+                repo_root, rel, scope.get("policy_scope", [])
+            )
+            if note is not None:
+                notes.append(note)
             documents.append((rel, kind, basis))
 
     for pattern in scope.get("include", []):
@@ -500,7 +569,7 @@ def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
             location=audit_scope,
         ))
 
-    rules = _group_rules(documents, extension)
+    rules, claimed = _group_rules(documents, extension)
     sets = sorted({r.doc_set for r in rules if r.doc_set})
     payload = {
         "schema_version": registry_mod.SCHEMA_VERSION,
@@ -521,6 +590,31 @@ def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
     parsed, problems = registry_mod.parse(text, location=registry_path)
     if problems:
         return Invalid(tuple(problems))
+
+    # Nor a draft that classifies something other than what it claims to. Every
+    # rule is a *glob*, including the per-file overrides, so a document whose
+    # name contains `*` or `?` emits a rule that also claims its neighbours —
+    # and overrides sort last, so it would win silently. Re-deriving the
+    # classification through the parsed registry is the only check that catches
+    # it, because parsing cannot: the file is perfectly well formed.
+    inconsistent = []
+    for path, expected in sorted(claimed.items()):
+        winner = parsed.classify(path)
+        actual = (winner.kind, winner.doc_set) if winner else (None, None)
+        if actual != expected:
+            inconsistent.append(Problem(
+                code="migration-draft-inconsistent",
+                message=(
+                    f"the drafted rules classify {path} as {actual[0]}, but it "
+                    f"was inferred as {expected[0]} — a rule's glob is claiming "
+                    f"a document it was not written for, which a `*` or `?` in "
+                    f"a filename does. Rename the file, or write the registry's "
+                    f"rules by hand."
+                ),
+                location=path,
+            ))
+    if inconsistent:
+        return Invalid(tuple(inconsistent))
 
     return Draft(
         status=STATUS_OK,
@@ -555,16 +649,24 @@ class Obligation:
 
 @dataclass(frozen=True)
 class Rekeyed:
-    """A waiver whose acceptance lands on exactly one unit of the new corpus."""
+    """A waiver whose acceptance lands on determinate units of the new corpus.
+
+    `matched` is its blast radius, the same fact the audit's own `waived`
+    annotation reports, so a reader can see whether an acceptance named one
+    claim or swept a document before deciding to keep it.
+    """
 
     file: str
     claim: str
-    unit: str
-    unit_text: str
+    units: Tuple[Tuple[str, str], ...]
 
     def to_dict(self):
-        return {"file": self.file, "claim": self.claim, "unit": self.unit,
-                "unit_text": self.unit_text}
+        return {
+            "file": self.file,
+            "claim": self.claim,
+            "matched": len(self.units),
+            "units": [{"digest": d, "text": t} for d, t in self.units],
+        }
 
 
 @dataclass(frozen=True)
@@ -591,8 +693,31 @@ class ArtifactClass:
     found: Tuple[str, ...]
 
     def to_dict(self):
-        return {"class": self.name, "reason": self.reason,
+        return {"class": self.name, "carried": False, "reason": self.reason,
                 "regenerate": self.regenerate, "found": list(self.found)}
+
+
+@dataclass(frozen=True)
+class Preserved:
+    """One consumer file the contract accounts for, and what happens to it."""
+
+    path: str
+    present: bool
+    digest: Optional[str]
+    disposition: str
+
+    def to_dict(self):
+        return {"path": self.path, "present": self.present,
+                "digest": self.digest, "disposition": self.disposition}
+
+
+def _preserved(repo_root):
+    return tuple(Preserved(
+        path=source.path, present=source.present, digest=source.digest,
+        disposition=disposition,
+    ) for source, (_, disposition) in zip(
+        _sources(repo_root, [path for path, _ in PRESERVED]), PRESERVED
+    ))
 
 
 @dataclass(frozen=True)
@@ -612,7 +737,7 @@ class DryRun:
     rekeyed: Tuple[Rekeyed, ...]
     needs_rewaiving: Tuple[Rewaive, ...]
     artifacts: Tuple[ArtifactClass, ...]
-    preserved: Tuple[Source, ...]
+    preserved: Tuple[Preserved, ...]
     sources: Tuple[Source, ...]
 
     def to_dict(self):
@@ -708,7 +833,7 @@ def _obligations(inventory):
         by_kind[document.kind].append(document.path)
     return tuple(Obligation(
         kind=kind,
-        obligation=KIND_OBLIGATIONS.get(kind, OBLIGATION_LIFECYCLE),
+        obligation=OBLIGATION_BY_KIND[kind],
         documents=tuple(sorted(by_kind[kind])),
         reason=PLANNING_REASON if kind == "planning" else None,
     ) for kind in KINDS)
@@ -719,10 +844,16 @@ def _rekey(repo_root, inventory, waivers, registry_path):
 
     A legacy waiver names a file and quotes claim text; the new contract keys a
     finding to a document and a *group of assertion units*, identified by
-    content digest. An acceptance therefore re-keys cleanly exactly when its
-    quoted text lands on one determinate unit — and needs re-waiving whenever
-    it lands on none, on several, or on a document that no longer carries
-    assertions at all.
+    content digest. An acceptance therefore re-keys cleanly when its quoted
+    text lands on determinate units, and needs re-waiving when it lands on
+    none, on a document that no longer carries assertions, or on more units
+    than the audit itself will accept.
+
+    That last bound is the audit's, not this module's: `drift` annotates a
+    waiver reaching up to `MAX_WAIVER_UNITS` findings and refuses the run past
+    it. Calling anything above one unit "ambiguous" here would report waivers
+    as broken that will in fact keep working, which overstates the very cost
+    this dry run exists to state accurately.
 
     The half of the new identity this can resolve is the document-and-unit
     half; the lineage and finding code that complete a finding digest are bound
@@ -775,15 +906,16 @@ def _rekey(repo_root, inventory, waivers, registry_path):
                 f"edited or removed, so the acceptance names nothing — re-read "
                 f"the document and waive what it says now."
             ))
-        elif len(matched) > 1:
-            blocked(waiver, "waiver-claim-ambiguous", (
+        elif len(matched) > MAX_WAIVER_UNITS:
+            blocked(waiver, "waiver-claim-too-broad", (
                 f"{claim!r} appears in {len(matched)} assertion units of {path}, "
-                f"so it names no one finding to key an acceptance to. Quote more "
-                f"of the line, or write one waiver per unit accepted."
+                f"over the audit's limit of {MAX_WAIVER_UNITS}, so the run it is "
+                f"read into would be refused. Quote more of the line, or write "
+                f"one waiver per claim accepted."
             ))
         else:
             rekeyed.append(Rekeyed(
-                file=path, claim=claim, unit=matched[0][0], unit_text=matched[0][1],
+                file=path, claim=claim, units=tuple(matched),
             ))
     return tuple(rekeyed), tuple(stuck)
 
@@ -810,19 +942,24 @@ def _artifacts(repo_root):
     known filenames, anything in it that the contract does not carry across and
     that is not a vendored script is an artifact of the old world.
     Subdirectories are left alone — a vendored engine tree is wiring, not state.
-    The two report names the legacy workflows write into the working tree are
-    checked at the repository root as well.
+    The repository root is not a directory this contract owns, so there the
+    scan is the named list of files the legacy workflows write into it.
+
+    Every class reports `carried: false` whether or not an instance was found:
+    the disposition is the contract, and a reader must be able to see that
+    approvals do not survive the move without having to leave one lying around
+    to be told so.
     """
     found = {name: [] for name in ARTIFACT_CLASSES}
-    for name in LEGACY_REPORTS:
+    for name in LEGACY_WORKING_FILES:
         if os.path.isfile(os.path.join(repo_root, name)):
-            found["report"].append(name)
+            found[_artifact_class(name)].append(name)
 
     legacy = os.path.join(repo_root, LEGACY_ROOT)
     if os.path.isdir(legacy):
         for name in sorted(os.listdir(legacy)):
             rel = f"{LEGACY_ROOT}/{name}"
-            if rel in PRESERVED or rel == INSTALLED_VERSION_PATH:
+            if rel in CARRIED_IN_LEGACY_ROOT:
                 continue
             if name.endswith(".py") or not os.path.isfile(
                 os.path.join(legacy, name)
@@ -888,6 +1025,6 @@ def dry_run_migration(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
         rekeyed=rekeyed,
         needs_rewaiving=stuck,
         artifacts=_artifacts(repo_root),
-        preserved=_sources(repo_root, PRESERVED),
+        preserved=_preserved(repo_root),
         sources=_sources(repo_root, LEGACY_SOURCES),
     )

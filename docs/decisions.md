@@ -21,11 +21,19 @@
   Living last is the safe default: it owes the most, so a wrong guess over-audits rather than
   quietly exempting a document.
 - Decided (a dry run resolves the half of finding identity it can): a legacy waiver re-keys
-  cleanly when its quoted text lands on exactly one assertion-capable unit; the reported key is
-  the **unit digest**, not a finding digest. A finding digest also covers report lineage and the
-  finding code, both bound when an audit runs — emitting one here would be a promise about a run
-  nobody has made. Five named reasons cover the rest (not inventoried, carries no assertions,
-  unreadable, claim not found, claim ambiguous), each with what to do.
+  cleanly when its quoted text lands on determinate assertion-capable units; the reported key is
+  the **unit digest** (plural, with the `matched` count), not a finding digest. A finding digest
+  also covers report lineage and the finding code, both bound when an audit runs — emitting one
+  here would be a promise about a run nobody has made. The breadth bound is the audit's own
+  `MAX_WAIVER_UNITS`, not a stricter one: calling anything past a single unit ambiguous would
+  report waivers as broken that will keep working, overstating the cost this dry run exists to
+  state accurately. Five named reasons cover the rest (not inventoried, carries no assertions,
+  unreadable, claim not found, claim too broad), each with what to do.
+- Decided (the draft's claims are re-derived, not assumed): a per-file override is still a glob,
+  so a document named with `*` or `?` emits a rule that also claims its neighbours — and
+  overrides sort last, so it wins silently. `registry.parse()` cannot catch it (the file is well
+  formed), so every claim is re-checked through the parsed registry and a mismatch is
+  `migration-draft-inconsistent`.
 - Decided (old artifacts are rejected, never coerced): closed-world over `.github/doc-sync/` —
   anything the contract does not carry across and that is not a vendored script is an artifact
   of the old world — plus the two report names the legacy workflows write at the repo root. A
@@ -41,9 +49,15 @@
   a reviewed file; the dogfood migration itself is #75.
 - Rejected: an `unclassified` kind or bucket for documents no rule claims. A bucket is how a
   corpus quietly stops being audited — the paths are named and the upgrade stops.
-- Rejected: a second corpus walk inside the door. `registry.unclassified()` + the now-public
+- Rejected: a second corpus walk inside the door. `registry.without_rules()` + the now-public
   `inventory.walk_root()` mean the documents a draft proposes rules for are exactly the ones the
-  resulting inventory holds. `drift.load_waivers()` was made public for the same reason.
+  resulting inventory holds. `drift.load_waivers()` was made public for the same reason, and
+  root evidence goes through `paths.repository_relative_problem()` rather than hand-trimmed
+  strings, since path safety already has one owner.
+- Rejected: a registry of version-keyed migration steps. There is exactly one migration — every
+  pre-registry install looks alike, because none of them had a registry — so a step table would
+  be structure for a need that does not exist yet. The contract is named and the versions it
+  spans are reported; the second migration is what earns the table.
 
 ## 2026-07-26 — engine package + registry-driven closed-world inventory (#57 stage 1, #60)
 - Evidence: issue #57's distilled-decisions comment (2026-07-26) commits to "one stdlib-only

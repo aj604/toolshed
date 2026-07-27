@@ -172,8 +172,8 @@ def _digest(roots, exclude, sets, extensions, rules):
     })
 
 
-def unclassified(roots, exclude=(), extensions=DEFAULT_EXTENSIONS):
-    """A registry that says where documents are and classifies none of them.
+def without_rules(roots, exclude=(), extensions=DEFAULT_EXTENSIONS):
+    """A registry that says where documents are and carries no rules at all.
 
     The migration door has to walk a corpus before any rule exists to classify
     it. Handing it the same `Registry` shape a parsed file produces is what

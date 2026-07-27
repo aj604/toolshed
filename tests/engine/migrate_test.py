@@ -153,6 +153,7 @@ class DraftRegistryTest(RepoTestCase):
         )
         self.assertEqual(by_glob["docs/plans/*.md"]["basis"], "planning-location")
         self.assertEqual(by_glob["docs/*.md"]["basis"], "living-default")
+        self.assertFalse(by_glob["docs/*.md"]["override"])
 
     def test_records_which_legacy_sources_it_read(self):
         _, draft = self.draft()
@@ -175,6 +176,51 @@ class DraftRegistryTest(RepoTestCase):
                 ("docs/plans/*.md", "planning"),
             ],
         )
+
+    def test_a_dot_directory_is_not_mangled_into_a_different_root(self):
+        _, draft = self.draft(legacy_consumer({
+            ".docs/guide.md": "# Guide\n\nRun the migration first.\n",
+            ".github/doc-sync/drift-waivers.json": json.dumps({"waivers": [
+                {"file": ".docs/guide.md", "claim": "Run the migration first"},
+            ]}),
+        }))
+        self.assertEqual(draft.to_dict()["registry"]["roots"],
+                         [".docs", "README.md", "docs"])
+
+    def test_an_unsafe_waiver_path_is_not_read_as_root_evidence(self):
+        root = self.repo({
+            "elsewhere/notes.md": "# Notes\n\nOutside any root.\n",
+            ".github/doc-sync/drift-waivers.json": json.dumps({"waivers": [
+                {"file": "../elsewhere/notes.md", "claim": "Outside any root"},
+            ]}),
+        })
+        result = draft_registry(root)
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems], ["migration-no-roots"])
+
+    def test_refuses_a_draft_whose_rules_do_not_classify_what_it_claims(self):
+        # `?` is a wildcard to the registry's glob compiler, so a literal
+        # override rule for this file would also claim `docs/faqs.md` — and
+        # overrides sort last, so it would silently win.
+        _, _ = self.draft()  # the uniform corpus still drafts fine
+        root = self.repo(legacy_consumer({
+            "docs/faq?.md": "# FAQ\n\n> As of 2026-01-07 (src/billing.py)\n",
+            "docs/faqs.md": "# FAQs\n\nBilling questions land in the ledger.\n",
+        }))
+        result = draft_registry(root)
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems],
+                         ["migration-draft-inconsistent"])
+        self.assertIn("docs/faqs.md", result.problems[0].message)
+
+    def test_notes_a_document_it_cannot_read_rather_than_guessing_its_kind(self):
+        root = self.repo(legacy_consumer())
+        with open(os.path.join(root, "docs/binary.md"), "wb") as fh:
+            fh.write(b"# Broken\n\n\xff\xfe not utf-8\n")
+        draft = draft_registry(root)
+        self.assertNotIsInstance(draft, Invalid, getattr(draft, "problems", None))
+        notes = {n["location"]: n for n in draft.to_dict()["notes"]}
+        self.assertEqual(notes["docs/binary.md"]["code"], "migration-unreadable-document")
 
     def test_an_override_sorts_after_its_directory_rule_whatever_it_is_called(self):
         # Precedence is rule order, and a filename sorting before `*` would put
@@ -238,8 +284,9 @@ class DryRunTest(RepoTestCase):
         rekeyed = payload["waivers"]["rekeyed"]
         self.assertEqual(len(rekeyed), 1)
         self.assertEqual(rekeyed[0]["file"], "docs/architecture.md")
-        self.assertEqual(len(rekeyed[0]["unit"]), 64)
-        self.assertIn("flat 2% rate", rekeyed[0]["unit_text"])
+        self.assertEqual(rekeyed[0]["matched"], 1)
+        self.assertEqual(len(rekeyed[0]["units"][0]["digest"]), 64)
+        self.assertIn("flat 2% rate", rekeyed[0]["units"][0]["text"])
 
     def test_a_waiver_on_a_document_outside_the_corpus_needs_re_waiving(self):
         root = self.migrated(legacy_consumer({
@@ -261,7 +308,10 @@ class DryRunTest(RepoTestCase):
         stuck = self.run_dry(root)["waivers"]["needs_rewaiving"]
         self.assertEqual([w["code"] for w in stuck], ["waiver-claim-not-found"])
 
-    def test_a_waiver_matching_two_units_needs_re_waiving(self):
+    def test_a_waiver_matching_two_units_re_keys_onto_both(self):
+        # The audit this migrates *to* accepts a waiver reaching several units
+        # and reports how far it reached, so a dry run that called this
+        # ambiguous would overstate the cost of migrating.
         root = self.migrated(legacy_consumer({
             "docs/architecture.md": (
                 "# Architecture\n\n"
@@ -273,8 +323,27 @@ class DryRunTest(RepoTestCase):
                  "claim": "settles invoices at a flat rate"},
             ]}),
         }))
+        payload = self.run_dry(root)["waivers"]
+        self.assertEqual(payload["needs_rewaiving"], [])
+        self.assertEqual(payload["rekeyed"][0]["matched"], 2)
+        self.assertEqual(len(payload["rekeyed"][0]["units"]), 2)
+
+    def test_a_waiver_reaching_past_the_audits_limit_needs_re_waiving(self):
+        from doclifecycle.drift import MAX_WAIVER_UNITS
+
+        sentences = " ".join(
+            f"Release {i} settles invoices at a flat rate."
+            for i in range(MAX_WAIVER_UNITS + 1)
+        )
+        root = self.migrated(legacy_consumer({
+            "docs/architecture.md": f"# Architecture\n\n{sentences}\n",
+            ".github/doc-sync/drift-waivers.json": json.dumps({"waivers": [
+                {"file": "docs/architecture.md",
+                 "claim": "settles invoices at a flat rate"},
+            ]}),
+        }))
         stuck = self.run_dry(root)["waivers"]["needs_rewaiving"]
-        self.assertEqual([w["code"] for w in stuck], ["waiver-claim-ambiguous"])
+        self.assertEqual([w["code"] for w in stuck], ["waiver-claim-too-broad"])
 
     def test_a_waiver_on_a_narrative_document_needs_re_waiving(self):
         root = self.migrated(legacy_consumer({
@@ -319,6 +388,22 @@ class DryRunTest(RepoTestCase):
                          [".github/doc-sync/approval-set.json"])
         self.assertEqual(classes["cache"]["found"],
                          [".github/doc-sync/last-stales.json"])
+
+    def test_rejects_the_bloat_lanes_working_files(self):
+        root = self.migrated(legacy_consumer({
+            "manifest.json": '{"pending": []}\n',
+            "distill-manifest.json": '{"pending": []}\n',
+        }))
+        classes = {a["class"]: a for a in self.run_dry(root)["artifacts"]}
+        self.assertEqual(classes["cache"]["found"],
+                         ["distill-manifest.json", "manifest.json"])
+
+    def test_every_artifact_class_says_it_is_not_carried_across(self):
+        payload = self.run_dry(self.migrated())
+        self.assertEqual(sorted(a["class"] for a in payload["artifacts"]),
+                         ["approval", "cache", "report"])
+        self.assertTrue(all(a["carried"] is False for a in payload["artifacts"]))
+        self.assertTrue(all(a["regenerate"] for a in payload["artifacts"]))
 
     def test_a_vendored_script_is_not_mistaken_for_an_uncarried_artifact(self):
         root = self.migrated(legacy_consumer({
@@ -366,10 +451,18 @@ class DryRunTest(RepoTestCase):
             sorted(preserved),
             [".github/doc-sync-marker",
              ".github/doc-sync/audit-scope.json",
-             ".github/doc-sync/drift-waivers.json"],
+             ".github/doc-sync/drift-waivers.json",
+             ".github/doc-sync/installed-version"],
         )
         self.assertTrue(all(p["present"] for p in preserved.values()))
         self.assertEqual(len(preserved[".github/doc-sync-marker"]["digest"]), 64)
+        self.assertEqual(preserved[".github/doc-sync-marker"]["disposition"],
+                         "unchanged")
+        # The one consumer file the migration does move, and it says so.
+        self.assertEqual(
+            preserved[".github/doc-sync/installed-version"]["disposition"],
+            "set-to-target",
+        )
 
     def test_writes_nothing_to_the_consumer(self):
         root = self.migrated()

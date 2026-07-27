@@ -152,6 +152,9 @@ def _parser():
         prog="python3 -m doclifecycle",
         description="doc-lifecycle engine commands.",
     )
+    # Every command answers this, so `main` never has to ask whether it was
+    # defined: only `migration-draft` offers the flag that turns it on.
+    parser.set_defaults(registry_only=False)
     commands = parser.add_subparsers(dest="command", required=True)
 
     inventory = commands.add_parser(
@@ -416,7 +419,7 @@ def _explain(result):
 def main(argv=None):
     args = _parser().parse_args(argv)
     result = args.run(args)
-    if getattr(args, "registry_only", False):
+    if args.registry_only:
         # The registry file's exact bytes, so the door's output can be
         # redirected to the path the human reviews. An invalid draft prints
         # nothing, for the same reason an invalid report renders nothing.
