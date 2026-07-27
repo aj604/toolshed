@@ -6,11 +6,16 @@ a run that cannot read the repository state must not certify a report as fresh.
 """
 
 import os
+import re
 import subprocess
 
 from .results import Problem
 
 SCHEMES = ("https://", "http://", "ssh://", "git://", "git+ssh://", "file://")
+
+# A fully resolved git object id — what `resolve_commit` returns, sha-1 or
+# sha-256. Anything a caller has not put through that gate is not one.
+OBJECT_ID = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
 
 # Environment variables that redirect git at a different repository than the one
 # named on the command line. Scrubbed, not trusted: a composite action or an
@@ -159,8 +164,11 @@ def resolve_commit(repo_root, revision):
     before the audit declares a scope derived from it — a scope derived from a
     revision nobody has is not a scope.
     """
+    if not isinstance(revision, str):
+        return None, _problem(repo_root, f"{revision!r} is not a revision")
     resolved, detail = _git(
-        repo_root, "rev-parse", "--verify", f"{revision}^{{commit}}"
+        repo_root, "rev-parse", "--verify", "--end-of-options",
+        f"{revision}^{{commit}}"
     )
     if detail is not None:
         return None, _problem(repo_root, f"{revision} is not a commit in it")
@@ -173,9 +181,23 @@ def changed_paths(repo_root, since):
     Repository-relative, sorted, including deleted paths — a document citing a
     file that a commit removed is exactly the case a diff-scoped audit must
     still reach.
+
+    `since` must already be a resolved object id, because it reaches git in
+    flag position: an unresolved revision spelled `--output=PWNED` is read by
+    `git diff` as an option, and this read-only module would write a file. The
+    gate is the check, not the separators — a trailing `--` only says where the
+    pathspecs start, and by then the option has already been parsed. Put a
+    revision through `resolve_commit` first; that is what makes it one.
     """
+    if not (isinstance(since, str) and OBJECT_ID.match(since)):
+        return None, _problem(
+            repo_root,
+            f"{since!r} is not a resolved commit id — a diff baseline reaches "
+            f"git where an option would, so it must come from resolve_commit "
+            f"rather than from whatever a caller was handed",
+        )
     out, detail = _git(repo_root, "diff", "--name-only", "--no-renames",
-                       f"{since}..HEAD")
+                       "--end-of-options", f"{since}..HEAD", "--")
     if detail is not None:
         return None, _problem(repo_root, detail)
     return tuple(sorted(line for line in out.splitlines() if line.strip())), None

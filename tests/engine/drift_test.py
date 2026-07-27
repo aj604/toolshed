@@ -918,6 +918,406 @@ class EvidencePointers(DriftRepoTestCase):
         self.assertEqual(before.digest, after.digest)
 
 
+class TheEvidenceBoundary(DriftRepoTestCase):
+    """A pointer is checked as a path before it is matched against the boundary.
+
+    The boundary is a glob, and a glob is a string match: `src/**` matches
+    `src/../../../etc/passwd` exactly as happily as it matches `src/fees.py`.
+    So `paths.py` — the single owner of path safety — decides what a
+    repository-relative path is, and only then does the boundary decide whether
+    it is inside one.
+    """
+
+    def gap_reason(self, root, source, **kwargs):
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root, evidence=evidence(source=source))
+        ), **kwargs)
+        self.assertEqual(report.status, STATE_PARTIAL, report.to_dict())
+        return report.incomplete[0].reason
+
+    def test_a_traversal_spelling_does_not_walk_through_the_boundary(self):
+        """The reviewer's probe on PR #87: with a boundary of `src/**`, a
+        `source` of `src/../../../../../../etc/passwd` was accepted into the
+        report as a finding's evidence pointer, while the plain absolute
+        spelling was blocked."""
+        root = self.drift_repo()
+
+        reason = self.gap_reason(root, "src/../../../../../../etc/passwd",
+                                 evidence_sources=("src/**",))
+
+        self.assertIn("drift-verdict-invalid-evidence", reason)
+
+    def test_no_unsafe_spelling_of_a_pointer_is_accepted(self):
+        root = self.drift_repo()
+        unsafe = {
+            "traversal": "src/../../../../../../etc/passwd",
+            "absolute": "/etc/passwd",
+            "home relative": "~/.ssh/id_rsa",
+            "doubled separator": "src//fees.py",
+            "dot component": "./src/fees.py",
+            "trailing separator": "src/fees.py/",
+            "windows separator": "src\\fees.py",
+            "leading dash": "-rf/fees.py",
+            "control character": "src/fees.py\x00",
+            "empty": "   ",
+        }
+
+        for name, source in unsafe.items():
+            with self.subTest(spelling=name):
+                self.assertIn("drift-verdict-invalid-evidence",
+                              self.gap_reason(root, source))
+
+    def test_the_refusal_names_which_rule_the_spelling_broke(self):
+        """`paths.py` diagnoses, drift reports: a lane that must re-point its
+        evidence should not have to guess what was wrong with it."""
+        root = self.drift_repo()
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root, evidence=evidence(source="src/../etc"))
+        ))
+
+        problems = report.incomplete[0].reason
+        self.assertIn("drift-verdict-invalid-evidence", problems)
+
+    def test_a_canonical_pointer_inside_the_boundary_is_accepted(self):
+        root = self.drift_repo()
+
+        report = self.audit(root, evidence_sources=("src/**",),
+                            verdicts=self.verdicts_for(root, self.verdict(root)))
+
+        self.assertEqual(report.status, STATE_FINDINGS)
+        self.assertEqual(report.records[0].extra["evidence"]["source"], SOURCE)
+
+    def test_a_pointer_at_a_file_a_commit_deleted_is_still_a_pointer(self):
+        """Existence is deliberately not part of the check: a claim about a
+        file that is gone is exactly what a STALE finding reports."""
+        root = self.drift_repo()
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root, evidence=evidence(source="src/removed.py"))
+        ))
+
+        self.assertEqual(report.status, STATE_FINDINGS)
+
+
+class RecordedCoverage(DriftRepoTestCase):
+    """VERIFIED coverage and the assertion classes, recorded rather than dropped.
+
+    The spec says the model "only classifies units ... and renders verdicts,
+    recorded in the report as reviewable data". Validating both and then
+    discarding them leaves positive coverage resting on an absence: a document
+    with no finding and no gap is indistinguishable from one nobody looked at.
+    """
+
+    def verified_report(self, root, **kwargs):
+        """A living document whose one claim was checked and holds."""
+        return self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root, verdict="VERIFIED", fix=None)
+        ), **kwargs)
+
+    def coverage(self, report, path=LIVING):
+        return next(e.detail for e in report.examined if e.scope == path)
+
+    def test_a_clean_document_is_recorded_as_examined(self):
+        """The reviewer's probe on PR #87: on a document where every unit was
+        classified and the factual unit was VERIFIED, `assertion_class` did not
+        appear anywhere in the payload and the document was simply absent."""
+        root = self.drift_repo()
+
+        report = self.verified_report(root)
+
+        self.assertEqual(report.status, STATE_CLEAN)
+        self.assertIn(LIVING, [e.scope for e in report.examined])
+
+    def test_recorded_coverage_counts_the_classes_the_model_assigned(self):
+        root = self.drift_repo()
+
+        detail = self.coverage(self.verified_report(root))
+
+        self.assertEqual(detail["classes"], {FACTUAL: 1})
+
+    def test_recorded_coverage_counts_the_verdicts_reached(self):
+        root = self.drift_repo()
+
+        detail = self.coverage(self.verified_report(root))
+
+        self.assertEqual(detail["verdicts"], {"VERIFIED": 1})
+
+    def test_a_verified_unit_keeps_the_evidence_that_backed_it(self):
+        """Evidence is mandatory for VERIFIED precisely so it can be checked;
+        validating it and dropping it makes the requirement decorative."""
+        root = self.drift_repo()
+
+        verified = self.coverage(self.verified_report(root))["verified"]
+
+        self.assertEqual(len(verified), 1)
+        self.assertEqual(verified[0]["evidence"]["source"], SOURCE)
+        self.assertEqual(verified[0]["location"], f"{LIVING}:3")
+        self.assertEqual(verified[0]["assertion_class"], FACTUAL)
+
+    def test_a_verified_unit_does_not_become_a_finding(self):
+        root = self.drift_repo()
+
+        report = self.verified_report(root)
+
+        self.assertEqual(report.records, ())
+
+    def test_the_classes_of_unjudged_units_are_recorded_too(self):
+        """A unit that owed no verdict was still classified, and the class is
+        the answer — it is what says nobody was asked to judge it."""
+        root = self.drift_repo(**{MIXED: MIXED_TEXT})
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root,
+            self.unit_entry(root, MIXED, MIXED_CONNECTIVE, NON_ASSERTIVE),
+            self.unit_entry(root, MIXED, MIXED_RATIONALE, RATIONALE),
+            self.unit_entry(root, MIXED, MIXED_NORMATIVE, NORMATIVE),
+            path=MIXED,
+        ))
+
+        self.assertEqual(self.coverage(report, MIXED)["classes"],
+                         {NON_ASSERTIVE: 1, NORMATIVE: 1, RATIONALE: 1})
+
+    def test_a_narrative_document_records_the_anchor_it_was_checked_against(self):
+        """A narrative document that passes produces no record either, and
+        "the anchor was read and it was honestly dated" is a different fact
+        from "nobody looked"."""
+        root = self.drift_repo()
+
+        report = self.verified_report(root)
+
+        self.assertEqual(self.coverage(report, NARRATIVE),
+                         {"obligation": OBLIGATION_ANCHOR, "anchor": "dated",
+                          "as_of": "2026-01-01", "references": []})
+
+    def test_a_document_that_was_not_examined_records_no_coverage(self):
+        """Exactly one of the two: a report saying both would describe two
+        different runs."""
+        root = self.drift_repo()
+
+        report = self.audit(root, verdicts={"documents": [
+            {"path": LIVING, "status": "failed", "reason": "the lane died"},
+        ]})
+
+        self.assertEqual(report.status, STATE_PARTIAL)
+        self.assertNotIn(LIVING, [e.scope for e in report.examined])
+        self.assertEqual([g.scope for g in report.incomplete], [LIVING])
+
+    def test_recorded_coverage_is_part_of_the_reports_identity(self):
+        """Two runs finding nothing, one having verified a claim and one
+        having declared it unjudgeable, are not the same report."""
+        root = self.drift_repo()
+        verified = self.verified_report(root)
+        unjudged = self.audit(root, verdicts=self.verdicts_for(
+            root, self.unit_entry(root, LIVING, LIVING_CLAIM, NON_ASSERTIVE)
+        ))
+
+        self.assertEqual(verified.status, unjudged.status)
+        self.assertNotEqual(verified.digest, unjudged.digest)
+
+
+class WaiverBreadth(DriftRepoTestCase):
+    """A waiver is exactly as broad as the text it quotes — so bound the text.
+
+    Containment is the right matcher: a human quotes what they read on a line,
+    and a unit is the sentence that line sits in. The unstated half was that
+    nothing bounded the fragment and the report never said how far one reached.
+    """
+
+    def repo_with(self, claim, documents=1):
+        """A repository whose living documents all share one sentence."""
+        changes = {
+            f"docs/shared-{i}.md": f"# S{i}\n\n{UNRELATED_CLAIM}\n"
+            for i in range(documents)
+        }
+        changes[WAIVERS] = json.dumps({"waivers": [
+            {"file": "docs/shared-0.md", "claim": claim},
+        ]})
+        return self.drift_repo(**changes)
+
+    def unverifiable(self, root, path, texts):
+        entries = [
+            self.verdict(root, path=path, text=text, verdict="UNVERIFIABLE",
+                         fix=None, evidence={"observed": "nothing checkable"})
+            for text in texts
+        ]
+        return self.audit(root, waivers=WAIVERS,
+                          verdicts=self.verdicts_for(root, *entries, path=path))
+
+    def test_a_one_character_waiver_is_refused(self):
+        """The reviewer's probe on PR #87: `{"file": ..., "claim": "e"}` waived
+        every assertion-bearing record in the file."""
+        root = self.repo_with("e")
+
+        result = self.unverifiable(root, "docs/shared-0.md", [UNRELATED_CLAIM])
+
+        self.assertEqual(codes(result), ["drift-waivers-invalid"])
+
+    def test_no_fragment_below_the_minimum_is_accepted(self):
+        for claim in ("e", "a", "the", "fee rate", "within one"):
+            with self.subTest(claim=claim):
+                root = self.repo_with(claim)
+
+                result = self.unverifiable(root, "docs/shared-0.md",
+                                           [UNRELATED_CLAIM])
+
+                self.assertEqual(codes(result), ["drift-waivers-invalid"])
+
+    def test_the_refusal_says_what_a_short_fragment_would_have_done(self):
+        root = self.repo_with("e")
+
+        result = self.unverifiable(root, "docs/shared-0.md", [UNRELATED_CLAIM])
+
+        self.assertIn("containment", result.problems[0].message)
+
+    def test_a_quoted_fragment_of_a_real_line_is_accepted(self):
+        root = self.repo_with("within one business day")
+
+        report = self.unverifiable(root, "docs/shared-0.md", [UNRELATED_CLAIM])
+
+        self.assertIsInstance(report, Report)
+        self.assertIn("waived", report.records[0].extra)
+
+    def test_an_annotation_states_how_far_its_waiver_reached(self):
+        root = self.repo_with("within one business day")
+
+        report = self.unverifiable(root, "docs/shared-0.md", [UNRELATED_CLAIM])
+
+        self.assertEqual(report.records[0].extra["waived"]["matched"], 1)
+
+    def test_a_waiver_reaching_past_the_cap_refuses_the_run(self):
+        """Both ways this fails are silent: an auto-apply policy that declines
+        waiver-disputed records is switched off document-wide, and one that
+        does not is told a human disputed findings nobody looked at."""
+        sentences = [f"Fact number {i} still holds today." for i in range(12)]
+        root = self.drift_repo(**{
+            "docs/shared-0.md": "# S0\n\n" + "\n\n".join(sentences) + "\n",
+            WAIVERS: json.dumps({"waivers": [
+                {"file": "docs/shared-0.md", "claim": "still holds today"},
+            ]}),
+        })
+
+        result = self.unverifiable(root, "docs/shared-0.md", sentences)
+
+        self.assertEqual(codes(result), ["drift-waiver-too-broad"])
+
+    def test_the_breadth_refusal_names_the_waiver_and_its_reach(self):
+        sentences = [f"Fact number {i} still holds today." for i in range(12)]
+        root = self.drift_repo(**{
+            "docs/shared-0.md": "# S0\n\n" + "\n\n".join(sentences) + "\n",
+            WAIVERS: json.dumps({"waivers": [
+                {"file": "docs/shared-0.md", "claim": "still holds today"},
+            ]}),
+        })
+
+        result = self.unverifiable(root, "docs/shared-0.md", sentences)
+
+        self.assertIn("still holds today", result.problems[0].message)
+        self.assertIn("12", result.problems[0].message)
+
+    def test_a_waiver_at_the_cap_is_still_accepted(self):
+        sentences = [f"Fact number {i} still holds today." for i in range(10)]
+        root = self.drift_repo(**{
+            "docs/shared-0.md": "# S0\n\n" + "\n\n".join(sentences) + "\n",
+            WAIVERS: json.dumps({"waivers": [
+                {"file": "docs/shared-0.md", "claim": "still holds today"},
+            ]}),
+        })
+
+        report = self.unverifiable(root, "docs/shared-0.md", sentences)
+
+        self.assertIsInstance(report, Report)
+        self.assertEqual(report.records[0].extra["waived"]["matched"], 10)
+
+
+class WaiverProvenance(DriftRepoTestCase):
+    """A `waived` annotation names a file; on its own that is unverifiable.
+
+    Excluding waivers from the audit-configuration digest is right — accepting
+    a claim must not expire prior reports or re-key the findings an approval
+    set selects. But the conclusion overshoots if the annotations are then
+    unreproducible: nobody holding the report can tell whether the named file
+    said that. The digest travels *beside* the annotation, not in lineage.
+    """
+
+    DEFAULT = json.dumps({
+        "waivers": [{"file": UNRELATED, "claim": "within one business day"}],
+    })
+
+    def waived(self, contents=None, repo=None):
+        """One UNVERIFIABLE finding, annotated from the waivers file.
+
+        `repo` is reused rather than rebuilt when a test compares two runs: a
+        second repository has a different root commit, so its lineage — and
+        therefore every finding digest under it — legitimately differs, and
+        the comparison would prove nothing about waivers.
+        """
+        if repo is None:
+            repo = self.drift_repo(**{
+                UNRELATED: f"# U\n\n{UNRELATED_CLAIM}\n",
+                WAIVERS: contents if contents is not None else self.DEFAULT,
+            })
+        else:
+            self.write(repo, WAIVERS,
+                       contents if contents is not None else self.DEFAULT)
+        report = self.audit(repo, waivers=WAIVERS, verdicts=self.verdicts_for(
+            repo,
+            self.verdict(repo, path=UNRELATED, text=UNRELATED_CLAIM,
+                         verdict="UNVERIFIABLE", fix=None,
+                         evidence={"observed": "no checkable value named"}),
+            path=UNRELATED,
+        ))
+        self.assertIsInstance(report, Report, getattr(report, "problems", None))
+        return report, repo
+
+    def test_an_annotation_carries_the_digest_of_the_file_it_came_from(self):
+        report, _ = self.waived()
+
+        digest = report.records[0].extra["waived"]["source_digest"]
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
+    def test_the_digest_is_of_the_waivers_file_as_it_was_read(self):
+        one, repo = self.waived()
+        other, _ = self.waived(json.dumps({"waivers": [
+            {"file": UNRELATED, "claim": "within one business day",
+             "reason": "accepted by the platform team"},
+        ]}), repo=repo)
+
+        self.assertNotEqual(
+            one.records[0].extra["waived"]["source_digest"],
+            other.records[0].extra["waived"]["source_digest"],
+        )
+
+    def test_the_waivers_digest_stays_out_of_the_audit_configuration(self):
+        """Detection stays pure. Accepting a claim must not make every report
+        produced before it read as stale."""
+        waived, repo = self.waived()
+        unwaived = self.audit(repo, verdicts=self.verdicts_for(
+            repo,
+            self.verdict(repo, path=UNRELATED, text=UNRELATED_CLAIM,
+                         verdict="UNVERIFIABLE", fix=None,
+                         evidence={"observed": "no checkable value named"}),
+            path=UNRELATED,
+        ))
+
+        self.assertEqual(waived.lineage.audit_config_digest,
+                         unwaived.lineage.audit_config_digest)
+
+    def test_the_waivers_digest_does_not_move_the_findings_identity(self):
+        """Disposition is not identity: which waivers file accepted a claim
+        must not re-key the record an approval set selects."""
+        one, repo = self.waived()
+        other, _ = self.waived(json.dumps({"waivers": [
+            {"file": UNRELATED, "claim": "within one business day",
+             "date": "2026-01-01"},
+        ]}), repo=repo)
+
+        self.assertNotEqual(
+            one.records[0].extra["waived"]["source_digest"],
+            other.records[0].extra["waived"]["source_digest"],
+        )
+        self.assertEqual(one.records[0].digest, other.records[0].digest)
+
+
 class WaiverState(DriftRepoTestCase):
     def waived_repo(self, claim=UNRELATED_CLAIM, file=UNRELATED, **changes):
         changes.setdefault(UNRELATED, f"# U\n\n{UNRELATED_CLAIM}\n")

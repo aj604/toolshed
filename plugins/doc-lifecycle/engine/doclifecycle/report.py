@@ -26,7 +26,7 @@ from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION, PLUGIN_VERSION, RULESET_VERSION
 from . import repository as repository_mod
-from .digest import sha256_canonical
+from .digest import canonical, sha256_canonical
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .results import (
     DECLARABLE_STATES,
@@ -39,7 +39,7 @@ from .results import (
 )
 
 FIELDS = (
-    "status", "schema_version", "lineage", "records", "incomplete",
+    "status", "schema_version", "lineage", "records", "examined", "incomplete",
     "scope", "stale_reasons", "digest",
 )
 REQUIRED_FIELDS = ("status", "schema_version", "lineage")
@@ -96,6 +96,21 @@ COMPARABLE = (
 # Which lineage field produced a given stale reason, so a run can tell whether
 # it actually re-checked a carried verdict or merely failed to look.
 STALE_REASON_FIELDS = {code: field for field, code, _ in COMPARABLE}
+
+# Stale reasons the declared scope produces rather than a lineage field. A run
+# given both a repository and a scope re-checks these; one given no scope did
+# not look, and a carried reason therefore stands.
+SCOPE_DOCUMENT_UNKNOWN = "scope-document-unknown"
+SCOPE_INVENTORY_UNACCOUNTED = "scope-inventory-unaccounted"
+SCOPE_REASON_CODES = (SCOPE_DOCUMENT_UNKNOWN, SCOPE_INVENTORY_UNACCOUNTED)
+
+# How much of the inventory a declared scope accounts for. Closed, because it
+# is the half of a coverage claim a validator can act on: `basis` is prose for
+# a reader, and prose saying "every living and narrative document" is exactly
+# the sentence a scope listing one of six documents can also carry.
+SCOPE_WHOLE_INVENTORY = "whole-inventory"
+SCOPE_DECLARED_ONLY = "declared-only"
+SCOPE_COVERAGES = (SCOPE_WHOLE_INVENTORY, SCOPE_DECLARED_ONLY)
 
 
 @dataclass(frozen=True)
@@ -158,23 +173,55 @@ class Record:
 
 
 @dataclass(frozen=True)
+class ScopeExclusion:
+    """One document the run declared out of scope, and why.
+
+    Enumerated rather than dropped, because it is what makes a coverage claim
+    checkable: a scope that accounts for every document in the inventory —
+    each one either declared or excluded with a reason — is a claim a validator
+    can re-derive against the repository. A scope that only lists what it took
+    in leaves "and nothing else was relevant" as an assertion nobody can test.
+    """
+
+    path: str
+    reason: str
+
+    def to_dict(self):
+        return {"path": self.path, "reason": self.reason}
+
+
+@dataclass(frozen=True)
 class Scope:
     """What the run set out to examine, enumerated.
 
     The result state says whether the *declared* scope completed; only this
     says what was declared. Without it a reader has to infer coverage from the
-    audit mode, and "full" is exactly the claim most worth checking — so a scope
-    names how it was derived (`basis`) and lists every document it covers.
+    audit mode, and "full" is exactly the claim most worth checking.
+
+    So the claim is split in two. `basis` is prose for a reader: how the scope
+    was derived. `coverage` is the token a validator acts on — `whole-inventory`
+    means `documents` and `excluded` together account for every document the
+    registry classifies, and `declared-only` means the scope names part of the
+    inventory and says nothing about the rest. Given a repository,
+    `validate_report` re-derives both against the current inventory; a scope
+    that no longer describes it is `stale`.
     """
 
     basis: str
+    coverage: str
     documents: Tuple[str, ...]
+    excluded: Tuple[ScopeExclusion, ...] = ()
 
     def to_dict(self):
-        return {"basis": self.basis, "documents": list(self.documents)}
+        return {
+            "basis": self.basis,
+            "coverage": self.coverage,
+            "documents": list(self.documents),
+            "excluded": [e.to_dict() for e in self.excluded],
+        }
 
 
-SCOPE_FIELDS = ("basis", "documents")
+SCOPE_FIELDS = ("basis", "coverage", "documents", "excluded")
 
 
 @dataclass(frozen=True)
@@ -186,6 +233,27 @@ class Incomplete:
 
     def to_dict(self):
         return {"scope": self.scope, "reason": self.reason}
+
+
+@dataclass(frozen=True)
+class Examined:
+    """One part of the declared scope the run did examine, and what it saw.
+
+    The mirror of `Incomplete`, and the reason both exist: without it, positive
+    coverage rests entirely on an absence. A document with no finding and no
+    gap is indistinguishable from one whose clean answers were validated and
+    then thrown away, and a report is supposed to be proof of examination.
+
+    The contract owns only `scope`. What was seen travels in `detail`
+    untouched, exactly as a record's fields do — the audit that looked owns
+    what looking meant, and this module does not become a second owner of it.
+    """
+
+    scope: str
+    detail: dict
+
+    def to_dict(self):
+        return {"scope": self.scope, **self.detail}
 
 
 @dataclass(frozen=True)
@@ -221,6 +289,7 @@ class Report:
     digest: str
     stale_reasons: Tuple[StaleReason, ...] = ()
     scope: Optional[Scope] = None
+    examined: Tuple[Examined, ...] = ()
 
     def to_dict(self):
         payload = {
@@ -231,6 +300,11 @@ class Report:
             "incomplete": [i.to_dict() for i in self.incomplete],
             "digest": self.digest,
         }
+        if self.examined:
+            # Omitted when empty, like `scope`: an audit that records no
+            # coverage says nothing about it, and reads exactly as it did
+            # before the field existed.
+            payload["examined"] = [e.to_dict() for e in self.examined]
         if self.scope is not None:
             payload["scope"] = self.scope.to_dict()
         if self.status == STATE_STALE:
@@ -296,7 +370,7 @@ def lineage_digest(lineage):
     })
 
 
-def _content_digest(lineage, records, incomplete, scope=None):
+def _content_digest(lineage, records, incomplete, scope=None, examined=()):
     """The report's identity: what it says, not what a validator concluded.
 
     Excludes the result state and the stale reasons, so the same report keeps
@@ -305,8 +379,13 @@ def _content_digest(lineage, records, incomplete, scope=None):
 
     The declared scope is *in*, because two runs finding the same records over
     different scopes are not the same report — one examined more than the
-    other. A report that declares no scope is digested exactly as it was before
-    the field existed, so adding one re-keys nothing that did not use it.
+    other. Recorded coverage is *in* for the same reason: a run that verified
+    twenty assertions and one that verified two are not the same report even
+    when neither found anything.
+
+    Both are omitted when a report carries neither, so one that says nothing
+    about scope or coverage is digested exactly as it was before the fields
+    existed — adding them re-keys nothing that did not use them.
     """
     payload = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
@@ -316,6 +395,8 @@ def _content_digest(lineage, records, incomplete, scope=None):
     }
     if scope is not None:
         payload["scope"] = scope.to_dict()
+    if examined:
+        payload["examined"] = [e.to_dict() for e in examined]
     return sha256_canonical(payload)
 
 
@@ -548,8 +629,9 @@ def _scope(raw, bad):
     if not isinstance(raw, dict) or set(raw) != set(SCOPE_FIELDS):
         bad("report-invalid-scope",
             f"scope must be an object with exactly {list(SCOPE_FIELDS)} — the "
-            f"basis says how the scope was derived, and the documents "
-            f"enumerate it",
+            f"basis says how the scope was derived, the coverage says how much "
+            f"of the inventory it accounts for, and the documents and "
+            f"exclusions enumerate it",
             "scope")
         return None
     ok = True
@@ -558,6 +640,14 @@ def _scope(raw, bad):
             "scope.basis must be a non-empty single-line statement of how the "
             "scope was derived — a scope nobody can re-derive is not checkable",
             "scope.basis")
+        ok = False
+    if raw["coverage"] not in SCOPE_COVERAGES:
+        bad("report-invalid-scope",
+            f"scope.coverage {raw['coverage']!r} is not a coverage claim — it "
+            f"is one of {list(SCOPE_COVERAGES)}, because a validator has to be "
+            f"able to act on how much of the inventory the scope accounts for, "
+            f"and the prose in 'basis' is not something it can act on",
+            "scope.coverage")
         ok = False
     documents = raw["documents"]
     if not isinstance(documents, list):
@@ -583,9 +673,176 @@ def _scope(raw, bad):
                 f"scope.documents[{i}]")
             ok = False
         seen.add(value)
+    excluded = _scope_excluded(raw["excluded"], seen, bad)
+    if excluded is None:
+        ok = False
     if not ok:
         return None
-    return Scope(basis=raw["basis"], documents=tuple(documents))
+    return Scope(
+        basis=raw["basis"], coverage=raw["coverage"],
+        documents=tuple(documents), excluded=tuple(excluded),
+    )
+
+
+def _scope_excluded(raw, declared, bad):
+    """The documents the scope deliberately left out. Returns a list or None.
+
+    A path cannot be both declared and excluded: a scope that says it examined
+    a document and also that it did not is not a scope anyone can act on.
+    """
+    if not isinstance(raw, list):
+        bad("report-invalid-scope",
+            "scope.excluded must be a list of the documents the run declared "
+            "out of scope, each with the reason it was left out",
+            "scope.excluded")
+        return None
+    entries, seen, ok = [], set(), True
+    for i, entry in enumerate(raw):
+        where = f"scope.excluded[{i}]"
+        if not isinstance(entry, dict) or set(entry) != {"path", "reason"}:
+            bad("report-invalid-scope",
+                f"scope.excluded[{i}] must be an object with exactly 'path' "
+                f"and 'reason'",
+                where)
+            ok = False
+            continue
+        if not _printable(entry["path"]) or not _printable(entry["reason"]):
+            bad("report-invalid-scope",
+                f"scope.excluded[{i}] must name a document and why it was left "
+                f"out — an exclusion with no reason is a document quietly "
+                f"dropped, which is what enumerating them prevents",
+                where)
+            ok = False
+            continue
+        path = entry["path"]
+        if path in declared:
+            bad("report-invalid-scope",
+                f"scope.excluded names {path!r}, which scope.documents also "
+                f"declares — a document is examined or it is not",
+                where)
+            ok = False
+        elif path in seen:
+            bad("report-invalid-scope",
+                f"scope.excluded names {path!r} twice — an exclusion is a "
+                f"document, and a repeat makes the accounting disagree with "
+                f"itself",
+                where)
+            ok = False
+        seen.add(path)
+        entries.append(ScopeExclusion(path=path, reason=entry["reason"]))
+    return entries if ok else None
+
+
+def _examined(raw, bad, declared):
+    """Parse the coverage the run recorded. Returns a list of `Examined`.
+
+    `declared` is the scope's document set, or None when no scope was declared.
+    A report cannot claim to have examined something it never said it would
+    look at — that is the same category error as a verdict for an undeclared
+    document, and it is what would let recorded coverage inflate a scope.
+    """
+    if not isinstance(raw, list):
+        bad("report-invalid-shape",
+            "examined must be a list naming what the run did examine",
+            "examined")
+        return None
+    entries, seen, ok = [], set(), True
+    for i, entry in enumerate(raw):
+        where = f"examined[{i}]"
+        if not isinstance(entry, dict) or not _printable(entry.get("scope")):
+            bad("report-invalid-examined",
+                f"examined[{i}] must be an object naming the 'scope' it "
+                f"covers, plus whatever the audit recorded about it",
+                where)
+            ok = False
+            continue
+        scope = entry["scope"]
+        too_deep, nonfinite = _scan(entry)
+        if nonfinite or too_deep:
+            bad("report-invalid-examined",
+                f"examined[{i}] carries a value the report cannot survive "
+                f"(NaN/Infinity, or nesting deeper than {MAX_NESTING} levels)",
+                where)
+            ok = False
+            continue
+        if scope in seen:
+            bad("report-invalid-examined",
+                f"two examined entries cover {scope!r} — which one describes "
+                f"the run is not knowable from here",
+                where)
+            ok = False
+            continue
+        if declared is not None and scope not in declared:
+            bad("report-invalid-examined",
+                f"examined[{i}] covers {scope!r}, which the declared scope does "
+                f"not name — a run cannot record coverage of something it never "
+                f"declared it would examine",
+                where)
+            ok = False
+            continue
+        seen.add(scope)
+        entries.append(Examined(
+            scope=scope,
+            detail={k: v for k, v in entry.items() if k != "scope"},
+        ))
+    return entries if ok else None
+
+
+def _scope_summary(paths, limit=5):
+    """A bounded, one-line, injection-proof rendering of a path list.
+
+    Canonical JSON, because these become stale-reason fields: they are read
+    back by `_printable`, echoed to logs and PR bodies, and a repository path
+    is content this module does not police.
+    """
+    text = canonical(list(paths[:limit]))
+    if len(paths) > limit:
+        text += f" (+{len(paths) - limit} more)"
+    return text
+
+
+def _scope_reasons(scope, inventory_paths):
+    """Every way the declared scope no longer describes the repository.
+
+    `stale`, not `invalid`, and the direction is deliberate. `invalid` is what
+    a payload says about itself, decidable with no repository in hand; this
+    check needs one, and from here a document that was deleted and a document
+    that never existed are the same observation. Both mean the same thing to a
+    reader — the scope claim does not describe this repository, so re-run the
+    audit rather than acting on its coverage — and `stale` is what says that.
+    A forged scope therefore cannot validate fresh, which is the property an
+    approval set binding to a scope needs.
+    """
+    reasons = []
+    named = tuple(scope.documents) + tuple(e.path for e in scope.excluded)
+    unknown = sorted(set(named) - inventory_paths)
+    if unknown:
+        reasons.append(StaleReason(
+            code=SCOPE_DOCUMENT_UNKNOWN,
+            message=(
+                f"the declared scope names {len(unknown)} document(s) the "
+                f"current inventory does not contain — a scope enumerating "
+                f"documents that are not there describes some other repository "
+                f"state, so re-run the audit rather than trusting its coverage"
+            ),
+            reported=_scope_summary(unknown),
+            current=f"{len(inventory_paths)} document(s) in the inventory",
+        ))
+    if scope.coverage == SCOPE_WHOLE_INVENTORY:
+        unaccounted = sorted(inventory_paths - set(named))
+        if unaccounted:
+            reasons.append(StaleReason(
+                code=SCOPE_INVENTORY_UNACCOUNTED,
+                message=(
+                    f"the scope claims {SCOPE_WHOLE_INVENTORY!r} coverage but "
+                    f"leaves {len(unaccounted)} document(s) neither declared "
+                    f"nor excluded — a coverage claim is only true if every "
+                    f"document is accounted for one way or the other"
+                ),
+                reported=f"{len(named)} document(s) accounted for",
+                current=_scope_summary(unaccounted),
+            ))
+    return tuple(reasons)
 
 
 def _carried_stale_reasons(raw, bad, status):
@@ -670,6 +927,20 @@ def current_lineage(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
     a freshness check that cannot read the world fails closed rather than
     certifying a report it did not check.
     """
+    current, _, problems = _current_state(
+        repo_root, registry_path, audit_config_digest
+    )
+    return current, problems
+
+
+def _current_state(repo_root, registry_path, audit_config_digest):
+    """(lineage state, inventory or None, problems).
+
+    The whole answer, so the inventory is built once. `current_lineage` is the
+    public half and drops the inventory; `validate_report` also needs it, to
+    re-derive a declared scope against what the repository actually contains,
+    and building it twice would double the cost of every checked report.
+    """
     current, problems = repository_mod.lineage(repo_root)
     current = dict(current)
 
@@ -688,16 +959,16 @@ def current_lineage(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
         current["registry_digest"] = inventory.registry_digest
 
     if problems:
-        return {}, tuple(problems)
+        return {}, None, tuple(problems)
 
     current["ruleset_version"] = RULESET_VERSION
     current["plugin_version"] = PLUGIN_VERSION
     if audit_config_digest is not None:
         current["audit_config_digest"] = audit_config_digest
-    return current, ()
+    return current, inventory, ()
 
 
-def _still_standing(carried, current):
+def _still_standing(carried, current, rechecked=()):
     """Carried stale reasons this run was not in a position to re-check.
 
     Clearing a verdict must be at least as thorough as setting it. A run that
@@ -705,10 +976,16 @@ def _still_standing(carried, current):
     cannot honestly clear a reason that field produced — otherwise a *weaker*
     check would launder a stale report clean. A reason naming a field this
     engine does not compare at all stands for the same reason.
+
+    `rechecked` names the codes this run *did* re-derive by some route other
+    than a lineage field — the scope reasons, which need a declared scope as
+    well as a repository. A run that had both cleared them honestly; one that
+    had only the repository did not look, so they stand.
     """
     return tuple(
         reason for reason in carried
-        if STALE_REASON_FIELDS.get(reason.code) not in current
+        if reason.code not in rechecked
+        and STALE_REASON_FIELDS.get(reason.code) not in current
     )
 
 
@@ -789,6 +1066,10 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     # Optional: a report that declares no scope says nothing about one, and is
     # read exactly as it was before the field existed.
     scope = _scope(payload["scope"], bad) if "scope" in payload else None
+    examined = _examined(
+        payload.get("examined", []), bad,
+        set(scope.documents) if scope is not None else None,
+    )
 
     status = payload.get("status")
     if "status" in payload and status not in CARRIED_STATES:
@@ -820,7 +1101,8 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
         return Invalid(tuple(problems))
 
     records, incomplete, carried = tuple(records), tuple(incomplete), tuple(carried)
-    digest = _content_digest(lineage, records, incomplete, scope)
+    examined = tuple(examined)
+    digest = _content_digest(lineage, records, incomplete, scope, examined)
     declared_digest = payload.get("digest")
     if declared_digest is not None and declared_digest != digest:
         return Invalid((Problem(
@@ -839,30 +1121,42 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
         return Report(
             status=status, lineage=lineage, records=records,
             incomplete=incomplete, digest=digest, stale_reasons=carried,
-            scope=scope,
+            scope=scope, examined=examined,
         )
 
-    current, problems = current_lineage(repo_root, registry_path,
-                                        audit_config_digest)
+    current, inventory, problems = _current_state(repo_root, registry_path,
+                                                  audit_config_digest)
     if problems:
         return Invalid(tuple(problems))
     reasons = _stale_reasons(lineage, current)
+    # The declared scope, re-derived rather than trusted. Shape validation
+    # above proves only that a scope is well-formed; this is what makes it a
+    # claim about *this* repository, which is the whole reason it is in the
+    # digest an approval set binds to.
+    if scope is not None:
+        reasons += _scope_reasons(
+            scope, {document.path for document in inventory.documents}
+        )
     found = {reason.code for reason in reasons}
     reasons += tuple(
-        reason for reason in _still_standing(carried, current)
+        reason for reason in _still_standing(
+            carried, current,
+            rechecked=SCOPE_REASON_CODES if scope is not None else (),
+        )
         if reason.code not in found
     )
     if reasons:
         return Report(
             status=STATE_STALE, lineage=lineage, records=records,
             incomplete=incomplete, digest=digest, stale_reasons=reasons,
-            scope=scope,
+            scope=scope, examined=examined,
         )
     # Every comparable field matches, and every carried reason was re-checked,
     # so the verdict is cleared and the state follows from the content again.
     return Report(
         status=state_from_content(records, incomplete), lineage=lineage,
         records=records, incomplete=incomplete, digest=digest, scope=scope,
+        examined=examined,
     )
 
 

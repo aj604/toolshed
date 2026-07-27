@@ -46,7 +46,7 @@ from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from . import repository as repository_mod
-from .digest import sha256_canonical
+from .digest import sha256_canonical, sha256_file
 from .finding import (
     FACTUAL,
     NON_ASSERTIVE,
@@ -54,8 +54,10 @@ from .finding import (
     record_classifications,
 )
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
+from .paths import repository_relative_problem
 from .registry import compile_glob
 from .report import (
+    SCOPE_WHOLE_INVENTORY,
     EvidenceBoundary,
     Incomplete,
     Lineage,
@@ -156,6 +158,19 @@ LINE_SUFFIX = re.compile(r":\d+$")
 FILE_EXTENSION = re.compile(r"\.[A-Za-z][A-Za-z0-9]{0,5}$")
 
 RECORD_ID = "DRIFT-{:03d}"
+
+# What bounds a waiver. Matching is containment — a waiver quotes the text a
+# human read on a line, and a unit is the sentence that line sits in — so the
+# fragment is the only thing deciding how far the acceptance reaches, and an
+# unbounded fragment is an unbounded acceptance. `"e"` would annotate every
+# assertion in a file; so would any one word.
+#
+# Both directions are guarded, because they fail differently. Too short is a
+# fact about the waiver, knowable when it is read. Too broad is a fact about
+# the run, knowable only after every record is drafted — a twelve-character
+# fragment can still be the most common phrase in a document.
+MIN_WAIVER_CLAIM = 12
+MAX_WAIVER_UNITS = 10
 
 # What a run declares it was permitted to consult when the caller names nothing.
 # Deliberately everything: a boundary must be honest before it is narrow, and a
@@ -378,13 +393,22 @@ def plan_drift_audit(repo_root, mode=MODE_FULL, since=None,
 
 
 def _load_waivers(repo_root, waivers_path):
-    """(waivers, None) or ((), problem). An absent file is simply no waivers.
+    """(waivers, content digest, None) or ((), None, problem).
 
-    A malformed one is not: a typo that silently un-waived everything would
-    defeat the mechanism, so it invalidates the run instead.
+    An absent file is simply no waivers. A malformed one is not: a typo that
+    silently un-waived everything would defeat the mechanism, so it invalidates
+    the run instead.
+
+    The digest is of the file's bytes, and it travels on every annotation the
+    file produces. Without it a `waived` block names a path and nothing else,
+    so nobody holding the report can tell whether the file said that — and the
+    annotations are the one part of a report that is not otherwise reproducible
+    from the repository. It is deliberately not in the audit-configuration
+    digest: that is what freshness compares, and accepting a claim must not
+    expire a prior report or re-key the findings an approval set selects.
     """
     if waivers_path is None:
-        return (), None
+        return (), None, None
     absolute = os.path.join(repo_root, waivers_path)
 
     def bad(detail):
@@ -400,25 +424,34 @@ def _load_waivers(repo_root, waivers_path):
         )
 
     if not os.path.exists(absolute):
-        return (), None
+        return (), None, None
     try:
         with open(absolute, encoding="utf-8") as fh:
             payload = json.load(fh)
+        digest = sha256_file(absolute)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return (), bad(str(exc))
+        return (), None, bad(str(exc))
     if not isinstance(payload, dict) or not isinstance(
         payload.get("waivers"), list
     ):
-        return (), bad("it must be an object carrying a 'waivers' array")
+        return (), None, bad("it must be an object carrying a 'waivers' array")
     waivers = []
     for i, entry in enumerate(payload["waivers"]):
         if not isinstance(entry, dict) or not _one_line(entry.get("file")) or (
             not _one_line(entry.get("claim"))
         ):
-            return (), bad(f"waivers[{i}] needs a 'file' and the 'claim' text "
-                           f"it accepts")
+            return (), None, bad(f"waivers[{i}] needs a 'file' and the 'claim' "
+                                 f"text it accepts")
+        if len(entry["claim"].strip()) < MIN_WAIVER_CLAIM:
+            return (), None, bad(
+                f"waivers[{i}] accepts {entry['claim']!r}, shorter than "
+                f"{MIN_WAIVER_CLAIM} characters. A waiver is matched by "
+                f"containment, so a fragment this short accepts every assertion "
+                f"in the file rather than the line a human read — quote enough "
+                f"of the line to name it"
+            )
         waivers.append(entry)
-    return tuple(waivers), None
+    return tuple(waivers), digest, None
 
 
 def _audit_config_digest(boundary):
@@ -437,29 +470,94 @@ def _audit_config_digest(boundary):
     })
 
 
-def _waiver_for(waivers, waivers_path, path, assertion):
-    """The waiver accepting this claim, as record data, or None.
+def _waiver_hits(waivers, specs):
+    """(the waiver index accepting each spec or None, matches per waiver).
 
     Containment rather than equality: a waiver names the claim text a human
     read on a line, and an assertion unit is the whole sentence that line sits
-    in. A waiver is therefore exactly as broad as the text it quotes.
+    in. A waiver is therefore exactly as broad as the text it quotes — which is
+    why how far it actually reached is a fact worth counting.
 
     Reaches every finding code, not only UNVERIFIABLE. On a STALE finding an
     acceptance is a human disputing the verdict, and a dispute a report did not
     show is one an auto-apply policy would act straight through.
+
+    Two passes, because blast radius is a fact about the whole run: no
+    annotation can honestly say how much its waiver accepted until every record
+    is drafted.
     """
-    for waiver in waivers:
-        if waiver["file"] == path and waiver["claim"] in assertion:
-            annotation = {"claim": waiver["claim"], "source": waivers_path}
-            for name in ("reason", "date"):
-                if _one_line(waiver.get(name)):
-                    annotation[name] = waiver[name]
-            return annotation
+    hits, counts = [], [0] * len(waivers)
+    for spec in specs:
+        assertion = spec.extra.get("assertion")
+        index = None
+        if assertion is not None:
+            index = next(
+                (i for i, waiver in enumerate(waivers)
+                 if waiver["file"] == spec.path
+                 and waiver["claim"] in assertion),
+                None,
+            )
+        if index is not None:
+            counts[index] += 1
+        hits.append(index)
+    return hits, counts
+
+
+def _breadth_problem(waivers, counts, waivers_path):
+    """The first waiver that reached further than a quoted line could, or None.
+
+    A refusal rather than a quiet over-waive, and the whole run rather than the
+    one record: an acceptance this broad is operator configuration that is
+    wrong, and the two ways it fails are both silent. An auto-apply policy that
+    declines waiver-disputed records is switched off file-wide; one that does
+    not is told a human disputed findings nobody looked at.
+    """
+    for waiver, count in zip(waivers, counts):
+        if count > MAX_WAIVER_UNITS:
+            return Problem(
+                code="drift-waiver-too-broad",
+                message=(
+                    f"the waiver accepting {waiver['claim']!r} in "
+                    f"{waiver['file']} annotates {count} findings, over the "
+                    f"limit of {MAX_WAIVER_UNITS}. A waiver quotes the text a "
+                    f"human read on one line; a fragment reaching this far is "
+                    f"matching something else — quote more of the line, or "
+                    f"write one waiver per claim accepted"
+                ),
+                location=waivers_path,
+            )
     return None
 
 
+def _waiver_annotation(waiver, waivers_path, digest, matched):
+    """One record's `waived` block: who accepted what, from where, how widely.
+
+    `matched` is the waiver's blast radius across the whole run, not this
+    record's — a reader deciding what an acceptance means needs to know whether
+    it named one claim or swept a document.
+    """
+    annotation = {
+        "claim": waiver["claim"],
+        "source": waivers_path,
+        "source_digest": digest,
+        "matched": matched,
+    }
+    for name in ("reason", "date"):
+        if _one_line(waiver.get(name)):
+            annotation[name] = waiver[name]
+    return annotation
+
+
 def _within(boundary, source):
-    """Is `source` inside the evidence boundary the run declared?"""
+    """Is `source` inside the evidence boundary the run declared?
+
+    Only ever asked about a source `paths.repository_relative_problem` has
+    already passed, and that order is the check. A glob is a string match: a
+    boundary of `src/**` matches `src/../../../../etc/passwd` exactly as
+    happily as it matches `src/fees.py`, so normalizing before matching is what
+    makes the boundary a statement about the repository rather than about
+    spelling.
+    """
     if any(compile_glob(g).match(source) for g in boundary.excluded):
         return False
     return any(compile_glob(g).match(source) for g in boundary.sources)
@@ -480,11 +578,20 @@ def _evidence(raw, verdict, boundary, bad, where):
 
     ok = True
     source = raw.get("source")
-    if source is not None and not _one_line(source):
-        bad("drift-verdict-invalid-evidence",
-            "evidence.source must be a repository-relative path", where)
-        ok = False
-    elif source is None and verdict in POINTED_VERDICTS:
+    if source is not None:
+        # Spelling before boundary: `paths.py` is the single owner of what a
+        # repository-relative path is, and the boundary below is a glob match,
+        # which a traversal spelling walks straight through. Refused, never
+        # normalized — a pointer a reader must re-derive to follow is not one.
+        fault = repository_relative_problem(source)
+        if fault:
+            code, reason = fault
+            bad("drift-verdict-invalid-evidence",
+                f"evidence.source must be a repository-relative path, and "
+                f"{source!r} {reason} [{code}]",
+                where)
+            ok = False
+    elif verdict in POINTED_VERDICTS:
         bad("drift-verdict-invalid-evidence",
             f"a {verdict} verdict asserts that a place in the repository was "
             f"read, so evidence.source must say which one",
@@ -508,7 +615,7 @@ def _evidence(raw, verdict, boundary, bad, where):
 
 
 def _validated_verdicts(segmentation, entries, boundary, path):
-    """(drafts, problems) for one document's answers.
+    """(drafts, coverage, problems) for one document's answers.
 
     Two answers per unit, and the split is the document model's. *What the unit
     is* — its assertion class — is validated by `finding.record_classifications`,
@@ -522,6 +629,13 @@ def _validated_verdicts(segmentation, entries, boundary, path):
     problem, so a re-prompt can address all of them. Any problem at all means
     the document was not validly examined, and the caller turns that into a
     coverage gap rather than a quietly missing finding.
+
+    `coverage` is what a clean answer leaves behind. Validating the classes and
+    the VERIFIED verdicts and then discarding them would make positive coverage
+    rest on an absence — no record and no gap — so the class counts, the
+    verdict counts, and every VERIFIED unit's evidence pointer are returned as
+    reviewable data. None of it is a finding: a VERIFIED claim is proof the
+    document was examined, not something to fix.
     """
     problems = []
 
@@ -529,14 +643,14 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         problems.append(Problem(code=code, message=message, location=where))
 
     if not isinstance(entries, list):
-        return (), (Problem(
+        return (), None, (Problem(
             code="drift-verdict-invalid-shape",
             message="a document's answers must be a list",
             location=path,
         ),)
 
     known = {u.digest: u for u in segmentation.units}
-    drafts, shaped = [], []
+    drafts, shaped, verified, judged_counts = [], [], [], {}
 
     for i, entry in enumerate(entries):
         where = f"{path}:verdicts[{i}]"
@@ -631,9 +745,26 @@ def _validated_verdicts(segmentation, entries, boundary, path):
                 where)
             valid = False
 
-        if not valid or verdict not in FINDING_VERDICTS or unit not in known:
+        if not valid:
+            continue
+        judged_counts[verdict] = judged_counts.get(verdict, 0) + 1
+        if unit not in known:
             continue
         unit_data = known[unit]
+        if verdict not in FINDING_VERDICTS:
+            # Coverage, not a finding — and coverage nobody can follow is not
+            # coverage. Evidence is mandatory for VERIFIED precisely so it can
+            # be checked, so the pointer is kept rather than validated and
+            # dropped.
+            verified.append({
+                "unit": unit,
+                "assertion_class": assertion_class,
+                "location": f"{path}:{unit_data.line}",
+                "kind": entry["kind"],
+                "tier": tier,
+                "evidence": evidence,
+            })
+            continue
         extra = {
             "assertion": unit_data.text,
             "assertion_class": assertion_class,
@@ -649,8 +780,21 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         ))
 
     if problems:
-        return (), tuple(problems)
-    return tuple(drafts), ()
+        return (), None, tuple(problems)
+
+    classes = {}
+    for classification in classified.classifications:
+        classes[classification.assertion_class] = (
+            classes.get(classification.assertion_class, 0) + 1
+        )
+    coverage = {
+        "obligation": OBLIGATION_ASSERTIONS,
+        "units": len(segmentation.units),
+        "classes": dict(sorted(classes.items())),
+        "verdicts": dict(sorted(judged_counts.items())),
+        "verified": verified,
+    }
+    return tuple(drafts), coverage, ()
 
 
 def _verdict_entries(payload, plan):
@@ -817,20 +961,24 @@ def _anchor_findings(repo_root, path, anchor, as_of, references):
 
 
 def _audit_anchor(repo_root, path, registry_path):
-    """(specs, gap) for one narrative document.
+    """(specs, coverage, gap) for one narrative document.
 
     Deterministic and model-free: the obligation is honest dating, so what is
     checked is the anchor's shape and whether what it names has moved. The prose
     around it is never read as a claim.
+
+    Coverage says which of those things happened, because a narrative document
+    that passes produces no record either — and "the anchor was read and it was
+    honestly dated" is a different fact from "nobody looked".
     """
     segmentation = segment_document(repo_root, path, registry_path)
     if isinstance(segmentation, Invalid):
-        return (), Incomplete(
+        return (), None, Incomplete(
             scope=path, reason=_gap_reason(segmentation.problems)
         )
     units = segmentation.units
     if not units:
-        return (), Incomplete(
+        return (), None, Incomplete(
             scope=path,
             reason="the document is empty, so it carries no anchor to check",
         )
@@ -851,7 +999,7 @@ def _audit_anchor(repo_root, path, registry_path):
                     "what it was true of"
                 ),
             },
-        ),), None
+        ),), {"obligation": OBLIGATION_ANCHOR, "anchor": "missing"}, None
 
     match = ANCHOR.match(anchor.text)
     as_of = match.group(1) if match else None
@@ -874,11 +1022,19 @@ def _audit_anchor(repo_root, path, registry_path):
                     "whether the document is honestly dated"
                 ),
             },
-        ),), None
+        ),), {"obligation": OBLIGATION_ANCHOR, "anchor": "malformed"}, None
 
     # "Honestly dated" has two directions. A date the repository has not
     # reached cannot be when anything was checked, and no reference comparison
     # would catch it — every file's last change is behind such a date.
+    references = _anchor_references(match.group(2))
+    dated = {
+        "obligation": OBLIGATION_ANCHOR,
+        "anchor": "dated",
+        "as_of": as_of,
+        "references": references,
+    }
+
     head, problem = repository_mod.last_change(repo_root, ".")
     if problem is None and head is not None and as_of > head[0]:
         return (_DraftFinding(
@@ -896,11 +1052,11 @@ def _audit_anchor(repo_root, path, registry_path):
                     ),
                 },
             },
-        ),), None
+        ),), dated, None
 
     return tuple(_anchor_findings(
-        repo_root, path, anchor, as_of, _anchor_references(match.group(2))
-    )), None
+        repo_root, path, anchor, as_of, references
+    )), dated, None
 
 
 def _gap_reason(problems):
@@ -909,9 +1065,14 @@ def _gap_reason(problems):
 
 
 def _audit_assertions(repo_root, path, entry, boundary, registry_path):
-    """(specs, gap) for one living document, given what the lane returned."""
+    """(specs, coverage, gap) for one living document, given the lane's answer.
+
+    Exactly one of `coverage` and `gap` is ever set: a document was validly
+    examined or it was not, and a report that said both would be describing two
+    different runs.
+    """
     if entry is None:
-        return (), Incomplete(
+        return (), None, Incomplete(
             scope=path,
             reason=(
                 "no verdict set was returned for this document, so none of its "
@@ -922,26 +1083,26 @@ def _audit_assertions(repo_root, path, entry, boundary, registry_path):
         reason = entry["reason"]
         if "chunk" in entry:
             reason = f"{entry['chunk']}: {reason}"
-        return (), Incomplete(scope=path, reason=reason)
+        return (), None, Incomplete(scope=path, reason=reason)
 
     segmentation = segment_document(repo_root, path, registry_path)
     if isinstance(segmentation, Invalid):
-        return (), Incomplete(
+        return (), None, Incomplete(
             scope=path, reason=_gap_reason(segmentation.problems)
         )
 
-    specs, problems = _validated_verdicts(
+    specs, coverage, problems = _validated_verdicts(
         segmentation, entry["verdicts"], boundary, path
     )
     if problems:
-        return (), Incomplete(
+        return (), None, Incomplete(
             scope=path,
             reason=(
                 f"the verdicts returned for this document did not validate: "
                 f"{_gap_reason(problems)}"
             ),
         )
-    return specs, None
+    return specs, coverage, None
 
 
 def load_verdicts(path):
@@ -980,7 +1141,7 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
     if isinstance(plan, Invalid):
         return plan
 
-    accepted, problem = _load_waivers(repo_root, waivers)
+    accepted, waivers_digest, problem = _load_waivers(repo_root, waivers)
     if problem is not None:
         return Invalid((problem,))
 
@@ -996,7 +1157,7 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
     if problems:
         return Invalid(problems)
 
-    specs, gaps = [], [
+    specs, examined, gaps = [], [], [
         Incomplete(
             scope=path,
             reason=(
@@ -1009,26 +1170,36 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
     ]
     for document in plan.documents:
         if document.obligation == OBLIGATION_ANCHOR:
-            found, gap = _audit_anchor(repo_root, document.path, registry_path)
+            found, coverage, gap = _audit_anchor(
+                repo_root, document.path, registry_path
+            )
         else:
-            found, gap = _audit_assertions(
+            found, coverage, gap = _audit_assertions(
                 repo_root, document.path, entries.get(document.path), boundary,
                 registry_path,
             )
         specs.extend(found)
+        if coverage is not None:
+            examined.append({"scope": document.path, **coverage})
         if gap is not None:
             gaps.append(gap)
 
+    hits, counts = _waiver_hits(accepted, specs)
+    problem = _breadth_problem(accepted, counts, waivers)
+    if problem is not None:
+        return Invalid((problem,))
+
     records = []
-    for number, spec in enumerate(specs, start=1):
+    for number, (spec, hit) in enumerate(zip(specs, hits), start=1):
         extra = dict(spec.extra)
-        if "assertion" in extra:
+        if hit is not None:
             # Disposition, never deletion: an accepted claim keeps its record
-            # and says who accepted it. Waivers are not part of any digest, so
+            # and says who accepted it, from which file, and how far that
+            # acceptance reached. Waivers are not part of any digest, so
             # accepting a claim cannot re-key what an approval set selects.
-            waived = _waiver_for(accepted, waivers, spec.path, extra["assertion"])
-            if waived is not None:
-                extra["waived"] = waived
+            extra["waived"] = _waiver_annotation(
+                accepted[hit], waivers, waivers_digest, counts[hit]
+            )
         finding = build_finding(
             lineage=lineage, code=spec.code, path=spec.path, units=spec.units,
             record_id=RECORD_ID.format(number), extra=extra,
@@ -1043,9 +1214,17 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "lineage": lineage.to_dict(),
         "records": records,
+        "examined": examined,
         "incomplete": incomplete,
         "scope": {
             "basis": plan.basis,
+            # Both modes account for the whole inventory: `plan_drift_audit`
+            # partitions it, so every document is declared or excluded with a
+            # reason. A diff-scoped run is narrower, not less accountable.
+            "coverage": SCOPE_WHOLE_INVENTORY,
             "documents": [d.path for d in plan.documents],
+            "excluded": [
+                {"path": d.path, "reason": d.reason} for d in plan.excluded
+            ],
         },
     }, registry_path=registry_path)

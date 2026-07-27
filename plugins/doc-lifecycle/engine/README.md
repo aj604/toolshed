@@ -17,13 +17,13 @@ re-architecture (issue #57).
 |---|---|
 | `doclifecycle/registry.py` | registry parsing, validation, classification, glob matching, registry digest |
 | `doclifecycle/inventory.py` | `build_inventory()`, the closed-world walk, document/inventory digests |
-| `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, the canonical path form and target classes |
+| `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, `repository_relative_problem()`, the canonical path form and target classes |
 | `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
 | `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
 | `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
 | `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, the chunk cache seam |
 | `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, `load_verdicts()`, the verdicts and anchor checks |
-| `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `state_from_content()`, lineage and report digests |
+| `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/render.py` | `render_report()` — Markdown from a validated `Report`, and nothing else |
 | `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
@@ -145,8 +145,18 @@ result.to_dict()                       # → the payload above, as a dict
 ## Path authorization
 
 `doclifecycle/paths.py` decides what may be read or written on behalf of a record. It is the
-engine's one place for that decision by design; the applier slice (issue #69) is the caller that
-routes through it, and until then nothing in the engine calls it.
+engine's one place for that decision by design. The applier slice (issue #69) is the caller that
+routes through `authorize_path()`, and until then nothing calls that half.
+
+The spelling rules are already shared, through `repository_relative_problem(path)` — returns
+`(code, reason)` or `None`. `authorize_path` answers the question an *applier* asks (may I write
+here), which is inseparable from the declared roots, the target class, and the state of the
+filesystem. A read-only audit asks the smaller question: is this string a path inside the
+repository at all? Both rest on the same list, so `..`, a leading `/`, a drive letter, a
+backslash separator, a control character, whitespace, a non-canonical `//`, and a leading-dash
+component mean the same thing to a drift record's evidence pointer as they do to an edit
+target — and cannot mean two things, because there is only one list. Existence is not part of
+it: a create-document target and a pointer at a deleted file are both legitimate.
 
 For a repository where `docs/architecture.md` exists as a regular non-symlinked file:
 
@@ -370,6 +380,26 @@ Path *authorization* for `evidence_boundary` globs — traversal, symlinks, forb
 classes — is issue #67's single owner. The contract checks shape and log hygiene only; a
 boundary is lineage here, never opened.
 
+### Reading the repository
+
+`doclifecycle/repository.py` is the only place that runs `git`, and only to read.
+`lineage(root)` gives identity and HEAD, `resolve_commit(root, revision)` turns a revision into
+a full object id, `changed_paths(root, since)` lists what a range touched, and
+`last_change(root, path)` gives the committer date and commit of a path's last change. Each
+returns `(answer, problem)`; a problem means the repository state is unknown, and the caller
+fails closed rather than certifying what it could not read.
+
+Two disciplines make "only to read" true rather than intended. The environment is **scrubbed**
+of every variable that could point git at another tree (`GIT_DIR`, `GIT_WORK_TREE`, and the six
+others in `REDIRECTING_VARS`), so an earlier workflow step cannot make a freshness check answer
+about someone else's repository. And an argument that reaches git in **flag position** is
+validated before it gets there: `changed_paths` interpolates its baseline into `<since>..HEAD`,
+so it requires an already-resolved object id — `changed_paths(root, "--output=PWNED")` is a
+redirect, not a revision, and would have written a file. Put revisions through `resolve_commit`
+first; that is what makes them ids. `--end-of-options` and a trailing `--` back the check up,
+but they do not replace it: a trailing `--` only marks where pathspecs begin, and by then the
+option has already been parsed.
+
 ### Declared scope
 
 A result state says whether the *declared* scope completed. Only the optional
@@ -378,20 +408,72 @@ A result state says whether the *declared* scope completed. Only the optional
 ```json
 "scope": {
   "basis": "full inventory: every living and narrative document the registry classifies",
-  "documents": ["docs/architecture.md", "docs/guides/onboarding.md"]
+  "coverage": "whole-inventory",
+  "documents": ["docs/architecture.md", "docs/guides/onboarding.md"],
+  "excluded": [{"path": "docs/plans/next.md", "reason": "a planning document carries lifecycle state"}]
 }
 ```
 
-`basis` states how the scope was derived, `documents` enumerates it, and both are checked:
-exactly those two fields, a non-empty single-line basis, and single-line paths no two of which
-repeat (`report-invalid-scope`). An empty `documents` list is a real answer — a diff-scoped run
-whose range touched no document declared nothing.
+The claim is deliberately in two halves. `basis` is prose for a reader: how the scope was
+derived. `coverage` is the token a validator acts on — `whole-inventory` (every document the
+registry classifies is accounted for, either declared or excluded) or `declared-only` (the scope
+names part of the inventory and claims nothing about the rest). Prose cannot carry the coverage
+claim, because "every living and narrative document" is a sentence a scope listing one of six
+documents can also carry.
+
+Shape is checked exactly: those four fields and no others, a non-empty single-line basis, a
+`coverage` from the closed set, single-line paths no two of which repeat, and exclusions that
+each name a path and a reason and never a path `documents` also declares
+(`report-invalid-scope`). An empty `documents` list is a real answer — a diff-scoped run whose
+range touched no document declared nothing.
+
+**Given a `repo_root`, the scope is re-derived against the current inventory.** Shape alone
+would let a report claim full-corpus coverage over one document, or enumerate documents the
+repository does not contain, and be certified fresh — the one field added to make coverage
+claims truthful would be the one field nothing checked. So:
+
+| Stale reason | Raised when |
+|---|---|
+| `scope-document-unknown` | a declared or excluded path is not in the current inventory |
+| `scope-inventory-unaccounted` | `coverage` is `whole-inventory` and some inventory document is neither declared nor excluded |
+
+The verdict is `stale`, not `invalid`, and the direction is deliberate: the check needs a
+repository in hand, and from there a document that was deleted and a document that never existed
+are the same observation, with the same remedy — re-run the audit. `invalid` stays what a
+payload says about itself, decidable with no repository. Like every stale reason, a carried one
+is only cleared by a run that actually re-checked it: a validator given a repository but no
+scope did not look, so the reason stands.
 
 The block is part of the report's digest, because two runs finding the same records over
 different scopes are not the same report: one examined more than the other. It is optional, and
 a report that declares no scope digests exactly as it did before the field existed — so a
 producing run that says nothing about scope is not silently re-keyed, and the reader falls back
 to `audit_mode`, which is required.
+
+### Recorded coverage
+
+`examined` is the mirror of `incomplete`: what the run *did* look at, and what it saw.
+
+```json
+"examined": [
+  {"scope": "docs/architecture.md", "obligation": "assertions", "units": 9,
+   "classes": {"factual": 2, "non-assertive": 7}, "verdicts": {"VERIFIED": 2},
+   "verified": [{"unit": "…", "assertion_class": "factual", "location": "docs/architecture.md:14",
+                 "kind": "behavior", "tier": 2, "evidence": {"source": "src/app.py", "observed": "…"}}]}
+]
+```
+
+Without it, positive coverage rests entirely on an absence — a document with no finding and no
+gap is indistinguishable from one nobody looked at, and a report is supposed to be proof of
+examination. Evidence is mandatory for VERIFIED precisely so it can be checked, so it is kept
+rather than validated and dropped.
+
+The contract owns only `scope`; everything else on an entry travels untouched, exactly as a
+record's fields do. It is checked for a printable scope, no two entries covering one scope, no
+NaN/Infinity, and nesting within `MAX_NESTING` (`report-invalid-examined`) — and, when a scope
+is declared, that each entry names a document that scope declared: recorded coverage must not be
+able to inflate a scope. Like `scope`, it is in the digest and omitted when empty, so a report
+that records no coverage digests exactly as it did before the field existed.
 
 ### The five result states
 
@@ -821,7 +903,15 @@ validated report. The replacement line a STALE verdict carries is recorded for t
 ### Planning the scope
 
 `plan_drift_audit()` derives what a run will examine from the inventory, with no model in the
-loop, so the scope a report declares can be re-derived rather than trusted.
+loop, so the scope a report declares can be re-derived rather than trusted — and, given a
+`repo_root`, `validate_report` does re-derive it (*Declared scope* above).
+
+Both modes partition the inventory: every document is either declared or excluded with its
+reason, so a drift report's scope claims `coverage: "whole-inventory"` in either mode. A
+diff-scoped run is narrower, not less accountable. What a diff-scoped run cannot prove
+post-hoc is its *basis* — whether the range really is the one the report names, and whether the
+affected-document search found everything — so that half stays prose a reader checks against
+the commit range, not a claim the validator re-derives.
 
 | Mode | Declares |
 |---|---|
@@ -900,9 +990,20 @@ named; that *is* the finding). `kind` is one of `command`, `path`, `symbol`, `be
 Evidence is mandatory for every verdict, VERIFIED included, and carries the fact separately from
 the pointer: `observed` is required, and `source` is required for VERIFIED and STALE — both
 assert that a place in the repository was read. UNVERIFIABLE may omit it, because there is
-nothing to point at. A `source` outside the run's declared evidence boundary is
-`drift-evidence-outside-boundary`: a verdict resting on something the report says was not
-consulted is not checkable.
+nothing to point at.
+
+A `source` is checked as a path *before* it is matched against the boundary, and the order is
+the check. `paths.py` — the single owner of path safety — decides what a repository-relative
+path is: no `..`, no leading `/` or `~`, no backslash separator, no control character or
+whitespace, no `//` or `./`, no leading-dash component, NFC only. Anything else is
+`drift-verdict-invalid-evidence`, naming which rule the spelling broke. Only then does the
+boundary apply, because a boundary is a glob and a glob is a string match: `src/**` matches
+`src/../../../etc/passwd` exactly as happily as it matches `src/fees.py`. A source that is a
+well-formed path but outside the boundary is `drift-evidence-outside-boundary` — a verdict
+resting on something the report says was not consulted is not checkable.
+
+Existence is deliberately *not* part of the check: a pointer at a file a commit deleted is
+exactly what a STALE finding reports, and refusing it would refuse the finding.
 
 What the document says is never the model's to report. A record's `assertion` and `location`
 come from the segmentation — the unit's own text and line — so a verdict cannot misquote the
@@ -930,6 +1031,13 @@ what happened: `drift-verdicts-invalid-shape` (the payload is not
 failure that will not say why), `drift-verdict-duplicate-document` (two entries for one
 document), `drift-verdict-undeclared-document` (an entry for a document the plan did not
 declare), and `drift-verdict-on-narrative-document`.
+
+Fail-closed is right for all five — none is a document that went unexamined, and a report that
+could not say which run it describes is worse than no report. Note the consequence for a
+chunked headless lane: **one stray worker entry produces no report at all, rather than one
+coverage gap**, which without a self-explaining terminal state on the run surface is a silent
+nightly no-op. A scheduler adapter running this unattended must report the `Invalid` problems,
+not just its exit code.
 
 ### Narrative documents
 
@@ -976,14 +1084,31 @@ the acceptance; it is **never** removed from the report. Matching is `file` equa
 containment, because a waiver quotes the text a human read on a line and a unit is the sentence
 that line sits in — so a waiver is exactly as broad as the text it quotes.
 
+Which is why the text is bounded, in both directions. A fragment shorter than **12 characters**
+is `drift-waivers-invalid` when the file is read: under containment, one word — or one
+character — accepts every assertion in the document rather than the line a human read. A waiver
+that annotates more than **10 findings** is `drift-waiver-too-broad` once the run is drafted,
+which is the earliest its reach is knowable. Both refuse the run rather than over-waive quietly,
+because both failures are silent: an auto-apply policy that declines waiver-disputed records is
+switched off document-wide, and one that does not is told a human disputed findings nobody
+looked at.
+
+Every annotation states its blast radius. A `waived` block carries `claim`, `source` (the
+waivers path), `source_digest` (sha-256 of that file as it was read), `matched` (how many
+findings this waiver reached across the whole run), and `reason`/`date` when the entry gives
+them. The digest is what makes the annotation reproducible: without it a `waived` block names a
+path and nothing else, and nobody holding the report can tell whether that file said that —
+annotations being the one part of a report not otherwise derivable from the repository.
+
 An acceptance reaches any finding code, not only UNVERIFIABLE: on a STALE record it is a human
 disputing the verdict, and a dispute the report did not show is one an auto-apply policy would
 act straight through. Waivers are deliberately **not** part of the audit configuration digest —
-accepting a claim changes what a reader is asked to look at, never what the audit found, so it
-neither expires prior reports (the lineage is untouched) nor re-keys the finding digests an
-approval set selects. The *report* digest does move, because the annotated report says something
-the unannotated one did not, and a report's digest covers what it says. The evidence boundary,
-by contrast, is in the configuration digest: narrowing it could change a verdict.
+the waivers digest included. Accepting a claim changes what a reader is asked to look at, never
+what the audit found, so it neither expires prior reports (the lineage is untouched) nor re-keys
+the finding digests an approval set selects. The *report* digest does move, because the
+annotated report says something the unannotated one did not, and a report's digest covers what
+it says. The evidence boundary, by contrast, is in the configuration digest: narrowing it could
+change a verdict.
 
 An absent waivers file is simply no waivers; a malformed one is `drift-waivers-invalid` and
 invalidates the run, since a typo that silently un-waived everything would defeat the mechanism.
@@ -1056,9 +1181,10 @@ Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `record_classifications()`, `build_context_index()`, `bloat.plan_chunks()`,
 `bloat.merge_contention()`, `bloat.enumerate_scope()`, `bloat.record_verdicts()`,
 `bloat.load_chunk()`, `bloat.store_chunk()`, `plan_drift_audit()`, `audit_drift()`,
-`load_verdicts()`), and the commands as subprocesses whose payload must equal the library
-result. Path authorization, the cache, finding identity, and verdict recording have no command
-of their own — they are substrate the other components (and, for the cache, the bloat lane)
+`load_verdicts()`, `repository.lineage()`, `repository.resolve_commit()`,
+`repository.changed_paths()`, `repository.last_change()`), and the commands as subprocesses
+whose payload must equal the library result. Path authorization, the git reads, the cache,
+finding identity, and verdict recording have no command of their own — they are substrate the other components (and, for the cache, the bloat lane)
 call. `tests/engine/support.py` holds what every suite needs — the engine on `sys.path`,
 `RepoTestCase.repo()`, and `run_command()` for the subprocess seam; report fixtures live in
 `report_test.py`, which `report_cli_test.py`, `cache_test.py`, and `bloat_test.py` all import
@@ -1066,7 +1192,8 @@ call. `tests/engine/support.py` holds what every suite needs — the engine on `
 bloat-cache, and drift suites build real git repositories, because staleness is a comparison
 against a repository — and a diff-scoped scope is a question about a commit range — so a mocked
 one would prove nothing. `drift_cli_test.py` imports `drift_test.py`'s repository fixture rather
-than rebuilding it.
+than rebuilding it. `repository_test.py` holds the git reads to their read-only contract
+directly, probing every argument with the spellings git would read as options.
 
 `tests/engine/acceptance/` is the repository-level fixture (a real `git init`, real commits,
 real symlinks, real prompt-injection content) and the scenarios built on it: scenario one is
