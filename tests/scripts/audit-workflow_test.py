@@ -19,8 +19,10 @@ criteria (issue #71):
    doc-sync.yml's marker-only commit, this lane makes no direct commit to any
    branch at all, default or otherwise.
 3. The job shape the acceptance criteria describe: exactly `audit` (the
-   model, read-only) and `publish` (the one write scope, `issues: write`, and
-   nothing else — never `contents: write`, never `pull-requests`).
+   model, read-only) and `publish` (no model, and — today — no write scope at
+   all: `contents: read` only, since a job summary needs none; it stays its
+   own job so any write this lane later needs to publish more than that lands
+   there, never beside the model, and never `contents: write`).
 4. Concurrency is declared, and both artifact uploads run unconditionally
    (`if: always()`) — a failed audit still leaves an artifact to publish
    against, per the report contract's own "never a misleading empty report".
@@ -112,7 +114,7 @@ class NoDirectBranchCommits(unittest.TestCase):
         self.assertEqual(
             offenders, [],
             "doc-audit.yml commits or pushes directly — this lane publishes "
-            "only a report artifact and a tracking-issue update:\n  "
+            "only a report artifact and a job summary:\n  "
             + "\n  ".join(offenders))
 
 
@@ -120,11 +122,15 @@ class JobShape(unittest.TestCase):
     def test_exactly_audit_and_publish_jobs(self):
         self.assertEqual(set(jobs()), {"audit", "publish"})
 
-    def test_publish_permissions_are_exactly_read_contents_and_write_issues(self):
+    def test_publish_holds_no_write_scope_at_all(self):
+        # This lane needs no GitHub write to publish a job summary — `publish`
+        # exists as its own job so the moment one *is* needed, it lands here,
+        # never beside the model. Today that means exactly contents: read.
         body = jobs()["publish"]
         perms = WPT.mapping_under(body, "permissions", 4)
         self.assertIsNotNone(perms, "publish job declares no permissions block")
-        self.assertEqual(perms, {"contents": "read", "issues": "write"})
+        self.assertEqual(perms, {"contents": "read"})
+        self.assertEqual(WPT.write_scopes(perms), {})
 
     def test_publish_needs_audit(self):
         body = jobs()["publish"]

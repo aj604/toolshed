@@ -15,7 +15,6 @@ README's warning). That is rendered as its own typed problem
 Usage:
     render-audit-summary.py cost --execution-log FILE --out FILE
     render-audit-summary.py summary --report FILE [--cost FILE]
-    render-audit-summary.py issue-body --report FILE [--cost FILE]
 
 `cost` is best-effort and never fails the run: an absent or unreadable
 execution log, or one with no `result` event, writes
@@ -23,13 +22,14 @@ execution log, or one with no `result` event, writes
 rather than erroring — cost is observability, never a gate.
 
 `summary` appends the rendered Markdown to the file named by
-$GITHUB_STEP_SUMMARY (stdout when unset); `issue-body` always prints to
-stdout only, for `--body-file` redirection into a tracking issue, and never
-touches $GITHUB_STEP_SUMMARY even when it is set.
+$GITHUB_STEP_SUMMARY (stdout when unset).
 
-Exit status: 0 on success (including every rendered outcome above — a typed
-render IS success for this script, even when it describes a failed audit);
-2 on bad input (missing file, unknown subcommand).
+Exit status: 0 whenever a subcommand ran with valid arguments — including a
+missing or unreadable --report/--cost *file*, which renders (or, for `cost`,
+records) as its own typed outcome rather than failing the script; a typed
+render IS success here, even when it describes a failed audit. 2 is reserved
+for bad invocation only: a missing required flag or an unknown subcommand,
+both caught by argparse before either subcommand's body runs.
 """
 
 import argparse
@@ -234,10 +234,6 @@ def main():
     summary.add_argument("--report", required=True)
     summary.add_argument("--cost", default=None)
 
-    issue = sub.add_parser("issue-body")
-    issue.add_argument("--report", required=True)
-    issue.add_argument("--cost", default=None)
-
     args = parser.parse_args()
 
     if args.mode == "cost":
@@ -255,10 +251,7 @@ def main():
                          "duration_ms": None}
 
     text = render(args.report, cost_data)
-    if args.mode == "summary":
-        _write_summary(text)
-    else:
-        sys.stdout.write(text)
+    _write_summary(text)
     return 0
 
 

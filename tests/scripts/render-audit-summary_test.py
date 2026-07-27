@@ -4,9 +4,8 @@
 This script owns the run-surface rendering for the new read-only audit lane
 (doc-audit.yml, issue #71): the self-explaining outcome (clean / findings /
 partial / stale / invalid / no-report-at-all), the pinned lineage, and
-cost/budget observability — as Markdown for the job summary and the tracking
-issue body, and as a small JSON extraction from claude-code-action's
-execution-log for cost.
+cost/budget observability — as Markdown for the job summary, and as a small
+JSON extraction from claude-code-action's execution-log for cost.
 
 Tested as a subprocess: real argv, real exit codes, real stdout, and a real
 $GITHUB_STEP_SUMMARY file for the `summary` subcommand.
@@ -296,27 +295,6 @@ class CostObservability(unittest.TestCase):
         report_path = self.write_report(report("clean"))
         proc = run("summary", "--report", report_path)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-
-
-class IssueBody(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-
-    def write_report(self, payload):
-        path = os.path.join(self.tmp.name, "drift-report.json")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-        return path
-
-    def test_prints_to_stdout_only_ignores_step_summary_env(self):
-        path = self.write_report(report("findings", records=[record()]))
-        summary_path = os.path.join(self.tmp.name, "summary.md")
-        proc = run("issue-body", "--report", path,
-                    env_extra={"GITHUB_STEP_SUMMARY": summary_path})
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("FINDINGS", proc.stdout)
-        self.assertFalse(os.path.exists(summary_path))
 
 
 class UsageErrors(unittest.TestCase):

@@ -7,14 +7,16 @@
 # `audit` executes the model with `contents: read` and no credential at all (checkout drops
 # persist-credentials, no GH_TOKEN reaches it) and calls the engine's own public CLI —
 # `drift-plan` (deterministic scope), then `drift-audit` (the validated report) — never owning
-# a lifecycle rule of its own. `publish` runs no model, holds the one write scope this lane
-# needs (`issues: write`, to keep one tracking issue's body current — never `contents: write`,
-# never a PR, never a commit to the default branch), and consumes only the validated report
-# artifact `audit` produced. A run that produced no report at all, or one whose lineage no
-# longer matches the repository, is rendered as its own typed outcome — never a misleading
-# empty result (render-audit-summary.py owns every one of those strings; see its docstring for
-# the full state table). Cost/turn/duration figures ride along as observability only: they never
-# narrow the declared scope `drift-plan` already committed to before the model ran a single turn.
+# a lifecycle rule of its own. `publish` runs no model and holds no write scope at all today
+# (`contents: read` only) — it consumes only the validated report artifact `audit` produced and
+# renders the run's job summary. It is still its own job, never folded into `audit`: the
+# moment this lane needs any GitHub write to publish more than a job summary, that write lands
+# here, never in the model's job — never `contents: write`, never a PR, never a commit. A run
+# that produced no report at all, or one whose lineage no longer matches the repository, is
+# rendered as its own typed outcome — never a misleading empty result
+# (render-audit-summary.py owns every one of those strings; see its docstring for the full
+# state table). Cost/turn/duration figures ride along as observability only: they never narrow
+# the declared scope `drift-plan` already committed to before the model ran a single turn.
 #
 # Design: the distilled-decisions comment on aj604/toolshed#57 (2026-07-26); this workflow's
 # ticket is aj604/toolshed#71.
@@ -63,16 +65,17 @@ jobs:
 
       # Deterministic — no model. The engine (vendored at .github/doc-sync/engine/, same as
       # every other engine call this lane makes) derives the scope from the registry alone, so
-      # a reader can re-derive what this run examined instead of trusting it. Captured
-      # regardless of exit code: an invalid registry is itself the typed outcome the audit
-      # step below reports, never a silent stop.
+      # a reader can re-derive what this run examined instead of trusting it.
+      # `continue-on-error` + `steps.plan.outcome` (not a hand-rolled exit-code capture) gates
+      # the model step below: an invalid registry is itself the typed outcome the audit step
+      # further down reports, never a silent stop, and never a branch decision hidden in shell.
       - name: Plan the audit scope (deterministic — no model)
         id: plan
+        continue-on-error: true
         run: |
-          set -uo pipefail
+          set -euo pipefail
           python3 .github/doc-sync/engine/doc-lifecycle.py drift-plan --repo . --mode full \
             > drift-plan.json
-          echo "valid=$([ $? -eq 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       # Model step run via the official runner (anthropics/claude-code-action) — it owns Claude
       # Code install, plugin setup, and auth. Auth prefers the OAuth token (created by
@@ -88,9 +91,9 @@ jobs:
       # this lane. The skill is still useful for verification method (tiers, escalation), which
       # is why it is invoked for procedure and overridden for output shape.
       - name: Audit documentation drift (headless, full corpus)
-        if: steps.plan.outputs.valid == 'true'
+        if: steps.plan.outcome == 'success'
         id: model
-        uses: anthropics/claude-code-action@672170b4a9bde1482339aeba9637452ef5490ca6 # v1.0.183
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -132,6 +135,7 @@ jobs:
       # examined about the narrative ones. Captured regardless of exit code — 1 (invalid), 4
       # (partial), and 0 (clean/findings) are each a legitimate typed report, never a crash.
       - name: Run the drift audit (engine's public CLI)
+        if: always()
         run: |
           set -uo pipefail
           python3 .github/doc-sync/engine/doc-lifecycle.py drift-audit --repo . --mode full \
@@ -155,17 +159,17 @@ jobs:
           path: audit-cost.json
           if-no-files-found: ignore
 
-  # The only credentialed job, and no model runs in it: it consumes the validated report
-  # artifact and renders it — never authors a finding, never touches repository content.
+  # No model runs in this job, and it holds no write scope at all today. It consumes only the
+  # validated report artifact `audit` produced and renders it as the run's job summary — never
+  # authors a finding, never touches repository content. Kept as its own job (rather than a
+  # final step of `audit`) so any future write this lane needs to publish more than a job
+  # summary lands here, never beside the model.
   publish:
     needs: audit
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: write
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -187,40 +191,27 @@ jobs:
 
       # Re-check freshness against the live repository: a report is only as good as the state
       # it still describes, and a rerun of this job alone (long after `audit` ran) must not
-      # present a report the repository has since moved past as if it were current.
+      # present a report the repository has since moved past as if it were current. Skipped
+      # when the artifact is already an `invalid` payload — that shape carries no lineage to
+      # re-check (it is a different contract entirely, `problems` rather than `records`), and
+      # validate-report rejects "status": "invalid" as a report shape it was never meant to
+      # persist (report-invalid-status) rather than re-confirming the original problem.
       - name: Re-validate freshness before publishing
         if: hashFiles('drift-report.json') != ''
         run: |
-          set -uo pipefail
-          python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
-            --report drift-report.json --repo . > revalidated.json
-          mv revalidated.json drift-report.json
+          set -uo pipefail   # no -e: validate-report's non-zero (stale/partial/invalid)
+                              # exit codes are typed outcomes to capture, not crashes to abort on
+          if grep -q '"status":[[:space:]]*"invalid"' drift-report.json; then
+            echo "report is already invalid — nothing to re-validate freshness against"
+          else
+            python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
+              --report drift-report.json --repo . > revalidated.json
+            [ -s revalidated.json ] && mv revalidated.json drift-report.json
+          fi
 
       - name: Render job summary
+        if: always()
         run: |
           python3 .github/doc-sync/render-audit-summary.py summary \
             --report drift-report.json \
             $( [ -f audit-cost.json ] && echo "--cost audit-cost.json" )
-
-      - name: Render tracking-issue body
-        run: |
-          python3 .github/doc-sync/render-audit-summary.py issue-body \
-            --report drift-report.json \
-            $( [ -f audit-cost.json ] && echo "--cost audit-cost.json" ) \
-            > "$RUNNER_TEMP/issue-body.md"
-
-      # One persistent tracking issue, kept current — never a PR, never a commit. Idempotent:
-      # a rerun edits the same issue rather than opening a duplicate.
-      - name: Publish the summary (open or update the tracking issue)
-        run: |
-          set -euo pipefail
-          ISSUE=$(gh issue list --label doc-audit --state open \
-            --search "in:title \"doc-audit: latest scheduled report\"" \
-            --json number --jq '.[0].number // empty')
-          if [ -n "${ISSUE}" ]; then
-            gh issue edit "${ISSUE}" --body-file "$RUNNER_TEMP/issue-body.md"
-          else
-            gh issue create --label doc-audit \
-              --title "doc-audit: latest scheduled report" \
-              --body-file "$RUNNER_TEMP/issue-body.md"
-          fi
