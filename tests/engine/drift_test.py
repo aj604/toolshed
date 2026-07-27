@@ -979,6 +979,30 @@ class TheEvidenceBoundary(DriftRepoTestCase):
         problems = report.incomplete[0].reason
         self.assertIn("drift-verdict-invalid-evidence", problems)
 
+    def test_the_gap_names_the_source_that_broke_the_spelling_rule(self):
+        """PR #87 review, N4: the fixture's own hostile filenames (a leading
+        dash, `; rm -rf ~`) are documents drift declares and examines but
+        that can never be cited as evidence sources — the gap this produced
+        named only `drift-verdict-invalid-evidence`, losing which source
+        broke which rule. The gap now names the source too."""
+        root = self.drift_repo()
+        hostile = "-rf/fees.py"
+
+        reason = self.gap_reason(root, hostile)
+
+        self.assertIn("drift-verdict-invalid-evidence", reason)
+        self.assertIn(hostile, reason)
+
+    def test_the_boundary_gap_also_names_the_offending_source(self):
+        """The same detail for the other evidence code: a source that is a
+        well-formed path but outside the declared boundary."""
+        root = self.drift_repo()
+
+        reason = self.gap_reason(root, SOURCE, evidence_sources=("lib/**",))
+
+        self.assertIn("drift-evidence-outside-boundary", reason)
+        self.assertIn(SOURCE, reason)
+
     def test_a_canonical_pointer_inside_the_boundary_is_accepted(self):
         root = self.drift_repo()
 

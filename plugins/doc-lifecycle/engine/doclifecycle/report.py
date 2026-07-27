@@ -102,7 +102,19 @@ STALE_REASON_FIELDS = {code: field for field, code, _ in COMPARABLE}
 # not look, and a carried reason therefore stands.
 SCOPE_DOCUMENT_UNKNOWN = "scope-document-unknown"
 SCOPE_INVENTORY_UNACCOUNTED = "scope-inventory-unaccounted"
-SCOPE_REASON_CODES = (SCOPE_DOCUMENT_UNKNOWN, SCOPE_INVENTORY_UNACCOUNTED)
+# PR #87 review, N1: a closed `coverage` token means nothing if what it leaves
+# out is free prose — a living document moved into `excluded` with the reason
+# "not relevant to this run" validated as `whole-inventory` with no stale
+# reason. `scope-exclusion-kind-mismatch` is the re-derivation that closes it:
+# an exclusion coded `planning-kind` must actually name a planning document,
+# and a `whole-inventory` claim under a `full` audit mode cannot exclude a
+# living or narrative document at all — every document such a claim covers is
+# examined or the claim is false.
+SCOPE_EXCLUSION_KIND_MISMATCH = "scope-exclusion-kind-mismatch"
+SCOPE_REASON_CODES = (
+    SCOPE_DOCUMENT_UNKNOWN, SCOPE_INVENTORY_UNACCOUNTED,
+    SCOPE_EXCLUSION_KIND_MISMATCH,
+)
 
 # How much of the inventory a declared scope accounts for. Closed, because it
 # is the half of a coverage claim a validator can act on: `basis` is prose for
@@ -111,6 +123,17 @@ SCOPE_REASON_CODES = (SCOPE_DOCUMENT_UNKNOWN, SCOPE_INVENTORY_UNACCOUNTED)
 SCOPE_WHOLE_INVENTORY = "whole-inventory"
 SCOPE_DECLARED_ONLY = "declared-only"
 SCOPE_COVERAGES = (SCOPE_WHOLE_INVENTORY, SCOPE_DECLARED_ONLY)
+
+# Why a document was left out of the declared scope, a second closed
+# vocabulary beside `coverage`. `reason` stays prose for a reader; `code` is
+# what a validator can act on, for the same reason `coverage` is a token
+# rather than a sentence (PR #87 review, N1). `planning-kind` is a document
+# excluded because a planning document is never examined for drift;
+# `unaffected-by-range` is a living or narrative document an incremental
+# run's commit range did not touch.
+EXCLUSION_PLANNING_KIND = "planning-kind"
+EXCLUSION_UNAFFECTED_BY_RANGE = "unaffected-by-range"
+EXCLUSION_CODES = (EXCLUSION_PLANNING_KIND, EXCLUSION_UNAFFECTED_BY_RANGE)
 
 
 @dataclass(frozen=True)
@@ -181,13 +204,30 @@ class ScopeExclusion:
     each one either declared or excluded with a reason — is a claim a validator
     can re-derive against the repository. A scope that only lists what it took
     in leaves "and nothing else was relevant" as an assertion nobody can test.
+
+    The claim is split in two, the same way `Scope.basis`/`coverage` is.
+    `reason` is prose for a reader; `code` is the token a validator acts on —
+    unconstrained prose let a living document be laundered into `excluded`
+    with a reason like "not relevant to this run" and no way to catch it
+    (PR #87 review, N1). Given a repository, `validate_report` checks `code`
+    against the document's current kind, not just its shape.
+
+    BREAKING, not a re-key: `code` is required, so a previously-valid report
+    whose `scope.excluded` entries carry only `path`/`reason` (the shape
+    before this field existed) is now `report-invalid-scope` outright, not
+    merely re-keyed to a new digest. Every producer in this repository
+    (`drift.audit_drift`) is updated alongside this to always emit `code`, so
+    nothing this repository produces breaks — but a persisted report from
+    before this change, or a consumer outside this repository holding the old
+    shape, will fail validation and must be re-run.
     """
 
     path: str
     reason: str
+    code: str
 
     def to_dict(self):
-        return {"path": self.path, "reason": self.reason}
+        return {"path": self.path, "reason": self.reason, "code": self.code}
 
 
 @dataclass(frozen=True)
@@ -676,12 +716,35 @@ def _scope(raw, bad):
     excluded = _scope_excluded(raw["excluded"], seen, bad)
     if excluded is None:
         ok = False
+    elif raw["coverage"] == SCOPE_DECLARED_ONLY and excluded:
+        # A shape contradiction adjacent to N1, not the fix for N2: the
+        # reviewer's N2 probe (a `declared-only` scope over 1 of 6 documents,
+        # `excluded` empty, `basis` still reading "full inventory...") stays
+        # mechanically valid even after this — nothing here or elsewhere
+        # parses `basis`, by design (see the README's "residual gap" note).
+        # What *is* mechanical: `declared-only` means the scope "names part
+        # of the inventory and claims nothing about the rest", so naming a
+        # specific exclusion with a reason would be claiming something about
+        # the rest — a contradiction the shape alone can catch, independent
+        # of what `basis` says.
+        bad("report-invalid-scope",
+            f"scope.excluded names document(s) while coverage is "
+            f"{SCOPE_DECLARED_ONLY!r} — {SCOPE_DECLARED_ONLY!r} claims "
+            f"nothing about the rest of the inventory, so enumerating "
+            f"specific exclusions would be claiming something about it; "
+            f"only {SCOPE_WHOLE_INVENTORY!r} coverage accounts for what it "
+            f"leaves out",
+            "scope.excluded")
+        ok = False
     if not ok:
         return None
     return Scope(
         basis=raw["basis"], coverage=raw["coverage"],
         documents=tuple(documents), excluded=tuple(excluded),
     )
+
+
+EXCLUSION_FIELDS = {"path", "reason", "code"}
 
 
 def _scope_excluded(raw, declared, bad):
@@ -693,16 +756,17 @@ def _scope_excluded(raw, declared, bad):
     if not isinstance(raw, list):
         bad("report-invalid-scope",
             "scope.excluded must be a list of the documents the run declared "
-            "out of scope, each with the reason it was left out",
+            "out of scope, each with the reason and the code it was left out "
+            "under",
             "scope.excluded")
         return None
     entries, seen, ok = [], set(), True
     for i, entry in enumerate(raw):
         where = f"scope.excluded[{i}]"
-        if not isinstance(entry, dict) or set(entry) != {"path", "reason"}:
+        if not isinstance(entry, dict) or set(entry) != EXCLUSION_FIELDS:
             bad("report-invalid-scope",
-                f"scope.excluded[{i}] must be an object with exactly 'path' "
-                f"and 'reason'",
+                f"scope.excluded[{i}] must be an object with exactly 'path', "
+                f"'reason', and 'code'",
                 where)
             ok = False
             continue
@@ -711,6 +775,16 @@ def _scope_excluded(raw, declared, bad):
                 f"scope.excluded[{i}] must name a document and why it was left "
                 f"out — an exclusion with no reason is a document quietly "
                 f"dropped, which is what enumerating them prevents",
+                where)
+            ok = False
+            continue
+        if entry["code"] not in EXCLUSION_CODES:
+            bad("report-invalid-scope",
+                f"scope.excluded[{i}].code {entry['code']!r} is not an "
+                f"exclusion code — it is one of {list(EXCLUSION_CODES)}, "
+                f"because a validator has to be able to act on why a "
+                f"document was left out, and free prose like 'not relevant "
+                f"to this run' is not something it can act on",
                 where)
             ok = False
             continue
@@ -729,7 +803,9 @@ def _scope_excluded(raw, declared, bad):
                 where)
             ok = False
         seen.add(path)
-        entries.append(ScopeExclusion(path=path, reason=entry["reason"]))
+        entries.append(ScopeExclusion(
+            path=path, reason=entry["reason"], code=entry["code"],
+        ))
     return entries if ok else None
 
 
@@ -740,10 +816,26 @@ def _examined(raw, bad, declared):
     A report cannot claim to have examined something it never said it would
     look at — that is the same category error as a verdict for an undeclared
     document, and it is what would let recorded coverage inflate a scope.
+
+    That containment check needs a scope to check against. PR #87 review, N3:
+    with none declared it was simply skipped, so a scope-less report could
+    record coverage of arbitrary paths nothing had enumerated. Requiring a
+    scope whenever `examined` is non-empty is the structural fix — it needs no
+    repository, unlike constraining `examined` to the current inventory would,
+    and `audit_drift` always emits a scope alongside its coverage already, so
+    nothing legitimate is newly refused.
     """
     if not isinstance(raw, list):
         bad("report-invalid-shape",
             "examined must be a list naming what the run did examine",
+            "examined")
+        return None
+    if raw and declared is None:
+        bad("report-invalid-examined",
+            "examined records coverage of a document, but no scope was "
+            "declared — recorded coverage cannot be checked against a scope "
+            "that is not there, so it could name any path at all; declare a "
+            "scope naming what was examined",
             "examined")
         return None
     entries, seen, ok = [], set(), True
@@ -801,7 +893,33 @@ def _scope_summary(paths, limit=5):
     return text
 
 
-def _scope_reasons(scope, inventory_paths):
+def _exclusion_disagrees(exclusion, kind, coverage, audit_mode):
+    """Does this exclusion's claimed code disagree with the document it names?
+
+    PR #87 review, N1. Two independent ways an exclusion can lie, and either
+    is enough: a `planning-kind` code naming a document that is not currently
+    classified `planning`, or — regardless of what code was claimed — a
+    living or narrative document excluded from a `full`-mode report that
+    claims `whole-inventory` coverage. A full audit declares every living and
+    narrative document (`plan_drift_audit`); nothing of that kind is ever
+    legitimately excluded from one, so the second check holds even if a
+    forged report picks `unaffected-by-range` instead of lying about the code.
+
+    Deliberately mode-scoped: an incremental audit's `whole-inventory` claim
+    legitimately excludes living/narrative documents the commit range did not
+    touch, so the same rule applied there would refuse every diff-scoped run.
+    """
+    if exclusion.code == EXCLUSION_PLANNING_KIND and kind != "planning":
+        return True
+    if (
+        audit_mode == "full" and coverage == SCOPE_WHOLE_INVENTORY
+        and kind in ("living", "narrative")
+    ):
+        return True
+    return False
+
+
+def _scope_reasons(scope, kind_by_path, audit_mode):
     """Every way the declared scope no longer describes the repository.
 
     `stale`, not `invalid`, and the direction is deliberate. `invalid` is what
@@ -812,7 +930,13 @@ def _scope_reasons(scope, inventory_paths):
     audit rather than acting on its coverage — and `stale` is what says that.
     A forged scope therefore cannot validate fresh, which is the property an
     approval set binding to a scope needs.
+
+    `kind_by_path` is the current inventory, `{path: kind}` — its key set is
+    what the document-existence checks compare against, and its values are
+    what the exclusion-code checks compare against, so one map serves both
+    rather than two derived from the same walk over `inventory.documents`.
     """
+    inventory_paths = set(kind_by_path)
     reasons = []
     named = tuple(scope.documents) + tuple(e.path for e in scope.excluded)
     unknown = sorted(set(named) - inventory_paths)
@@ -842,6 +966,29 @@ def _scope_reasons(scope, inventory_paths):
                 reported=f"{len(named)} document(s) accounted for",
                 current=_scope_summary(unaccounted),
             ))
+    mismatched = sorted(
+        exclusion.path for exclusion in scope.excluded
+        if exclusion.path in kind_by_path
+        and _exclusion_disagrees(
+            exclusion, kind_by_path[exclusion.path], scope.coverage, audit_mode
+        )
+    )
+    if mismatched:
+        reasons.append(StaleReason(
+            code=SCOPE_EXCLUSION_KIND_MISMATCH,
+            message=(
+                f"the scope excludes {len(mismatched)} document(s) whose "
+                f"current kind disagrees with why they were left out — a "
+                f"{EXCLUSION_PLANNING_KIND!r} exclusion must name a document "
+                f"the registry currently classifies planning, and a "
+                f"'full'-mode {SCOPE_WHOLE_INVENTORY!r} claim cannot exclude "
+                f"a living or narrative document under any code at all — "
+                f"that is exactly the coverage a full audit exists to "
+                f"examine"
+            ),
+            reported=_scope_summary(mismatched),
+            current=f"{len(kind_by_path)} document(s) in the inventory",
+        ))
     return tuple(reasons)
 
 
@@ -1135,7 +1282,9 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     # digest an approval set binds to.
     if scope is not None:
         reasons += _scope_reasons(
-            scope, {document.path for document in inventory.documents}
+            scope,
+            {document.path: document.kind for document in inventory.documents},
+            lineage.audit_mode,
         )
     found = {reason.code for reason in reasons}
     reasons += tuple(

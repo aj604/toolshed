@@ -57,6 +57,8 @@ from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .paths import repository_relative_problem
 from .registry import compile_glob
 from .report import (
+    EXCLUSION_PLANNING_KIND,
+    EXCLUSION_UNAFFECTED_BY_RANGE,
     SCOPE_WHOLE_INVENTORY,
     EvidenceBoundary,
     Incomplete,
@@ -206,15 +208,19 @@ class ExcludedDocument:
     """One document the audit deliberately did not declare, and why.
 
     Enumerated rather than dropped: a scope is only checkable if what it leaves
-    out is visible next to what it takes in.
+    out is visible next to what it takes in. `code` is the closed vocabulary
+    `report.validate_report` cross-checks against the document's current kind
+    (PR #87 review, N1); `reason` stays the prose next to it.
     """
 
     path: str
     kind: str
     reason: str
+    code: str
 
     def to_dict(self):
-        return {"path": self.path, "kind": self.kind, "reason": self.reason}
+        return {"path": self.path, "kind": self.kind, "reason": self.reason,
+                "code": self.code}
 
 
 @dataclass(frozen=True)
@@ -358,6 +364,7 @@ def plan_drift_audit(repo_root, mode=MODE_FULL, since=None,
         if obligation is None:
             excluded.append(ExcludedDocument(
                 path=document.path, kind=document.kind, reason=PLANNING_REASON,
+                code=EXCLUSION_PLANNING_KIND,
             ))
         elif mode == MODE_INCREMENTAL and not _affected(
             repo_root, document.path, changed
@@ -368,6 +375,7 @@ def plan_drift_audit(repo_root, mode=MODE_FULL, since=None,
                     f"unchanged by {baseline}..HEAD, and names no path that "
                     f"range changed"
                 ),
+                code=EXCLUSION_UNAFFECTED_BY_RANGE,
             ))
         else:
             documents.append(PlannedDocument(
@@ -589,7 +597,7 @@ def _evidence(raw, verdict, boundary, bad, where):
             bad("drift-verdict-invalid-evidence",
                 f"evidence.source must be a repository-relative path, and "
                 f"{source!r} {reason} [{code}]",
-                where)
+                f"{where} source={source!r}")
             ok = False
     elif verdict in POINTED_VERDICTS:
         bad("drift-verdict-invalid-evidence",
@@ -609,7 +617,7 @@ def _evidence(raw, verdict, boundary, bad, where):
             f"evidence.source {source!r} is outside the evidence boundary this "
             f"run declared ({list(boundary.sources)}) — a verdict resting on "
             f"something the report says was not consulted is not checkable",
-            where)
+            f"{where} source={source!r}")
         ok = False
     return (dict(raw) if ok else None), ok
 
@@ -1059,9 +1067,39 @@ def _audit_anchor(repo_root, path, registry_path):
     )), dated, None
 
 
+# Codes whose gap reason loses something specific if only the code survives:
+# both name a rule an `evidence.source` broke, and the source that broke it is
+# exactly what an operator debugging the gap needs next (PR #87 review, N4 —
+# the fixture's own hostile filenames are documents the audit declares and
+# examines but that cannot be cited as evidence sources, and the gap this
+# produced named only the code).
+EVIDENCE_GAP_CODES = ("drift-verdict-invalid-evidence",
+                      "drift-evidence-outside-boundary")
+
+
 def _gap_reason(problems):
-    """One line naming why a document was not examined, without prose drift."""
-    return ", ".join(sorted({problem.code for problem in problems}))
+    """One line naming why a document was not examined.
+
+    Codes only, by design — no prose drift — except for the two evidence
+    codes above: `_evidence` records the offending source in `location` as
+    `"<where> source=<repr>"`, and it is folded back in here, because the code
+    alone says a rule was broken, not which source broke it. Split on the
+    *first* " source=" (`where` never contains that substring, so it is
+    always `_evidence`'s own delimiter) rather than the last, so a hostile
+    source containing that same substring cannot truncate its own repr out of
+    the reason.
+    """
+    codes = sorted({problem.code for problem in problems})
+    sources = sorted({
+        problem.location.split(" source=", 1)[1]
+        for problem in problems
+        if problem.code in EVIDENCE_GAP_CODES
+        and problem.location and " source=" in problem.location
+    })
+    reason = ", ".join(codes)
+    if sources:
+        reason += " (offending source(s): " + ", ".join(sources) + ")"
+    return reason
 
 
 def _audit_assertions(repo_root, path, entry, boundary, registry_path):
@@ -1224,7 +1262,8 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
             "coverage": SCOPE_WHOLE_INVENTORY,
             "documents": [d.path for d in plan.documents],
             "excluded": [
-                {"path": d.path, "reason": d.reason} for d in plan.excluded
+                {"path": d.path, "reason": d.reason, "code": d.code}
+                for d in plan.excluded
             ],
         },
     }, registry_path=registry_path)
