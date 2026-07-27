@@ -25,7 +25,7 @@ rendered summary can itself be compared or digested.
 
 import re
 
-from .approval import ApprovalSet
+from .approval import UNCHECKED_MEANING, ApprovalSet
 from .digest import canonical, sha256_canonical
 from .report import Report
 from .results import (
@@ -280,6 +280,15 @@ def render_approval_set(approval):
         "",
         f"- Approval digest: {_code(approval.digest)}",
         f"- Report digest: {_code(approval.report_digest)}",
+        # The report's state, because a `partial` one changes what the change
+        # reviewer is looking at: reconciliation groups only the records that
+        # were present, so a coverage gap can hide a finding that would have
+        # grouped exclusively with something approved here.
+        f"- Report state when approved: {_code(approval.report_state)}"
+        + (
+            "" if approval.observed_report_state is None
+            else f", now {_code(approval.observed_report_state)}"
+        ),
         f"- Reconciliation digest: {_code(approval.reconciliation_digest)}",
         f"- Minter: {_code(approval.minter.kind)} {_code(approval.minter.id)}",
         f"- Repository: {_code(lineage.repository)}",
@@ -320,6 +329,16 @@ def render_approval_set(approval):
             for reason in approval.stale_reasons
         ]
 
+    if approval.unchecked:
+        # A verdict reached without the report or without the repository is not
+        # the verdict this summary otherwise looks like, and the reader deciding
+        # whether to merge cannot be left to infer that from an absence.
+        lines += ["", "## Not checked", ""]
+        lines += [
+            f"- {_code(name)} — {UNCHECKED_MEANING[name]}"
+            for name in approval.unchecked
+        ]
+
     return "\n".join(lines)
 
 
@@ -344,6 +363,15 @@ def approval_trailers(approval):
     return "\n".join([
         f"Doc-Lifecycle-Approval: {approval.digest}",
         f"Doc-Lifecycle-Report: {approval.report_digest}",
+        # The verdict, because the trailers are the *only* part of an approval
+        # set that lands in the repository. Without it a block copied from a
+        # stale set into a commit message reads exactly like a live one — and
+        # the artifact it points at is untracked and gone.
+        f"Doc-Lifecycle-Approval-State: {approval.status}"
+        + (
+            "" if not approval.unchecked
+            else f" (not checked: {', '.join(approval.unchecked)})"
+        ),
         f"Doc-Lifecycle-Records: {len(approval.records)} approved, "
         f"{len(approval.skipped)} skipped",
     ])

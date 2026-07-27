@@ -43,8 +43,9 @@ from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .digest import sha256_canonical
+from .finding import finding_digest
 from .inventory import DEFAULT_REGISTRY_PATH, load_registry
-from .paths import DOCUMENTATION, authorize_path
+from .paths import DOCUMENTATION, authorize_path, repository_relative_problem
 from .reconcile import DISPOSITION_EXCLUSIVE, reconcile
 from . import repository as repository_mod
 from .report import (
@@ -54,6 +55,7 @@ from .report import (
     StaleReason,
     compare_lineage,
     current_lineage,
+    lineage_digest,
     parse_lineage,
     parse_stale_reasons,
 )
@@ -92,14 +94,23 @@ DESTINATION_FIELD = "destination"
 
 FIELDS = (
     "artifact", "schema_version", "status", "minter", "report_digest",
-    "lineage", "reconciliation_digest", "records", "skipped", "scope",
-    "digest", "stale_reasons",
+    "report_state", "lineage", "reconciliation_digest", "records", "skipped",
+    "scope", "digest", "stale_reasons", "unchecked", "observed_report_state",
 )
-# `digest` is optional on the way in, as a report's is: it is checked when
-# present, and its absence changes no verdict. `stale_reasons` is a validator's
-# output that must read back in, for the same reason a report's do.
+# Verdict-side output that reads back in only so a validated artifact can be
+# round-tripped through a file. Both are re-derived on every run and the
+# carried value is never consulted: they describe what one validation run was
+# shown, which is a fact about that run and not about the approval set.
+RUN_FIELDS = ("unchecked", "observed_report_state")
+# `digest` is *required*, unlike a report's. A report is proof of examination
+# and its digest is a convenience; an approval set is authority, and its digest
+# is the only part of it that travels into the repository — so an approval set
+# that declines to say what it hashes to is one whose trailer nothing can be
+# checked against, and every tamper becomes "delete one field". `stale_reasons`
+# is a validator's output that must read back in, for the same reason a
+# report's do.
 REQUIRED_FIELDS = tuple(
-    f for f in FIELDS if f not in ("digest", "stale_reasons")
+    f for f in FIELDS if f != "stale_reasons" and f not in RUN_FIELDS
 )
 
 MINTER_FIELDS = ("kind", "id")
@@ -139,6 +150,28 @@ REPORT_REASON_CODES = (
     "approval-report-changed",
     "approval-reconciliation-changed",
 )
+
+# The checks that need something the caller may not have supplied, and what
+# each of them is the only thing that answers. A validation run names the ones
+# it did *not* perform, on the artifact it returns, so `clean` from a structural
+# read can never be mistaken for `clean` from a full one — the applier's whole
+# trust rests on this verdict, and "I was not shown the report" and "the report
+# agrees" must not print the same word.
+CHECK_REPORT = "report"
+CHECK_REPOSITORY = "repository"
+UNCHECKED_MEANING = {
+    CHECK_REPORT: (
+        "no report was supplied, so the selection was not checked against the "
+        "records it names: reconciliation groups, the skipped list, the move "
+        "destinations, and the report's own lineage are unverified"
+    ),
+    CHECK_REPOSITORY: (
+        "no repository was supplied, so nothing was checked against the world: "
+        "base commit, rules, configuration, the allowed mutation scope, and "
+        "every selected record's target text are unverified, and this verdict "
+        "can never be stale"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -225,12 +258,17 @@ class ApprovalSet:
     status: str
     minter: Minter
     report_digest: str
+    report_state: str
     lineage: Lineage
     reconciliation_digest: str
     records: Tuple[ApprovedRecord, ...]
     skipped: Tuple[SkippedRecord, ...]
     scope: MutationScope
     stale_reasons: Tuple[StaleReason, ...] = ()
+    # Verdict-side, like `status`: what this particular validation run was in a
+    # position to answer, never part of the artifact's identity.
+    unchecked: Tuple[str, ...] = ()
+    observed_report_state: Optional[str] = None
 
     @property
     def content(self):
@@ -249,6 +287,13 @@ class ApprovalSet:
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "minter": self.minter.to_dict(),
             "report_digest": self.report_digest,
+            # The report's own state at the moment of minting. In the content,
+            # so a hand-edit is a digest mismatch: a `partial` report's absent
+            # records are the unexamined ones, and reconciliation's guarantee is
+            # only over the records that were present — so one of them could
+            # have grouped exclusively with something approved here. The change
+            # reviewer has to be able to see that from the artifact.
+            "report_state": self.report_state,
             "lineage": self.lineage.to_dict(),
             "reconciliation_digest": self.reconciliation_digest,
             "records": [r.to_dict() for r in self.records],
@@ -267,6 +312,13 @@ class ApprovalSet:
         payload["digest"] = self.digest
         if self.stale_reasons:
             payload["stale_reasons"] = [r.to_dict() for r in self.stale_reasons]
+        if self.unchecked:
+            payload["unchecked"] = [
+                {"check": name, "meaning": UNCHECKED_MEANING[name]}
+                for name in self.unchecked
+            ]
+        if self.observed_report_state is not None:
+            payload["observed_report_state"] = self.observed_report_state
         return payload
 
 
@@ -533,6 +585,7 @@ def mint_approval_set(report, selected, *, repo_root, minter,
         status=STATE_CLEAN,
         minter=minter,
         report_digest=report.digest,
+        report_state=report.status,
         lineage=report.lineage,
         reconciliation_digest=reconciliation.digest,
         records=records,
@@ -601,7 +654,21 @@ def _minter(raw, bad):
     return Minter(kind=raw["kind"], id=raw["id"])
 
 
-def _approved_records(raw, bad):
+def _path_problem(value):
+    """Why `value` is not a canonical repository-relative document, or None.
+
+    The structural layer's own path check, and it needs no repository: an
+    approval set's record paths and scope paths are write targets, so `..`, a
+    leading `/`, a backslash, whitespace, and a non-NFC spelling are forgeries
+    rather than a repository that moved — and a forgery is `invalid`, not
+    `stale`. One owner decides (`paths.repository_relative_problem`), so an
+    edit target cannot mean one thing here and another to the applier.
+    """
+    problem = repository_relative_problem(value)
+    return None if problem is None else problem[1]
+
+
+def _approved_records(raw, bad, lineage):
     if not isinstance(raw, list) or not raw:
         bad("approval-empty-selection",
             "records must be a non-empty list of the selected records — an "
@@ -650,6 +717,24 @@ def _approved_records(raw, bad):
                 where)
             ok = False
             continue
+        spelling = next(
+            (
+                (name, _path_problem(entry[name]))
+                for name in ("path", "destination")
+                if entry[name] is not None
+                and _path_problem(entry[name]) is not None
+            ),
+            None,
+        )
+        if spelling is not None:
+            bad("approval-invalid-record",
+                f"records[{i}].{spelling[0]} {entry[spelling[0]]!r} "
+                f"{spelling[1]} — every path in an approval set is a document "
+                f"the applier may write, and a spelling that leaves the "
+                f"repository is a forged scope, not a repository that moved",
+                where)
+            ok = False
+            continue
         if entry["digest"] in seen:
             bad("approval-invalid-record",
                 f"records[{i}] repeats digest {entry['digest']} — a selection "
@@ -658,11 +743,47 @@ def _approved_records(raw, bad):
             ok = False
             continue
         seen.add(entry["digest"])
+        if lineage is not None:
+            # The check that makes the approved *target* mean something. Until
+            # here, `code`, `path`, and `units` were shape-checked and nothing
+            # more — so keeping a legitimately approved digest while rewriting
+            # the document and units beneath it, and repairing `scope.paths` to
+            # match, produced an artifact whose every derivation faithfully
+            # computed the wrong document. A finding's digest *is* its lineage,
+            # code, document, and units, so re-deriving it here binds the
+            # selection to what it says it selected — the same check
+            # `reconcile.py` runs over a report's records, and like that one it
+            # needs no report and no repository.
+            expected = finding_digest(
+                lineage, entry["code"], entry["path"], units
+            )
+            if expected != entry["digest"]:
+                bad("approval-record-digest-mismatch",
+                    f"records[{i}] declares digest {entry['digest']} but its "
+                    f"code, document, and units under this approval set's "
+                    f"lineage digest to {expected} — the digest is what was "
+                    f"approved, so a record whose target does not re-derive to "
+                    f"it would point the applier at a document nobody selected",
+                    where)
+                ok = False
+                continue
         records.append(ApprovedRecord(
             digest=entry["digest"], record_id=entry["id"], code=entry["code"],
             path=entry["path"], units=tuple(sorted(set(units))),
             destination=destination,
         ))
+    if ok and [r.digest for r in records] != sorted(r.digest for r in records):
+        # The digest is taken over the record array as written, so two orderings
+        # of one selection would be two approval digests — and the digest is
+        # what a trailer pins. Sorted is the one order minting produces, so it
+        # is the only one that reads back: canonicality by refusal, never by
+        # silent reordering, which would make the file disagree with its digest.
+        bad("approval-records-not-sorted",
+            "records must be listed in ascending digest order — the approval "
+            "digest is taken over the list as written, so an approval set that "
+            "may be reordered has more than one digest for one selection",
+            "records")
+        ok = False
     return records if ok else None
 
 
@@ -691,6 +812,13 @@ def _skipped_records(raw, bad):
             ok = False
             continue
         entries.append(SkippedRecord(digest=entry["digest"], record_id=entry["id"]))
+    if ok and [e.digest for e in entries] != sorted(e.digest for e in entries):
+        bad("approval-skipped-not-sorted",
+            "skipped must be listed in ascending digest order — it is inside "
+            "the approval digest, so an order that may vary is a selection with "
+            "more than one identity",
+            "skipped")
+        ok = False
     return entries if ok else None
 
 
@@ -716,6 +844,18 @@ def _mutation_scope(raw, bad):
                 f"scope.{name} repeats a path — an enumerated scope is a set",
                 f"scope.{name}")
             ok = False
+        else:
+            for value in values:
+                problem = _path_problem(value)
+                if problem is not None:
+                    bad("approval-invalid-scope",
+                        f"scope.{name} entry {value!r} {problem} — the "
+                        f"allowed mutation scope is the outer bound on what "
+                        f"the applier writes, so a path that is not inside the "
+                        f"repository is forged authority and no repository "
+                        f"state could make it true",
+                        f"scope.{name}")
+                    ok = False
     if not ok:
         return None
     return MutationScope(roots=tuple(raw["roots"]), paths=tuple(raw["paths"]))
@@ -829,7 +969,7 @@ def _preimage_reasons(records, repo_root, registry_path):
 
 def validate_approval_set(payload, *, report=None, repo_root=None,
                           registry_path=DEFAULT_REGISTRY_PATH,
-                          audit_config_digest=None):
+                          audit_config_digest=None, expected_digest=None):
     """Validate an approval set. Returns an `ApprovalSet` or `Invalid`.
 
     Structural validation is exhaustive and runs alone: an artifact that cannot
@@ -838,9 +978,16 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
 
     Pass `report` to check the selection against the report it names, and
     `repo_root` to check it against the world. Each check is optional and each
-    is honest about not having run: without a repository the verdict can never
-    be `stale`, because this function does not guess at a state it was not
-    shown.
+    is honest about not having run — in both directions. Without a repository
+    the verdict can never be `stale`, because this function does not guess at a
+    state it was not shown; and the returned artifact's `unchecked` names every
+    check that was skipped, so a caller cannot read `clean` from a structural
+    pass as `clean` from a full one. An applier must supply both.
+
+    Pass `expected_digest` — the `Doc-Lifecycle-Approval` trailer, which is the
+    only part of an approval set that survives in the repository — to bind this
+    file to the change that claims it. A file the trailer does not name is
+    `approval-digest-unexpected`, whatever it validates to on its own.
     """
     if report is not None and not isinstance(report, Report):
         raise TypeError(
@@ -902,14 +1049,25 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
                 f"approval to one report",
                 name)
 
+    report_state = payload.get("report_state")
+    if "report_state" in payload and report_state not in APPROVABLE_STATES:
+        # The minter's report-state refusal, re-run on the artifact. Minting
+        # would not produce an approval set from a report in any other state,
+        # and this is the read the applier actually reaches.
+        bad("approval-report-not-approvable",
+            f"report_state {report_state!r} is not a state a report can "
+            f"authorize from — an approval set is minted from a report whose "
+            f"state is one of {list(APPROVABLE_STATES)}",
+            "report_state")
+
     minter = _minter(payload["minter"], bad) if "minter" in payload else None
     lineage = None
     if "lineage" in payload:
         lineage, lineage_problems = parse_lineage(payload["lineage"])
         problems.extend(lineage_problems)
     records = (
-        _approved_records(payload["records"], bad) if "records" in payload
-        else None
+        _approved_records(payload["records"], bad, lineage)
+        if "records" in payload else None
     )
     skipped = (
         _skipped_records(payload["skipped"], bad) if "skipped" in payload
@@ -945,6 +1103,7 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
         status=STATE_CLEAN,
         minter=minter,
         report_digest=payload["report_digest"],
+        report_state=report_state,
         lineage=lineage,
         reconciliation_digest=payload["reconciliation_digest"],
         records=tuple(records),
@@ -952,8 +1111,8 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
         scope=scope,
     )
     records = approval.records
-    declared = payload.get("digest")
-    if declared is not None and declared != approval.digest:
+    declared = payload["digest"]
+    if declared != approval.digest:
         return Invalid((Problem(
             code="approval-digest-mismatch",
             message=(
@@ -964,10 +1123,24 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
             ),
             location="digest",
         ),))
+    if expected_digest is not None and expected_digest != approval.digest:
+        return Invalid((Problem(
+            code="approval-digest-unexpected",
+            message=(
+                f"this change was authorized by approval set {expected_digest} "
+                f"and the file supplied is {approval.digest} — an approval set "
+                f"is untracked, so the trailer is the only record of which one "
+                f"authorized the change, and a different file is a different "
+                f"approval however well-formed it is"
+            ),
+            location="digest",
+        ),))
 
     reasons = []
     if report is not None:
-        reasons, forged = _report_reasons(payload, records, skipped, report)
+        reasons, forged = _report_reasons(
+            payload, records, skipped, report, lineage
+        )
         if forged:
             # Not `stale`: nothing moved in the world. These are selections no
             # minter would have produced, so the artifact was never authority —
@@ -995,15 +1168,29 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
 
     # The verdict is put onto the artifact, never into it: `digest` is derived
     # from the content, so replacing the status and the reasons cannot change
-    # what this approval set is.
+    # what this approval set is. `unchecked` rides along for the same reason and
+    # under the same rule — it is what this run was shown, not what the approval
+    # says.
     return replace(
         approval,
         status=STATE_STALE if reasons else STATE_CLEAN,
         stale_reasons=tuple(reasons),
+        unchecked=tuple(
+            [CHECK_REPORT] if report is None else []
+        ) + tuple(
+            [CHECK_REPOSITORY] if repo_root is None else []
+        ),
+        # The report's state *now*, alongside the state it had when this was
+        # minted. Reported rather than judged: a report goes stale the moment
+        # any document changes, including by the applier's own writes, so
+        # turning that into a verdict here would make the second subset of one
+        # report unapplyable — the exact case partial approval exists for (see
+        # the module docstring). What the change reviewer needs is to see it.
+        observed_report_state=None if report is None else report.status,
     )
 
 
-def _report_reasons(payload, records, skipped, report):
+def _report_reasons(payload, records, skipped, report, approval_lineage):
     """(stale reasons, problems) for this approval set against its report.
 
     Two kinds of answer, because two different things can be wrong. A *stale
@@ -1028,6 +1215,24 @@ def _report_reasons(payload, records, skipped, report):
         )], []
 
     reasons = []
+    if approval_lineage != report.lineage:
+        # The report digest binds the report's *records*; the lineage travels
+        # beside it, and two of its fields — the audit mode and the evidence
+        # boundary — describe how the run was conducted rather than anything
+        # the world can be re-read for. Nothing else could ever catch a
+        # divergence there, and "binds the report's lineage verbatim" has to be
+        # true of the file, not just of what minting wrote.
+        return [StaleReason(
+            code="approval-report-changed",
+            message=(
+                "the approval set carries a lineage the report it names does "
+                "not — an approval set binds one report's lineage verbatim, so "
+                "a copy that differs describes a run that did not happen"
+            ),
+            reported=lineage_digest(approval_lineage),
+            current=lineage_digest(report.lineage),
+        )], []
+
     carried = {record.digest for record in report.records}
     missing = sorted(r.digest for r in records if r.digest not in carried)
     if missing:
@@ -1070,6 +1275,28 @@ def _report_reasons(payload, records, skipped, report):
     selected = {record.digest for record in records}
     problems = _group_problems(selected, reconciliation)
 
+    # A record's code, document, and units re-derive to its digest without a
+    # report — but `destination` does not: it is not in the finding digest,
+    # because where a move puts content is the lane's proposal and not the
+    # finding's identity. So it is the one part of the write set that only the
+    # report can confirm, and inventing one adds an arbitrary writable document
+    # that every other derivation would faithfully accept.
+    by_digest = {record.digest: record for record in report.records}
+    for record in records:
+        reported = _destination(by_digest[record.digest])
+        if record.destination != reported:
+            problems.append(Problem(
+                code="approval-destination-not-reported",
+                message=(
+                    f"record {record.record_id} says its remedy writes to "
+                    f"{record.destination!r}, and the report says "
+                    f"{reported!r} — a destination is inside the allowed "
+                    f"mutation scope, so one the report never proposed is a "
+                    f"document nobody approved and nobody audited"
+                ),
+                location=record.record_id,
+            ))
+
     # The skipped list is a derivation too — everything the report carries that
     # this approval set did not take. A shortened one hides what the approver
     # declined, which is the half of partial approval that makes it auditable.
@@ -1097,7 +1324,7 @@ def _reject_constant(name):
 
 def load_approval_set(path, *, report=None, repo_root=None,
                       registry_path=DEFAULT_REGISTRY_PATH,
-                      audit_config_digest=None):
+                      audit_config_digest=None, expected_digest=None):
     """Read an approval-set file and validate it. `ApprovalSet` or `Invalid`."""
     try:
         with open(path, encoding="utf-8") as fh:
@@ -1137,6 +1364,7 @@ def load_approval_set(path, *, report=None, repo_root=None,
     return validate_approval_set(
         payload, report=report, repo_root=repo_root,
         registry_path=registry_path, audit_config_digest=audit_config_digest,
+        expected_digest=expected_digest,
     )
 
 

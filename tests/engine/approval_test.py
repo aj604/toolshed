@@ -97,6 +97,27 @@ def reasons(approval):
     return sorted(r.code for r in approval.stale_reasons)
 
 
+# Everything a validation run puts *onto* an approval set rather than into it.
+# Excluded from the digest, exactly as `ApprovalSet.content` excludes them.
+VERDICT_FIELDS = (
+    "status", "digest", "stale_reasons", "unchecked", "observed_report_state",
+)
+
+
+def resigned(payload):
+    """`payload` with its digest recomputed, in place.
+
+    The tamper tests hand-edit an approval set and then repair its digest,
+    because an attacker who can edit the file can also re-hash it — leaving the
+    digest broken would test only the digest check, which is not the interesting
+    half of any of them.
+    """
+    payload["digest"] = sha256_canonical({
+        k: v for k, v in payload.items() if k not in VERDICT_FIELDS
+    })
+    return payload
+
+
 class ApprovalTestCase(RepoTestCase):
     """A real repository, real documents, and findings bound to both."""
 
@@ -366,10 +387,17 @@ class ReconciledSelection(ApprovalTestCase):
         )
 
     def overlapping_pair(self):
+        """Two records, overlapping targets, one remedy — an atomic group.
+
+        Both write the same replacement, which is what makes them one edit
+        rather than a contradiction: a remedy is the bytes a record puts in the
+        document, not the vocabulary its detector names the verdict with.
+        """
         units = self.units(self.repo, DOC_A)
         return (
-            self.finding("R-1", "CUT", DOC_A, units[:2]),
-            self.finding("R-2", "DISTILL", DOC_A, units[:1], status="ready"),
+            self.finding("R-1", "STALE", DOC_A, units[:2], fix="Fees: 2%."),
+            self.finding("R-2", "CONDENSE", DOC_A, units[:1],
+                         proposal="Fees: 2%."),
         )
 
     def test_one_leg_of_an_exclusive_pair_cannot_be_selected(self):
@@ -504,6 +532,32 @@ class ApprovedTestCase(ApprovalTestCase):
         self.approval = self.mint(self.source, [self.one["digest"]])
         self.assertIsInstance(self.approval, ApprovalSet, self.approval)
 
+    def approved_entry(self, record, destination=None):
+        """One report record in the shape an approval set carries it."""
+        return {
+            "digest": record["digest"], "id": record["id"],
+            "code": record["code"], "path": record["path"],
+            "destination": destination, "units": sorted(record["units"]),
+        }
+
+    def rebuilt(self, record, *, lineage=None, scope=None, skipped=()):
+        """An approval set for `record`, assembled by hand and re-digested.
+
+        Every derivation the contract can recompute on its own is repaired, so
+        each test that uses this is asking about the one thing it changed —
+        which is also the attacker's position: whoever can edit the file can
+        re-hash it and fix up the arithmetic.
+        """
+        payload = self.approval.to_dict()
+        if lineage is not None:
+            payload["lineage"] = lineage.to_dict()
+        payload["records"] = [self.approved_entry(record)]
+        payload["skipped"] = sorted(skipped, key=lambda r: r["digest"])
+        payload["scope"]["paths"] = (
+            [record["path"]] if scope is None else scope
+        )
+        return resigned(payload)
+
     def check(self, approval=None, **kwargs):
         kwargs.setdefault("report", self.source)
         kwargs.setdefault("repo_root", self.repo)
@@ -547,13 +601,17 @@ class Freshness(ApprovedTestCase):
         self.assertEqual(reasons(result), ["approval-audit-config-changed"])
 
     def test_a_ruleset_bump_makes_it_stale_naming_the_rules(self):
-        payload = self.approval.to_dict()
-        payload["lineage"]["ruleset_version"] = 99
-        del payload["digest"]
+        # Rebuilt rather than hand-patched: a record's digest is taken over its
+        # lineage, so an artifact claiming a ruleset the engine does not run is
+        # only coherent if its records were produced under that ruleset too.
+        bumped = self.lineage_for(self.repo, ruleset_version=99)
+        record = self.finding("R-1", "STALE", DOC_A,
+                              self.units(self.repo, DOC_A)[:1],
+                              lineage=bumped, fix="Fees: 2.5%.")
 
         result = validate_approval_set(
-            payload, report=None, repo_root=self.repo,
-            audit_config_digest=CONFIG_DIGEST,
+            self.rebuilt(record, lineage=bumped), report=None,
+            repo_root=self.repo, audit_config_digest=CONFIG_DIGEST,
         )
 
         self.assertIn("approval-ruleset-changed", reasons(result))
@@ -645,11 +703,15 @@ class Freshness(ApprovedTestCase):
     def test_a_selection_the_report_no_longer_carries_is_stale(self):
         # The report is the one the digest names, but the record is not in it:
         # nothing the applier could look up, so the authority does not stand.
-        payload = self.approval.to_dict()
-        payload["records"][0]["digest"] = "f" * 64
-        del payload["digest"]
+        # A real finding under the right lineage, so this is the report check
+        # answering and not the record's own digest.
+        absent = self.finding("R-9", "CONDENSE", DOC_B,
+                              self.units(self.repo, DOC_B)[:1],
+                              proposal="The worker retries five times.")
 
-        result = validate_approval_set(payload, report=self.source)
+        result = validate_approval_set(
+            self.rebuilt(absent), report=self.source
+        )
 
         self.assertIn("approval-report-changed", reasons(result))
 
@@ -692,8 +754,7 @@ class ReconciledOnReadBack(ApprovedTestCase):
             key=lambda r: r["digest"],
         )
         payload["scope"]["paths"] = [record["path"]]
-        del payload["digest"]
-        return payload
+        return resigned(payload)
 
     def test_one_leg_of_an_exclusive_pair_is_refused_on_read_back(self):
         report, cut, _ = self.contested()
@@ -705,8 +766,9 @@ class ReconciledOnReadBack(ApprovedTestCase):
 
     def test_half_an_atomic_group_is_refused_on_read_back(self):
         units = self.units(self.repo, DOC_A)
-        wide = self.finding("R-1", "CUT", DOC_A, units[:2])
-        narrow = self.finding("R-2", "DISTILL", DOC_A, units[:1], status="ready")
+        wide = self.finding("R-1", "STALE", DOC_A, units[:2], fix="Fees: 2%.")
+        narrow = self.finding("R-2", "CONDENSE", DOC_A, units[:1],
+                              proposal="Fees: 2%.")
         report = self.report([wide, narrow])
 
         result = validate_approval_set(self.forged(report, wide), report=report)
@@ -716,7 +778,7 @@ class ReconciledOnReadBack(ApprovedTestCase):
     def test_a_skipped_list_that_hides_a_record_is_refused(self):
         payload = self.approval.to_dict()
         payload["skipped"] = []
-        del payload["digest"]
+        resigned(payload)
 
         result = validate_approval_set(payload, report=self.source)
 
@@ -801,8 +863,7 @@ class StructuralRefusals(ApprovedTestCase):
     def payload(self, **overrides):
         payload = self.approval.to_dict()
         payload.update(overrides)
-        payload.pop("digest", None)
-        return payload
+        return resigned(payload)
 
     def test_an_unknown_minter_kind_is_refused(self):
         result = validate_approval_set(
@@ -977,6 +1038,228 @@ class Travelling(ApprovedTestCase):
     def test_rendering_takes_a_validated_approval_set(self):
         with self.assertRaises(TypeError):
             render_approval_set(self.approval.to_dict())
+
+    def test_the_trailers_carry_the_verdict(self):
+        # The trailers are the only part of an approval set that lands in the
+        # repository, so a block copied from a stale set must not read like a
+        # live one.
+        self.write(self.repo, DOC_A, "# Fees\n\nSomething else.\n")
+
+        trailers = approval_trailers(self.check())
+
+        self.assertIn(f"Doc-Lifecycle-Approval-State: {STATE_STALE}", trailers)
+
+    def test_a_live_set_says_so_in_its_trailers(self):
+        self.assertIn(f"Doc-Lifecycle-Approval-State: {STATE_CLEAN}",
+                      approval_trailers(self.check()))
+
+    def test_the_trailers_name_the_checks_that_did_not_run(self):
+        structural = validate_approval_set(self.approval.to_dict())
+
+        self.assertIn("not checked: report, repository",
+                      approval_trailers(structural))
+
+    def test_the_summary_shows_the_state_of_the_report_it_came_from(self):
+        # A `partial` report's absent records are the unexamined ones, and a
+        # coverage gap can hide a finding that would have grouped exclusively
+        # with something approved here. The change reviewer has to see it.
+        self.assertIn("Report state when approved: `findings`",
+                      render_approval_set(self.approval))
+
+
+class ReadBackBindsTheTarget(ApprovedTestCase):
+    """The read-back path is the applier's gate, so it re-derives the target.
+
+    Everything here starts from a legitimately minted approval set and edits the
+    file — which is the attacker's actual position, since an approval set is an
+    untracked file that reaches the applier by path.
+    """
+
+    def test_a_retargeted_record_cannot_keep_its_approved_digest(self):
+        # The attack: keep the approved digest, point `path` and `units` at an
+        # unselected document, repair `scope.paths`. Every derivation the
+        # contract recomputes then faithfully computes the wrong document.
+        payload = self.approval.to_dict()
+        payload["records"][0]["path"] = DOC_B
+        payload["records"][0]["units"] = self.units(self.repo, DOC_B)[:1]
+        payload["scope"]["paths"] = [DOC_B]
+        resigned(payload)
+
+        result = validate_approval_set(payload)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-record-digest-mismatch"])
+
+    def test_the_retarget_is_refused_with_no_report_and_no_repository(self):
+        # A finding digest is lineage, code, document, and units — so this is
+        # answerable from the artifact alone, and must be, because the reduced
+        # inputs are exactly where a forged file gets handed in.
+        payload = self.approval.to_dict()
+        payload["records"][0]["code"] = "RETIRE-DOC"
+        resigned(payload)
+
+        self.assertEqual(codes(validate_approval_set(payload)),
+                         ["approval-record-digest-mismatch"])
+
+    def test_an_invented_destination_is_refused_against_the_report(self):
+        # `destination` is not in the finding digest — where a move puts
+        # content is the lane's proposal, not the finding's identity — so the
+        # report is the only thing that can confirm it. Inventing one adds an
+        # arbitrary writable document.
+        payload = self.approval.to_dict()
+        payload["records"][0]["destination"] = DOC_B
+        payload["scope"]["paths"] = sorted([DOC_A, DOC_B])
+        resigned(payload)
+
+        result = validate_approval_set(payload, report=self.source)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-destination-not-reported"])
+
+    def test_a_destination_the_report_proposed_is_accepted(self):
+        move = self.finding(
+            "R-9", "EXTRACT-AND-MOVE", DOC_A, self.units(self.repo, DOC_A)[:1],
+            proposal="The fee is 2%.",
+            destination={"path": DOC_B, "kind": "living", "set": None},
+        )
+        report = self.report([move])
+        approval = self.mint(report, [move["digest"]])
+
+        result = validate_approval_set(approval.to_dict(), report=report)
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.scope.paths, (DOC_A, DOC_B))
+
+    def test_a_traversal_path_is_a_forgery_not_a_repository_that_moved(self):
+        payload = self.approval.to_dict()
+        payload["records"][0]["path"] = "../../../tmp/evil.md"
+        payload["scope"]["paths"] = ["../../../tmp/evil.md"]
+        resigned(payload)
+
+        result = validate_approval_set(payload)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(
+            codes(result),
+            ["approval-invalid-record", "approval-invalid-scope"],
+        )
+
+    def test_an_absolute_scope_path_is_refused_without_a_repository(self):
+        payload = self.approval.to_dict()
+        payload["scope"]["paths"] = ["/etc/passwd", DOC_A]
+        resigned(payload)
+
+        self.assertIn("approval-invalid-scope",
+                      codes(validate_approval_set(payload)))
+
+    def test_a_lineage_that_diverges_from_the_report_is_stale(self):
+        # Two lineage fields describe how a run was conducted, so nothing in
+        # the world could ever contradict them. Only the report can.
+        # Rebuilt under the diverging lineage, so the record's own digest
+        # re-derives and this is the report comparison answering.
+        other = self.lineage_for(self.repo, audit_mode="incremental")
+        record = self.finding("R-1", "STALE", DOC_A,
+                              self.units(self.repo, DOC_A)[:1],
+                              lineage=other, fix="Fees: 2.5%.")
+
+        result = validate_approval_set(
+            self.rebuilt(record, lineage=other), report=self.source
+        )
+
+        self.assertEqual(reasons(result), ["approval-report-changed"])
+
+
+class SelfDescribingVerdicts(ApprovedTestCase):
+    """AC-adjacent: `clean` must say what it was in a position to check."""
+
+    def test_a_structural_pass_names_both_checks_it_did_not_run(self):
+        result = validate_approval_set(self.approval.to_dict())
+
+        self.assertEqual(result.status, STATE_CLEAN)
+        self.assertEqual(result.unchecked, ("report", "repository"))
+
+    def test_a_full_pass_names_nothing_unchecked(self):
+        self.assertEqual(self.check().unchecked, ())
+
+    def test_the_payload_explains_each_check_that_did_not_run(self):
+        payload = validate_approval_set(self.approval.to_dict()).to_dict()
+
+        self.assertEqual([e["check"] for e in payload["unchecked"]],
+                         ["report", "repository"])
+        self.assertIn("no report was supplied", payload["unchecked"][0]["meaning"])
+
+    def test_the_reports_state_now_is_reported_beside_the_minted_one(self):
+        # Reported, never judged: a report goes stale the moment any document
+        # changes — including by the applier's own writes — so making that a
+        # verdict here would make the second subset of one report unapplyable.
+        self.assertEqual(self.check().observed_report_state, STATE_FINDINGS)
+        self.assertIsNone(
+            validate_approval_set(self.approval.to_dict()).observed_report_state
+        )
+
+    def test_a_report_state_no_report_could_authorize_is_refused(self):
+        payload = self.approval.to_dict()
+        payload["report_state"] = STATE_CLEAN
+        resigned(payload)
+
+        self.assertEqual(codes(validate_approval_set(payload)),
+                         ["approval-report-not-approvable"])
+
+
+class TamperEvidence(ApprovedTestCase):
+    """The digest is required, and can be pinned to the trailer that travels."""
+
+    def test_an_approval_set_without_a_digest_is_refused(self):
+        payload = self.approval.to_dict()
+        del payload["digest"]
+
+        result = validate_approval_set(payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["approval-missing-field"])
+
+    def test_a_file_the_trailer_does_not_name_is_refused(self):
+        result = validate_approval_set(
+            self.approval.to_dict(), expected_digest="b" * 64
+        )
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["approval-digest-unexpected"])
+
+    def test_the_trailer_it_does_name_validates(self):
+        result = validate_approval_set(
+            self.approval.to_dict(), expected_digest=self.approval.digest
+        )
+
+        self.assertIsInstance(result, ApprovalSet, result)
+
+    def test_one_selection_cannot_have_two_digests(self):
+        # Records are inside the digest and were read in file order, so a
+        # reordered list was a second digest for an identical selection.
+        both = self.mint(self.source, [self.one["digest"], self.two["digest"]])
+        payload = both.to_dict()
+        payload["records"].reverse()
+        resigned(payload)
+
+        result = validate_approval_set(payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["approval-records-not-sorted"])
+
+    def test_a_reordered_skipped_list_is_refused_too(self):
+        one, two, three = (
+            self.one, self.two,
+            self.finding("R-3", "CONDENSE", DOC_B,
+                         self.units(self.repo, DOC_B)[:1], proposal="x"),
+        )
+        report = self.report([one, two, three])
+        approval = self.mint(report, [one["digest"]])
+        payload = approval.to_dict()
+        payload["skipped"].reverse()
+        resigned(payload)
+
+        self.assertEqual(codes(validate_approval_set(payload)),
+                         ["approval-skipped-not-sorted"])
 
 
 if __name__ == "__main__":

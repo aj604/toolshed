@@ -14,6 +14,7 @@ import json
 import os
 import sys
 import unittest
+from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -187,11 +188,39 @@ class ValidateCommand(ApprovalCommandTestCase):
         self.assertIn("approval-not-an-approval-set", result.stderr)
 
     def test_it_renders_the_summary_that_travels_with_the_change(self):
+        result = run_command(
+            "render-approval", "--approval", self.approval_path,
+            "--repo", self.repo, "--report", self.report_path,
+            "--audit-config-digest", CONFIG_DIGEST,
+        )
+
+        self.assertEqual(result.returncode, EXIT_OK, result.stderr)
+        self.assertEqual(
+            result.stdout.rstrip("\n"),
+            # The command renders what validation returned, which carries the
+            # report's state as the run observed it — the minted artifact has
+            # not been shown a report.
+            render_approval_set(replace(
+                self.approval, observed_report_state=self.source.status
+            )),
+        )
+
+    def test_a_render_without_the_report_or_the_repository_says_so(self):
+        # A reduced-input verdict must not read as a full one: the summary is
+        # what a change reviewer sees, and `clean` from a structural pass is
+        # not the same claim.
         result = run_command("render-approval", "--approval", self.approval_path)
 
         self.assertEqual(result.returncode, EXIT_OK, result.stderr)
-        self.assertEqual(result.stdout.rstrip("\n"),
-                         render_approval_set(self.approval))
+        self.assertIn("## Not checked", result.stdout)
+        self.assertIn("no report was supplied", result.stdout)
+        self.assertIn("no repository was supplied", result.stdout)
+
+    def test_a_file_the_trailer_does_not_name_is_refused(self):
+        result = self.validate("--expected-digest", "b" * 64)
+
+        self.assertEqual(result.returncode, EXIT_INVALID)
+        self.assertIn("approval-digest-unexpected", result.stderr)
 
     def test_an_invalid_approval_set_renders_nothing(self):
         result = run_command("render-approval", "--approval", self.report_path)

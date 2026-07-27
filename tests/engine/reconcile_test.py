@@ -128,14 +128,15 @@ class Duplicates(unittest.TestCase):
             [r.kind for r in group.relations], [RELATION_DUPLICATE]
         )
 
-    def test_two_deletions_of_one_passage_are_duplicates(self):
-        cut = finding_record("R-1", "CUT", "docs/a.md", [UNIT_A, UNIT_B])
-        distill = finding_record("R-2", "DISTILL", "docs/a.md",
-                                 # The same target listed the other way round:
-                                 # a finding's units are a set, not a sequence.
-                                 [UNIT_B, UNIT_A], status="ready")
+    def test_the_same_replacement_is_one_edit_however_the_units_are_ordered(self):
+        one = finding_record("R-1", "STALE", "docs/a.md", [UNIT_A, UNIT_B],
+                             fix="one line")
+        two = finding_record("R-2", "CONDENSE", "docs/a.md",
+                             # The same target listed the other way round:
+                             # a finding's units are a set, not a sequence.
+                             [UNIT_B, UNIT_A], proposal="one line")
 
-        result = reconcile(report_of(cut, distill))
+        result = reconcile(report_of(one, two))
 
         self.assertEqual(
             [r.kind for r in result.groups[0].relations], [RELATION_DUPLICATE]
@@ -284,6 +285,77 @@ class Determinism(unittest.TestCase):
 
         self.assertIsInstance(result, Reconciliation)
         self.assertEqual(result.groups, ())
+
+
+class UnrecordedRemedies(unittest.TestCase):
+    """Most real records propose no replacement text, so this is the common case.
+
+    Bloat's `CUT`, `RETIRE-DOC`, and `DISTILL` all carry no proposal, and drift
+    emits a fix only for `STALE`. Reading every one of them as the same remedy
+    would declare unrelated actions to be one edit described twice.
+    """
+
+    def test_a_cut_and_a_distill_over_one_passage_contradict(self):
+        cut = finding_record("R-1", "CUT", "docs/a.md", [UNIT_A, UNIT_B])
+        distill = finding_record("R-2", "DISTILL", "docs/a.md",
+                                 [UNIT_B, UNIT_A], status="pending-implementation")
+
+        result = reconcile(report_of(cut, distill))
+
+        group = result.groups[0]
+        self.assertEqual(group.disposition, DISPOSITION_EXCLUSIVE)
+        self.assertEqual([r.kind for r in group.relations],
+                         [RELATION_SAME_TARGET])
+
+    def test_neither_leg_of_that_pair_can_be_approved(self):
+        # The bug this closes: as duplicates the group was `atomic`, so taking
+        # the CUT alone was refused and taking both was clean — which walked a
+        # DISTILL that is not appliable straight through the gate.
+        cut = finding_record("R-1", "CUT", "docs/a.md", [UNIT_A])
+        distill = finding_record("R-2", "DISTILL", "docs/a.md", [UNIT_A],
+                                 status="pending-implementation")
+
+        group = reconcile(report_of(cut, distill)).groups[0]
+
+        self.assertEqual(group.disposition, DISPOSITION_EXCLUSIVE)
+
+    def test_one_code_with_overlapping_targets_is_still_one_edit(self):
+        # Same code and no replacement text on either side: nothing says they
+        # disagree, and identical code, document, and units would be one
+        # finding by digest — so only overlapping sets can reach here.
+        wide = finding_record("R-1", "CUT", "docs/a.md", [UNIT_A, UNIT_B])
+        narrow = finding_record("R-2", "CUT", "docs/a.md", [UNIT_B, UNIT_C])
+
+        group = reconcile(report_of(wide, narrow)).groups[0]
+
+        self.assertEqual(group.disposition, DISPOSITION_ATOMIC)
+        self.assertEqual([r.kind for r in group.relations],
+                         [RELATION_OVERLAPPING])
+
+
+class CanonicalTargets(unittest.TestCase):
+    """A document written two ways would be two targets, and never conflict."""
+
+    def test_a_non_canonical_leg_cannot_hide_from_its_pair(self):
+        # The attack: spell one leg of a contradictory pair `./docs/a.md`, and
+        # the pair splits into two independent groups — then approve one leg.
+        cut = finding_record("R-1", "CUT", "./docs/a.md", [UNIT_A])
+        condense = finding_record("R-2", "CONDENSE", "docs/a.md", [UNIT_A],
+                                  proposal="one line")
+
+        result = reconcile(report_of(cut, condense))
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result),
+                         ["reconcile-record-path-not-canonical"])
+
+    def test_a_doubled_separator_is_refused_too(self):
+        record = finding_record("R-1", "CUT", "docs//a.md", [UNIT_A])
+
+        result = reconcile(report_of(record))
+
+        self.assertEqual(codes(result),
+                         ["reconcile-record-path-not-canonical"])
 
 
 class Refusals(unittest.TestCase):

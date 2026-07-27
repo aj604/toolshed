@@ -28,7 +28,11 @@ the *selection rule* an approval must obey — structure, not advice:
 
 **A target is (document, unit digests).** A unit digest is content, so the same
 sentence in two documents is two targets: editing one says nothing about the
-other.
+other. The document is compared as a *canonical* repository-relative spelling —
+`paths.repository_relative_problem` decides, the same owner an edit target
+answers to — because `./docs/a.md` and `docs/a.md` are one document, and a
+report that spells one leg of a contradictory pair the other way would otherwise
+split the pair into two independent groups and let an approver take one leg.
 
 **A remedy is what the record writes, and where** — the replacement text and
 the destination, never the finding code. Codes are detector vocabulary; the
@@ -36,6 +40,17 @@ question is whether two records would put the same bytes in the same place, so
 a drift `STALE` fix and a bloat `CONDENSE` proposing one replacement for one
 passage reconcile as the duplicate they are. Evidence prose, display ids,
 locations, and waiver annotations are not remedies at all.
+
+*A record that records no replacement text has an* unknown *remedy, not an
+empty one.* Most real records are in that state — bloat's `CUT`, `RETIRE-DOC`,
+and `DISTILL` all carry no proposal, and drift emits a fix only for `STALE` —
+so collapsing every one of them onto a single "writes nothing" signature would
+declare a `CUT` and a `DISTILL` over one passage to be one edit described twice,
+and then demand they be approved together. Unknown remedies are distinguished by
+finding code instead: two unknowns under different codes are different remedies
+and their group is exclusive, which is the fail-closed answer, while two under
+the same code stay comparable (identical code, document, and units is one
+finding by digest, so this can only ever relate *overlapping* unit sets).
 
 One code, one document, one unit set is not two records but one finding — the
 finding digest says so — so a duplicate within a report is always cross-code.
@@ -57,6 +72,7 @@ from typing import Tuple
 from . import ARTIFACT_SCHEMA_VERSION
 from .digest import canonical, sha256_canonical
 from .finding import finding_digest
+from .paths import repository_relative_problem
 from .report import DIGEST, Report
 from .results import STATUS_OK, Invalid, Problem
 
@@ -93,7 +109,20 @@ EXCLUSIVE_RELATIONS = (RELATION_SAME_TARGET, RELATION_MUTUALLY_EXCLUSIVE)
 # it puts in the document, not the vocabulary its detector names the verdict
 # with — two lanes proposing the same replacement for one passage are one edit
 # described twice, and reconciling them as a contradiction would be false.
+#
+# This list is the *whole* vocabulary for replacement text, and it is an
+# assumption about the producers rather than something the report contract
+# enforces: `report.py` deliberately does not police `extra`, so a lane that
+# carried its replacement under a third key would have that text read as no
+# remedy at all. Both shipped lanes have closed verdict field sets
+# (`drift.VERDICT_FIELDS`, `bloat.VERDICT_FIELDS`), which is what closes it
+# today; a new lane adds its slot here, and the unknown-remedy rule below is
+# what keeps the failure fail-closed until it does.
 WRITTEN_FIELDS = ("fix", "proposal")
+
+# The signature slot that keeps "no recorded remedy" from meaning "the same as
+# every other record with no recorded remedy" — see the module docstring.
+UNRECORDED_REMEDY_FIELD = "unrecorded-remedy-code"
 
 # Where a remedy puts content it moves. Part of the remedy for the same reason
 # the replacement text is: two moves of one passage to two documents are two
@@ -208,7 +237,16 @@ def _remedy(record):
         # The lanes record a destination as the document plus what was checked
         # about it; the document is the part that makes it a different edit.
         destination = destination.get("path")
-    return canonical({"writes": written, "destination": destination})
+    signature = {"writes": written, "destination": destination}
+    if written is None:
+        # Nothing was recorded, so nothing is known about the bytes — and an
+        # unknown must not compare equal to another unknown. The finding code
+        # is the only thing left that says what the record would do, so it
+        # enters the signature here and only here: a `CUT` and a `DISTILL` over
+        # one passage become different remedies, and their group is exclusive
+        # rather than "one edit described twice".
+        signature[UNRECORDED_REMEDY_FIELD] = extra.get("code")
+    return canonical(signature)
 
 
 def _relation(left, right, targets, remedies):
@@ -306,6 +344,25 @@ def reconcile(report):
                     f"— nothing says what it would change, so nothing can say "
                     f"whether it conflicts with another record, and a selection "
                     f"including it could not be checked"
+                ),
+                location=record.id,
+            ))
+            continue
+        spelling = repository_relative_problem(target[0])
+        if spelling is not None:
+            # A target is compared by string equality, so a non-canonical
+            # spelling is a *different* document to every other record — which
+            # is how one leg of a contradictory pair slips out of its group and
+            # becomes independently approvable. Reconciliation's guarantee is
+            # over every pair, so a document it cannot compare invalidates the
+            # whole reconciliation rather than quietly leaving a group out.
+            problems.append(Problem(
+                code="reconcile-record-path-not-canonical",
+                message=(
+                    f"record {record.id!r} names document {target[0]!r}, which "
+                    f"{spelling[1]} — reconciliation compares targets by "
+                    f"spelling, so a document written two ways is two targets, "
+                    f"and a contradiction between them would never be found"
                 ),
                 location=record.id,
             ))

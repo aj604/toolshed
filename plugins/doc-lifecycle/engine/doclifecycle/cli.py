@@ -134,6 +134,15 @@ def _add_approval_arguments(command):
         "--audit-config-digest", default=None,
         help="the consumer's current audit-configuration digest",
     )
+    command.add_argument(
+        "--expected-digest", default=None,
+        help=(
+            "the Doc-Lifecycle-Approval trailer of the change being applied; "
+            "supply it to bind this file to the approval that authorized the "
+            "change, since the trailer is the only part that lands in the "
+            "repository"
+        ),
+    )
     command.set_defaults(run=_validate_approval)
 
 
@@ -151,6 +160,7 @@ def _validate_approval(args):
         args.approval, report=report, repo_root=args.repo,
         registry_path=args.registry,
         audit_config_digest=args.audit_config_digest,
+        expected_digest=args.expected_digest,
     )
 
 
