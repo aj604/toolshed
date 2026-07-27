@@ -46,7 +46,7 @@ def texts(segmentation):
     return [unit.text for unit in segmentation.units]
 
 
-class Determinism(unittest.TestCase):
+class Determinism(RepoTestCase):
     """The first acceptance criterion: same bytes, same units, same digests."""
 
     DOC = (
@@ -81,6 +81,23 @@ class Determinism(unittest.TestCase):
             result = segment_text(self.DOC)
 
         self.assertTrue(result.units)
+
+    def test_no_network_and_no_subprocess_when_reading_a_document(self):
+        """The same guarantee at the seam that touches a repository: reading
+        and classifying a document is filesystem work, never a call out."""
+        repo = self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/architecture.md": self.DOC,
+        })
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("segmentation reached outside the process")
+
+        with mock.patch.object(socket, "socket", forbidden), \
+                mock.patch.object(subprocess, "Popen", forbidden):
+            result = segment_document(repo, "docs/architecture.md")
+
+        self.assertEqual(result.status, "ok")
 
     def test_every_unit_kind_is_a_declared_kind(self):
         for unit in segment_text(self.DOC).units:

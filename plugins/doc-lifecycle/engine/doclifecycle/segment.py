@@ -94,6 +94,19 @@ oct. nov. dec. mon. tue. wed. thu. fri. sat. sun. min. max. avg. approx
 """.split())
 _INITIAL = re.compile(r"^[A-Za-z]\.$")
 
+# What opens a block, in precedence order, and the handler that consumes it.
+# One table: the dispatch reads it, and so does the test for what ends a
+# paragraph or a list item, so the two cannot drift apart. A pipe table is not
+# here because it needs the next line as well as this one.
+_BLOCK_STARTERS = (
+    (_FENCE, "fenced_code"),
+    (_ATX, "heading"),
+    (_THEMATIC, "thematic_break"),
+    (_HTML, "html_block"),
+    (_QUOTE, "block_quote"),
+    (_LIST, "list_item"),
+)
+
 
 @dataclass(frozen=True)
 class AssertionUnit:
@@ -296,11 +309,21 @@ class _Segmenter:
                 )
             start = bound
 
-    def starts_block(self, line):
-        """Whether `line` begins a block, and so ends whatever precedes it."""
-        return bool(
-            _ATX.match(line) or _FENCE.match(line) or _THEMATIC.match(line)
-            or _QUOTE.match(line) or _LIST.match(line) or _HTML.match(line)
+    def starter(self, line):
+        """The handler for the block `line` opens, or None if it opens none."""
+        for pattern, handler in _BLOCK_STARTERS:
+            if pattern.match(line):
+                return getattr(self, handler)
+        return None
+
+    def starts_block(self):
+        """Whether the current line opens a block, ending whatever precedes it.
+
+        Reads the same table the dispatch does, so the parser cannot disagree
+        with itself about what ends a paragraph or a list item.
+        """
+        return (
+            self.starter(self.lines[self.i]) is not None or self.starts_table()
         )
 
     # -- block dispatch ---------------------------------------------------
@@ -309,20 +332,11 @@ class _Segmenter:
         self.front_matter()
         while self.i < len(self.lines):
             line = self.lines[self.i]
+            handler = self.starter(line)
             if not line.strip():
                 self.i += 1
-            elif _FENCE.match(line):
-                self.fenced_code()
-            elif _ATX.match(line):
-                self.heading()
-            elif _THEMATIC.match(line):
-                self.i += 1             # punctuation, not content
-            elif _HTML.match(line):
-                self.html_block()
-            elif _QUOTE.match(line):
-                self.block_quote()
-            elif _LIST.match(line):
-                self.list_item()
+            elif handler is not None:
+                handler()
             elif self.starts_table():
                 self.table()
             elif _INDENTED.match(line):
@@ -331,13 +345,13 @@ class _Segmenter:
                 self.paragraph()
         return tuple(self.units)
 
-    def starts_table(self, offset=0):
-        i = self.i + offset
+    def starts_table(self):
+        """A pipe table is a header row whose next line is the delimiter."""
         return (
-            "|" in self.lines[i]
-            and not _is_table_delimiter(self.lines[i])
-            and i + 1 < len(self.lines)
-            and _is_table_delimiter(self.lines[i + 1])
+            "|" in self.lines[self.i]
+            and not _is_table_delimiter(self.lines[self.i])
+            and self.i + 1 < len(self.lines)
+            and _is_table_delimiter(self.lines[self.i + 1])
         )
 
     # -- blocks -----------------------------------------------------------
@@ -349,7 +363,7 @@ class _Segmenter:
         for end in range(1, len(self.lines)):
             if _FRONT_END.match(self.lines[end]):
                 body = self.lines[1:end]
-                self.emit(FRONT_MATTER, "\n".join(body).strip("\n"), 2, max(end, 2))
+                self.emit(FRONT_MATTER, "\n".join(body).strip("\n"), 2, end)
                 self.i = end + 1
                 return
         # No closing fence: it was never front matter. Leave it to the parser,
@@ -370,8 +384,11 @@ class _Segmenter:
                 break
             body.append(line)
             self.i += 1
-        self.emit(CODE_BLOCK, "\n".join(body).strip("\n"), start + 2,
-                  max(start + 1 + len(body), start + 2))
+        self.emit(CODE_BLOCK, "\n".join(body).strip("\n"),
+                  start + 2, start + 1 + len(body))
+
+    def thematic_break(self):
+        self.i += 1                     # punctuation, not content
 
     def indented_code(self):
         start = self.i
@@ -438,7 +455,7 @@ class _Segmenter:
         self.i += 1
         while self.i < len(self.lines):
             line = self.lines[self.i]
-            if not line.strip() or self.starts_block(line) or self.starts_table():
+            if not line.strip() or self.starts_block():
                 break
             body.append((self.i + 1, line))
             self.i += 1
@@ -466,7 +483,7 @@ class _Segmenter:
                 self.emit_flowed(HEADING, body)
                 self.i += 1
                 return
-            if body and (self.starts_block(line) or self.starts_table()):
+            if body and self.starts_block():
                 break
             body.append((self.i + 1, line))
             self.i += 1

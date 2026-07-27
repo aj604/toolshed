@@ -231,8 +231,11 @@ The right-hand column is the point. A heading names a section, a code block is a
 HTML comment is not prose: those kinds are *non-assertive capable*, and
 `record_classifications()` below refuses any class but `non-assertive` against them — so
 structure cannot be turned into a claim and then "verified". What a capable unit actually
-asserts is the model's call, never the parser's. Fence markers, table delimiter rows, and
-thematic breaks carry no content and are not units at all.
+asserts is the model's call, never the parser's: connective prose ("For example:", "See the
+runbook.") is structurally a sentence, and reaches `non-assertive` as a recorded class rather
+than by being detected here — the parser has no way to tell connective prose from a claim, and
+a parser that guessed would be the judgment this module exists to keep out. Fence markers,
+table delimiter rows, and thematic breaks carry no content and are not units at all.
 
 Unit text is whitespace-normalized (runs collapse to one space), so re-wrapping a paragraph,
 renumbering a list, and repadding a table column all preserve identity. `code_block` and
@@ -326,7 +329,7 @@ changed a verdict. It is proof of examination, never authority to change anythin
     "audit_config_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "registry_digest": "1d9176534bcc15f5fe5062503110be01ea198bb8ce65179230af4b226f56d85e",
     "ruleset_version": 1,
-    "plugin_version": "0.14.0",
+    "plugin_version": "0.16.0",
     "evidence_boundary": {"sources": ["src/**"], "excluded": []}
   },
   "records": [
@@ -515,6 +518,14 @@ digest, which covers the records).
 | the document | the recorded assertion classes |
 | the finding code | the order the units were listed in |
 | any lineage field | listing the same unit twice |
+| `ARTIFACT_SCHEMA_VERSION` | |
+
+The document and the finding code are in there because unit identity deliberately is not:
+the same sentence in two documents is one unit, and a drift finding and a bloat finding can
+group the same units — without both fields those would collide into one digest, which the
+report contract rejects as `report-duplicate-record` and an approval set could not tell apart.
+Both err toward a digest that moves too readily, and the failure that produces is an approval
+honestly refused.
 
 The group is normalized — sorted and deduplicated — before hashing, because it is a set of
 units rather than a sequence. That split is what approval rests on: an approval set selects a

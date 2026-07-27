@@ -23,13 +23,12 @@ keeps structure from being turned into a fake claim and then "verified".
 Recording a class changes no digest.
 """
 
-import re
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .digest import sha256_canonical
-from .report import Lineage, lineage_digest
+from .report import DIGEST, Lineage, lineage_digest
 from .results import Invalid, Problem
 
 # What a model may say an assertion unit is. Closed, and exhaustive by design:
@@ -49,8 +48,6 @@ ASSERTION_CLASSES = (FACTUAL, NORMATIVE, RATIONALE, NON_ASSERTIVE)
 RESERVED_RECORD_FIELDS = ("id", "digest", "code", "path", "units")
 
 CLASSIFICATION_FIELDS = ("unit", "assertion_class")
-
-_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -158,8 +155,10 @@ def build_finding(lineage, code, path, units, record_id, extra=None):
 
     problems = []
 
-    def bad(code_, message, where=None):
-        problems.append(Problem(code=code_, message=message, location=where))
+    def bad(problem_code, message, where=None):
+        problems.append(
+            Problem(code=problem_code, message=message, location=where)
+        )
 
     for name, value in (("code", code), ("path", path), ("id", record_id)):
         if not (isinstance(value, str) and value.strip()):
@@ -173,7 +172,7 @@ def build_finding(lineage, code, path, units, record_id, extra=None):
             "units")
     else:
         for unit in units:
-            if not (isinstance(unit, str) and _DIGEST.match(unit)):
+            if not (isinstance(unit, str) and DIGEST.match(unit)):
                 bad("finding-invalid-unit",
                     f"unit {unit!r} is not an assertion-unit digest — a finding "
                     f"groups units by digest, so that its identity does not "
