@@ -1,6 +1,6 @@
 # Starting docs from scratch with `bootstrapping-docs` and `growing-docs`
 
-> As of 2026-07-05 (doc-lifecycle 0.6.2 @ e5201b8; `plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md`, `growing-docs/SKILL.md`)
+> As of 2026-07-05 (doc-lifecycle 0.6.2 @ e5201b8; `plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md`, `plugins/doc-lifecycle/skills/growing-docs/SKILL.md`)
 
 **You should already have:** the plugin installed (`/plugin install doc-lifecycle@toolshed`)
 and read [the principles](principles.md). This is the entry point for a repo with no doc
