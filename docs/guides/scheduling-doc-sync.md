@@ -88,7 +88,7 @@ gh workflow run doc-bloat
 ## Tuning and living with it
 
 - **Scope:** `.github/doc-sync/audit-scope.json` holds `include`/`exclude` globs the
-  weekly sweep reads (this repo excludes `tests/fixtures/**` and `tests/baselines/**`),
+  weekly sweep reads (this repo excludes `tests/fixtures/**`, `tests/baselines/**`, and `tests/docs-ab/**`),
   plus optional `policy_scope` directories (each swept as one `POLICY` record instead of
   file-by-file) and `chunking` caps — the planner's docstring documents them.
 - **CI on sync PRs:** there are none by default — the pipeline pushes with

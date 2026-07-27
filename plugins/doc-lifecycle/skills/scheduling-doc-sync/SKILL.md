@@ -73,8 +73,8 @@ retire the legacy lane (aj604/toolshed#77). Its own script, `scripts/render-audi
 owns that lane's run-surface rendering exactly as `render-report.py` owns the legacy lane's.
 
 Structurally it is the same two-job trust split as every other lane here — `audit` (the model,
-`contents: read` + `id-token: write`, no credential) and `publish` (no model, `contents: read` +
-`issues: write` only — never `contents: write`, never a PR, never a direct commit) — but calls
+`contents: read` + `id-token: write`, no credential) and `publish` (no model, `contents: read`
+only, no write scope at all today — never `contents: write`, never a PR, never a direct commit) — but calls
 the engine's own public CLI (`drift-plan`, `drift-audit`, `validate-report`) instead of the
 legacy `sync-gate.py`/`render-report.py`/`validate-drift-output.py` trio, and every third-party
 action it invokes is pinned to an immutable commit SHA (a stricter bar than the legacy
