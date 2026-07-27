@@ -47,6 +47,15 @@ HEADLINES = {
     ),
 }
 
+# A scope that declared nothing. "Clean" is vacuously true of it, and the
+# declared count three lines down is too far away to stop it reading as a
+# global all-clear at a glance — so the headline itself says nothing was
+# examined, rather than that nothing was found.
+EMPTY_SCOPE_HEADLINE = (
+    "0 documents were declared, so nothing was examined and nothing could "
+    "have been found"
+)
+
 # How much of one record field to show inline. Long enough for a path, a digest,
 # or a sentence; short enough that one field cannot bury the rest of the report.
 FIELD_LIMIT = 240
@@ -107,16 +116,32 @@ def _field_text(value):
     )
 
 
-def _record_detail(record):
-    """Every field the record carries beyond the contract's own two.
+def _detail(mapping):
+    """Every field of a record or a coverage entry, beyond its own key.
 
-    All of them: an approver binds to a digest that covers the whole record, so
+    All of them: an approver binds to a digest that covers the whole thing, so
     a field this module could not render inline is marked, never dropped.
     """
     return " · ".join(
         f"{_field_text(key)}: {_field_text(value)}"
-        for key, value in sorted(record.extra.items())
+        for key, value in sorted(mapping.items())
     )
+
+
+def _headline(report):
+    """The one-line verdict, with what it is a verdict *about*.
+
+    The count leads, because the state alone does not say how much it covers:
+    "clean" over nothing and "clean" over the whole inventory are the same word
+    for very different runs, and the reader who stops at the first line is the
+    one the distinction is for.
+    """
+    if report.scope is None:
+        return HEADLINES[report.status]
+    count = len(report.scope.documents)
+    if count == 0 and report.status == STATE_CLEAN:
+        return EMPTY_SCOPE_HEADLINE
+    return f"{count} document(s) declared — {HEADLINES[report.status]}"
 
 
 def render_report(report):
@@ -138,7 +163,7 @@ def render_report(report):
     lines = [
         f"# Documentation audit — {report.status}",
         "",
-        f"**Result: {report.status}** — {HEADLINES[report.status]}.",
+        f"**Result: {report.status}** — {_headline(report)}.",
         "",
         "## Lineage",
         "",
@@ -154,6 +179,26 @@ def render_report(report):
         f"- Report digest: {_code(report.digest)}",
     ]
 
+    if report.scope is not None:
+        # What the run set out to examine, so "the declared scope" in the
+        # headline above is a claim the reader can check rather than take.
+        # Exclusions are shown next to inclusions: a document left out with a
+        # reason is the visible half of a coverage claim.
+        lines += [
+            "",
+            "## Scope",
+            "",
+            f"- Basis: {_code(report.scope.basis)}",
+            f"- Coverage: {_code(report.scope.coverage)}",
+            f"- Declared documents ({len(report.scope.documents)}): "
+            + (", ".join(_code(d) for d in report.scope.documents) or "none"),
+            f"- Excluded documents ({len(report.scope.excluded)}): "
+            + (", ".join(
+                f"{_code(e.path)} ({_code(e.reason)})"
+                for e in report.scope.excluded
+            ) or "none"),
+        ]
+
     if report.stale_reasons:
         lines += ["", "## Lineage drift", ""]
         lines += [
@@ -161,6 +206,16 @@ def render_report(report):
             f"current {_code(reason.current)}"
             for reason in report.stale_reasons
         ]
+
+    if report.examined:
+        # The positive half of coverage, shown next to the negative half below:
+        # a clean run's proof of work is the only thing standing between "we
+        # checked and it holds" and "nobody looked".
+        lines += ["", "## Examined", ""]
+        for entry in report.examined:
+            detail = _detail(entry.detail)
+            suffix = f" — {detail}" if detail else ""
+            lines.append(f"- {_code(entry.scope)}{suffix}")
 
     if report.incomplete:
         lines += ["", "## Not examined", ""]
@@ -172,7 +227,7 @@ def render_report(report):
     lines += ["", "## Records", ""]
     if report.records:
         for record in report.records:
-            detail = _record_detail(record)
+            detail = _detail(record.extra)
             suffix = f" — {detail}" if detail else ""
             lines.append(f"- {_code(record.id)} {_code(record.digest)}{suffix}")
     else:

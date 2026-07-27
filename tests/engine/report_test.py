@@ -28,11 +28,16 @@ from doclifecycle import (  # noqa: E402
     RULESET_VERSION,
 )
 from doclifecycle import repository  # noqa: E402
+from doclifecycle.digest import sha256_canonical  # noqa: E402
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import (  # noqa: E402
     AUDIT_MODES,
     MAX_NESTING,
     REQUIRED_LINEAGE_FIELDS,
+    SCOPE_DECLARED_ONLY,
+    SCOPE_DOCUMENT_UNKNOWN,
+    SCOPE_INVENTORY_UNACCOUNTED,
+    SCOPE_WHOLE_INVENTORY,
     Report,
     current_lineage,
     load_report,
@@ -1243,6 +1248,549 @@ class RenderedRecordContent(unittest.TestCase):
         )]))
 
         self.assertEqual(render_report(report), render_report(report))
+
+
+SCOPE = {
+    "basis": "every living and narrative document in the inventory",
+    "coverage": SCOPE_DECLARED_ONLY,
+    "documents": ["docs/architecture.md", "docs/guides/onboarding.md"],
+    "excluded": [],
+}
+
+
+class DeclaredScope(unittest.TestCase):
+    """What the run set out to examine, enumerated in the report itself.
+
+    A result state says whether the *declared* scope completed; only the scope
+    says what was declared. Optional, because it is the audit engine that
+    declares one — but once present it is part of the report's identity.
+    """
+
+    def test_a_report_may_enumerate_the_documents_it_declared(self):
+        result = validate_report(report_payload(scope=dict(SCOPE)))
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.scope.basis, SCOPE["basis"])
+        self.assertEqual(result.scope.documents, tuple(SCOPE["documents"]))
+
+    def test_a_report_without_a_scope_says_nothing_about_one(self):
+        result = validate_report(report_payload())
+
+        self.assertIsInstance(result, Report)
+        self.assertIsNone(result.scope)
+        self.assertNotIn("scope", result.to_dict())
+
+    def test_the_declared_scope_round_trips_through_the_payload(self):
+        result = validate_report(report_payload(scope=dict(SCOPE)))
+
+        self.assertEqual(result.to_dict()["scope"], SCOPE)
+
+    def test_an_empty_declared_scope_is_a_real_answer(self):
+        """A diff-scoped run whose diff touched no document declared nothing —
+        that is truthful, and different from declining to say."""
+        result = validate_report(report_payload(
+            status=STATE_CLEAN, records=[],
+            scope={"basis": "documents affected by a..b",
+                   "coverage": SCOPE_DECLARED_ONLY,
+                   "documents": [], "excluded": []},
+        ))
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.scope.documents, ())
+
+    def test_the_scope_is_part_of_the_reports_identity(self):
+        """Two runs finding the same records over different declared scopes are
+        not the same report: one examined more than the other."""
+        wide = validate_report(report_payload(scope=dict(SCOPE)))
+        narrow = validate_report(report_payload(scope=dict(
+            SCOPE, documents=["docs/architecture.md"]
+        )))
+
+        self.assertNotEqual(wide.digest, narrow.digest)
+
+    def test_omitting_the_scope_leaves_a_reports_digest_where_it_was(self):
+        """Additive: a report that declares no scope digests as it always did.
+
+        Spelled as the digested shape rather than a literal, because the
+        lineage a fixture carries moves with every plugin release, and the
+        claim here is about the absent key, not about today's version.
+        """
+        payload = report_payload()
+
+        self.assertEqual(validate_report(payload).digest, sha256_canonical({
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "lineage": payload["lineage"],
+            "records": payload["records"],
+            "incomplete": payload["incomplete"],
+        }))
+
+    def test_a_scope_that_is_not_an_object_is_refused(self):
+        result = validate_report(report_payload(scope=["docs/architecture.md"]))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_scope_must_carry_every_field_the_contract_names(self):
+        result = validate_report(report_payload(scope={"documents": []}))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_scope_may_not_carry_a_field_the_contract_does_not_know(self):
+        result = validate_report(report_payload(
+            scope=dict(SCOPE, sampled=True)
+        ))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_basis_that_does_not_say_how_the_scope_was_derived_is_refused(self):
+        result = validate_report(report_payload(scope=dict(SCOPE, basis="  ")))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_document_that_is_not_a_printable_path_is_refused(self):
+        result = validate_report(report_payload(
+            scope=dict(SCOPE, documents=["docs/a.md", "docs/b\nc.md"])
+        ))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_the_same_document_declared_twice_is_refused(self):
+        """A declared scope is a set of documents; a repeat makes the count of
+        what was examined disagree with the list of it."""
+        result = validate_report(report_payload(
+            scope=dict(SCOPE, documents=["docs/a.md", "docs/a.md"])
+        ))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+
+class ScopeAgainstTheRepository(GitRepoTestCase):
+    """The declared scope, re-derived rather than trusted.
+
+    Shape validation proves a scope is well-formed. Only a comparison against
+    the current inventory makes it a claim about *this* repository — and that
+    is the point of the field, because #68 will pin a scope into an approval
+    set. A scope that no longer describes the repository is `stale`: the check
+    needs a repository in hand, and from here a deleted document and one that
+    never existed are the same observation, with the same remedy.
+    """
+
+    # Every document `REPO_FILES` puts under the declared root.
+    INVENTORY = ("docs/architecture.md",)
+
+    def scoped(self, repo, **overrides):
+        scope = {
+            "basis": "full inventory: every living document",
+            "coverage": SCOPE_WHOLE_INVENTORY,
+            "documents": list(self.INVENTORY),
+            "excluded": [],
+        }
+        scope.update(overrides)
+        return validate_report(
+            report_payload(lineage=self.fresh_lineage(repo), scope=scope),
+            repo_root=repo,
+        )
+
+    def reasons(self, result):
+        return sorted(reason.code for reason in result.stale_reasons)
+
+    def test_a_scope_matching_the_inventory_is_fresh(self):
+        repo = self.git_repo()
+
+        result = self.scoped(repo)
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.stale_reasons, ())
+        self.assertNotEqual(result.status, STATE_STALE)
+
+    def test_a_phantom_document_makes_the_report_stale(self):
+        """The reviewer's probe on PR #87: `scope.documents +
+        ["docs/never-existed.md"]` validated fresh against the real
+        repository."""
+        repo = self.git_repo()
+
+        result = self.scoped(repo, documents=[
+            *self.INVENTORY, "docs/never-existed.md",
+        ])
+
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(self.reasons(result), [SCOPE_DOCUMENT_UNKNOWN])
+
+    def test_the_stale_reason_names_the_documents_that_are_not_there(self):
+        repo = self.git_repo()
+
+        result = self.scoped(repo, documents=[
+            *self.INVENTORY, "docs/never-existed.md",
+        ])
+
+        self.assertIn("docs/never-existed.md", result.stale_reasons[0].reported)
+
+    def test_a_full_coverage_claim_over_one_of_many_documents_is_stale(self):
+        """The other half of the reviewer's probe: a basis reading "every
+        living and narrative document" with one of six documents listed
+        validated fresh, because nothing compared the claim to the
+        inventory."""
+        repo = self.git_repo(dict(
+            REPO_FILES,
+            **{f"docs/extra-{i}.md": f"# Extra {i}\n" for i in range(5)},
+        ))
+
+        result = self.scoped(repo)
+
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(self.reasons(result), [SCOPE_INVENTORY_UNACCOUNTED])
+
+    def test_the_unaccounted_reason_names_what_was_left_out(self):
+        repo = self.git_repo(dict(REPO_FILES, **{"docs/extra.md": "# Extra\n"}))
+
+        result = self.scoped(repo)
+
+        self.assertIn("docs/extra.md", result.stale_reasons[0].current)
+
+    def test_documents_the_scope_excluded_still_account_for_the_inventory(self):
+        """An exclusion is the visible half of a coverage claim: a document
+        left out *with its reason* is accounted for, and a document simply
+        omitted is not."""
+        repo = self.git_repo(dict(REPO_FILES, **{"docs/plan.md": "# Plan\n"}))
+
+        result = self.scoped(repo, excluded=[
+            {"path": "docs/plan.md", "reason": "a planning document"},
+        ])
+
+        self.assertEqual(result.stale_reasons, ())
+
+    def test_an_excluded_document_that_is_not_in_the_inventory_is_stale(self):
+        repo = self.git_repo()
+
+        result = self.scoped(repo, excluded=[
+            {"path": "docs/never-existed.md", "reason": "a planning document"},
+        ])
+
+        self.assertEqual(self.reasons(result), [SCOPE_DOCUMENT_UNKNOWN])
+
+    def test_a_declared_only_scope_claims_nothing_about_the_rest(self):
+        """The narrower coverage token is a real answer, not a way out: it
+        still may not name a document the repository does not have."""
+        repo = self.git_repo(dict(REPO_FILES, **{"docs/extra.md": "# Extra\n"}))
+
+        result = self.scoped(repo, coverage=SCOPE_DECLARED_ONLY)
+
+        self.assertEqual(result.stale_reasons, ())
+
+    def test_a_declared_only_scope_may_still_not_invent_a_document(self):
+        repo = self.git_repo()
+
+        result = self.scoped(repo, coverage=SCOPE_DECLARED_ONLY,
+                             documents=["docs/never-existed.md"])
+
+        self.assertEqual(self.reasons(result), [SCOPE_DOCUMENT_UNKNOWN])
+
+    def test_without_a_repository_a_scope_is_checked_for_shape_only(self):
+        """The validator does not guess at a repository it was not shown."""
+        result = validate_report(report_payload(scope=dict(
+            SCOPE, documents=["docs/never-existed.md"]
+        )))
+
+        self.assertIsInstance(result, Report)
+        self.assertNotEqual(result.status, STATE_STALE)
+
+    def test_a_forged_scope_cannot_be_laundered_by_a_second_validation(self):
+        """Clearing a verdict must be at least as thorough as setting it: a
+        carried scope reason stands unless this run re-derived it."""
+        repo = self.git_repo()
+        stale = self.scoped(repo, documents=[
+            *self.INVENTORY, "docs/never-existed.md",
+        ])
+
+        again = validate_report(stale.to_dict(), repo_root=repo)
+
+        self.assertEqual(again.status, STATE_STALE)
+        self.assertEqual(self.reasons(again), [SCOPE_DOCUMENT_UNKNOWN])
+
+    def test_a_run_that_saw_no_scope_cannot_clear_a_carried_scope_reason(self):
+        repo = self.git_repo()
+        stale = self.scoped(repo, documents=[
+            *self.INVENTORY, "docs/never-existed.md",
+        ])
+        payload = stale.to_dict()
+        payload.pop("scope")
+        payload.pop("digest")
+
+        again = validate_report(payload, repo_root=repo)
+
+        self.assertEqual(again.status, STATE_STALE)
+        self.assertEqual(self.reasons(again), [SCOPE_DOCUMENT_UNKNOWN])
+
+    def test_a_scope_that_is_put_right_clears_the_carried_reason(self):
+        repo = self.git_repo()
+        stale = self.scoped(repo, documents=[
+            *self.INVENTORY, "docs/never-existed.md",
+        ])
+        payload = stale.to_dict()
+        payload["scope"]["documents"] = list(self.INVENTORY)
+        payload.pop("digest")
+
+        again = validate_report(payload, repo_root=repo)
+
+        self.assertNotEqual(again.status, STATE_STALE)
+        self.assertEqual(again.stale_reasons, ())
+
+
+class ScopeExclusions(unittest.TestCase):
+    def test_an_exclusion_names_the_document_and_why_it_was_left_out(self):
+        result = validate_report(report_payload(scope=dict(SCOPE, excluded=[
+            {"path": "docs/plans/next.md", "reason": "a planning document"},
+        ])))
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.scope.excluded[0].path, "docs/plans/next.md")
+
+    def test_an_exclusion_with_no_reason_is_refused(self):
+        result = validate_report(report_payload(scope=dict(SCOPE, excluded=[
+            {"path": "docs/plans/next.md"},
+        ])))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_document_cannot_be_both_declared_and_excluded(self):
+        result = validate_report(report_payload(scope=dict(SCOPE, excluded=[
+            {"path": SCOPE["documents"][0], "reason": "also excluded"},
+        ])))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_the_same_exclusion_twice_is_refused(self):
+        result = validate_report(report_payload(scope=dict(SCOPE, excluded=[
+            {"path": "docs/plans/next.md", "reason": "a planning document"},
+            {"path": "docs/plans/next.md", "reason": "a planning document"},
+        ])))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_a_coverage_that_is_not_a_closed_token_is_refused(self):
+        """Prose is what `basis` is for. A validator has to act on the coverage
+        claim, and "every living and narrative document" is a sentence."""
+        result = validate_report(report_payload(
+            scope=dict(SCOPE, coverage="every living and narrative document")
+        ))
+
+        self.assertEqual(codes(result), ["report-invalid-scope"])
+
+    def test_the_coverage_token_is_part_of_the_reports_identity(self):
+        whole = validate_report(report_payload(
+            scope=dict(SCOPE, coverage=SCOPE_WHOLE_INVENTORY)))
+        declared = validate_report(report_payload(
+            scope=dict(SCOPE, coverage=SCOPE_DECLARED_ONLY)))
+
+        self.assertNotEqual(whole.digest, declared.digest)
+
+
+class RecordedCoverage(unittest.TestCase):
+    """What the run *did* examine, recorded as reviewable data.
+
+    Without it, positive coverage rests entirely on an absence: a document with
+    no finding and no gap is indistinguishable from one nobody looked at. The
+    contract owns only the `scope` key; what looking meant belongs to the audit
+    that looked.
+    """
+
+    ENTRY = {
+        "scope": SCOPE["documents"][0],
+        "classes": {"factual": 2, "non-assertive": 5},
+        "verdicts": {"VERIFIED": 2},
+    }
+
+    def scoped(self, **overrides):
+        payload = report_payload(scope=dict(SCOPE))
+        payload.update(overrides)
+        return validate_report(payload)
+
+    def test_a_report_may_record_what_it_examined(self):
+        result = self.scoped(examined=[dict(self.ENTRY)])
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.examined[0].scope, self.ENTRY["scope"])
+        self.assertEqual(result.examined[0].detail["verdicts"], {"VERIFIED": 2})
+
+    def test_recorded_coverage_round_trips_through_the_payload(self):
+        result = self.scoped(examined=[dict(self.ENTRY)])
+
+        self.assertEqual(result.to_dict()["examined"], [self.ENTRY])
+
+    def test_a_report_that_records_none_says_nothing_about_it(self):
+        result = validate_report(report_payload())
+
+        self.assertEqual(result.examined, ())
+        self.assertNotIn("examined", result.to_dict())
+
+    def test_omitting_coverage_leaves_a_reports_digest_where_it_was(self):
+        """Additive, like the scope: a report that records no coverage digests
+        exactly as it did before the field existed."""
+        payload = report_payload()
+
+        self.assertEqual(validate_report(payload).digest, sha256_canonical({
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "lineage": payload["lineage"],
+            "records": payload["records"],
+            "incomplete": payload["incomplete"],
+        }))
+
+    def test_recorded_coverage_is_part_of_the_reports_identity(self):
+        """Two runs finding nothing, one having verified twenty assertions and
+        one having verified two, are not the same report."""
+        thorough = self.scoped(examined=[dict(self.ENTRY)])
+        thin = self.scoped(examined=[dict(
+            self.ENTRY, verdicts={"VERIFIED": 1}
+        )])
+
+        self.assertNotEqual(thorough.digest, thin.digest)
+
+    def test_coverage_of_a_document_the_scope_never_declared_is_refused(self):
+        """The same category error as a verdict for an undeclared document:
+        recorded coverage must not be able to inflate a scope."""
+        result = self.scoped(examined=[dict(
+            self.ENTRY, scope="docs/never-declared.md"
+        )])
+
+        self.assertEqual(codes(result), ["report-invalid-examined"])
+
+    def test_two_entries_covering_one_document_are_refused(self):
+        result = self.scoped(examined=[dict(self.ENTRY), dict(self.ENTRY)])
+
+        self.assertEqual(codes(result), ["report-invalid-examined"])
+
+    def test_an_entry_that_names_no_scope_is_refused(self):
+        result = self.scoped(examined=[{"classes": {"factual": 1}}])
+
+        self.assertEqual(codes(result), ["report-invalid-examined"])
+
+    def test_coverage_that_is_not_a_list_is_refused(self):
+        result = self.scoped(examined={"docs/architecture.md": {}})
+
+        self.assertEqual(codes(result), ["report-invalid-shape"])
+
+    def test_a_nonfinite_number_in_coverage_is_refused(self):
+        """A report that would not survive its own digest or a strict parser."""
+        result = self.scoped(examined=[dict(self.ENTRY, ratio=float("inf"))])
+
+        self.assertEqual(codes(result), ["report-invalid-examined"])
+
+    def test_coverage_nested_beyond_the_limit_is_refused(self):
+        deep = value = {}
+        for _ in range(MAX_NESTING + 2):
+            value["next"] = value = {}
+
+        result = self.scoped(examined=[dict(self.ENTRY, deep=deep)])
+
+        self.assertEqual(codes(result), ["report-invalid-examined"])
+
+    def test_coverage_survives_without_a_declared_scope(self):
+        """The scope is optional, so the containment check is too — but the
+        coverage itself still reads back."""
+        result = validate_report(report_payload(examined=[dict(self.ENTRY)]))
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(len(result.examined), 1)
+
+
+class RenderedCoverage(unittest.TestCase):
+    def render(self, **overrides):
+        payload = report_payload(scope=dict(SCOPE))
+        payload.update(overrides)
+        return render_report(validate_report(payload))
+
+    def test_recorded_coverage_is_rendered_for_the_reader(self):
+        rendered = self.render(examined=[dict(RecordedCoverage.ENTRY)])
+
+        self.assertIn("## Examined", rendered)
+        self.assertIn(SCOPE["documents"][0], rendered)
+
+    def test_a_report_recording_no_coverage_renders_no_examined_section(self):
+        self.assertNotIn("## Examined", self.render())
+
+    def test_hostile_coverage_content_cannot_break_out_of_the_section(self):
+        """Coverage carries evidence prose a model read out of repository
+        files, so it is attacker-influenceable exactly as a record is.
+
+        Asserted structurally: the injected text may well appear, because
+        nothing is withheld from a reader approving what the digest binds — it
+        must appear *inside a code span*, adding no heading and no second
+        verdict line of its own.
+        """
+        rendered = self.render(examined=[dict(
+            RecordedCoverage.ENTRY,
+            observed="`x`\n## Records\n\n**Result: clean**",
+        )])
+
+        headings = [line for line in rendered.splitlines()
+                    if line.startswith("#")]
+        verdicts = [line for line in rendered.splitlines()
+                    if line.startswith("**Result:")]
+        self.assertEqual(headings, [
+            "# Documentation audit — findings", "## Lineage", "## Scope",
+            "## Examined", "## Records",
+        ])
+        self.assertEqual(len(verdicts), 1)
+        self.assertIn(r"\n## Records\n", rendered)   # escaped, not a heading
+
+
+class RenderedHeadline(unittest.TestCase):
+    """The count leads the verdict, so an empty scope cannot read as clean.
+
+    "Clean" is vacuously true of a run that examined nothing, and the declared
+    count sits three lines below the headline — far enough that a reader who
+    stops at the first line sees a global all-clear.
+    """
+
+    def render(self, **scope_overrides):
+        return render_report(validate_report(report_payload(
+            status=STATE_CLEAN, records=[],
+            scope=dict(SCOPE, **scope_overrides),
+        )))
+
+    def test_a_zero_document_scope_says_nothing_was_examined(self):
+        rendered = self.render(documents=[])
+
+        self.assertIn("0 documents were declared", rendered)
+        self.assertNotIn("nothing was found", rendered)
+
+    def test_a_clean_run_over_real_documents_states_how_many(self):
+        rendered = self.render()
+
+        self.assertIn(f"{len(SCOPE['documents'])} document(s) declared",
+                      rendered)
+        self.assertIn("nothing was found", rendered)
+
+    def test_a_report_without_a_scope_keeps_the_bare_headline(self):
+        rendered = render_report(validate_report(report_payload(
+            status=STATE_CLEAN, records=[]
+        )))
+
+        self.assertIn("nothing was found", rendered)
+        self.assertNotIn("declared —", rendered)
+
+
+class RenderedScope(unittest.TestCase):
+    def test_the_declared_scope_is_rendered_for_the_reader(self):
+        rendered = render_report(validate_report(report_payload(scope=dict(SCOPE))))
+
+        self.assertIn("## Scope", rendered)
+        self.assertIn(SCOPE["basis"], rendered)
+        self.assertIn("docs/guides/onboarding.md", rendered)
+
+    def test_a_report_that_declares_no_scope_renders_no_scope_section(self):
+        rendered = render_report(validate_report(report_payload()))
+
+        self.assertNotIn("## Scope", rendered)
+
+    def test_a_hostile_document_path_cannot_break_out_of_the_scope_section(self):
+        """A path is a filename on a filesystem the audit walked, so it can hold
+        anything a filesystem allows."""
+        rendered = render_report(validate_report(report_payload(scope=dict(
+            SCOPE, documents=["docs/`a`[x](http://evil.example).md"]
+        ))))
+
+        self.assertIn("``docs/`a`[x](http://evil.example).md``", rendered)
+        self.assertEqual(rendered.count("## Records"), 1)
 
 
 if __name__ == "__main__":

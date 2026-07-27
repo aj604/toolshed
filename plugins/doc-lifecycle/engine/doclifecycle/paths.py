@@ -351,6 +351,29 @@ def _spelling_problem(path):
     return None
 
 
+def repository_relative_problem(path):
+    """Why `path` is not a canonical repository-relative spelling, or None.
+
+    Returns `(code, reason)`, where the reason completes the sentence
+    "`<path>` ...", so a caller renders one message in its own vocabulary.
+
+    Public because path safety has one owner. `authorize_path` answers the
+    question an *applier* asks — may I write here — which is inseparable from
+    the declared roots, the target class, and the state of the filesystem. A
+    read-only audit asks the smaller question: is this string a path inside the
+    repository at all? Both rest on this, so `..`, a leading `/`, a drive
+    letter, a backslash separator, a control character, whitespace, a
+    non-canonical `//`, and a leading-dash component mean the same thing to a
+    record's evidence pointer as they do to an edit target — and cannot mean
+    two things, because there is only this one list.
+
+    Existence is deliberately not part of it: a pointer at a file a commit
+    deleted is exactly what a STALE finding reports, and refusing it would
+    refuse the finding.
+    """
+    return _spelling_problem(path)
+
+
 def _roots_problem(roots):
     """Why the roots cannot decide containment, as (code, message, location)."""
     if not roots:
