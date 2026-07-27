@@ -67,6 +67,7 @@ belongs to the record, not to you**:
 | Finding code | The operations its remedy is made of |
 |---|---|
 | `STALE`, `UNVERIFIABLE` | `replace`, `delete`, `insert` |
+| `ANCHOR-STALE` | `replace`, `delete`, `insert` |
 | `CUT` | `delete` |
 | `CONDENSE` | `replace`, `delete`, `insert` |
 | `EXTRACT-AND-MOVE` | `move-with-provenance` |

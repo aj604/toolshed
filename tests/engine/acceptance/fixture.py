@@ -26,6 +26,13 @@ import unittest
 
 REGISTRY_PATH = ".doc-lifecycle/registry.json"
 
+# The consumer's standing auto-apply policy (issue #73): the declaration that
+# lets a named policy mint approval sets for mechanical remedies without a
+# human. Committed like the registry, because it is repository state a reviewer
+# reads — and because an autonomous apply runs against a clean work tree.
+AUTO_APPLY_POLICY_PATH = ".doc-lifecycle/auto-apply-policy.json"
+AUTO_APPLY_POLICY_ID = "acceptance-fixture-nightly"
+
 # Living: factual + normative assertions, plus a prompt-injection attempt
 # embedded in an HTML comment — content a model-driven audit must read without
 # obeying.
@@ -257,6 +264,13 @@ def calculate_fee(amount):
     return amount * FLAT_FEE_RATE
 '''
 
+_AUTO_APPLY_POLICY_JSON = """{
+  "artifact": "auto-apply-policy",
+  "schema_version": 1,
+  "id": "%s"
+}
+""" % AUTO_APPLY_POLICY_ID
+
 _WAIVERS_JSON = """{
   "waivers": [
     {"file": "docs/architecture.md", "claim": "calculates fees at a flat 2% rate"}
@@ -309,6 +323,7 @@ def build():
     _git(root, "init", "-q")
 
     _write(root, REGISTRY_PATH, _REGISTRY_JSON)
+    _write(root, AUTO_APPLY_POLICY_PATH, _AUTO_APPLY_POLICY_JSON)
     _write(root, LIVING_DOC, _LIVING_DOC_TEXT)
     _write(root, NARRATIVE_DOC, _NARRATIVE_DOC_TEXT)
     _write(root, PLANNING_DOC, _PLANNING_DOC_TEXT)

@@ -57,7 +57,7 @@ from .bloat import (
     residue_destination_ineligibility,
 )
 from .digest import sha256_canonical
-from .drift import VERDICT_STALE, VERDICT_UNVERIFIABLE
+from .drift import CODE_ANCHOR_STALE, VERDICT_STALE, VERDICT_UNVERIFIABLE
 from .inventory import DEFAULT_REGISTRY_PATH, load_registry
 from .paths import DECLARABLE_TARGET_CLASSES, write_target_problem
 from .report import DIGEST, StaleReason
@@ -108,6 +108,13 @@ RECORD_REMEDIES = {
     # remedy rewrites, removes, or completes that passage, and nothing else.
     VERDICT_STALE: _PASSAGE_REMEDY,
     VERDICT_UNVERIFIABLE: _PASSAGE_REMEDY,
+    # A narrative document's `> As of` line, overtaken by a change to what it
+    # names. The remedy rewrites that one line, so it is the same span edit and
+    # nothing more: an anchor record's units *are* the anchor, so the hull
+    # check already confines the edit to it. The other anchor codes are absent
+    # deliberately — a missing or malformed anchor needs one authored, which is
+    # not a span edit to a passage anybody approved.
+    CODE_ANCHOR_STALE: _PASSAGE_REMEDY,
     # Bloat.
     CUT: (OP_DELETE,),
     CONDENSE: _PASSAGE_REMEDY,

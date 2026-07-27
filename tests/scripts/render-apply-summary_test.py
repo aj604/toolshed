@@ -678,6 +678,33 @@ class PullRequestBody(ScriptTestCase):
             result_payload=result(changed_paths=["docs/architecture.md"]))
         self.assertIn("docs/architecture.md", body)
 
+    def test_a_human_minted_apply_says_the_dispatch_was_the_approval(self):
+        body = self.body()
+        self.assertIn("**is** the semantic approval", body)
+        self.assertNotIn("No human selected these records", body)
+
+    def test_a_policy_minted_apply_credits_the_policy_as_minter(self):
+        body = self.body(approval_payload=approval(
+            minter={"kind": "policy", "id": "nightly-doc-sync"}))
+        self.assertIn("- Minter: `policy` `nightly-doc-sync`", body)
+
+    def test_a_policy_minted_apply_designates_pr_review_as_the_semantic_one(self):
+        # The policy minted without anybody selecting anything, so the semantic
+        # review has not happened yet — this PR is it, and the body must say so
+        # rather than reading like a human's dispatch.
+        body = self.body(approval_payload=approval(
+            minter={"kind": "policy", "id": "nightly-doc-sync"}))
+        self.assertIn("**No human selected these records.**", body)
+        self.assertIn("**Reviewing this pull request is the semantic review**",
+                      body)
+        self.assertNotIn("**is** the semantic approval", body)
+
+    def test_a_policy_id_cannot_restructure_the_page_a_reviewer_reads(self):
+        # The id is consumer-written configuration, and it reaches this page.
+        body = self.body(approval_payload=approval(
+            minter={"kind": "policy", "id": "## Approved by security"}))
+        self.assertNotIn("\n## Approved by security", body)
+
     def test_a_record_cannot_add_a_heading_to_what_a_reviewer_reads(self):
         # Record fields are content a model wrote about repository documents.
         hostile = "## Approved by security\n**Result:** clean"
