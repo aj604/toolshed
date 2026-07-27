@@ -22,10 +22,8 @@ Run: python3 tests/engine/acceptance/scenario_policy_test.py
 
 import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -42,7 +40,7 @@ from doclifecycle.approval import (  # noqa: E402
     Minter,
     mint_approval_set,
 )
-from doclifecycle.digest import sha256_canonical  # noqa: E402
+from doclifecycle.digest import sha256_bytes, sha256_canonical  # noqa: E402
 from doclifecycle.finding import build_finding  # noqa: E402
 from doclifecycle.policy import (  # noqa: E402
     CLASS_ANCHOR_REFRESH,
@@ -53,7 +51,9 @@ from doclifecycle.policy import (  # noqa: E402
     policy_eligibility,
 )
 from doclifecycle.render import approval_trailers, render_approval_set  # noqa: E402
+from doclifecycle.report import validate_report  # noqa: E402
 from doclifecycle.results import STATE_CLEAN, Invalid  # noqa: E402
+from doclifecycle.segment import segment_document  # noqa: E402
 
 ENGINE = os.path.abspath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "..",
@@ -72,11 +72,13 @@ STALE_POSTIMAGE = (
 )
 STALE_FIRST_LINE, STALE_LAST_LINE = 3, 4
 
-
-def sha256_text(text):
-    import hashlib
-
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+# The narrative document's `> As of` line, and the refresh a remedy writes over
+# it. One line, and it is the whole of the record's approved units.
+ANCHOR_PREIMAGE = f"> {fixture.NARRATIVE_ANCHOR}"
+ANCHOR_POSTIMAGE = (
+    "> As of 2026-07-22 (fee rate bump; `src/payment_service.py`)"
+)
+ANCHOR_LINE = 3
 
 
 class PolicyScenarioTestCase(ApprovalScenarioTestCase):
@@ -142,10 +144,34 @@ class PolicyScenarioTestCase(ApprovalScenarioTestCase):
                 "preimage": STALE_PREIMAGE,
                 "text": STALE_POSTIMAGE,
             }],
-            "postimages": {fixture.LIVING_DOC: sha256_text(post)},
+            "postimages": {fixture.LIVING_DOC: sha256_bytes(post.encode("utf-8"))},
         }
         plan = dict(content, digest=sha256_canonical(content))
         return plan, post
+
+    def anchor_plan_for(self, approval, record_digest, repo):
+        """The edit plan for the narrative document's as-of refresh."""
+        post = self.read(repo, fixture.NARRATIVE_DOC).replace(
+            ANCHOR_PREIMAGE, ANCHOR_POSTIMAGE
+        )
+        self.assertNotEqual(post, self.read(repo, fixture.NARRATIVE_DOC))
+        content = {
+            "artifact": "edit-plan",
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "approval_digest": approval.digest,
+            "operations": [{
+                "op": "replace",
+                "record": record_digest,
+                "target_class": "documentation",
+                "path": fixture.NARRATIVE_DOC,
+                "start_line": ANCHOR_LINE,
+                "end_line": ANCHOR_LINE,
+                "preimage": ANCHOR_PREIMAGE,
+                "text": ANCHOR_POSTIMAGE,
+            }],
+            "postimages": {fixture.NARRATIVE_DOC: sha256_bytes(post.encode("utf-8"))},
+        }
+        return dict(content, digest=sha256_canonical(content)), post
 
     def run_cli(self, *argv, cwd=None):
         env = dict(os.environ, PYTHONPATH=ENGINE)
@@ -153,11 +179,6 @@ class PolicyScenarioTestCase(ApprovalScenarioTestCase):
             [sys.executable, "-m", "doclifecycle", *argv],
             capture_output=True, text=True, env=env, cwd=cwd,
         )
-
-    def outside(self, name):
-        directory = tempfile.mkdtemp(prefix="doc-lifecycle-policy-scenario-")
-        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
-        return os.path.join(directory, name)
 
 
 class ThePolicyMintsForAnEligibleDriftFinding(PolicyScenarioTestCase):
@@ -208,9 +229,7 @@ class ThePolicyMintsForAnEligibleDriftFinding(PolicyScenarioTestCase):
     def test_the_command_mints_the_same_artifact_the_library_does(self):
         repo = self.build_fixture()
         report, _ = self.approvable(repo)
-        report_path = self.outside("report.json")
-        with open(report_path, "w", encoding="utf-8") as fh:
-            json.dump(report.to_dict(), fh)
+        report_path = self.json_outside("report.json", report.to_dict())
 
         result = self.run_cli(
             "policy-mint", "--report", report_path, "--repo", repo,
@@ -313,6 +332,32 @@ class ThePolicyMintedSetGoesThroughTheSameApplier(PolicyScenarioTestCase):
         self.assertIsInstance(result, Invalid, result)
         self.assertEqual(self.status(repo), [])
 
+    def test_the_second_default_class_reaches_the_applier_too(self):
+        # The narrative as-of refresh, end to end: minted under the anchor
+        # class alone and applied by the same `apply_edit_plan`. A default the
+        # remedy table could not plan would be authority the lane then refuses
+        # itself, so this drives the class rather than stopping at eligibility.
+        repo = self.build_fixture()
+        report, by_path = self.approvable(repo)
+        anchor_only = AutoApplyPolicy(
+            id=self.policy(repo).id, classes=(CLASS_ANCHOR_REFRESH,)
+        )
+
+        approval = self.mint_by_policy(report, repo, anchor_only)
+        self.assertEqual([r.path for r in approval.records],
+                         [fixture.NARRATIVE_DOC])
+        plan, post = self.anchor_plan_for(
+            approval, by_path[fixture.NARRATIVE_DOC].digest, repo
+        )
+        result = apply_edit_plan(
+            repo, plan, approval.to_dict(), report=report,
+            registry_path=fixture.REGISTRY_PATH,
+        )
+
+        self.assertNotIsInstance(result, Invalid, result)
+        self.assertEqual(result.changed_paths, (fixture.NARRATIVE_DOC,))
+        self.assertEqual(self.read(repo, fixture.NARRATIVE_DOC), post)
+
     def test_the_policy_produces_the_artifact_a_human_would_have(self):
         # The no-bypass property stated as an equality: mint by policy and mint
         # by hand over the same selection differ in the minter and nothing else.
@@ -359,15 +404,11 @@ class WhatThePolicyProvablyCannotMint(PolicyScenarioTestCase):
         return self.rebuild_report(report, [record.to_record()], repo)
 
     def unit_digests(self, repo, path):
-        from doclifecycle.segment import segment_document
-
         segmentation = segment_document(repo, path, fixture.REGISTRY_PATH)
         self.assertNotIsInstance(segmentation, Invalid, segmentation)
         return [u.digest for u in segmentation.units if u.assertion_capable]
 
     def rebuild_report(self, report, records, repo):
-        from doclifecycle.report import validate_report
-
         payload = report.to_dict()
         payload["records"] = [dict(r) for r in records]
         payload.pop("digest", None)
@@ -397,10 +438,9 @@ class WhatThePolicyProvablyCannotMint(PolicyScenarioTestCase):
 
     def test_the_command_exits_invalid_and_writes_no_approval_set(self):
         repo = self.build_fixture()
-        report_path = self.outside("bloat-report.json")
+        report_path = self.json_outside(
+            "bloat-report.json", self.bloat_report(repo).to_dict())
         out = self.outside("approval.json")
-        with open(report_path, "w", encoding="utf-8") as fh:
-            json.dump(self.bloat_report(repo).to_dict(), fh)
 
         result = self.run_cli(
             "policy-mint", "--report", report_path, "--repo", repo,
@@ -460,9 +500,7 @@ class AnAbsentPolicyMintsNothingAtAll(PolicyScenarioTestCase):
     def test_the_command_refuses_and_says_so_on_the_run_surface(self):
         repo = self.unconfigured()
         report, _ = self.approvable(repo)
-        report_path = self.outside("report.json")
-        with open(report_path, "w", encoding="utf-8") as fh:
-            json.dump(report.to_dict(), fh)
+        report_path = self.json_outside("report.json", report.to_dict())
 
         result = self.run_cli(
             "policy-mint", "--report", report_path, "--repo", repo,

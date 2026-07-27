@@ -518,15 +518,14 @@ def _semantic_review(app, approved, skipped):
     `code_span` like every other interpolated value.
     """
     minter = app.get("minter") or {}
+    counts = f"{approved} approved record(s) applied, {skipped} skipped."
     if minter.get("kind") != "policy":
-        return (
-            f"{approved} approved record(s) applied, {skipped} skipped. The "
-            "named record subset dispatched to this lane **is** the semantic "
-            "approval; merging this pull request is change approval of the "
-            "actual diff.")
-    return (
-        f"{approved} approved record(s) applied, {skipped} skipped. **No human "
-        "selected these records.** The standing auto-apply policy "
+        return counts + (
+            " The named record subset dispatched to this lane **is** the "
+            "semantic approval; merging this pull request is change approval "
+            "of the actual diff.")
+    return counts + (
+        " **No human selected these records.** The standing auto-apply policy "
         f"{code_span(minter.get('id'))} minted the approval set, for finding "
         "classes it is configured to treat as mechanical remedies. **Reviewing "
         "this pull request is the semantic review** for what the policy "

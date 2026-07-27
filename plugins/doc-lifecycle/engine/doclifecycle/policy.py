@@ -256,10 +256,10 @@ def load_auto_apply_policy(repo_root, path=DEFAULT_POLICY_PATH):
             location=path,
         ),))
 
-    return parse_auto_apply_policy(payload, location=path)
+    return _parse(payload, location=path)
 
 
-def parse_auto_apply_policy(payload, location=DEFAULT_POLICY_PATH):
+def _parse(payload, location=DEFAULT_POLICY_PATH):
     """Validate a policy payload exhaustively. `AutoApplyPolicy` or `Invalid`."""
     problems = []
 
@@ -341,8 +341,11 @@ def _never_eligible(code, record_id):
     )
 
 
-def _decide(policy, record):
+def _decide(policy, record, enabled):
     """The policy's verdict on one record. `(eligible_class, Problem or None)`.
+
+    `enabled` is `policy.codes()`, computed once by the caller: it is a fact
+    about the policy, not about the record.
 
     Order matters, and it runs outward-in: the refusals that hold regardless of
     configuration come first, so a repository that enabled every class still
@@ -381,7 +384,7 @@ def _decide(policy, record):
             location=record_id,
         )
 
-    admitted = policy.codes().get(code)
+    admitted = enabled.get(code)
     if admitted is None:
         mechanical = {c for codes in CLASS_CODES.values() for c in codes}
         code_known = code in mechanical
@@ -453,8 +456,9 @@ def policy_eligibility(policy, report):
         )
 
     decisions = []
+    enabled = policy.codes()
     for record in report.records:
-        admitted, refusal = _decide(policy, record)
+        admitted, refusal = _decide(policy, record, enabled)
         decisions.append(Decision(
             digest=record.digest,
             record_id=record.id,

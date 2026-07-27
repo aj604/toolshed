@@ -27,7 +27,7 @@ applier — the only component that writes.
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
 | `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope and the minter kinds |
-| `doclifecycle/policy.py` | `load_auto_apply_policy()`, `parse_auto_apply_policy()`, `policy_eligibility()`, `mint_policy_approval_set()`, the eligibility classes and the never-eligible codes |
+| `doclifecycle/policy.py` | `load_auto_apply_policy()`, `policy_eligibility()`, `mint_policy_approval_set()`, the eligibility classes and the never-eligible codes |
 | `doclifecycle/applier.py` | `apply_edit_plan()`, `load_edit_plan()`, `load_approval_payload()`, the edit-plan vocabulary, the record-code remedy table, and the whole-diff confinement check |
 | `doclifecycle/render.py` | `render_report()`, `render_approval_set()`, `approval_trailers()` — Markdown and git trailers from validated artifacts, and nothing else |
 | `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()`, `worktree_changes()`, `head_bytes()` — everything read from git |
@@ -1774,8 +1774,11 @@ a caller names a record, and no second producer of approval sets. A policy-minte
 human-minted one over the same selection differ in `minter` and nothing else
 (`tests/engine/acceptance/scenario_policy_test.py`), and it reaches the applier by the same
 route: the applier is handed an approval set and never asks who minted it. The
-operation half of the restriction is `RECORD_REMEDIES` — no code any class admits maps to
-`create-document`, `retire-document`, or `move-with-provenance`.
+operation half of the restriction is `RECORD_REMEDIES`, and the coupling is checked in both
+directions: no code any class admits maps to `create-document`, `retire-document`, or
+`move-with-provenance`, and every code any class admits has a non-empty entry there — a class
+whose code the table did not carry would mint authority the lane then refuses itself, which is
+fail-shut but is not a working default.
 
 ### Commands
 
@@ -1837,7 +1840,8 @@ The order of refusals is the contract:
    ambiguous spans (`plan-overlapping-spans`, `plan-conflicting-operations`), and the declared
    postimages (`plan-invalid-postimages`, `plan-postimages-not-derived`).
 3. **The remedy is the record's, not the plan's.** `RECORD_REMEDIES` maps each finding code to
-   the operations its approved remedy is made of — `STALE`/`UNVERIFIABLE` and `CONDENSE` to the
+   the operations its approved remedy is made of — `STALE`/`UNVERIFIABLE`, `ANCHOR-STALE`, and
+   `CONDENSE` to the
    span edits, `CUT` to `delete`, `EXTRACT-AND-MOVE` to `move-with-provenance`, `MERGE-DOC` to
    move and retire, `RETIRE-DOC` to `retire-document`, `DISTILL` to the residue-authoring set
    including `create-document`. Closed and fail-shut: a code nobody listed authorizes nothing

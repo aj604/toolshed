@@ -385,6 +385,16 @@ class WhatAPolicyMayNeverMint(PolicyTestCase):
                     set(RECORD_REMEDIES.get(code, ())) & forbidden, set()
                 )
 
+    def test_every_eligible_code_has_a_remedy_the_applier_can_plan(self):
+        # The other half of the same coupling, and the one that fails silently:
+        # a class whose code is absent from the remedy table mints approval
+        # sets no edit plan can act on, so the lane would produce authority and
+        # then refuse itself. Fail-shut, but a dead default is not a default.
+        for code in self.eligible_codes():
+            with self.subTest(code=code):
+                self.assertIn(code, RECORD_REMEDIES)
+                self.assertNotEqual(RECORD_REMEDIES[code], ())
+
     def eligible_codes(self):
         from doclifecycle.policy import CLASS_CODES
 
