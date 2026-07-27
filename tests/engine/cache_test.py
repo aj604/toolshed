@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""Tests for the lineage-keyed cache (issue #64): key independence,
+revalidation on read, and cache-poisoning defenses.
+
+Seam: the library functions `cache_key`, `put`, and `get`. There is no command
+for this module — nothing calls it yet (the audit engine, #65/#66, is the
+first caller) — so, per the engine's convention, no CLI suite is added at a
+seam that does not exist.
+
+Built on real git repositories, like `report_test.py`: staleness is a
+comparison against a repository, and a mocked one would prove nothing about
+the revalidation this module leans on `report.validate_report` for.
+
+Run: python3 tests/engine/cache_test.py
+"""
+
+import dataclasses
+import json
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from report_test import CONFIG_DIGEST, GitRepoTestCase  # noqa: E402
+
+from doclifecycle import ARTIFACT_SCHEMA_VERSION  # noqa: E402
+from doclifecycle import cache  # noqa: E402
+from doclifecycle.report import current_lineage  # noqa: E402
+
+DOCUMENT_DIGEST = "d" * 64
+SOURCE_DIGEST = "e" * 64
+
+
+class CacheTestCase(GitRepoTestCase):
+    def cache_dir(self):
+        root = tempfile.mkdtemp(prefix="doc-lifecycle-cache-")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        return root
+
+    def fresh_key(self, repo, document_digest=DOCUMENT_DIGEST,
+                 source_digest=SOURCE_DIGEST, audit_config_digest=CONFIG_DIGEST):
+        state, problems = current_lineage(repo, audit_config_digest=audit_config_digest)
+        self.assertEqual(problems, ())
+        return cache.cache_key(document_digest, source_digest, state)
+
+    def valid_record(self, record_id="R1", digest="a" * 64, **extra):
+        return {"id": record_id, "digest": digest, **extra}
+
+    def raw_payload_for(self, key, record, status="findings", incomplete=None,
+                        repository=None, evidence_sources=("x",)):
+        """Hand-build the same shape `cache.put()` writes, so a test can
+        deliberately diverge from what `key` implies (a foreign repository, a
+        missing record field, an incomplete scope) without going through the
+        module's own writer."""
+        return {
+            "status": status,
+            "schema_version": key.schema_version,
+            "lineage": {
+                "repository": repository if repository is not None else key.repository,
+                "base_commit": key.base_commit,
+                "audit_mode": "chunk",
+                "inventory_digest": key.inventory_digest,
+                "audit_config_digest": key.audit_config_digest,
+                "registry_digest": key.registry_digest,
+                "ruleset_version": key.ruleset_version,
+                "plugin_version": key.plugin_version,
+                "evidence_boundary": {
+                    "sources": list(evidence_sources), "excluded": [],
+                },
+            },
+            "records": [record] if record is not None else [],
+            "incomplete": incomplete or [],
+        }
+
+    def write_raw(self, cache_dir, key, payload):
+        os.makedirs(cache_dir, exist_ok=True)
+        path = cache.entry_path(cache_dir, key)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        return path
+
+
+class BasicHitsAndMisses(CacheTestCase):
+    def test_a_fresh_entry_is_a_hit(self):
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        cache.put(cache_dir, key, self.valid_record())
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertTrue(result.hit)
+        self.assertIsNone(result.reason)
+        self.assertEqual(result.record["id"], "R1")
+
+    def test_an_entry_that_was_never_written_is_a_miss(self):
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertIsNone(result.record)
+        self.assertEqual(result.reason, cache.MISS_NOT_FOUND)
+
+    def test_corrupt_json_at_the_right_path_is_a_miss(self):
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache.entry_path(cache_dir, key), "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.reason, cache.MISS_CORRUPT)
+
+    def test_the_stored_record_carries_the_document_and_source_digests(self):
+        # put() sets these from the key when the caller's record does not
+        # already carry them, since the report contract's lineage has no
+        # notion of "one document" — this is what a read's identity check
+        # compares against.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        cache.put(cache_dir, key, self.valid_record())
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertEqual(result.record["document_digest"], DOCUMENT_DIGEST)
+        self.assertEqual(result.record["source_digest"], SOURCE_DIGEST)
+
+
+class KeyIndependence(CacheTestCase):
+    """Every one of the nine inputs the issue names must invalidate the cache
+    on its own — proven by writing one entry, then showing that changing
+    exactly one field of the key (holding the other eight fixed) is a miss,
+    and that the untouched key is still a hit throughout."""
+
+    def test_each_keyed_input_invalidates_the_cache_independently(self):
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        base_key = self.fresh_key(repo)
+        cache.put(cache_dir, base_key, self.valid_record())
+        self.assertTrue(cache.get(cache_dir, base_key, repo_root=repo).hit)
+
+        mutations = (
+            ("document_digest", "f" * 64),
+            ("source_digest", "f" * 64),
+            ("inventory_digest", "9" * 64),
+            ("audit_config_digest", "9" * 64),
+            ("registry_digest", "9" * 64),
+            ("ruleset_version", base_key.ruleset_version + 1),
+            ("schema_version", base_key.schema_version + 1),
+            ("plugin_version", "0.0.1-test"),
+            ("repository", "origin:github.com/someone/else"),
+            ("base_commit", "f" * 40),
+        )
+        self.assertEqual({m[0] for m in mutations}, set(cache.KEY_FIELDS))
+
+        for field, value in mutations:
+            with self.subTest(field=field):
+                mutated_key = dataclasses.replace(base_key, **{field: value})
+
+                result = cache.get(cache_dir, mutated_key, repo_root=repo)
+
+                self.assertFalse(result.hit, f"{field} did not invalidate the key")
+                self.assertEqual(result.reason, cache.MISS_NOT_FOUND)
+
+        # The original, unmutated key is unaffected by any of the lookups
+        # above — each mutation missed because it addressed a different slot,
+        # not because the store itself was disturbed.
+        self.assertTrue(cache.get(cache_dir, base_key, repo_root=repo).hit)
+
+
+class CachePoisoning(CacheTestCase):
+    """Payloads a legitimate `put()` would never produce, but that could
+    reach the cache directory some other way (a corrupted write, a copied
+    entry from elsewhere) — every one of these must fail closed as a miss."""
+
+    def test_a_parseable_but_invalid_record_is_a_miss(self):
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        payload = self.raw_payload_for(key, {"id": "R1"})  # no 'digest'
+        self.write_raw(cache_dir, key, payload)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.reason, cache.MISS_INVALID)
+
+    def test_mismatched_chunk_identity_is_a_miss(self):
+        # Everything about the lineage matches, but the record inside
+        # declares a different document/source pair than the key it is
+        # filed under — a mismatched chunk sitting at the right path.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        record = self.valid_record(document_digest="f" * 64, source_digest=SOURCE_DIGEST)
+        payload = self.raw_payload_for(key, record)
+        self.write_raw(cache_dir, key, payload)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.reason, cache.MISS_IDENTITY)
+
+    def test_foreign_repository_lineage_is_a_miss(self):
+        # Filed at the path this repository's own key hashes to, but the
+        # payload declares a different repository entirely.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        payload = self.raw_payload_for(
+            key, self.valid_record(), repository="origin:github.com/foreign/repo",
+        )
+        self.write_raw(cache_dir, key, payload)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.reason, cache.MISS_STALE)
+
+    def test_an_incomplete_result_is_a_miss(self):
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        payload = self.raw_payload_for(
+            key, None, status="partial",
+            incomplete=[{"scope": "docs/huge.md", "reason": "chunk budget"}],
+        )
+        self.write_raw(cache_dir, key, payload)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.reason, cache.MISS_INCOMPLETE)
+
+    def test_a_valid_key_with_an_invalid_payload_is_a_miss(self):
+        # The key is exactly right (the entry is genuinely found), but its
+        # payload is corrupted in place afterward — a hit requires both.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        cache.put(cache_dir, key, self.valid_record())
+        self.assertTrue(cache.get(cache_dir, key, repo_root=repo).hit)
+
+        path = cache.entry_path(cache_dir, key)
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        del payload["records"][0]["digest"]
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.reason, cache.MISS_INVALID)
+
+
+class CacheKeyDigest(unittest.TestCase):
+    def test_the_default_schema_version_is_the_engines_own(self):
+        state = {
+            "inventory_digest": "1" * 64, "audit_config_digest": CONFIG_DIGEST,
+            "registry_digest": "2" * 64, "ruleset_version": 1,
+            "plugin_version": "0.16.0", "repository": "root-commit:abc",
+            "base_commit": "0" * 40,
+        }
+
+        key = cache.cache_key(DOCUMENT_DIGEST, SOURCE_DIGEST, state)
+
+        self.assertEqual(key.schema_version, ARTIFACT_SCHEMA_VERSION)
+
+    def test_reformatting_the_key_inputs_does_not_change_the_digest(self):
+        state = {
+            "inventory_digest": "1" * 64, "audit_config_digest": CONFIG_DIGEST,
+            "registry_digest": "2" * 64, "ruleset_version": 1,
+            "plugin_version": "0.16.0", "repository": "root-commit:abc",
+            "base_commit": "0" * 40,
+        }
+        key_a = cache.cache_key(DOCUMENT_DIGEST, SOURCE_DIGEST, state)
+        key_b = cache.cache_key(DOCUMENT_DIGEST, SOURCE_DIGEST, dict(reversed(state.items())))
+
+        self.assertEqual(key_a.digest, key_b.digest)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

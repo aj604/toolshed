@@ -5,9 +5,9 @@ third-party dependencies. Library functions are the implementation; the commands
 add nothing, so an import and a command cannot disagree. The one external program it runs is
 `git`, and only to read a repository's identity and HEAD when checking a report's freshness.
 
-Current surface: the registry parser, the document inventory, path authorization, and the
-report contract. Segmenter, cache, approval sets, and the applier land in later slices of the
-re-architecture (issue #57).
+Current surface: the registry parser, the document inventory, path authorization, the report
+contract, and the lineage-keyed cache. Segmenter, approval sets, and the applier land in later
+slices of the re-architecture (issue #57).
 
 ## Modules
 
@@ -19,6 +19,7 @@ re-architecture (issue #57).
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, lineage and report digests |
 | `doclifecycle/render.py` | `render_report()` — Markdown from a validated `Report`, and nothing else |
 | `doclifecycle/repository.py` | repository identity and base commit, read from git |
+| `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the five result states, the `ok`/`invalid` status strings |
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
 | `doclifecycle/cli.py`, `__main__.py`, `doc-lifecycle.py` | argv parsing and exit codes only |
@@ -363,6 +364,41 @@ Identity note: the `root-commit:` fallback is only as stable as the history it r
 different repository — safe (stale, never certified), but a repository audited in CI wants
 either an origin remote or full history.
 
+## Cache
+
+A cached semantic result is a derived artifact: it cannot outlive the inputs that could have
+changed the judgment it records. `cache.cache_key()` folds every one of them into a single
+lookup key — document bytes, source-evidence bytes, the document inventory, the consumer's audit
+configuration, the registry, the ruleset version, the artifact schema version, the plugin
+version, and the repository/base-commit identity (`report.current_lineage()` supplies everything
+but the first two). Two keys differing in exactly one of those fields hash to different cache
+slots, so changing any one of them is a miss, never a stale hit.
+
+```python
+from doclifecycle.cache import cache_key, get, put
+from doclifecycle.report import current_lineage
+
+state, problems = current_lineage(".", audit_config_digest=my_config_digest)
+key = cache_key(document_digest, source_digest, state)
+
+put(cache_dir, key, {"id": "DRIFT-001", "digest": "..."})   # store one result
+result = get(cache_dir, key, repo_root=".")                 # result.hit, result.record
+```
+
+A key match alone is not a hit. On read, the stored entry is wrapped in the same shape a report
+is and run through `report.validate_report` — the landed validator, not a parallel one — so a
+parseable-but-invalid record, a lineage that no longer matches the repository (a different
+repository or commit, a moved registry or inventory, a bumped ruleset or plugin, a changed audit
+configuration), or a result admitting it did not finish are each a miss (`MISS_INVALID`,
+`MISS_STALE`, `MISS_INCOMPLETE`). Because a cache entry is about one document checked against one
+piece of source evidence — which the report contract's lineage does not model — the entry's
+declared `document_digest`/`source_digest` are also compared against the key's, so a payload that
+validates cleanly but names a different document or source (a mismatched chunk sitting at the
+right path) is `MISS_IDENTITY` rather than a false hit. Every other way to fail — the entry was
+never written (`MISS_NOT_FOUND`), or its JSON does not parse (`MISS_CORRUPT`) — is a miss too.
+There is no path that returns a stale or unverified payload; a hit is exactly the case where every
+check above passed.
+
 ## Digests
 
 `digest.sha256_canonical` hashes the canonical JSON form (sorted keys, compact separators),
@@ -388,10 +424,15 @@ python3 -m unittest discover -s tests/engine -p '*_test.py'
 ```
 
 Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
-`validate_report()`, `load_report()`, `current_lineage()`, `render_report()`), and the commands
-as subprocesses whose payload must equal the library result. Path authorization has no command
-of its own — it is substrate the other components call. `tests/engine/support.py` holds what
-every suite needs — the engine on `sys.path`, `RepoTestCase.repo()`, and `run_command()` for
-the subprocess seam; report fixtures live in `report_test.py`, which `report_cli_test.py`
-imports. The report suites build real git repositories, because staleness is a comparison
-against a repository and a mocked one would prove nothing.
+`validate_report()`, `load_report()`, `current_lineage()`, `render_report()`, `cache.cache_key()`,
+`cache.put()`, `cache.get()`), and the commands as subprocesses whose payload must equal the
+library result. Path authorization and the cache have no command of their own — they are
+substrate the other components (and, for the cache, the not-yet-built audit engine) call.
+`tests/engine/support.py` holds what every suite needs — the engine on `sys.path`,
+`RepoTestCase.repo()`, and `run_command()` for the subprocess seam; report fixtures live in
+`report_test.py`, which `report_cli_test.py` and `cache_test.py` both import (`GitRepoTestCase`,
+for a real repository to check freshness against). The report and cache suites build real git
+repositories, because staleness is a comparison against a repository and a mocked one would
+prove nothing. `tests/engine/acceptance/scenario_cache_test.py` holds the cache's acceptance-
+fixture scenario (issue #64): changing only source evidence, or only configuration/ruleset,
+prevents reuse of a prior semantic result.
