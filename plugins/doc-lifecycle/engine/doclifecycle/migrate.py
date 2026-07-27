@@ -531,6 +531,36 @@ def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
             ),
         ),))
 
+    # Checked before anything is walked. `registry.parse` would refuse an
+    # unsafe root at the end, but by then the door would already have listed a
+    # directory outside the repository — and a declared root that simply is not
+    # there would drift past it as an empty walk, drafting a registry
+    # `build_inventory` then refuses with `registry-missing-root`.
+    root_problems = []
+    for root in roots:
+        reason = repository_relative_problem(root)
+        if reason is not None:
+            root_problems.append(Problem(
+                code="migration-unsafe-root",
+                message=(
+                    f"declared root {root!r} {reason[1]} — a root names a "
+                    f"documentation subtree of this repository"
+                ),
+                location=root,
+            ))
+        elif not os.path.exists(os.path.join(repo_root, root)):
+            root_problems.append(Problem(
+                code="migration-missing-root",
+                message=(
+                    f"declared root {root!r} does not exist — drafting rules "
+                    f"for a tree that is not there would produce a registry the "
+                    f"inventory refuses"
+                ),
+                location=root,
+            ))
+    if root_problems:
+        return Invalid(tuple(root_problems))
+
     exclude = tuple(scope.get("exclude", []))
     extension = registry_mod.DEFAULT_EXTENSIONS[0]
     walker = registry_mod.without_rules(roots, exclude)

@@ -231,6 +231,18 @@ class DraftRegistryTest(RepoTestCase):
         globs = [r["glob"] for r in draft.to_dict()["registry"]["rules"]]
         self.assertLess(globs.index("docs/*.md"), globs.index("docs/(draft)-ledger.md"))
 
+    def test_refuses_a_declared_root_that_is_not_inside_the_repository(self):
+        root = self.repo(legacy_consumer())
+        result = draft_registry(root, roots=["../elsewhere"])
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems], ["migration-unsafe-root"])
+
+    def test_refuses_a_declared_root_that_does_not_exist(self):
+        root = self.repo(legacy_consumer())
+        result = draft_registry(root, roots=["handbook"])
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems], ["migration-missing-root"])
+
     def test_refuses_when_no_documentation_root_can_be_inferred(self):
         root = self.repo({"src/billing.py": "RATE = 0.02\n"})
         result = draft_registry(root)

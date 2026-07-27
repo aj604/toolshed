@@ -1238,8 +1238,9 @@ not evidence — naming a subtree to keep it out is not a declaration that it is
 is filtered through `paths.repository_relative_problem()`, path safety's one owner, so a waiver
 naming `../elsewhere/x.md` declares no root; a trailing `/` on a directory prefix is repaired
 first, since it is the obvious spelling. A root inside another is dropped, because the registry
-refuses overlapping roots outright. `--root` (repeatable) replaces inference entirely. No
-inferable root is `migration-no-roots`.
+refuses overlapping roots outright. `--root` (repeatable) replaces inference entirely, and is
+checked before anything is walked: `migration-unsafe-root` for a spelling outside the repository,
+`migration-missing-root` for a tree that is not there. No inferable root is `migration-no-roots`.
 
 `audit-scope.json`'s `exclude` becomes the registry's `exclude`; a planning directory becomes a
 declared set named after it; an `include` entry that names neither `.md` nor a wildcard suffix is
