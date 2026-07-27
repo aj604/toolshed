@@ -1072,17 +1072,32 @@ returns one entry per declared living document:
 ```json
 {"documents": [
   {"path": "docs/architecture.md", "status": "ok", "verdicts": [
-    {"unit": "<assertion-unit digest>", "assertion_class": "factual",
+    {"unit": 4, "assertion_class": "factual",
      "verdict": "STALE", "kind": "value", "tier": 3,
      "evidence": {"source": "src/payment_service.py", "line": 7,
                   "observed": "FLAT_FEE_RATE = 0.025"},
      "fix": "The payment service charges a flat 2.5% rate."},
-    {"unit": "<another digest>", "assertion_class": "non-assertive"}
+    {"unit": 7, "assertion_class": "non-assertive"}
   ]},
   {"path": "docs/runbook.md", "status": "failed", "chunk": "chunk-2",
    "reason": "the chunk worker failed twice"}
 ]}
 ```
+
+`unit` names which assertion unit an answer is about by the small integer `segment`'s output prints
+alongside each one (`AssertionUnit.ordinal`, fixed per document) — never the 64-character digest
+directly. The engine resolves the ordinal back to the unit itself before anything downstream sees
+a digest at all (`drift-verdict-unknown-ordinal` if the document has no unit at that ordinal). This
+is what removes the transcription failure the shadow-parity gate measured (#116, G3 in
+`docs/plans/2026-07-26-shadow-parity-gate.md`): of 1329 first-round answers over this repository's
+own corpus, 39 (2.9%) named a digest no unit had — 36 of those a real digest truncated to 57–63
+characters or one or two characters off — and because the engine fails a document closed on any
+classification problem, that error rate invalidated 48% of the corpus in one pass. An ordinal is a
+small integer copied from a command's own output, not composed from memory, so there is nothing
+left to truncate or mistype into naming the wrong unit. A caller that already holds a unit's digest
+directly (a library caller, not a model lane) may still pass it as `unit` — the two forms are never
+ambiguous, since JSON distinguishes an integer from a string — but the model-facing lane
+(`doc-audit.yml`) now asks for the ordinal exclusively.
 
 The classes are `finding.py`'s four, and `record_classifications()` — their landed owner —
 validates them: an unknown class, a class against a unit the document lacks or against
@@ -1127,6 +1142,7 @@ passage it is about. The recorded class travels on the record too, as `assertion
 | Code | Refused because |
 |---|---|
 | `drift-verdict-invalid-shape` | not `{unit, assertion_class}` plus, when judged, all of `{verdict, kind, tier, evidence}` |
+| `drift-verdict-unknown-ordinal` | `unit` is an integer, but this document has no assertion unit at that ordinal |
 | `drift-verdict-not-obligated` | a `non-assertive` unit was given a verdict |
 | `drift-verdict-owed` | a `factual` unit was left unjudged |
 | `drift-unknown-verdict` | not one of the three |
@@ -1213,6 +1229,16 @@ would turn a gap into a silence.
 the acceptance; it is **never** removed from the report. Matching is `file` equality plus claim
 containment, because a waiver quotes the text a human read on a line and a unit is the sentence
 that line sits in — so a waiver is exactly as broad as the text it quotes.
+
+Deliberately `{file, claim}` text, not a unit digest, and the #116 ordinal-keyed verdict fix above
+is an argument for keeping it that way rather than a stepping stone toward changing it. A verdict
+answers by ordinal precisely because a garbled 64-character digest was measured (G3,
+`docs/plans/2026-07-26-shadow-parity-gate.md`) to fail a document **closed and loudly** —
+`classification-unknown-unit`, `partial`, nothing silently lost. A waiver keyed to a digest instead
+of quoted text would fail the opposite way: a garbled digest matches no finding, so the waiver
+simply never fires, and an accepted claim quietly stops being waived with no typed problem anywhere
+to catch it. Text-keyed waivers stay the more robust shape while a model can be the one transcribing
+the key.
 
 Which is why the text is bounded, in both directions. A fragment shorter than **12 characters**
 is `drift-waivers-invalid` when the file is read: under containment, one word — or one

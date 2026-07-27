@@ -18,7 +18,11 @@ ARTIFACT_SCHEMA_VERSION = 1
 # rather than as a file that has left the repository (#97).
 # 3: a DISTILL verdict may name the residue document it authors, so a response
 # that was refused as `bloat-destination-forbidden` is now recorded (#109).
-RULESET_VERSION = 3
+# 4: a drift verdict may name its unit by the segmenter's per-document ordinal
+# instead of the 64-character digest — an integer `drift-verdict-unknown-ordinal`
+# rejects outside a document's range, where before any non-digest-string `unit`
+# was uniformly `classification-unknown-unit` (#116).
+RULESET_VERSION = 4
 
 # The published plugin version this engine ships inside. Pinned in lineage, so
 # it must track `plugins/doc-lifecycle/.claude-plugin/plugin.json` — the engine
@@ -26,4 +30,4 @@ RULESET_VERSION = 3
 # `tests/engine/report_test.py` fails loudly when the two drift. Every release
 # therefore expires prior reports: cheaper than reasoning about which releases
 # could have changed a verdict, and re-running an audit is cheap.
-PLUGIN_VERSION = "0.33.0"
+PLUGIN_VERSION = "0.34.0"

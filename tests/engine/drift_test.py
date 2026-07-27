@@ -608,6 +608,58 @@ class VerdictDiscipline(DriftRepoTestCase):
                       report.incomplete[0].reason)
 
 
+class OrdinalKeyedVerdicts(DriftRepoTestCase):
+    """#116: a verdict may answer for a unit by the segmenter's own per-document
+    ordinal instead of its 64-character digest, and the engine resolves that
+    back to the digest itself. This is what removes the shadow-parity gate's
+    G3 near-miss failure mode (docs/plans/2026-07-26-shadow-parity-gate.md) —
+    a model no longer has to transcribe a 64-character hex string verbatim, so
+    a truncated or off-by-one-character transcription of one cannot happen.
+    """
+
+    def test_an_ordinal_keyed_answer_resolves_to_the_right_unit(self):
+        root = self.drift_repo()
+        ordinal = self.claim_unit(root).ordinal
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root, unit=ordinal)))
+
+        self.assertEqual(report.status, STATE_FINDINGS)
+        self.assertEqual([r.extra["code"] for r in report.records], ["STALE"])
+
+    def test_an_ordinal_outside_the_documents_range_is_refused(self):
+        root = self.drift_repo()
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root, unit=99999)))
+
+        self.assertEqual(report.status, STATE_PARTIAL)
+        self.assertIn("drift-verdict-unknown-ordinal", report.incomplete[0].reason)
+
+    def test_a_truncated_digest_no_longer_has_to_be_answered_by_a_model(self):
+        """Reproduces the shadow-parity gate's G3 measurement directly: 36 of
+        39 first-round near-misses were a real unit's digest truncated to
+        57-63 characters. Answered the old way (a bare digest string, still
+        accepted for a direct caller), a garbled digest still names no unit
+        and the document still fails closed — unit identity is still the
+        digest, and garbage in is garbage out. What #116 removes is the
+        model's *obligation* to transcribe that digest at all: the same
+        answer, keyed by the unit's ordinal instead, cannot be truncated into
+        a near miss, because there is no 64-character string to transcribe.
+        """
+        root = self.drift_repo()
+        unit = self.claim_unit(root)
+        garbled_digest = unit.digest[:-3]     # truncated, the recorded shape
+
+        by_garbled_digest = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root, unit=garbled_digest)))
+        self.assertEqual(by_garbled_digest.status, STATE_PARTIAL)
+
+        by_ordinal = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root, unit=unit.ordinal)))
+        self.assertEqual(by_ordinal.status, STATE_FINDINGS)
+
+
 class AssertionClasses(DriftRepoTestCase):
     """What each unit *is* is the model's other answer, and it is recorded.
 

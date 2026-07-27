@@ -663,6 +663,7 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         ),)
 
     known = {u.digest: u for u in segmentation.units}
+    by_ordinal = {u.ordinal: u.digest for u in segmentation.units}
     drafts, shaped, verified, judged_counts = [], [], [], {}
 
     for i, entry in enumerate(entries):
@@ -676,6 +677,27 @@ def _validated_verdicts(segmentation, entries, boundary, path):
                 f"evidence obligation — nothing else",
                 where)
             continue
+        # #116: a lane answers for a unit by the ordinal `segment` printed
+        # alongside it — a small integer, never transcribed wrong the way a
+        # 64-character digest is (the shadow-parity gate's G3 measurement: 39
+        # of 1329 first-round answers named a digest no unit had, 36 of them
+        # a real digest truncated or one/two characters off). A digest string
+        # is still accepted directly, for a caller that already holds one —
+        # `known`, just below, is exactly that lookup — so this only adds a
+        # second, unambiguous way in: JSON's int and string are never the
+        # same value, so there is no case where a well-formed answer could be
+        # read either way.
+        raw_unit = entry["unit"]
+        if isinstance(raw_unit, int) and not isinstance(raw_unit, bool):
+            if raw_unit not in by_ordinal:
+                bad("drift-verdict-unknown-ordinal",
+                    f"this document has no assertion unit at ordinal "
+                    f"{raw_unit!r} — a verdict answers by the ordinal "
+                    f"`segment` printed alongside each unit, and one outside "
+                    f"that range names nothing to classify",
+                    where)
+                continue
+            entry = dict(entry, unit=by_ordinal[raw_unit])
         shaped.append((where, entry))
 
     # One owner for the classification rules: unknown class, unknown unit, a
