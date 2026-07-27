@@ -30,7 +30,9 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
 (accepted-UNVERIFIABLE waivers the sync run surfaces consume), `doc-sync/installed-version`
 (the plugin-version lockfile the upgrade workflow reads), `workflows/doc-sync.yml`,
 `workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`), the ci+release workflow
-(`workflows/release.yml`), and the shadow-mode parity gate's harness
+(`workflows/release.yml`), that workflow's own test-suite runner
+(`.github/scripts/run-script-suites.py`, #99 — discovery-driven, so a new
+`tests/scripts/*_test.py` suite needs no hand-wiring), and the shadow-mode parity gate's harness
 (`tests/baselines/shadow-parity-gate/shadow-cycle.py`, #76 — recorded scaffolding, retired with
 the legacy lane in #77).
 
