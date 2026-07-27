@@ -1084,7 +1084,7 @@ returns one entry per declared living document:
 ]}
 ```
 
-`unit` names which assertion unit an answer is about by the small integer `segment`'s output prints
+`unit` names which assertion unit an answer is about by the small integer that `segment` prints
 alongside each one (`AssertionUnit.ordinal`, fixed per document) — never the 64-character digest
 directly. The engine resolves the ordinal back to the unit itself before anything downstream sees
 a digest at all (`drift-verdict-unknown-ordinal` if the document has no unit at that ordinal). This
