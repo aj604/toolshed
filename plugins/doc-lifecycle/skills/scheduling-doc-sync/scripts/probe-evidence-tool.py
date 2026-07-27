@@ -154,7 +154,7 @@ def citation_for(argv, tools):
 def probe(argv, tools):
     """Run one declared probe. Returns (citation, output)."""
     citation = citation_for(argv, tools)
-    binary = shutil.which(argv[0], path=os.environ.get("PATH"))
+    binary = shutil.which(argv[0])
     if binary is None:
         raise Unanswerable(
             f"tool-not-installed: {argv[0]!r} is declared but not on PATH here "

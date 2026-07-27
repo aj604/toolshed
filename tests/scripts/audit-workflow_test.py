@@ -178,11 +178,10 @@ class ConcurrencyAndFailureSurface(unittest.TestCase):
 class DeclaredEvidenceTools(unittest.TestCase):
     """How this lane reaches Tier-2 tool evidence (aj604/toolshed#118).
 
-    A drift verdict may cite `evidence.command`, but only for a tool the
-    report's `evidence_boundary.commands` declares. This lane declares those
-    tools from a consumer-owned config through a tested script, under the
-    model job's *existing* `Bash(python3 *)` allowance — the grant itself does
-    not widen, which is the decision these guards hold in place.
+    The decision and its rationale live in `docs/decisions.md`'s #118 entry;
+    these guards hold its two mechanical halves in place — the model grant
+    stays exactly as it was, and the declared tools reach `--evidence-command`
+    through the tested script rather than a tool name typed into this YAML.
     """
 
     EXPECTED_GRANT = ('--allowedTools '
@@ -347,6 +346,79 @@ class NoUnguardedEngineExitBeforeMoreLogic(unittest.TestCase):
             "typed non-zero exit (1 invalid, 4 partial) aborts the step "
             "before that later logic runs, no matter what the step's `set` "
             "line comment claims about -e:\n  " + "\n  ".join(offenders))
+
+
+def audit_step_script():
+    """The literal `run:` body of audit's "Run the drift audit" step."""
+    for job_name, step_name, block in step_run_blocks():
+        if job_name == "audit" and "Run the drift audit" in step_name:
+            return "\n".join(block)
+    return None
+
+
+class DeclaredToolsFailureIsNotSilent(unittest.TestCase):
+    """Executes the real "Run the drift audit" step under `bash -eo pipefail`.
+
+    A command substitution in argument position neither aborts under `-e` nor
+    lands in `$?`, so rendering `--evidence-command` inline would swallow a
+    probe failure: an `evidence-tools.json` that does not parse would narrow
+    the declared boundary to tool-free, and every command-cited verdict would
+    then be refused as `drift-evidence-outside-boundary` with nothing on the
+    run surface saying the config was the cause. The step must state that
+    outcome instead of publishing a boundary it did not mean.
+    """
+
+    def setUp(self):
+        self.script = audit_step_script()
+        self.assertIsNotNone(
+            self.script,
+            "could not locate the 'Run the drift audit' step in "
+            "doc-audit.yml — did its name or job change?")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = self.tmp.name
+        os.makedirs(os.path.join(self.repo, ".github", "doc-sync", "engine"))
+        self._stub("engine/doc-lifecycle.py",
+                   'import sys\nsys.stdout.write("{}")\nsys.exit(0)\n')
+
+    def _stub(self, relpath, body, exit_code=None):
+        path = os.path.join(self.repo, ".github", "doc-sync", *relpath.split("/"))
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("#!/usr/bin/env python3\n" + body)
+        os.chmod(path, 0o755)
+
+    def _stub_probe(self, stdout, stderr, exit_code):
+        self._stub(
+            "probe-evidence-tool.py",
+            "import sys\n"
+            f"sys.stdout.write({stdout!r})\n"
+            f"sys.stderr.write({stderr!r})\n"
+            f"sys.exit({exit_code})\n")
+
+    def _run_step(self):
+        return subprocess.run(
+            ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c",
+             self.script],
+            cwd=self.repo, capture_output=True, text=True)
+
+    def test_a_declared_run_passes_the_flags_through(self):
+        self._stub_probe("--evidence-command gh\n", "", 0)
+        result = self._run_step()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_tool_free_install_runs_clean_with_no_flags(self):
+        self._stub_probe("\n", "", 0)
+        result = self._run_step()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_an_unreadable_declaration_fails_the_step_and_says_so(self):
+        self._stub_probe("", "error: could not read evidence-tools.json\n", 1)
+        result = self._run_step()
+        self.assertNotEqual(
+            result.returncode, 0,
+            "a declaration that could not be read left the step green — the "
+            "run would publish a tool-free boundary it never meant to declare")
+        self.assertIn("evidence", (result.stdout + result.stderr).lower())
 
 
 def freshness_step_script():

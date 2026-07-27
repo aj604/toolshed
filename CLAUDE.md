@@ -129,9 +129,8 @@ the legacy lane in #77).
   by `probe-evidence-tool.py` rather than typed into the YAML);
   `probe-evidence-tool_test.py` covers that script itself (the declared list and its rendered
   flags, the refusals for an undeclared tool or a non-`--help`/`--version` invocation, and the
-  credential scrub). Alongside what
-  `workflow-permissions_test.py` already covers generically for every
-  `scheduling-doc-sync/*.yml` template. `render-apply-summary_test.py` covers the apply lane's
+  credential scrub). Both suites sit alongside what `workflow-permissions_test.py` already
+  covers generically for every `scheduling-doc-sync/*.yml` template. `render-apply-summary_test.py` covers the apply lane's
   run surface (every refusal, the staged path list, and the rendered PR body, title, and commit
   message), and `apply-workflow_test.py` adds `doc-apply.yml`'s static checks (three-job trust
   split, no dispatch input in any `run:` block, staging confined to the apply result's paths, a
