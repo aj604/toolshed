@@ -115,6 +115,12 @@ DEFAULT_CLASSES = ELIGIBILITY_CLASSES
 PREIMAGE_FIELD = "assertion"
 EVIDENCE_FIELD = "evidence"
 EVIDENCE_SOURCE_FIELD = "source"
+# The other citation a drift verdict may carry (#115): the local tool that was
+# run to settle a claim no file in the repository can answer. Mechanical means
+# re-derivable from the commit, and this pointer is not — so it is refused by
+# name rather than left to fall through the missing-source check, which would
+# tell an operator their record had no pointer when it had the wrong kind.
+EVIDENCE_COMMAND_FIELD = "command"
 # Where a move writes. A mechanical remedy touches the document the finding is
 # about and nothing else, so a record carrying one is refused before its code
 # is even consulted.
@@ -418,6 +424,19 @@ def _decide(policy, record, enabled):
         )
 
     evidence = record.extra.get(EVIDENCE_FIELD)
+    if isinstance(evidence, dict) and _name(evidence.get(EVIDENCE_COMMAND_FIELD)):
+        return None, Problem(
+            code="policy-external-evidence",
+            message=(
+                f"record {record_id} rests on running "
+                f"{evidence[EVIDENCE_COMMAND_FIELD]!r}, which is a real pointer "
+                f"but not one this repository contains — nobody re-deriving the "
+                f"change from the commit can settle it, and a remedy whose "
+                f"reason lives outside the closed world is exactly the one a "
+                f"human should approve"
+            ),
+            location=record_id,
+        )
     if not isinstance(evidence, dict) or not _name(
             evidence.get(EVIDENCE_SOURCE_FIELD)):
         return None, Problem(

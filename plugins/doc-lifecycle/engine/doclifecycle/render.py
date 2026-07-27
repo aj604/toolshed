@@ -160,6 +160,11 @@ def render_report(report):
     if boundary.excluded:
         excluded = ", ".join(_code(g) for g in boundary.excluded)
         evidence += f" (excluded: {excluded})"
+    if boundary.commands:
+        # Named separately from the globs, because they are a different
+        # permission: what the run could *run*, not what it could open.
+        tools = ", ".join(_code(c) for c in boundary.commands)
+        evidence += f" (tools: {tools})"
 
     lines = [
         f"# Documentation audit — {report.status}",

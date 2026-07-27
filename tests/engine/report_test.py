@@ -88,7 +88,8 @@ def lineage_payload(**overrides):
         "registry_digest": "2" * 64,
         "ruleset_version": RULESET_VERSION,
         "plugin_version": PLUGIN_VERSION,
-        "evidence_boundary": {"sources": ["src/**"], "excluded": ["src/vendor/**"]},
+        "evidence_boundary": {"sources": ["src/**"],
+                              "excluded": ["src/vendor/**"], "commands": []},
     }
     payload.update(overrides)
     return payload
@@ -312,6 +313,25 @@ class LineageFields(unittest.TestCase):
             ("evidence_boundary", {"sources": ["src\n**"]},
              "report-invalid-evidence-boundary"),
             ("evidence_boundary", {"excluded": ["v"]},
+             "report-invalid-evidence-boundary"),
+            # A declared tool is a bare executable name: a boundary that cannot
+            # be read as "which programs could a verdict rest on" declares
+            # nothing a reader can check.
+            ("evidence_boundary", {"sources": ["src/**"], "commands": "gh"},
+             "report-invalid-evidence-boundary"),
+            ("evidence_boundary", {"sources": ["src/**"],
+                                   "commands": ["gh pr list"]},
+             "report-invalid-evidence-boundary"),
+            ("evidence_boundary", {"sources": ["src/**"],
+                                   "commands": ["/usr/bin/gh"]},
+             "report-invalid-evidence-boundary"),
+            ("evidence_boundary", {"sources": ["src/**"], "commands": [""]},
+             "report-invalid-evidence-boundary"),
+            ("evidence_boundary", {"sources": ["src/**"], "commands": [7]},
+             "report-invalid-evidence-boundary"),
+            # `$` in a Python pattern matches before a trailing newline, so an
+            # anchored `match` would let one through into a lineage field.
+            ("evidence_boundary", {"sources": ["src/**"], "commands": ["gh\n"]},
              "report-invalid-evidence-boundary"),
         ]
         for field, value, code in cases:
@@ -1062,6 +1082,22 @@ class Rendering(GitRepoTestCase):
         self.assertIn(report.digest, rendered)
         self.assertIn("full", rendered)
         self.assertIn("src/**", rendered)
+
+    def test_the_render_names_the_tools_the_boundary_declared(self):
+        """A reader deciding what a verdict could rest on needs what the run
+        could *run*, not only what it could open."""
+        report = validate_report(report_payload(lineage=lineage_payload(
+            evidence_boundary={"sources": ["src/**"], "excluded": [],
+                               "commands": ["gh"]})))
+
+        rendered = render_report(report)
+
+        self.assertIn("(tools: `gh`)", rendered)
+
+    def test_a_render_of_a_boundary_declaring_no_tools_claims_none(self):
+        report = validate_report(report_payload())
+
+        self.assertNotIn("(tools:", render_report(report))
 
     def test_a_clean_render_says_the_declared_scope_completed(self):
         report = validate_report(report_payload(status=STATE_CLEAN, records=[]))

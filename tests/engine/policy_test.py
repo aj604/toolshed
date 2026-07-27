@@ -443,6 +443,17 @@ class WhatAPolicyMayNeverMint(PolicyTestCase):
         self.assertEqual(refusals(eligibility),
                          {"R-1": "policy-missing-evidence"})
 
+    def test_a_finding_settled_by_running_a_tool_is_refused(self):
+        """A command citation is a real pointer, but not one the repository
+        contains: nobody re-deriving the change from this commit can settle it,
+        so the semantic review a PR provides is the wrong one to skip."""
+        eligibility = self.eligibility([self.stale(evidence={
+            "command": "gh pr list --json bogus",
+            "observed": "authorAssociation is not an available field"})])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-external-evidence"})
+
     def test_a_record_that_writes_a_second_document_is_refused(self):
         # A destination is where a move puts content, so a record carrying one
         # would widen the mutation scope past the document the finding is about.

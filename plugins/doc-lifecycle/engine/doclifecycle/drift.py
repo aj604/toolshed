@@ -130,7 +130,19 @@ REQUIRED_VERDICT_FIELDS = ("unit", "assertion_class")
 # Owed by a unit whose class carries an evidence obligation, and refused for one
 # whose class does not.
 VERDICT_ONLY_FIELDS = ("verdict", "kind", "tier", "evidence")
-EVIDENCE_FIELDS = ("source", "line", "observed")
+# What a verdict may point at. `source`+`line` cite a place in the repository;
+# `command` cites a local tool that was run to settle a claim no file in the
+# repository can answer (#115). Exactly one of the two, because a verdict rests
+# on one place a reader goes.
+EVIDENCE_FIELDS = ("source", "line", "observed", "command")
+EVIDENCE_CITATIONS = ("source", "command")
+# What makes a cited command line more than one plain invocation: chaining,
+# redirection, substitution, and escaping. A citation carrying any of them
+# would be laundered by the report as a single read-only command a reader can
+# re-run, which is exactly what it would not be. The engine never executes a
+# citation — this is about what the report tells a reader to do. Globbing
+# characters are deliberately absent: they change an argument, not what runs.
+SHELL_SYNTAX = ";&|<>()$`\\"
 ENTRY_FIELDS = ("path", "status", "verdicts", "reason", "chunk")
 VERDICTS_FIELDS = ("schema_version", "documents")
 
@@ -576,6 +588,26 @@ def _within(boundary, source):
     return any(compile_glob(g).match(source) for g in boundary.sources)
 
 
+def _command_spelling(command):
+    """Why this cited command is not one command line, or None.
+
+    Spelling before boundary, the same order a `source` is checked in and for
+    the same reason: the boundary below matches the command's first token, and
+    a shell program's first token says nothing about what the line would run.
+    The engine never executes a citation — this is about what the report tells
+    whoever checks the verdict to do.
+    """
+    if not _one_line(command):
+        return ("evidence.command must be the single command line that settled "
+                "the claim — a citation nobody can re-run is not one")
+    if any(c in SHELL_SYNTAX for c in command):
+        return (f"evidence.command {command!r} carries shell syntax "
+                f"({SHELL_SYNTAX!r}) — chaining, redirection, substitution, or "
+                f"escaping makes it a shell program, and a report must not "
+                f"present one as a single read-only command a reader re-runs")
+    return None
+
+
 def _evidence(raw, verdict, boundary, bad, where):
     """Validate one verdict's evidence. Returns (evidence, ok)."""
     if not isinstance(raw, dict) or set(raw) - set(EVIDENCE_FIELDS) or (
@@ -590,6 +622,45 @@ def _evidence(raw, verdict, boundary, bad, where):
         return None, False
 
     ok = True
+    cited = [name for name in EVIDENCE_CITATIONS if raw.get(name) is not None]
+    if len(cited) > 1:
+        # The one place this function stops at the first problem rather than
+        # naming them all, and for the same reason the shape check above does:
+        # which citation the rest of the checks are about is exactly what is
+        # in doubt, so every one of them would be a guess.
+        bad("drift-verdict-invalid-evidence",
+            f"evidence cites both {list(EVIDENCE_CITATIONS)} — a verdict rests "
+            f"on one place a reader goes, and two pointers leave nobody able to "
+            f"say which one settled it",
+            where)
+        return None, False
+
+    command = raw.get("command")
+    if command is not None:
+        # Every refusal below carries the command in `location`, so `_gap_reason`
+        # can fold it into the coverage gap: the code alone says a citation
+        # broke a rule, not which one.
+        located = f"{where} command={command!r}"
+        fault = _command_spelling(command)
+        if fault:
+            bad("drift-verdict-invalid-evidence", fault, located)
+            ok = False
+        if raw.get("line") is not None:
+            bad("drift-verdict-invalid-evidence",
+                "evidence.line points into a file, and a tool's output is not "
+                "one — a command citation carries 'observed' and nothing else",
+                located)
+            ok = False
+        if ok and command.split()[0] not in boundary.commands:
+            bad("drift-evidence-outside-boundary",
+                f"evidence.command {command!r} runs a tool outside the evidence "
+                f"boundary this run declared ({list(boundary.commands)}) — a "
+                f"verdict resting on something the report says was not "
+                f"consulted is not checkable",
+                located)
+            ok = False
+        return (dict(raw) if ok else None), ok
+
     source = raw.get("source")
     if source is not None:
         # Spelling before boundary: `paths.py` is the single owner of what a
@@ -606,8 +677,10 @@ def _evidence(raw, verdict, boundary, bad, where):
             ok = False
     elif verdict in POINTED_VERDICTS:
         bad("drift-verdict-invalid-evidence",
-            f"a {verdict} verdict asserts that a place in the repository was "
-            f"read, so evidence.source must say which one",
+            f"a {verdict} verdict asserts that something was actually checked, "
+            f"so evidence must cite where: a repository path in "
+            f"evidence.source, or the command that settled it in "
+            f"evidence.command",
             where)
         ok = False
     line = raw.get("line")
@@ -1110,8 +1183,8 @@ def _audit_anchor(repo_root, path, registry_path):
 
 
 # Codes whose gap reason loses something specific if only the code survives:
-# both name a rule an `evidence.source` broke, and the source that broke it is
-# exactly what an operator debugging the gap needs next (PR #87 review, N4 —
+# both name a rule an `evidence` citation broke, and the citation that broke
+# it is exactly what an operator debugging the gap needs next (PR #87 review, N4 —
 # the fixture's own hostile filenames are documents the audit declares and
 # examines but that cannot be cited as evidence sources, and the gap this
 # produced named only the code).
@@ -1123,24 +1196,28 @@ def _gap_reason(problems):
     """One line naming why a document was not examined.
 
     Codes only, by design — no prose drift — except for the two evidence
-    codes above: `_evidence` records the offending source in `location` as
-    `"<where> source=<repr>"`, and it is folded back in here, because the code
-    alone says a rule was broken, not which source broke it. Split on the
-    *first* " source=" (`where` never contains that substring, so it is
-    always `_evidence`'s own delimiter) rather than the last, so a hostile
-    source containing that same substring cannot truncate its own repr out of
-    the reason.
+    codes above: `_evidence` records the offending citation in `location` as
+    `"<where> source=<repr>"` or `"<where> command=<repr>"`, and it is folded
+    back in here under its own label, because the code alone says a rule was
+    broken, not which citation broke it. Split on the *first* delimiter
+    (`where` never contains either substring, so it is always `_evidence`'s
+    own) rather than the last, so a hostile source or command containing that
+    same substring cannot truncate its own repr out of the reason.
     """
-    codes = sorted({problem.code for problem in problems})
-    sources = sorted({
-        problem.location.split(" source=", 1)[1]
-        for problem in problems
-        if problem.code in EVIDENCE_GAP_CODES
-        and problem.location and " source=" in problem.location
-    })
-    reason = ", ".join(codes)
-    if sources:
-        reason += " (offending source(s): " + ", ".join(sources) + ")"
+    def offenders(label):
+        delimiter = f" {label}="
+        return sorted({
+            problem.location.split(delimiter, 1)[1]
+            for problem in problems
+            if problem.code in EVIDENCE_GAP_CODES
+            and problem.location and delimiter in problem.location
+        })
+
+    reason = ", ".join(sorted({problem.code for problem in problems}))
+    for label in EVIDENCE_CITATIONS:
+        cited = offenders(label)
+        if cited:
+            reason += f" (offending {label}(s): " + ", ".join(cited) + ")"
     return reason
 
 
@@ -1205,7 +1282,7 @@ def load_verdicts(path):
 
 def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
                 waivers=None, evidence_sources=DEFAULT_EVIDENCE,
-                evidence_excluded=(),
+                evidence_excluded=(), evidence_commands=(),
                 registry_path=DEFAULT_REGISTRY_PATH):
     """Run a drift audit. Returns a validated `Report`, or `Invalid`.
 
@@ -1225,7 +1302,8 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
     if problem is not None:
         return Invalid((problem,))
 
-    boundary = EvidenceBoundary(tuple(evidence_sources), tuple(evidence_excluded))
+    boundary = EvidenceBoundary(tuple(evidence_sources), tuple(evidence_excluded),
+                                tuple(evidence_commands))
     state, problems = current_lineage(
         repo_root, registry_path, _audit_config_digest(boundary)
     )

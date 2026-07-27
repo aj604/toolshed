@@ -150,8 +150,20 @@ class TheAuditCommand(DriftCommandTestCase):
                              "src/**", "--exclude-evidence", "src/vendor/**")
 
         boundary = json.loads(result.stdout)["lineage"]["evidence_boundary"]
-        self.assertEqual(boundary,
-                         {"sources": ["src/**"], "excluded": ["src/vendor/**"]})
+        self.assertEqual(boundary, {"sources": ["src/**"],
+                                    "excluded": ["src/vendor/**"],
+                                    "commands": []})
+
+    def test_the_tools_a_verdict_may_be_settled_by_are_declared_too(self):
+        """Empty unless asked for: a run that declares no tool cannot cite
+        one, so the closed world stays closed by default."""
+        root = self.drift_repo()
+
+        result = run_command("drift-audit", "--repo", root,
+                             "--evidence-command", "gh")
+
+        boundary = json.loads(result.stdout)["lineage"]["evidence_boundary"]
+        self.assertEqual(boundary["commands"], ["gh"])
 
     def test_a_run_the_engine_cannot_trust_exits_one_with_no_report(self):
         root = self.drift_repo()

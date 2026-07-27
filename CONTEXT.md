@@ -47,6 +47,21 @@ _Avoid_: status (unqualified), error, failure
 One typed reason a run is invalid: a code, a message that says how to recover, and where it was found. Reported exhaustively — a run names every problem it found, not the first.
 _Avoid_: error message, warning (a problem never degrades to advisory)
 
+**Evidence boundary**:
+The declared limit of what a run was permitted to consult: repository-relative globs for what it
+could open, plus the bare executable names of the local tools it could run. Lineage on every
+report, so a reader can tell what a verdict could not have rested on. Closed both ways — the
+command list is empty unless a consumer declares one.
+_Avoid_: scope (that's the declared scope), allowlist, sandbox
+
+**Citation**:
+The half of a verdict's evidence that says where to go and check: a repository path (with an
+optional line) or a command line that was run. Exactly one per verdict, and it must be inside
+the evidence boundary. The other half is `observed`, the fact found there. A verdict that
+asserts something was checked carries one; UNVERIFIABLE is the case where there is nothing to
+point at.
+_Avoid_: reference, link, proof
+
 **Approval set**:
 An immutable artifact binding selected record digests from one report, plus its lineage, to an allowed mutation scope. The sole authority the applier accepts. Never tracked in the repo: its digest and summary travel in the change it authorizes (commit, PR body), and it expires with that change's validity.
 _Avoid_: approval layer, dispatch list, approved records (informal)

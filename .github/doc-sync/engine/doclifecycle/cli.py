@@ -348,6 +348,7 @@ def _drift_audit(args):
         args.repo, mode=args.mode, since=args.since, verdicts=verdicts,
         waivers=args.waivers, evidence_sources=sources,
         evidence_excluded=tuple(args.exclude_evidence or ()),
+        evidence_commands=tuple(args.evidence_command or ()),
         registry_path=args.registry,
     )
 
@@ -499,6 +500,15 @@ def _parser():
     audit.add_argument(
         "--exclude-evidence", action="append", default=None, metavar="GLOB",
         help="a source glob the run was not permitted to consult (repeatable)",
+    )
+    audit.add_argument(
+        "--evidence-command", action="append", default=None, metavar="NAME",
+        help=(
+            "a local tool a verdict may be settled by running, named as a bare "
+            "executable (repeatable). Empty by default: a run that declares no "
+            "tool cannot cite one. The engine never runs it — the citation is "
+            "for whoever checks the verdict"
+        ),
     )
     audit.set_defaults(run=_drift_audit, render=None)
 

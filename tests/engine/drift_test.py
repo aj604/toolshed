@@ -1594,6 +1594,217 @@ class WaiverState(DriftRepoTestCase):
                             narrow.lineage.audit_config_digest)
 
 
+class ToolCitations(DriftRepoTestCase):
+    """A verdict settled by running a declared local tool, not by opening a file.
+
+    The verification method's tier 2 sanctions `--help`/`--version`/dry-run on a
+    local read-only tool, and a document that documents a tool's flags can only
+    be checked that way. Before this the boundary was paths alone, so such a
+    verdict had no contract-legal expression and came back UNVERIFIABLE — six
+    false findings and one hidden STALE on this repository's own corpus (#115).
+    """
+
+    COMMAND = "gh pr list --json bogus"
+
+    def cited(self, root, **overrides):
+        """A verdict whose evidence cites a command instead of a path."""
+        return self.verdict(root, evidence={
+            "command": self.COMMAND,
+            "observed": "Available fields: … author … (no authorAssociation)",
+            **overrides,
+        })
+
+    def gap_for(self, root, entry, **kwargs):
+        report = self.audit(root, verdicts=self.verdicts_for(root, entry),
+                            **kwargs)
+        self.assertEqual(report.status, STATE_PARTIAL, report.to_dict())
+        return report.incomplete[0].reason
+
+    def test_a_verdict_may_rest_on_a_command_the_boundary_declares(self):
+        root = self.drift_repo()
+
+        report = self.audit(root, evidence_commands=("gh",),
+                            verdicts=self.verdicts_for(root, self.cited(root)))
+
+        self.assertEqual([r.extra["code"] for r in report.records], ["STALE"])
+
+    def test_the_record_keeps_the_command_a_reader_would_re_run(self):
+        root = self.drift_repo()
+
+        report = self.audit(root, evidence_commands=("gh",),
+                            verdicts=self.verdicts_for(root, self.cited(root)))
+
+        self.assertEqual(report.records[0].extra["evidence"]["command"],
+                         self.COMMAND)
+
+    def test_a_verified_verdict_may_be_settled_by_a_declared_command(self):
+        """VERIFIED asserts someone checked; running the tool is checking."""
+        root = self.drift_repo()
+
+        report = self.audit(
+            root, evidence_commands=("gh",),
+            verdicts=self.verdicts_for(root, self.verdict(
+                root, verdict="VERIFIED", fix=None,
+                evidence={"command": "gh issue edit --help",
+                          "observed": "--add-label is a flag"})))
+
+        self.assertEqual(report.records, ())
+
+    def test_an_unverifiable_verdict_may_cite_the_tool_that_did_not_settle_it(self):
+        """"I ran it and still could not tell" is a real answer, and the
+        command is what makes the finding worth anything to whoever reads it."""
+        root = self.drift_repo()
+
+        report = self.audit(
+            root, evidence_commands=("gh",),
+            verdicts=self.verdicts_for(root, self.verdict(
+                root, verdict="UNVERIFIABLE", fix=None,
+                evidence={"command": "gh issue edit --help",
+                          "observed": "the help text does not mention it"})))
+
+        self.assertEqual([r.extra["evidence"]["command"] for r in report.records],
+                         ["gh issue edit --help"])
+
+    def test_an_unverifiable_verdict_may_not_cite_an_undeclared_tool(self):
+        """Pointing at nothing is allowed; pointing outside the boundary is
+        not — that would rest the finding on something never consulted."""
+        root = self.drift_repo()
+
+        self.assertIn(
+            "drift-evidence-outside-boundary",
+            self.gap_for(root, self.verdict(
+                root, verdict="UNVERIFIABLE", fix=None,
+                evidence={"command": "gh issue edit --help",
+                          "observed": "the help text does not mention it"})),
+        )
+
+    def test_a_boundary_declaring_no_commands_admits_none(self):
+        """The closed world stays closed by default: a run that did not declare
+        a tool cannot have consulted one."""
+        root = self.drift_repo()
+
+        self.assertIn("drift-evidence-outside-boundary",
+                      self.gap_for(root, self.cited(root)))
+
+    def test_a_command_outside_the_declared_set_is_refused(self):
+        root = self.drift_repo()
+
+        self.assertIn(
+            "drift-evidence-outside-boundary",
+            self.gap_for(root, self.cited(root), evidence_commands=("make",)),
+        )
+
+    def test_the_gap_names_the_command_that_broke_the_rule(self):
+        """Same reason the offending source is folded in: the code alone says a
+        citation broke a rule, not which one."""
+        root = self.drift_repo()
+
+        reason = self.gap_for(root, self.cited(root))
+
+        self.assertIn(self.COMMAND, reason)
+
+    def test_citing_a_path_and_a_command_at_once_is_refused(self):
+        """A verdict rests on one place a reader goes; two pointers is two
+        verdicts, and nobody can tell which one settled it."""
+        root = self.drift_repo()
+
+        self.assertIn(
+            "drift-verdict-invalid-evidence",
+            self.gap_for(root, self.cited(root, source=SOURCE),
+                         evidence_commands=("gh",)),
+        )
+
+    def test_a_command_carrying_shell_syntax_is_refused(self):
+        """The citation is an instruction a reader re-runs. A compound or
+        substituting line must not be laundered as one read-only invocation."""
+        root = self.drift_repo()
+
+        self.assertIn(
+            "drift-verdict-invalid-evidence",
+            self.gap_for(root, self.verdict(root, evidence={
+                "command": "gh pr list; rm -rf ~", "observed": "no such field"}),
+                evidence_commands=("gh",)),
+        )
+
+    def test_a_command_substitution_is_refused_too(self):
+        root = self.drift_repo()
+
+        self.assertIn(
+            "drift-verdict-invalid-evidence",
+            self.gap_for(root, self.verdict(root, evidence={
+                "command": "gh pr list --json $(cat /etc/passwd)",
+                "observed": "no such field"}),
+                evidence_commands=("gh",)),
+        )
+
+    def test_a_command_citation_takes_no_line_number(self):
+        """A line number points into a file; a tool's output is not one."""
+        root = self.drift_repo()
+
+        self.assertIn(
+            "drift-verdict-invalid-evidence",
+            self.gap_for(root, self.cited(root, line=3),
+                         evidence_commands=("gh",)),
+        )
+
+    def test_an_empty_command_names_nothing_to_re_run(self):
+        root = self.drift_repo()
+
+        self.assertIn(
+            "drift-verdict-invalid-evidence",
+            self.gap_for(root, self.cited(root, command="   "),
+                         evidence_commands=("gh",)),
+        )
+
+    def test_the_declared_commands_are_part_of_the_audit_configuration(self):
+        """Widening what a run may run could change a verdict, exactly as
+        widening its paths could."""
+        root = self.drift_repo()
+
+        without = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root)))
+        with_gh = self.audit(root, evidence_commands=("gh",),
+                             verdicts=self.verdicts_for(root, self.verdict(root)))
+
+        self.assertNotEqual(without.lineage.audit_config_digest,
+                            with_gh.lineage.audit_config_digest)
+
+    def test_the_finding_the_gap_used_to_hide_comes_back_stale(self):
+        """The shadow-parity gate's false negative, end to end (#115).
+
+        `docs/agents/issue-tracker.md` documented a `gh pr list --json` field
+        that does not exist. The claim was checkable — `gh pr list --json bogus`
+        enumerates the real ones — but the boundary was paths alone, so the only
+        contract-legal answer was UNVERIFIABLE and the drift went unreported.
+        """
+        claim = ("List external PRs with `gh pr list --json "
+                 "number,authorAssociation`.")
+        root = self.drift_repo(**{UNRELATED: f"# Tracker\n\n{claim}\n"})
+
+        report = self.audit(
+            root, evidence_commands=("gh",),
+            verdicts=self.verdicts_for(root, self.verdict(
+                root, path=UNRELATED, text=claim, kind="command",
+                evidence={"command": "gh pr list --json bogus",
+                          "observed": "available fields do not include "
+                                      "authorAssociation"},
+                fix="List external PRs with `gh api "
+                    "\"repos/{owner}/{repo}/pulls?state=open\"`."),
+                path=UNRELATED))
+
+        self.assertEqual([(r.extra["code"], r.extra["location"])
+                          for r in report.records],
+                         [("STALE", f"{UNRELATED}:3")])
+
+    def test_the_report_declares_which_commands_were_citable(self):
+        root = self.drift_repo()
+
+        report = self.audit(root, evidence_commands=("gh",),
+                            verdicts=self.verdicts_for(root, self.cited(root)))
+
+        self.assertEqual(report.lineage.evidence_boundary.commands, ("gh",))
+
+
 class ReadOnly(DriftRepoTestCase):
     def tree(self, root):
         listing = {}

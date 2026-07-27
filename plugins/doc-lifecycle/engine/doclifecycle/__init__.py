@@ -22,7 +22,10 @@ ARTIFACT_SCHEMA_VERSION = 1
 # instead of the 64-character digest — an integer `drift-verdict-unknown-ordinal`
 # rejects outside a document's range, where before any non-digest-string `unit`
 # was uniformly `classification-unknown-unit` (#116).
-RULESET_VERSION = 4
+# 5: a drift verdict may cite a declared local tool instead of a repository
+# path, so a claim only that tool can settle is VERIFIED or STALE where the
+# evidence boundary had left UNVERIFIABLE as the only legal answer (#115).
+RULESET_VERSION = 5
 
 # The published plugin version this engine ships inside. Pinned in lineage, so
 # it must track `plugins/doc-lifecycle/.claude-plugin/plugin.json` — the engine
@@ -30,4 +33,4 @@ RULESET_VERSION = 4
 # `tests/engine/report_test.py` fails loudly when the two drift. Every release
 # therefore expires prior reports: cheaper than reasoning about which releases
 # could have changed a verdict, and re-running an audit is cheap.
-PLUGIN_VERSION = "0.34.0"
+PLUGIN_VERSION = "0.35.0"
