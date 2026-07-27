@@ -506,6 +506,33 @@ def pr_title(args):
     return 0
 
 
+def _semantic_review(app, approved, skipped):
+    """Who performed the semantic approval this apply rests on.
+
+    Two minters, and the difference is the whole point of saying it here. A
+    human dispatch *is* the semantic approval, performed before the lane ran.
+    A standing auto-apply policy mints without anybody selecting anything, so
+    the semantic review has not happened yet — reviewing this pull request is
+    it, and a reviewer who cannot tell the two apart would perform the wrong
+    one. The policy's id is consumer-written content, so it goes through
+    `code_span` like every other interpolated value.
+    """
+    minter = app.get("minter") or {}
+    if minter.get("kind") != "policy":
+        return (
+            f"{approved} approved record(s) applied, {skipped} skipped. The "
+            "named record subset dispatched to this lane **is** the semantic "
+            "approval; merging this pull request is change approval of the "
+            "actual diff.")
+    return (
+        f"{approved} approved record(s) applied, {skipped} skipped. **No human "
+        "selected these records.** The standing auto-apply policy "
+        f"{code_span(minter.get('id'))} minted the approval set, for finding "
+        "classes it is configured to treat as mechanical remedies. **Reviewing "
+        "this pull request is the semantic review** for what the policy "
+        "minted, as well as change approval of the actual diff.")
+
+
 def _record_line(entry):
     # Every field below is content a model wrote; none of it may restructure
     # the page a reviewer reads before performing change approval.
@@ -540,9 +567,7 @@ def pr_body(args):
     lines = [
         "## Documentation apply",
         "",
-        f"{approved} approved record(s) applied, {skipped} skipped. The named "
-        "record subset dispatched to this lane **is** the semantic approval; "
-        "merging this pull request is change approval of the actual diff.",
+        _semantic_review(app, approved, skipped),
         "",
         "### Authority",
         "",

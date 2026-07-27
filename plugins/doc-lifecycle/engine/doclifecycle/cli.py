@@ -49,6 +49,12 @@ from .migrate import (
     draft_registry,
     dry_run_migration,
 )
+from .policy import (
+    DEFAULT_POLICY_PATH,
+    load_auto_apply_policy,
+    mint_policy_approval_set,
+    policy_eligibility,
+)
 from .reconcile import reconcile
 from .render import approval_trailers, render_approval_set, render_report
 from .report import Report, load_report
@@ -213,6 +219,40 @@ def _mint_approval(args):
         report, args.record, repo_root=args.repo,
         minter=Minter(kind=args.minter_kind, id=args.minter),
         registry_path=args.registry,
+    )
+    if isinstance(approval, Invalid) or args.out is None:
+        return approval
+    written = write_approval_set(approval, args.out)
+    return written if isinstance(written, Invalid) else approval
+
+
+def _policy_report(args):
+    """The report and the policy, or whichever of them refused first."""
+    report = load_report(
+        args.report, repo_root=args.repo, registry_path=args.registry,
+        audit_config_digest=args.audit_config_digest,
+    )
+    if isinstance(report, Invalid):
+        return report, None
+    policy = load_auto_apply_policy(args.repo, args.policy)
+    if isinstance(policy, Invalid):
+        return policy, None
+    return report, policy
+
+
+def _policy_eligibility(args):
+    report, policy = _policy_report(args)
+    if policy is None:
+        return report
+    return policy_eligibility(policy, report)
+
+
+def _policy_mint(args):
+    report, policy = _policy_report(args)
+    if policy is None:
+        return report
+    approval = mint_policy_approval_set(
+        report, policy, repo_root=args.repo, registry_path=args.registry,
     )
     if isinstance(approval, Invalid) or args.out is None:
         return approval
@@ -669,6 +709,64 @@ def _parser():
         help="print git trailers for a commit message instead of Markdown",
     )
     render_approval.set_defaults(render=_render_approval)
+
+    for name, help_text, description, run in (
+        (
+            "policy-eligibility",
+            "decide which of a report's records an auto-apply policy admits",
+            "Emit one decision per record: the eligibility class that admitted "
+            "it, or the typed reason it was refused. Read-only, and `ok` even "
+            "when nothing is eligible — a report of bloat findings is a run "
+            "whose answer is 'a human decides all of these'. An absent policy "
+            "file is a refusal, never a permissive default.",
+            _policy_eligibility,
+        ),
+        (
+            "policy-mint",
+            "mint an approval set for everything the policy rules eligible",
+            "Mint an approval set whose selection is derived from the policy's "
+            "own decisions — there is no flag that names a record — through "
+            "the same mint_approval_set a human dispatch uses, with the policy "
+            "named as the minter. Refuses policy-nothing-eligible, naming "
+            "every record's reason, when the policy admits nothing.",
+            _policy_mint,
+        ),
+    ):
+        command = commands.add_parser(
+            name, help=help_text, description=description
+        )
+        command.add_argument(
+            "--report", required=True,
+            help="path to the report JSON the policy decides about",
+        )
+        command.add_argument(
+            "--repo", required=True,
+            help="the repository the report describes, and the policy's home",
+        )
+        command.add_argument(
+            "--policy", default=DEFAULT_POLICY_PATH,
+            help=(
+                f"auto-apply policy path, repo-relative (default: "
+                f"{DEFAULT_POLICY_PATH})"
+            ),
+        )
+        command.add_argument(
+            "--registry", default=DEFAULT_REGISTRY_PATH,
+            help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
+        )
+        command.add_argument(
+            "--audit-config-digest", default=None,
+            help="the consumer's current audit-configuration digest",
+        )
+        if name == "policy-mint":
+            command.add_argument(
+                "--out", default=None,
+                help=(
+                    "also write the approval set here; refused for any path "
+                    "git would track, as mint-approval's --out is"
+                ),
+            )
+        command.set_defaults(run=run, render=None)
 
     return parser
 

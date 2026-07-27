@@ -27,6 +27,7 @@ applier — the only component that writes.
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
 | `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope and the minter kinds |
+| `doclifecycle/policy.py` | `load_auto_apply_policy()`, `parse_auto_apply_policy()`, `policy_eligibility()`, `mint_policy_approval_set()`, the eligibility classes and the never-eligible codes |
 | `doclifecycle/applier.py` | `apply_edit_plan()`, `load_edit_plan()`, `load_approval_payload()`, the edit-plan vocabulary, the record-code remedy table, and the whole-diff confinement check |
 | `doclifecycle/render.py` | `render_report()`, `render_approval_set()`, `approval_trailers()` — Markdown and git trailers from validated artifacts, and nothing else |
 | `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()`, `worktree_changes()`, `head_bytes()` — everything read from git |
@@ -1513,10 +1514,12 @@ mutation scope, minted by a named minter. The applier accepts nothing else.
 ```
 
 `minter.kind` is `human` (semantic approval — a person selecting digests) or `policy` (a
-standing auto-apply policy, named so PR review knows what it is reviewing). **`--minter-kind
-policy` currently mints for any record class: the eligibility gate that restricts a policy to
-mechanical remedies lands with a later stage, so do not wire the flag into CI yet.** `status`
-is `clean` or `stale`; a stale one carries `stale_reasons` in the shape a report's do.
+standing auto-apply policy, named so PR review knows what it is reviewing). `mint-approval
+--minter-kind policy` is the raw flag and mints for any record class a human names: it credits
+a policy without consulting one. The gated door is `policy-mint` below, whose selection is
+derived from a policy's own decisions and cannot be widened by a caller — that is the one to
+wire into a lane. `status` is `clean` or `stale`; a stale one carries `stale_reasons` in the
+shape a report's do.
 
 `digest` is **required** on the way in, unlike a report's — an approval set is authority, and
 its digest is the only part of it that reaches the repository, so a file that declines to say
@@ -1705,6 +1708,100 @@ approval = mint_approval_set(                   # → ApprovalSet or Invalid
 validate_approval_set(approval.to_dict(), report=report, repo_root=".")
 ```
 
+## The auto-apply policy
+
+Issue #73, `doclifecycle/policy.py`. The other minter: a standing,
+consumer-configured declaration that a narrow class of *mechanical* remedies may have approval
+sets minted without waiting for a person, so a scheduled lane keeps producing autonomous fix
+PRs. The policy is named as the minter in lineage, and PR review is the designated semantic
+review for what it mints — change approval, a person merging the real pull request, still lands
+everything.
+
+```json
+{
+  "artifact": "auto-apply-policy",
+  "schema_version": 1,
+  "id": "nightly-doc-sync",
+  "classes": ["drift-stale-mechanical", "narrative-anchor-refresh"]
+}
+```
+
+It lives at `.doc-lifecycle/auto-apply-policy.json` beside the registry, because both are
+standing declarations a reviewer reads as repository state. `id` is what lineage records, so an
+unnamed policy is `policy-missing-field`. `classes` is optional and defaults to every class
+there is; an empty list is `policy-invalid-classes` rather than "the defaults", since a policy
+that would mint nothing said the confusing way is one nobody can read.
+
+**An absent file is a refusal, not a default.** No policy is `policy-not-configured`, and
+`load_auto_apply_policy` returns it as `Invalid`. The permissive reading is the failure the
+component exists to avoid: it would make every repository that never considered autonomous
+minting into one that performs it.
+
+**The vocabulary is closed, and the closure is the restriction.** The two class names are
+`drift-stale-mechanical` (a living document's `STALE` verdict) and `narrative-anchor-refresh` (a
+narrative document's `ANCHOR-STALE`). A name outside them is `policy-unknown-class` — refused,
+never ignored, so a typo cannot silently narrow a policy and an invented name cannot widen one.
+There is no class name for a bloat verdict, a create, or a retire, so no configuration reaches
+them; and the bloat codes are refused a second time by name (`policy-never-eligible`), so a
+future class that tried to reach one is a contradiction two definitions apart rather than a
+permission. `UNVERIFIABLE` is deliberately absent from the drift class: "nobody could check
+this" is a question, and a policy answering it would invent the fact nobody could find. So are
+the anchor codes that need an anchor *authored* or that name something nobody can resolve.
+
+Per record, in this order — the refusals that hold regardless of configuration first, so a
+repository that enabled everything still cannot reach them:
+
+| Refusal | What it means |
+|---|---|
+| `policy-never-eligible` | a bloat verdict: a passage or document should stop existing or move |
+| `policy-record-waived` | a human already disputed this finding, in the waivers file |
+| `policy-record-has-destination` | the remedy writes a second document |
+| `policy-code-not-mechanical` | no class admits this code at all |
+| `policy-class-not-enabled` | a class admits it; this consumer did not enable that class |
+| `policy-missing-preimage` | no `units`, or no `assertion` — nothing pinned to replace |
+| `policy-missing-evidence` | no `evidence.source` — a PR reviewer has nothing to follow |
+
+Deciding is `policy_eligibility(policy, report)`, which is always an `Eligibility` and never
+`Invalid`: a report of bloat findings is not a failed run but one whose answer is "a person
+decides all of these". It carries a decision *per record* — the class that admitted it, or the
+typed reason it did not — because an unattended lane that reported "nothing to do" without
+saying what it declined is one nobody can tell from a lane that never ran.
+
+**No bypass.** `mint_policy_approval_set` derives its selection from those decisions and hands
+it to `approval.mint_approval_set` — the same call a human dispatch makes, through the same
+reconciliation, path-authorization, and preimage refusals. There is no parameter through which
+a caller names a record, and no second producer of approval sets. A policy-minted artifact and a
+human-minted one over the same selection differ in `minter` and nothing else
+(`tests/engine/acceptance/scenario_policy_test.py`), and it reaches the applier by the same
+route: the applier is handed an approval set and never asks who minted it. The
+operation half of the restriction is `RECORD_REMEDIES` — no code any class admits maps to
+`create-document`, `retire-document`, or `move-with-provenance`.
+
+### Commands
+
+```bash
+python3 -m doclifecycle policy-eligibility --report report.json --repo . \
+  [--policy .doc-lifecycle/auto-apply-policy.json] [--audit-config-digest <sha256>]
+python3 -m doclifecycle policy-mint --report report.json --repo . \
+  [--policy <path>] [--out /tmp/approval.json]
+```
+
+`policy-eligibility` is read-only and exits 0 even when nothing is eligible. `policy-mint`
+refuses `policy-nothing-eligible` (exit 1) in that case, listing every record's own reason on
+the run surface, and `--out` refuses any path git would keep exactly as `mint-approval`'s does.
+Neither takes a `--record` flag: one that named a record would be a human dispatch wearing a
+policy's name.
+
+```python
+from doclifecycle.policy import (
+    load_auto_apply_policy, mint_policy_approval_set, policy_eligibility,
+)
+
+policy = load_auto_apply_policy(".")            # → AutoApplyPolicy or Invalid
+policy_eligibility(policy, report)              # → Eligibility (never Invalid)
+mint_policy_approval_set(report, policy, repo_root=".")   # → ApprovalSet or Invalid
+```
+
 ## The applier
 
 The one component that writes, `doclifecycle/applier.py`. An **edit plan** is a separate
@@ -1856,7 +1953,9 @@ Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `repository.resolve_commit()`, `repository.changed_paths()`, `repository.last_change()`,
 `repository.tracking()`, `repository.tracked_files()`, `reconcile()`, `mint_approval_set()`,
 `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`,
-`render_approval_set()`, `approval_trailers()`, `apply_edit_plan()`, `load_edit_plan()`,
+`render_approval_set()`, `approval_trailers()`, `load_auto_apply_policy()`,
+`policy_eligibility()`, `mint_policy_approval_set()`,
+`apply_edit_plan()`, `load_edit_plan()`,
 `load_approval_payload()`, `repository.worktree_changes()`), and the commands as subprocesses whose payload
 must equal the library result. Path authorization, the git reads, the cache, finding identity,
 and verdict recording have no command of their own — they are substrate the other components
@@ -1893,7 +1992,14 @@ after every run, refusal paths included. `scenario_approval_test.py` is the appr
 audit really produced, an apply performed by hand between two subsets so the untouched one
 still validates and the applied one is refused by its own preimage, a rival remedy for the
 same passage that neither leg can be approved from, and the fixture repository refusing to
-hold the artifact anywhere git would keep it.
+hold the artifact anywhere git would keep it. `scenario_policy_test.py` is the auto-apply
+policy's (issue #73), one class per acceptance criterion: the policy minting for the STALE
+finding the drift audit really produced and that approval set going through the *same*
+`apply_edit_plan` to write real bytes into a real work tree; a bloat verdict and a document
+retirement refused by name with nothing written; the waiver the fixture's own install carries
+stopping the policy dead; and the policy file removed and committed, so an unconfigured
+repository mints nothing while a human still can. It imports `scenario_approval_test.py`'s
+fixture, so the findings it decides about are the ones those suites already hold the audit to.
 
 `approval_test.py` and `approval_cli_test.py` build real git repositories for the same reason
 the report suite does — an approval set's freshness, its allowed scope, and the refusal to
