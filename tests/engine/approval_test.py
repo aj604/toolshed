@@ -22,9 +22,13 @@ from doclifecycle.approval import (
     write_approval_set,
 )
 from doclifecycle.digest import sha256_canonical
+from doclifecycle.reconcile import reconcile
 from doclifecycle.render import approval_trailers, render_approval_set
 from doclifecycle.finding import build_finding
 from doclifecycle.report import (
+    EXCLUSION_PLANNING_KIND,
+    SCOPE_DECLARED_ONLY,
+    SCOPE_WHOLE_INVENTORY,
     EvidenceBoundary,
     Lineage,
     Report,
@@ -54,6 +58,7 @@ REGISTRY = """{
 
 DOC_A = "docs/a.md"
 DOC_B = "docs/b.md"
+PLAN_DOC = "docs/plans/2026-07-20-fee-tiers.md"
 
 DOC_A_TEXT = """# Fees
 
@@ -67,10 +72,18 @@ DOC_B_TEXT = """# Workers
 The worker retries a failed job three times.
 """
 
+# A planning document, so a declared scope has something it may legitimately
+# exclude: planning documents are never examined for drift.
+PLAN_DOC_TEXT = """# Plan: tiered fees
+
+**Status:** in-progress. The flat rate does not scale to enterprise volume.
+"""
+
 FILES = {
     ".doc-lifecycle/registry.json": REGISTRY,
     DOC_A: DOC_A_TEXT,
     DOC_B: DOC_B_TEXT,
+    PLAN_DOC: PLAN_DOC_TEXT,
 }
 
 HUMAN = Minter(kind="human", id="avery@example.com")
@@ -426,49 +439,59 @@ class ReconciledSelection(ApprovalTestCase):
 class CoverageIsNotAuthority(ApprovalTestCase):
     """A report's coverage claim never widens what an approval may write.
 
-    Issue #88/N1: `whole-inventory` coverage only means every document is
-    *mentioned*, and an exclusion carrying unconstrained prose is enough to
-    mention one. So the allowed mutation scope is derived from the selected
-    records, and a coverage claim contributes nothing to it.
+    `whole-inventory` coverage says every document was accounted for; it says
+    nothing about what may be *changed*. PR #87's review found the weaker half
+    of that (N1: a living document laundered into `excluded` with prose), and
+    #88 closed it — but approval must not rest on that fix. The allowed
+    mutation scope is derived from the selected records, so the strongest
+    coverage claim a report can make authorizes exactly as much as the weakest.
     """
 
-    def scoped_report(self, records, coverage, excluded):
+    def scoped_report(self, records, coverage):
+        # Only a `whole-inventory` claim accounts for what it left out, so only
+        # it may enumerate exclusions — the two claims differ in exactly the
+        # way that would matter if coverage were authority.
+        excluded = [{
+            "path": PLAN_DOC,
+            "reason": "planning documents are never examined for drift",
+            "code": EXCLUSION_PLANNING_KIND,
+        }] if coverage == SCOPE_WHOLE_INVENTORY else []
         return self.report(records, scope={
             "basis": "every living and narrative document in the inventory",
             "coverage": coverage,
-            "documents": [DOC_A],
+            "documents": [DOC_A, DOC_B],
             "excluded": excluded,
         })
 
-    def test_a_laundered_whole_inventory_claim_authorizes_no_more(self):
+    def test_a_whole_inventory_claim_authorizes_only_the_selection(self):
+        # The scope declares both documents examined. One record is approved,
+        # so one document is writable.
         one, _ = self.two_findings()
-        laundered = self.scoped_report(
-            [one], "whole-inventory",
-            [{"path": DOC_B, "reason": "not relevant to this run"}],
-        )
-        declared = self.scoped_report(
-            [one], "declared-only",
-            [{"path": DOC_B, "reason": "not relevant to this run"}],
-        )
-
-        wide = self.mint(laundered, [one["digest"]])
-        narrow = self.mint(declared, [one["digest"]])
-
-        self.assertEqual(wide.scope.paths, (DOC_A,))
-        self.assertEqual(wide.scope.paths, narrow.scope.paths)
-
-    def test_an_excluded_document_is_not_writable(self):
-        # The document the scope pushed out with a prose reason is exactly the
-        # one an exclusion-laundered report would smuggle in.
-        one, _ = self.two_findings()
-        report = self.scoped_report(
-            [one], "whole-inventory",
-            [{"path": DOC_B, "reason": "not relevant to this run"}],
-        )
+        report = self.scoped_report([one], SCOPE_WHOLE_INVENTORY)
 
         approval = self.mint(report, [one["digest"]])
 
-        self.assertNotIn(DOC_B, approval.scope.paths)
+        self.assertEqual(approval.scope.paths, (DOC_A,))
+
+    def test_the_two_coverage_claims_authorize_identically(self):
+        one, _ = self.two_findings()
+
+        wide = self.mint(
+            self.scoped_report([one], SCOPE_WHOLE_INVENTORY), [one["digest"]]
+        )
+        narrow = self.mint(
+            self.scoped_report([one], SCOPE_DECLARED_ONLY), [one["digest"]]
+        )
+
+        self.assertEqual(wide.scope.paths, narrow.scope.paths)
+
+    def test_a_document_the_scope_excluded_is_not_writable(self):
+        one, _ = self.two_findings()
+        report = self.scoped_report([one], SCOPE_WHOLE_INVENTORY)
+
+        approval = self.mint(report, [one["digest"]])
+
+        self.assertNotIn(PLAN_DOC, approval.scope.paths)
 
 
 class ApprovedTestCase(ApprovalTestCase):
@@ -612,7 +635,7 @@ class Freshness(ApprovedTestCase):
 
     def test_an_altered_approval_set_is_invalid_not_stale(self):
         payload = self.approval.to_dict()
-        payload["scope"]["paths"].append(DOC_B)
+        payload["minter"]["id"] = "someone-else@example.com"
 
         result = validate_approval_set(payload)
 
@@ -629,6 +652,88 @@ class Freshness(ApprovedTestCase):
         result = validate_approval_set(payload, report=self.source)
 
         self.assertIn("approval-report-changed", reasons(result))
+
+
+class ReconciledOnReadBack(ApprovedTestCase):
+    """The group discipline is the applier's gate, not only the minter's.
+
+    An approval set is a file. Whatever `mint_approval_set` refused, the
+    applier sees only what validation says about the artifact in front of it —
+    so a selection that takes one leg of a contradictory pair has to be caught
+    here too, or the guarantee is advisory in the one place it must be
+    structural.
+    """
+
+    def contested(self):
+        unit = self.units(self.repo, DOC_A)[0]
+        cut = self.finding("R-1", "CUT", DOC_A, [unit])
+        condense = self.finding("R-2", "CONDENSE", DOC_A, [unit],
+                                proposal="Fees: 2%.")
+        return self.report([cut, condense]), cut, condense
+
+    def forged(self, report, record):
+        """An approval set naming `record`, assembled by hand around the report.
+
+        Everything the contract can check on its own is honest: the artifact
+        declares the report's real digest, the report's real reconciliation
+        digest, and a scope derived from the record it selects.
+        """
+        payload = self.approval.to_dict()
+        payload["report_digest"] = report.digest
+        payload["reconciliation_digest"] = reconcile(report).digest
+        payload["records"] = [{
+            "digest": record["digest"], "id": record["id"],
+            "code": record["code"], "path": record["path"],
+            "destination": None, "units": sorted(record["units"]),
+        }]
+        payload["skipped"] = sorted(
+            ({"digest": r.digest, "id": r.id} for r in report.records
+             if r.digest != record["digest"]),
+            key=lambda r: r["digest"],
+        )
+        payload["scope"]["paths"] = [record["path"]]
+        del payload["digest"]
+        return payload
+
+    def test_one_leg_of_an_exclusive_pair_is_refused_on_read_back(self):
+        report, cut, _ = self.contested()
+
+        result = validate_approval_set(self.forged(report, cut), report=report)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-exclusive-group"])
+
+    def test_half_an_atomic_group_is_refused_on_read_back(self):
+        units = self.units(self.repo, DOC_A)
+        wide = self.finding("R-1", "CUT", DOC_A, units[:2])
+        narrow = self.finding("R-2", "DISTILL", DOC_A, units[:1], status="ready")
+        report = self.report([wide, narrow])
+
+        result = validate_approval_set(self.forged(report, wide), report=report)
+
+        self.assertEqual(codes(result), ["approval-partial-group"])
+
+    def test_a_skipped_list_that_hides_a_record_is_refused(self):
+        payload = self.approval.to_dict()
+        payload["skipped"] = []
+        del payload["digest"]
+
+        result = validate_approval_set(payload, report=self.source)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["approval-skipped-not-derived"])
+
+    def test_an_honest_selection_still_validates_against_its_report(self):
+        report, cut, condense = self.contested()
+        other = self.finding("R-3", "STALE", DOC_B, self.units(self.repo, DOC_B)[:1],
+                             fix="The worker retries five times.")
+        with_other = self.report([cut, condense, other])
+        approval = self.mint(with_other, [other["digest"]])
+
+        result = validate_approval_set(approval.to_dict(), report=with_other)
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_CLEAN)
 
 
 class NotAnApprovalSet(ApprovedTestCase):
@@ -711,13 +816,40 @@ class StructuralRefusals(ApprovedTestCase):
 
         self.assertEqual(codes(result), ["approval-empty-selection"])
 
-    def test_a_record_outside_the_allowed_scope_is_refused(self):
+    def test_a_scope_that_omits_a_selected_record_is_refused(self):
         payload = self.payload()
         payload["scope"]["paths"] = [DOC_B]
 
         result = validate_approval_set(payload)
 
-        self.assertEqual(codes(result), ["approval-record-outside-scope"])
+        self.assertEqual(codes(result), ["approval-scope-not-derived"])
+
+    def test_a_scope_widened_beyond_the_selection_is_refused(self):
+        # The forgery the mint-time derivation cannot stop on its own: an
+        # approval set is a file, and a file can be edited to make the
+        # unselected finding's document writable.
+        payload = self.payload()
+        payload["scope"]["paths"] = [DOC_A, DOC_B]
+
+        result = validate_approval_set(payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["approval-scope-not-derived"])
+        self.assertIn(DOC_B, result.problems[0].message)
+
+    def test_a_move_destination_is_part_of_the_derivation(self):
+        move = self.finding(
+            "R-9", "EXTRACT-AND-MOVE", DOC_A, self.units(self.repo, DOC_A)[:1],
+            proposal="The fee is 2%.",
+            destination={"path": DOC_B, "kind": "living", "set": None},
+        )
+        approval = self.mint(self.report([move]), [move["digest"]])
+
+        result = validate_approval_set(approval.to_dict())
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.scope.paths, (DOC_A, DOC_B))
+        self.assertEqual(result.records[0].destination, DOC_B)
 
     def test_an_unknown_field_is_refused(self):
         result = validate_approval_set(self.payload(expires="never"))

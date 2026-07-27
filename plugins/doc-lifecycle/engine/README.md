@@ -24,9 +24,9 @@ lands in a later slice of the re-architecture (issue #57).
 | `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, the chunk cache seam |
 | `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, `load_verdicts()`, the verdicts and anchor checks |
 | `doclifecycle/migrate.py` | `draft_registry()`, `dry_run_migration()`, the legacy-install inference and the migration contract |
-| `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
+| `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
-| `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `approval_digest()`, the allowed mutation scope and the minter kinds |
+| `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope and the minter kinds |
 | `doclifecycle/render.py` | `render_report()`, `render_approval_set()`, `approval_trailers()` — Markdown and git trailers from validated artifacts, and nothing else |
 | `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
@@ -1392,7 +1392,8 @@ mutation scope, minted by a named minter. The applier (issue #69) accepts nothin
   "reconciliation_digest": "<sha256 of the grouping the selection satisfied>",
   "records": [
     {"digest": "<record digest>", "id": "DRIFT-001", "code": "STALE",
-     "path": "docs/architecture.md", "units": ["<unit digest>"]}
+     "path": "docs/architecture.md", "destination": null,
+     "units": ["<unit digest>"]}
   ],
   "skipped": [{"digest": "<record digest>", "id": "DRIFT-002"}],
   "scope": {"roots": ["docs"], "paths": ["docs/architecture.md"]},
@@ -1421,11 +1422,26 @@ mints, in this order, because each phase rests on the one before:
 - every target's text must still be what the record was written about
   (`approval-preimage-mismatch`, `approval-preimage-unreadable`).
 
-**Nothing rides along.** The allowed mutation scope is derived from the selected records and
-nothing else. In particular a report's coverage claim contributes nothing to it:
-`whole-inventory` means every document is *mentioned*, which an exclusion carrying prose
-satisfies (issue #88, N1), so a laundered coverage claim mints exactly the scope a
-`declared-only` one does. Skipped records stay in the report and are named in `skipped`.
+**Nothing rides along.** The allowed mutation scope is a *derivation* of the selection —
+`derived_scope_paths()`: each selected record's document, plus the `destination` a move writes
+to, and nothing else. A report's coverage claim contributes nothing: `whole-inventory` means
+every document is accounted for, which says nothing about what may be changed, so the
+strongest coverage claim a report can make authorizes exactly what the weakest one does.
+
+Because it is a derivation, validation recomputes it rather than believing it, and a scope
+naming one document more than the selection justifies is `approval-scope-not-derived` — an
+approval set is a file, and a hand-widened `scope.paths` would otherwise make an unselected
+finding's document writable. `skipped` is derived the same way and checked the same way
+against the report (`approval-skipped-not-derived`): it is every record not taken, and a short
+one hides what the approver declined.
+
+**The minter's refusals are re-run on read-back.** `mint_approval_set` is not the gate — the
+applier sees only what validation says about the artifact in front of it. So when `report` is
+supplied, `validate_approval_set` re-reconciles and re-applies the group discipline:
+`approval-exclusive-group` and `approval-partial-group` come back as `invalid`, not `stale`,
+because nothing in the world moved — the selection is one no minter would have produced. The
+applier reads the report anyway (a record's remedy text lives there, not in the approval set),
+so this is the path it takes.
 
 **Expiry.** `validate_approval_set(payload, report=…, repo_root=…)` is structural first and
 exhaustive; `invalid` always beats `stale`. With `report` it compares the report digest, that
@@ -1456,7 +1472,12 @@ an apply still expires every approval set minted against the previous commit, vi
 `approval-base-commit-changed`.
 
 A carried stale reason this run did not re-check still stands, as a report's does: clearing a
-verdict is at least as thorough as setting it.
+verdict is at least as thorough as setting it. Two consequences worth stating. Without
+`--audit-config-digest` the configuration is never compared, so a live approval set stays
+`clean` and a config-stale one stays stale rather than being laundered clean by the weaker
+check — supply it in any lane where configuration can move. And the lineage comparison itself
+is `report.compare_lineage()`, shared with `validate-report`: an approval set and the report it
+came from cannot notice different drift in the same lineage.
 
 **Not an approval set.** Anything else handed in where one is required is
 `approval-not-an-approval-set`, and the message says what it actually is: a report ("proof of
