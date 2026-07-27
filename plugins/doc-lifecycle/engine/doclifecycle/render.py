@@ -53,27 +53,49 @@ FIELD_LIMIT = 240
 
 BACKTICKS = re.compile(r"`+")
 
+# Characters that end a line — or that a renderer may treat as ending one.
+# A code span cannot contain a blank line, so a single unescaped newline is
+# enough to terminate the span and turn whatever follows into block structure.
+LINE_ENDING = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
+NAMED_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def _escape(match):
+    character = match.group()
+    return NAMED_ESCAPES.get(character, f"\\u{ord(character):04x}")
+
 
 def _code(text):
-    """A Markdown code span holding `text` exactly, that cannot be escaped from.
+    """A Markdown code span holding `text`, that cannot be escaped from.
 
-    CommonMark lets a code span be opened by any run of backticks and closed by
-    a matching run, so a fence one longer than the longest run inside the text
-    always wins. A leading or trailing backtick or space is separated by one
-    space, which the renderer strips back off.
+    Total by construction, because being total is the whole point: a caller
+    that forgets to sanitize its argument must not be able to reopen the
+    injection this closes.
+
+    Two ways out of a code span, both shut here. A run of backticks as long as
+    the fence closes it, so the fence is fitted one longer than the longest run
+    inside. A line break ends it outright — CommonMark spans cannot span a
+    blank line — so control characters are rendered with their escapes instead
+    of reaching the document, `U+2028`/`U+2029` included.
     """
-    fence = "`" * (max((len(m) for m in BACKTICKS.findall(text)), default=0) + 1)
-    pad = " " if text[:1] in ("`", " ") or text[-1:] in ("`", " ") else ""
-    return f"{fence}{pad}{text}{pad}{fence}"
+    if not text:
+        # `` is two literal backticks, not an empty span. Say "the empty
+        # string" the way the field values below say it.
+        text = '""'
+    safe = LINE_ENDING.sub(_escape, text)
+    fence = "`" * (max((len(m) for m in BACKTICKS.findall(safe)), default=0) + 1)
+    pad = " " if safe[:1] in ("`", " ") or safe[-1:] in ("`", " ") else ""
+    return f"{fence}{pad}{safe}{pad}{fence}"
 
 
 def _field_text(value):
-    """One record field as a single safe line.
+    """One record key or value as a single safe, bounded, complete line.
 
     Canonical JSON, the same form the digest is taken over — so what a reader
-    sees is what was hashed, strings show their quoting, and a newline or a
-    control character is already escaped to `\\n` by the encoder rather than
-    reaching the document as a line break.
+    sees is what was hashed, strings show their quoting, and a control
+    character is escaped by the encoder rather than reaching the document.
+    Keys go through this too: a key is record content exactly as much as a
+    value is, and the contract does not police either.
     """
     text = canonical(value)
     if len(text) <= FIELD_LIMIT:
@@ -92,7 +114,7 @@ def _record_detail(record):
     a field this module could not render inline is marked, never dropped.
     """
     return " · ".join(
-        f"{_code(key)}: {_field_text(value)}"
+        f"{_field_text(key)}: {_field_text(value)}"
         for key, value in sorted(record.extra.items())
     )
 

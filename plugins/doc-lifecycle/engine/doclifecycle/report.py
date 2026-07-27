@@ -76,6 +76,12 @@ EVIDENCE_FIELDS = ("sources", "excluded")
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")  # sha-1 or sha-256 git
 
+# How deeply a record may nest. Findings group assertion units and carry
+# preimages; nothing legitimate approaches this. It is a stated limit rather
+# than whatever the interpreter's recursion limit happens to be, so the verdict
+# on a given report is the same everywhere the engine runs.
+MAX_NESTING = 64
+
 # Lineage fields the engine can compare against the world, in report order.
 COMPARABLE = (
     ("repository", "lineage-repository-mismatch", "repository identity"),
@@ -223,21 +229,33 @@ def _whole_number(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _nonfinite(value):
-    """Whether `value` holds a float JSON cannot represent.
+def _scan(value):
+    """(too_deep, nonfinite) for one decoded record, walked iteratively.
 
-    `json.loads` accepts `NaN` and `Infinity` by default and `json.dumps` emits
-    them back, so a record carrying one would make the engine's own output
-    unreadable to a strict parser — and the digest is taken over that same
-    encoding. Rejected at the door instead.
+    Iterative, and bounded, on purpose. A report is untrusted input: a
+    recursive walk of a deeply nested one dies with a `RecursionError`, a bare
+    exception this result model does not permit — and the digest is taken with
+    `json.dumps`, which recurses too, so an unbounded record could crash the
+    engine after validation had passed it.
+
+    `nonfinite` covers the other thing JSON will not survive: `json.loads`
+    accepts `NaN` and `Infinity` by default and `json.dumps` emits them back,
+    which would make the engine's own output unreadable to a strict parser.
     """
-    if isinstance(value, float):
-        return not math.isfinite(value)
-    if isinstance(value, dict):
-        return any(_nonfinite(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_nonfinite(item) for item in value)
-    return False
+    too_deep = nonfinite = False
+    pending = [(value, 1)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > MAX_NESTING:
+            too_deep = True
+            continue                      # refuse it rather than descend
+        if isinstance(item, float) and not math.isfinite(item):
+            nonfinite = True
+        elif isinstance(item, dict):
+            pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)
+    return too_deep, nonfinite
 
 
 def _content_digest(lineage, records, incomplete):
@@ -405,11 +423,19 @@ def _records(raw, bad):
                 f"approved",
                 where)
             valid = False
-        if _nonfinite(entry):
+        too_deep, nonfinite = _scan(entry)
+        if nonfinite:
             bad("report-nonfinite-number",
                 f"record {i} carries NaN or Infinity — JSON defines neither, so "
                 f"the report would not survive its own digest or a strict "
                 f"parser",
+                where)
+            valid = False
+        if too_deep:
+            bad("report-nesting-too-deep",
+                f"record {i} nests deeper than {MAX_NESTING} levels — a record "
+                f"describes a finding, and this one cannot be digested or "
+                f"rendered without exhausting the stack",
                 where)
             valid = False
         if not valid:
@@ -778,6 +804,17 @@ def load_report(path, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH,
         return Invalid((Problem(
             code="report-unparseable",
             message=f"the report is not valid JSON: {exc}",
+            location=path,
+        ),))
+    except RecursionError:
+        # The decoder recurses, and a `RecursionError` is not a `ValueError`.
+        # A few kilobytes of nested brackets must be a verdict, not a traceback.
+        return Invalid((Problem(
+            code="report-nesting-too-deep",
+            message=(
+                f"the report nests too deeply to parse — a record describes a "
+                f"finding, and this engine reads at most {MAX_NESTING} levels"
+            ),
             location=path,
         ),))
     return validate_report(

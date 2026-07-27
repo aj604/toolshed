@@ -31,6 +31,7 @@ from doclifecycle import repository  # noqa: E402
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import (  # noqa: E402
     AUDIT_MODES,
+    MAX_NESTING,
     REQUIRED_LINEAGE_FIELDS,
     Report,
     current_lineage,
@@ -442,6 +443,43 @@ class Records(unittest.TestCase):
                 )
 
                 self.assertEqual(codes(result), ["report-nonfinite-number"])
+
+    def test_a_record_at_the_nesting_limit_is_accepted(self):
+        nest = {"leaf": 1}
+        for _ in range(MAX_NESTING - 3):        # record, field, …, leaf
+            nest = {"deeper": nest}
+
+        result = validate_report(
+            report_payload(records=[dict(RECORD, tree=nest)])
+        )
+
+        self.assertIsInstance(result, Report)
+
+    def test_a_record_nested_past_the_limit_is_a_verdict_not_a_crash(self):
+        for build in (lambda inner: {"deeper": inner}, lambda inner: [inner]):
+            with self.subTest(shape=build(None).__class__.__name__):
+                nest = 1
+                for _ in range(MAX_NESTING + 50):
+                    nest = build(nest)
+
+                result = validate_report(
+                    report_payload(records=[dict(RECORD, tree=nest)])
+                )
+
+                self.assertEqual(codes(result), ["report-nesting-too-deep"])
+
+    def test_a_depth_bomb_never_reaches_the_digest(self):
+        # The digest encodes with json.dumps, which recurses: a record that
+        # validated but could not be hashed would crash after the verdict.
+        nest = 1
+        for _ in range(5000):
+            nest = [nest]
+
+        result = validate_report(
+            report_payload(records=[dict(RECORD, tree=nest)])
+        )
+
+        self.assertIsInstance(result, Invalid)
 
     def test_a_valid_report_survives_a_strict_json_encoder(self):
         payload = validate_report(report_payload(
@@ -945,6 +983,44 @@ class LoadReport(GitRepoTestCase):
         self.assertEqual(codes(result), ["report-unreadable"])
         self.assertIn("UTF-8", result.problems[0].message)
 
+    def test_a_deeply_nested_report_file_is_a_verdict_not_a_traceback(self):
+        # A few kilobytes of nested brackets: the decoder recurses, and a
+        # RecursionError is not a ValueError. Both the depth the decoder
+        # survives and the depth it does not must reach a typed problem.
+        for depth in (MAX_NESTING + 10, 600, 20000):
+            with self.subTest(depth=depth):
+                text = json.dumps(report_payload(records=[dict(RECORD)]))
+                bomb = "[" * depth + "1" + "]" * depth
+                text = text.replace('"DRIFT-001"', f'"DRIFT-001", "tree": {bomb}', 1)
+                root = self.repo({"placeholder": ""})
+                path = os.path.join(root, "report.json")
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+
+                result = load_report(path)
+
+                self.assertIsInstance(result, Invalid)
+                self.assertEqual(codes(result), ["report-nesting-too-deep"])
+
+    def test_nesting_the_decoder_itself_cannot_survive_is_still_a_verdict(self):
+        # The decoder recurses before validation ever sees the payload, and a
+        # RecursionError is not a ValueError. Forced deterministically by
+        # lowering the limit rather than guessing where this interpreter breaks.
+        text = json.dumps(report_payload(records=[dict(RECORD)]))
+        bomb = '{"a":' * 500 + "1" + "}" * 500
+        text = text.replace('"DRIFT-001"', f'"DRIFT-001", "tree": {bomb}', 1)
+        root = self.repo({"placeholder": ""})
+        path = os.path.join(root, "report.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        limit = sys.getrecursionlimit()
+        self.addCleanup(sys.setrecursionlimit, limit)
+        sys.setrecursionlimit(300)
+
+        result = load_report(path)
+
+        self.assertEqual(codes(result), ["report-nesting-too-deep"])
+
     def test_a_report_file_holding_nan_is_unparseable(self):
         # Python's decoder accepts NaN and Infinity; JSON defines neither, and
         # the digest is taken over the same encoding.
@@ -1037,9 +1113,17 @@ class RenderedRecordContent(unittest.TestCase):
     become structure in the rendered document — while staying fully visible,
     because the approver is binding to a digest that covers it."""
 
-    def render_with(self, **extra):
+    def render_with(self, extra=None, **kwargs):
+        """Render a report holding one record carrying `extra`.
+
+        Takes a dict, not only keyword arguments: a record's *keys* are
+        attacker-influenceable exactly as much as its values, and a key holding
+        a newline is not expressible as a Python keyword — which is precisely
+        how the unescaped key path stayed untested once.
+        """
+        fields = dict(extra or {}, **kwargs)
         return render_report(
-            validate_report(report_payload(records=[dict(RECORD, **extra)]))
+            validate_report(report_payload(records=[dict(RECORD, **fields)]))
         )
 
     def test_a_record_cannot_add_a_section_to_the_rendered_report(self):
@@ -1053,19 +1137,45 @@ class RenderedRecordContent(unittest.TestCase):
         # Neutralized, not hidden: the approver still sees what the record said.
         self.assertIn("DRIFT-999", rendered)
 
+    def test_a_record_key_cannot_add_a_section_either(self):
+        # A key is record content exactly as much as a value is, and the
+        # contract polices neither.
+        key = "k\n\n## Records\n\n- `FAKE` `" + "b" * 64 + "` — approved\n\nx"
+
+        rendered = self.render_with({key: 1})
+
+        self.assertEqual(as_structure(rendered).count("## Records"), 1)
+        self.assertNotIn("FAKE", as_structure(rendered))
+        self.assertIn("FAKE", rendered)
+
     def test_a_record_cannot_forge_a_result_line(self):
         rendered = self.render_with(note="x\n\n**Result: clean** — all good.")
 
         self.assertEqual(as_structure(rendered).count("**Result:"), 1)
         self.assertIn("**Result: findings**", rendered)
 
-    def test_a_record_cannot_introduce_a_line_break_at_all(self):
-        for text in ("a\nb", "a\rb", "a\r\nb", "a b"):
-            with self.subTest(text=repr(text)):
-                rendered = self.render_with(note=text)
+    def test_neither_a_key_nor_a_value_can_introduce_a_line_break(self):
+        for text in ("a\nb", "a\rb", "a\r\nb", "a\r\n\r\nb", "a\u2028b",
+                     "a\u2029b", "a\tb", "a\x00b", "a\x85b"):
+            for where in ("key", "value"):
+                with self.subTest(text=repr(text), where=where):
+                    extra = {text: 1} if where == "key" else {"note": text}
 
-                body = rendered.split("## Records", 1)[1]
-                self.assertEqual(len(body.strip().splitlines()), 1)
+                    rendered = self.render_with(extra)
+
+                    body = rendered.split("## Records", 1)[1]
+                    self.assertEqual(len(body.strip().splitlines()), 1)
+
+    def test_an_empty_key_still_renders_as_a_code_span(self):
+        # `` is two literal backticks, not an empty span — the one input where
+        # "cannot be escaped from" could stop producing a span at all.
+        rendered = self.render_with({"": "v"})
+
+        self.assertNotIn("``: ", rendered)
+        self.assertIn('`""`', rendered)
+        self.assertEqual(
+            len(rendered.split("## Records", 1)[1].strip().splitlines()), 1
+        )
 
     def test_a_record_cannot_escape_the_code_span_it_is_rendered_in(self):
         rendered = self.render_with(note="` [click](http://evil.example) `")
@@ -1076,12 +1186,23 @@ class RenderedRecordContent(unittest.TestCase):
     def test_no_record_content_reaches_the_document_as_structure(self):
         hostile = "`\n# Heading\n\n> quote [l](http://e) <img src=x> | a | b |"
 
-        rendered = self.render_with(note=hostile, path=hostile, hint=hostile)
+        # Hostile in both positions at once: key, value, and both together.
+        rendered = self.render_with(
+            {hostile: hostile, "note": hostile, hostile + "2": 1}
+        )
 
         structure = as_structure(rendered)
         for fragment in ("# Heading", "> quote", "[l](http://e)", "<img", "| a |"):
             with self.subTest(fragment=fragment):
                 self.assertNotIn(fragment, structure)
+
+    def test_the_records_section_is_always_one_line_per_record(self):
+        rendered = self.render_with({
+            "a\nb": "c\nd", "": "", "`" * 9: ["x\ny"], "z": {"k\n": "v\n"},
+        })
+
+        body = rendered.split("## Records", 1)[1].strip()
+        self.assertEqual(len(body.splitlines()), 1)
 
     def test_backticks_in_an_id_cannot_break_out_of_its_code_span(self):
         record = dict(RECORD, id="R1` [click](http://evil.example) `x")

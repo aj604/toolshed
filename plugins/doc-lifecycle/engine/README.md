@@ -289,10 +289,12 @@ That is deliberate: cheaper than reasoning about which releases could have chang
 and re-running an audit is cheap.
 
 Records are validated only as far as approval binding needs — a non-empty `id` and a sha256
-`digest`, both unique within the report, and no `NaN`/`Infinity` anywhere inside (JSON defines
-neither, and the digest is taken over that encoding). Every other field the audit engine or the
-segmenter (#63) puts on a record travels through untouched — and is neutralized at the
-rendering boundary rather than at the contract boundary; see Commands below.
+`digest`, both unique within the report; no `NaN`/`Infinity` anywhere inside (JSON defines
+neither, and the digest is taken over that encoding); and no nesting past 64 levels
+(`report-nesting-too-deep`), since the digest and the renderer both walk the structure and a
+few kilobytes of brackets must be a verdict rather than a stack overflow. Every other field the
+audit engine or the segmenter (#63) puts on a record travels through untouched — and is
+neutralized at the rendering boundary rather than at the contract boundary; see Commands below.
 
 ### Commands
 
@@ -317,13 +319,19 @@ takes a validated `Report` and raises `TypeError` on anything else.
 
 Type-checking is not the whole guarantee, because the contract deliberately does not police
 record internals, and those fields carry text a model read out of repository documents. So
-every value the renderer interpolates — lineage, scopes, record ids, and every record field —
-is emitted inside a Markdown code span fenced longer than any backtick run inside it. A record
-cannot add a heading, a link, a table, a second `## Records` section, or a `**Result:**` line
-to what a human reads before approving. Nothing is withheld to achieve that: fields are shown
-as the canonical JSON the digest is taken over (so newlines arrive escaped, not as line
-breaks), and a value too long to show inline is truncated with a marker naming how many
-characters were elided and the sha256 of the whole value.
+every string the renderer interpolates — lineage, scopes, record ids, and every record field,
+**key as well as value** — is emitted inside a Markdown code span. There are exactly two ways
+out of such a span and both are shut: a backtick run as long as the fence, so the fence is
+fitted one longer than the longest run inside; and a line break, so control characters
+(`U+2028` and `U+2029` included) are escaped rather than emitted. The span builder does this
+itself rather than trusting its callers, because a caller that forgets is precisely how the
+key path stayed open once. The records section is one line per record, always.
+
+A record therefore cannot add a heading, a link, a table, a second `## Records` section, or a
+`**Result:**` line to what a human reads before approving. Nothing is withheld to achieve
+that: keys and values are shown as the canonical JSON the digest is taken over, and anything
+too long to show inline is truncated with a marker naming how many characters were elided and
+the sha256 of the whole value.
 
 The library calls behind them:
 
