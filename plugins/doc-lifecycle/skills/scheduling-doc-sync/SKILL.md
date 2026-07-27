@@ -248,10 +248,12 @@ landing a file, never the door.
 
     ENGINE="$CLAUDE_PLUGIN_ROOT/engine/doc-lifecycle.py"
 
-1. **Draft.** `python3 "$ENGINE" migration-draft --repo . --registry-only >
-   .doc-lifecycle/registry.json`. It infers roots and kinds from `audit-scope.json`, the waivers,
-   `docs/doc-scope.md`, first-line `> As of` markers, and directory conventions. `--root <path>`
-   (repeatable) replaces inference for a repo whose docs sit somewhere unconventional.
+1. **Draft.** `mkdir -p .doc-lifecycle && python3 "$ENGINE" migration-draft --repo .
+   --registry-only > .doc-lifecycle/registry.json`. It infers roots and kinds from
+   `audit-scope.json`, the waivers, `docs/doc-scope.md`, first-line `> As of` markers, and
+   directory conventions. `--root <path>` (repeatable) replaces inference for a repo whose docs
+   sit somewhere unconventional. A refused draft prints **nothing** and exits 1 — an empty
+   registry file means read stderr, not that there was nothing to infer.
 2. **Review the diff, as globs.** The draft is one rule per directory plus per-file overrides —
    a short diff, deliberately. Run `python3 "$ENGINE" migration-draft --repo .` (no
    `--registry-only`) to see each rule's `basis` and the documents it claims before judging it.
@@ -270,8 +272,9 @@ Rules for this mode:
 - **Never hand-write the registry from scratch** when a legacy install exists — the draft is what
   makes the review a diff instead of a per-file slog.
 - **Never bypass a block.** A blocked dry run is the closed-world rule doing its job.
-- `audit-scope.json`, `drift-waivers.json`, and the marker are preserved untouched; the dry run
-  lists them under `preserved` with their digests.
+- `audit-scope.json`, `drift-waivers.json`, and the marker are preserved untouched, and
+  `installed-version` advances to the target — the dry run's `preserved` states each file's
+  digest and disposition, so nothing about consumer state is left to memory.
 - Fresh installs run steps 1–3 too (the door is also **bootstrapping-docs**' registry step) —
   with no legacy state it infers from markers and directory conventions alone, and reports
   `from_version: null`.

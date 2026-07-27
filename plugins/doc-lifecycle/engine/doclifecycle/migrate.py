@@ -34,7 +34,7 @@ ahead of this engine, rather than guessing what state it is looking at.
 import json
 import os
 import posixpath
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION, PLUGIN_VERSION
