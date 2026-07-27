@@ -45,7 +45,7 @@ from . import ARTIFACT_SCHEMA_VERSION
 from .digest import sha256_canonical
 from .finding import finding_digest
 from .inventory import DEFAULT_REGISTRY_PATH, load_registry
-from .paths import DOCUMENTATION, authorize_path, repository_relative_problem
+from .paths import DOCUMENTATION, authorize_path, write_target_problem
 from .reconcile import DISPOSITION_EXCLUSIVE, reconcile
 from . import repository as repository_mod
 from .report import (
@@ -664,22 +664,11 @@ def _path_problem(value):
     `stale`. One owner decides (`paths.repository_relative_problem`), so an
     edit target cannot mean one thing here and another to the applier.
 
-    On top of that owner's spelling rules, one location: a git directory is
-    inside the repository and is spelled canonically, so nothing above refuses
-    it — and a single write to `.git/hooks/post-commit` or `.git/config` is
-    arbitrary code execution on the next commit. No document lives there, at
-    any depth (a nested repository's is the same hazard), under any casing (a
-    case-insensitive filesystem makes `.GIT` the same directory).
+    On top of that owner's spelling rules, one location — the git directory —
+    which `paths.write_target_problem` owns, shared with the edit plan's
+    operation targets so both artifacts refuse the same spellings.
     """
-    problem = repository_relative_problem(value)
-    if problem is not None:
-        return problem[1]
-    if any(c.casefold() == ".git" for c in value.split("/")):
-        return (
-            "is inside a git directory — the repository's own state is not "
-            "documentation, and a write there executes on the next commit"
-        )
-    return None
+    return write_target_problem(value)
 
 
 def _unsorted(digests, field, bad):

@@ -308,6 +308,30 @@ def tracked_files(repo_root):
     return tuple(sorted(p for p in out.split("\0") if p)), None
 
 
+def worktree_changes(repo_root):
+    """(every path the working tree or index differs from HEAD at, None).
+
+    Or (None, problem) when the state cannot be read — and a caller comparing
+    a diff against an allowed scope must fail closed on that, because "the
+    diff could not be read" and "the diff is empty" certify opposite things.
+
+    Untracked files are included, one path each (`--untracked-files=all`):
+    a stray file nothing accounts for is exactly the change a whole-diff
+    confinement check exists to catch. Ignored files are not changes — an
+    artifact written to a git-ignored path is deliberately invisible to the
+    change it authorizes. `--no-renames`, so every entry is one path and the
+    parse cannot mistake a rename's second name for a status. `-z` and a raw
+    read, for the same unusual-path reasons as `tracked_files`.
+    """
+    out, detail = _git(
+        repo_root, "status", "--porcelain=v1", "-z",
+        "--untracked-files=all", "--no-renames", raw=True,
+    )
+    if detail is not None:
+        return None, _problem(repo_root, detail)
+    return tuple(sorted({e[3:] for e in out.split("\0") if len(e) > 3})), None
+
+
 def last_change(repo_root, path):
     """((committer date `YYYY-MM-DD`, commit id), None) for `path`'s last commit.
 

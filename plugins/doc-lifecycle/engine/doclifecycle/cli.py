@@ -19,6 +19,7 @@ import argparse
 import json
 import sys
 
+from .applier import apply_edit_plan, load_approval_payload, load_edit_plan
 from .approval import (
     MINTER_HUMAN,
     MINTER_KINDS,
@@ -158,6 +159,30 @@ def _validate_approval(args):
             return report
     return load_approval_set(
         args.approval, report=report, repo_root=args.repo,
+        registry_path=args.registry,
+        audit_config_digest=args.audit_config_digest,
+        expected_digest=args.expected_digest,
+    )
+
+
+def _apply_plan(args):
+    """Load the artifacts as data and hand them to the one write path."""
+    plan = load_edit_plan(args.plan)
+    if isinstance(plan, Invalid):
+        return plan
+    approval = load_approval_payload(args.approval)
+    if isinstance(approval, Invalid):
+        return approval
+    report = None
+    if args.report is not None:
+        report = load_report(
+            args.report, repo_root=args.repo, registry_path=args.registry,
+            audit_config_digest=args.audit_config_digest,
+        )
+        if isinstance(report, Invalid):
+            return report
+    return apply_edit_plan(
+        args.repo, plan, approval, report=report,
         registry_path=args.registry,
         audit_config_digest=args.audit_config_digest,
         expected_digest=args.expected_digest,
@@ -577,6 +602,55 @@ def _parser():
     )
     _add_approval_arguments(validate_approval)
     validate_approval.set_defaults(render=None)
+
+    apply_plan = commands.add_parser(
+        "apply-plan",
+        help="execute an edit plan under its approval set — the one write path",
+        description=(
+            "Validate the approval set against its report and the repository, "
+            "validate the edit plan against the approval set, verify every "
+            "exact preimage, apply the operations in deterministic order, and "
+            "check the complete working-tree diff against the approval set's "
+            "allowed mutation scope. Any problem leaves the tree "
+            "byte-identical; a stale approval refuses and names every field "
+            "that moved. Reapplying the same approval set is a no-op. Nothing "
+            "is staged or committed — change approval is a person's."
+        ),
+    )
+    apply_plan.add_argument(
+        "--plan", required=True, help="path to the edit-plan JSON to execute"
+    )
+    apply_plan.add_argument(
+        "--approval", required=True,
+        help="path to the approval-set JSON that authorizes it",
+    )
+    apply_plan.add_argument(
+        "--repo", default=".",
+        help="repository root (default: the current directory)",
+    )
+    apply_plan.add_argument(
+        "--report", default=None,
+        help=(
+            "the report the approval set was minted from; supply it so the "
+            "selection is checked against the records it names"
+        ),
+    )
+    apply_plan.add_argument(
+        "--registry", default=DEFAULT_REGISTRY_PATH,
+        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
+    )
+    apply_plan.add_argument(
+        "--audit-config-digest", default=None,
+        help="the consumer's current audit-configuration digest",
+    )
+    apply_plan.add_argument(
+        "--expected-digest", default=None,
+        help=(
+            "the Doc-Lifecycle-Approval trailer of the change being applied; "
+            "supply it to bind the approval file to the change that claims it"
+        ),
+    )
+    apply_plan.set_defaults(run=_apply_plan, render=None)
 
     render_approval = commands.add_parser(
         "render-approval",

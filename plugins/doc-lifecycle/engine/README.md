@@ -8,8 +8,8 @@ and when a path last changed. Nothing here writes to a repository.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
 contract, the lineage-keyed cache, the segmenter, finding identity, the context index, the
-bloat lane, the drift audit, the migration door, reconciliation, and approval sets. The applier
-lands in a later slice of the re-architecture (issue #57).
+bloat lane, the drift audit, the migration door, reconciliation, approval sets, and the
+applier — the only component that writes.
 
 ## Modules
 
@@ -17,7 +17,7 @@ lands in a later slice of the re-architecture (issue #57).
 |---|---|
 | `doclifecycle/registry.py` | registry parsing, validation, classification, glob matching, `without_rules()`, registry digest |
 | `doclifecycle/inventory.py` | `build_inventory()`, `load_registry()`, the closed-world walk, document/inventory digests |
-| `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, `repository_relative_problem()`, the canonical path form and target classes |
+| `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, `repository_relative_problem()`, `write_target_problem()`, the canonical path form and target classes |
 | `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
 | `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
 | `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
@@ -27,8 +27,9 @@ lands in a later slice of the re-architecture (issue #57).
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
 | `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope and the minter kinds |
+| `doclifecycle/applier.py` | `apply_edit_plan()`, `load_edit_plan()`, `load_approval_payload()`, the edit-plan vocabulary and the whole-diff confinement check |
 | `doclifecycle/render.py` | `render_report()`, `render_approval_set()`, `approval_trailers()` — Markdown and git trailers from validated artifacts, and nothing else |
-| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()` — everything read from git |
+| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()`, `worktree_changes()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the five result states, the `ok`/`invalid` status strings |
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
@@ -78,8 +79,8 @@ Validation fails closed and reports every problem it finds in one pass. An unpar
 unreadable, or invalid registry — including a declared root that does not exist — yields
 `status: "invalid"` with typed problems and **no** documents: never a partial inventory.
 Symlinks under a root are reported as `symlinked-path` and never followed. The inventory walk
-enumerates; `paths.authorize_path()` below decides what may be read or written, and the applier
-slice (issue #69) is what routes through it.
+enumerates; `paths.authorize_path()` below decides what may be read or written, and the
+approval set and the applier are what route through it.
 
 ## Inventory command
 
@@ -148,8 +149,8 @@ result.to_dict()                       # → the payload above, as a dict
 ## Path authorization
 
 `doclifecycle/paths.py` decides what may be read or written on behalf of a record. It is the
-engine's one place for that decision by design. The applier slice (issue #69) is the caller that
-routes through `authorize_path()`, and until then nothing calls that half.
+engine's one place for that decision by design. Approval-set minting and validation route
+through `authorize_path()`, so every path the applier may write was authorized here.
 
 The spelling rules are already shared, through `repository_relative_problem(path)` — returns
 `(code, reason)` or `None`. `authorize_path` answers the question an *applier* asks (may I write
@@ -952,7 +953,7 @@ same reason the contract re-derives it.
 Is what the documentation says still true of the code? `doclifecycle/drift.py` answers that and
 nothing else, read-only: it opens documents, asks `git` what changed and when, and returns a
 validated report. The replacement line a STALE verdict carries is recorded for the applier
-(issue #69) and never applied — the audit has no writer at all.
+and never applied here — the audit has no writer at all.
 
 ### Planning the scope
 
@@ -1433,7 +1434,7 @@ minting's gate.
 
 A report authorizes nothing. An **approval set** is the artifact that does: a selection of
 record digests from one report, bound to that report's lineage and to an enumerated allowed
-mutation scope, minted by a named minter. The applier (issue #69) accepts nothing else.
+mutation scope, minted by a named minter. The applier accepts nothing else.
 
 ```json
 {
@@ -1650,6 +1651,71 @@ approval = mint_approval_set(                   # → ApprovalSet or Invalid
 validate_approval_set(approval.to_dict(), report=report, repo_root=".")
 ```
 
+## The applier
+
+The one component that writes, `doclifecycle/applier.py`. An **edit plan** is a separate
+versioned artifact (`artifact: edit-plan`, digest required, like an approval set's) binding to
+exactly one approval set by digest, with operations from a closed vocabulary — `replace`,
+`delete`, `insert`, `create-document`, `retire-document`, `move-with-provenance` — each
+declaring the approved record it comes from and the target class it is allowed to write
+(`documentation` is the only declarable one, exactly as in `paths.py`).
+
+```bash
+python3 -m doclifecycle apply-plan --repo . --plan plan.json --approval approval.json \
+  --report report.json --audit-config-digest <sha256>
+```
+
+The order of refusals is the contract:
+
+1. **Authority.** The approval set is validated with the repository (and the report, when
+   supplied — supply it) through `validate_approval_set`. `invalid` problems surface as-is; a
+   lineage field that moved is a `stale` refusal (exit 3) naming every field, with no
+   working-tree change — the message says to re-run the audit and mint afresh.
+2. **The plan.** Structural validation is exhaustive: unknown fields, the schema version, the
+   digest (`plan-digest-mismatch` on any tamper), the approval binding
+   (`plan-approval-mismatch`), each operation's exact field set and spelling
+   (`plan-invalid-operation`, via `paths.write_target_problem` — the same owner the approval
+   set's paths go through), the target class (`plan-forbidden-target-class`), the record
+   binding (`plan-record-not-approved`, `plan-target-not-record-target` — an operation writes
+   only its own record's targets), duplicates (`plan-duplicate-operation`), overlapping or
+   ambiguous spans (`plan-overlapping-spans`, `plan-conflicting-operations`), and the declared
+   postimages (`plan-invalid-postimages`, `plan-postimages-not-derived`).
+3. **Idempotency.** `postimages` maps every written path to the sha256 of its bytes after the
+   plan (`null` for a retired document). When every one is already on disk the run is a no-op:
+   `clean`, `already_applied: true`, nothing written — which is what makes re-running an
+   interrupted lane safe. The approval's own preimage staleness is judged *after* this check,
+   because the applier's writes are the one legitimate way those preimages move; preimage
+   staleness that is not "already applied" refuses as `stale` like any other moved field.
+4. **Exact preimages.** A span operation carries 1-based line numbers and the exact text of
+   those lines; `retire-document` carries the whole document. A file, span, or document that
+   is not the preimage is `apply-preimage-mismatch` / `apply-preimage-missing`; a create whose
+   target exists is `apply-create-exists`. Every post-content is computed in memory and checked
+   against the declared postimage (`apply-postimage-mismatch`) before any byte lands.
+5. **Whole-diff confinement.** Before writing, the complete working-tree diff — index, work
+   tree, and untracked files, read by `repository.worktree_changes()` — must already be inside
+   the approval set's allowed mutation scope (`apply-working-tree-not-confined`); after
+   writing, it is read again, and an unaccounted change rolls this run's writes back and fails
+   the run (`apply-unconfined-change`). Nothing is ever staged or committed here: change
+   approval — a person merging or committing — is the only thing that lands anything.
+
+Application order is deterministic: per document, span edits apply bottom-up so the plan's line
+numbers stay true, and moved text is appended to its destination (in source-path, span order)
+after the destination's own edits, followed by a newline. Provenance travels as data: each
+applied `move-with-provenance` entry in the result names its record, source, and destination,
+and the approval trailers name the authority.
+
+Model-generated content reaches the applier only as data inside the plan and report payloads.
+The module runs no shell and executes nothing it reads (`tests/engine/applier_test.py` holds it
+to that); its one git use is the read-only status behind the confinement check.
+
+```python
+from doclifecycle.applier import apply_edit_plan, load_approval_payload, load_edit_plan
+
+plan = load_edit_plan("plan.json")                    # payload dict or Invalid
+approval = load_approval_payload("approval.json")     # payload dict or Invalid
+apply_edit_plan(".", plan, approval, report=report)   # ApplyResult or Invalid
+```
+
 ## Digests
 
 `digest.sha256_canonical` hashes the canonical JSON form (sorted keys, compact separators),
@@ -1696,7 +1762,8 @@ Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `repository.resolve_commit()`, `repository.changed_paths()`, `repository.last_change()`,
 `repository.tracking()`, `repository.tracked_files()`, `reconcile()`, `mint_approval_set()`,
 `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`,
-`render_approval_set()`, `approval_trailers()`), and the commands as subprocesses whose payload
+`render_approval_set()`, `approval_trailers()`, `apply_edit_plan()`, `load_edit_plan()`,
+`load_approval_payload()`, `repository.worktree_changes()`), and the commands as subprocesses whose payload
 must equal the library result. Path authorization, the git reads, the cache, finding identity,
 and verdict recording have no command of their own — they are substrate the other components
 (and, for the cache, the bloat lane) call. `tests/engine/support.py` holds what every suite
@@ -1739,4 +1806,9 @@ the report suite does — an approval set's freshness, its allowed scope, and th
 write it into tracked state are all comparisons against a real index and a real work tree.
 `approval_cli_test.py` imports `approval_test.py`'s fixture rather than rebuilding it, and
 `scenario_approval_test.py` imports `scenario_drift_test.py`'s, so the findings it approves are
-the ones that suite already holds the audit to.
+the ones that suite already holds the audit to. `applier_test.py` builds on `approval_test.py`'s
+fixture the same way — every apply is against a real work tree, refusals compare the whole tree
+byte for byte before and after, and the mutation-facing cases (traversal targets, borrowed
+paths, forged approval scopes, span-overlap tricks) all run through the public
+`apply_edit_plan` seam; `applier_cli_test.py` holds `apply-plan` to the same payloads and exit
+codes.
