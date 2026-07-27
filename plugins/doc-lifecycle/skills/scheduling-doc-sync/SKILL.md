@@ -120,10 +120,12 @@ refusal, the staged path list, and the PR title, body, and commit message
 **Installed on the same condition `doc-audit.yml` is**: it needs a landed
 `.doc-lifecycle/registry.json`, the vendored engine, and `render-apply-summary.py` in
 `.github/doc-sync/`, so Upgrade mode installs it for exactly the repos that carry a registry. It
-has no knob — manual dispatch carries no schedule to preserve. **Disable the legacy lanes' write
-jobs before enabling it in a repo that still runs them**, so two generations never propose edits
-to one corpus at once; this repository's own install did that first (aj604/toolshed#75), and
-aj604/toolshed#77 removes those jobs from the templates.
+has no knob — manual dispatch carries no schedule to preserve. **Disable the legacy lanes before
+enabling it in a repo that still runs them**, so two generations never propose edits to one
+corpus at once — at the entry job, not only at the write job, since these lanes render every
+terminal summary from inside the job that writes and a half-disabled lane ends saying nothing.
+This repository's own install did that first (aj604/toolshed#75); aj604/toolshed#77 removes them
+from the templates.
 
 **Before retiring a repo's legacy lane, run the shadow comparison.** Both lanes look at the
 same documentation while only one may write; `scripts/compare-shadow-lanes.py compare` answers

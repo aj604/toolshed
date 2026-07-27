@@ -7,11 +7,6 @@
     "docs",
     "plugins"
   ],
-  "exclude": [
-    "tests/fixtures/**",
-    "tests/baselines/**",
-    "tests/docs-ab/**"
-  ],
   "sets": [
     "plans",
     "specs"
@@ -37,6 +32,10 @@
       "kind": "living"
     },
     {
+      "glob": "docs/decisions.md",
+      "kind": "narrative"
+    },
+    {
       "glob": "docs/design-rationale.md",
       "kind": "narrative"
     },
@@ -59,43 +58,7 @@
       "set": "specs"
     },
     {
-      "glob": "plugins/doc-lifecycle/agents/*.md",
-      "kind": "living"
-    },
-    {
-      "glob": "plugins/doc-lifecycle/engine/*.md",
-      "kind": "living"
-    },
-    {
-      "glob": "plugins/doc-lifecycle/skills/bootstrapping-docs/*.md",
-      "kind": "living"
-    },
-    {
-      "glob": "plugins/doc-lifecycle/skills/detecting-doc-bloat/*.md",
-      "kind": "living"
-    },
-    {
-      "glob": "plugins/doc-lifecycle/skills/detecting-doc-drift/*.md",
-      "kind": "living"
-    },
-    {
-      "glob": "plugins/doc-lifecycle/skills/fixing-docs/*.md",
-      "kind": "living"
-    },
-    {
-      "glob": "plugins/doc-lifecycle/skills/growing-docs/*.md",
-      "kind": "living"
-    },
-    {
-      "glob": "plugins/doc-lifecycle/skills/scheduling-doc-sync/*.md",
-      "kind": "living"
-    },
-    {
-      "glob": "plugins/doc-lifecycle/skills/writing-docs/*.md",
-      "kind": "living"
-    },
-    {
-      "glob": "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/*.md",
+      "glob": "plugins/**/*.md",
       "kind": "living"
     }
   ]

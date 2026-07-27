@@ -143,20 +143,22 @@ def adopted_registry(repo):
     return (repo / ".doc-lifecycle" / "registry.json").is_file()
 
 
+def _wiring(legacy, new_lane_only, new_lane):
+    """The legacy wiring, plus the new engine's when this install carries it."""
+    wiring = dict(legacy)
+    if new_lane:
+        wiring.update(new_lane_only)
+    return wiring
+
+
 def scripts_for(repo):
     """The vendored scripts this install owns, legacy plus whatever it has adopted."""
-    scripts = dict(SCRIPTS)
-    if adopted_registry(repo):
-        scripts.update(NEW_LANE_SCRIPTS)
-    return scripts
+    return _wiring(SCRIPTS, NEW_LANE_SCRIPTS, adopted_registry(repo))
 
 
 def templates_for(repo):
     """The workflow templates this install owns, legacy plus whatever it has adopted."""
-    templates = dict(TEMPLATE_PLACEHOLDERS)
-    if adopted_registry(repo):
-        templates.update(NEW_LANE_PLACEHOLDERS)
-    return templates
+    return _wiring(TEMPLATE_PLACEHOLDERS, NEW_LANE_PLACEHOLDERS, adopted_registry(repo))
 
 
 def read_knobs(repo):
@@ -212,9 +214,7 @@ def render_workflows(plugin_root, repo, knobs, new_lane=False):
     src_dir = plugin_root / "skills" / "scheduling-doc-sync"
     dest_dir = repo / ".github" / "workflows"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    templates = dict(TEMPLATE_PLACEHOLDERS)
-    if new_lane:
-        templates.update(NEW_LANE_PLACEHOLDERS)
+    templates = _wiring(TEMPLATE_PLACEHOLDERS, NEW_LANE_PLACEHOLDERS, new_lane)
     for name, placeholders in templates.items():
         text = _read(src_dir / name)
         for ph in placeholders:
@@ -231,9 +231,7 @@ def render_workflows(plugin_root, repo, knobs, new_lane=False):
 def copy_scripts(plugin_root, repo, new_lane=False):
     dest = repo / ".github" / "doc-sync"
     dest.mkdir(parents=True, exist_ok=True)
-    scripts = dict(SCRIPTS)
-    if new_lane:
-        scripts.update(NEW_LANE_SCRIPTS)
+    scripts = _wiring(SCRIPTS, NEW_LANE_SCRIPTS, new_lane)
     for name, subdir in scripts.items():
         src = plugin_root / "skills" / pathlib.PurePosixPath(subdir) / name
         if not src.is_file():
@@ -291,8 +289,8 @@ def apply_upgrade(plugin_root, repo, target):
         copy_engine(plugin_root, repo)
     seed_waivers(repo)
     write_version(repo, target)
-    workflows = len(templates_for(repo))
-    scripts = len(scripts_for(repo))
+    workflows = len(_wiring(TEMPLATE_PLACEHOLDERS, NEW_LANE_PLACEHOLDERS, new_lane))
+    scripts = len(_wiring(SCRIPTS, NEW_LANE_SCRIPTS, new_lane))
     engine = ", engine (vendored wholesale)" if new_lane else ""
     print(
         f"regenerated wiring at v{target}: {workflows} workflows (knobs "

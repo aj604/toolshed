@@ -36,6 +36,10 @@ env:
 
 jobs:
   plan:
+    # doc-lifecycle#75: the legacy lane is disabled in this install, ahead
+    # of the new audit and apply lanes and of #77 removing it from the
+    # template. Stopping the entry job skips every job that needs it.
+    if: false
     runs-on: ubuntu-latest
     permissions:
       contents: read

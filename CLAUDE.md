@@ -39,8 +39,8 @@ edited in place),
 (accepted-UNVERIFIABLE waivers the sync run surfaces consume), `doc-sync/installed-version`
 (the plugin-version lockfile the upgrade workflow reads), `workflows/doc-sync.yml`,
 `workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`, `workflows/doc-audit.yml`,
-`workflows/doc-apply.yml`; the legacy lanes' write jobs are `if: false` here, disabled by #75
-ahead of #77 removing them from the templates), the classification registry
+`workflows/doc-apply.yml`; the two legacy lanes are `if: false` at their entry job here,
+disabled by #75 ahead of #77 removing them from the templates), the classification registry
 (`.doc-lifecycle/registry.json` — five roots, closed-world), the ci+release workflow
 (`workflows/release.yml`), that workflow's own test-suite runner
 (`.github/scripts/run-script-suites.py`, #99 — discovery-driven, so a new
@@ -104,7 +104,7 @@ the legacy lane in #77).
   token-free, write jobs model-free and staging explicit paths), `install-parity_test.py`
   (the dogfooded `.github/` install is byte-identical to what `apply-upgrade.py` would lay down
   from the plugin with this install's knobs, plus a whole-tree comparison of the vendored engine
-  and a recorded allowlist of this install's legacy-write divergence, `LEGACY_WRITE_DISABLED`),
+  and a recorded allowlist of this install's legacy-lane divergence, `LEGACY_LANES_DISABLED`),
   and `engine-capability_test.py` (the engine's
   applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the new
   engine's audit lane's run-surface rendering (every report result state, plus the
