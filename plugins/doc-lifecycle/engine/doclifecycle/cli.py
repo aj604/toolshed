@@ -15,7 +15,11 @@ import argparse
 import json
 import sys
 
-from .bloat import DEFAULT_MAX_DOCUMENTS, DEFAULT_MAX_UNITS, plan_chunks
+from .bloat import (
+    DEFAULT_MAX_DOCUMENTS,
+    DEFAULT_MAX_UNITS,
+    plan_repository_chunks,
+)
 from .context import build_context_index
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .render import render_report
@@ -94,16 +98,6 @@ def _positive(value):
     return number
 
 
-def _run_plan(args):
-    """Plan chunks, unless the index itself is invalid — which travels through."""
-    index = build_context_index(args.repo, args.registry)
-    if isinstance(index, Invalid):
-        return index
-    return plan_chunks(
-        index, max_documents=args.max_documents, max_units=args.max_units
-    )
-
-
 def _parser():
     parser = argparse.ArgumentParser(
         prog="python3 -m doclifecycle",
@@ -121,14 +115,7 @@ def _parser():
             "invalid, which invalidates the whole run."
         ),
     )
-    inventory.add_argument(
-        "--repo", default=".", help="repository root (default: the current directory)"
-    )
-    inventory.add_argument(
-        "--registry",
-        default=DEFAULT_REGISTRY_PATH,
-        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
-    )
+    _add_corpus_arguments(inventory)
     inventory.set_defaults(
         run=lambda args: build_inventory(args.repo, args.registry), render=False
     )
@@ -145,17 +132,10 @@ def _parser():
             "is invalid or the path is not a document in the inventory."
         ),
     )
-    segment.add_argument(
-        "--repo", default=".", help="repository root (default: the current directory)"
-    )
+    _add_corpus_arguments(segment)
     segment.add_argument(
         "--path", required=True,
         help="the document to segment, repository-relative; must be inventoried",
-    )
-    segment.add_argument(
-        "--registry",
-        default=DEFAULT_REGISTRY_PATH,
-        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
     )
     segment.set_defaults(
         run=lambda args: segment_document(args.repo, args.path, args.registry),
@@ -198,7 +178,13 @@ def _parser():
         "--max-units", type=_positive, default=DEFAULT_MAX_UNITS,
         help=f"assertion units per chunk (default: {DEFAULT_MAX_UNITS})",
     )
-    plan.set_defaults(run=_run_plan, render=False)
+    plan.set_defaults(
+        run=lambda args: plan_repository_chunks(
+            args.repo, args.registry,
+            max_documents=args.max_documents, max_units=args.max_units,
+        ),
+        render=False,
+    )
 
     validate = commands.add_parser(
         "validate-report",

@@ -13,23 +13,16 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from support import RepoTestCase  # noqa: E402  (also puts the engine on sys.path)
+from support import (  # noqa: E402  (also puts the engine on sys.path)
+    CORPUS_REGISTRY as REGISTRY,
+    SHARED_SENTENCE as SHARED,
+    RepoTestCase,
+)
 
 from doclifecycle.context import build_context_index  # noqa: E402
 from doclifecycle.results import Invalid  # noqa: E402
 
-REGISTRY = """{
-  "schema_version": 1,
-  "roots": ["docs"],
-  "rules": [
-    {"glob": "docs/*.md", "kind": "living"},
-    {"glob": "docs/guides/*.md", "kind": "narrative"},
-    {"glob": "docs/plans/*.md", "kind": "planning"}
-  ]
-}
-"""
 
-SHARED = "Fee changes require a migration note."
 
 
 class WhatTheIndexHolds(RepoTestCase):
@@ -110,7 +103,7 @@ class GlobalDuplicateSearch(RepoTestCase):
 
 
 class Ownership(RepoTestCase):
-    def test_a_living_document_owns_a_claim_a_planning_document_copies(self):
+    def test_a_living_document_owns_content_a_planning_document_copies(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": REGISTRY,
             "docs/plans/p.md": f"# P\n\n{SHARED}\n",
@@ -122,7 +115,7 @@ class Ownership(RepoTestCase):
 
         self.assertEqual(index.owner_of(digest), "docs/a.md")
 
-    def test_a_living_document_owns_a_claim_a_narrative_document_repeats(self):
+    def test_a_living_document_owns_content_a_narrative_document_repeats(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": REGISTRY,
             "docs/guides/b.md": f"# B\n\n{SHARED}\n",
@@ -171,6 +164,60 @@ class CoverageGaps(RepoTestCase):
         })
 
         self.assertEqual(build_context_index(repo).unexamined, ())
+
+
+class ContextDigest(RepoTestCase):
+    """What could have changed *this* document's bloat verdict, and only that."""
+
+    def index(self, files):
+        return build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY, **files
+        }))
+
+    def test_two_documents_in_one_corpus_have_different_context_digests(self):
+        index = self.index({
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        })
+
+        self.assertNotEqual(
+            index.context_digest("docs/a.md"), index.context_digest("docs/plans/p.md")
+        )
+
+    def test_an_unrelated_document_appearing_leaves_it_alone(self):
+        before = self.index({
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        })
+        after = self.index({
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+            "docs/z.md": "# Z\n\nSomething else entirely.\n",
+        })
+
+        self.assertNotEqual(before.digest, after.digest)
+        self.assertEqual(
+            before.context_digest("docs/a.md"), after.context_digest("docs/a.md")
+        )
+
+    def test_losing_the_other_copy_of_an_assertion_moves_it(self):
+        before = self.index({
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        })
+        after = self.index({
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/plans/p.md": "# P\n\nRewritten.\n",
+        })
+
+        self.assertNotEqual(
+            before.context_digest("docs/a.md"), after.context_digest("docs/a.md")
+        )
+
+    def test_a_document_that_is_not_indexed_has_no_context_digest(self):
+        index = self.index({"docs/a.md": f"# A\n\n{SHARED}\n"})
+
+        self.assertIsNone(index.context_digest("docs/nowhere.md"))
 
 
 class Determinism(RepoTestCase):

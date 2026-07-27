@@ -65,12 +65,12 @@ PLANNING_DOC = "docs/plans/2026-07-20-followup-plan.md"
 # what the rest of the corpus says. These four documents give the bloat scenario
 # a corpus where the right answers are *outside* any one worker's slice.
 #
-# `POLICY_DOC` is the living document that owns the fee policy. Two claims in it
-# are copied elsewhere:
+# `POLICY_DOC` is the living document that owns the fee policy. Two of its
+# assertions are copied elsewhere:
 #
-#   DUPLICATED_CLAIM  also in FEE_TIERS_PLAN, twice (so occurrence pointers have
-#                     to distinguish copies that share one content digest)
-#   CONTENDED_CLAIM   also in FEE_ROLLOUT_PLAN
+#   DUPLICATED_ASSERTION  also in FEE_TIERS_PLAN, twice (so occurrence pointers
+#                         have to distinguish copies sharing one content digest)
+#   CONTENDED_ASSERTION   also in FEE_ROLLOUT_PLAN
 #
 # Because the copies live in two different planning documents, a chunk plan puts
 # them in different chunks — and both must resolve to POLICY_DOC as the merge
@@ -81,10 +81,10 @@ POLICY_DOC = "docs/fee-policy.md"
 FEE_TIERS_PLAN = "docs/plans/2026-07-21-fee-tiers-plan.md"
 FEE_ROLLOUT_PLAN = "docs/plans/2026-07-22-fee-rollout-plan.md"
 
-DUPLICATED_CLAIM = (
+DUPLICATED_ASSERTION = (
     "Every fee change ships with a migration note in the release checklist."
 )
-CONTENDED_CLAIM = "The fee schedule is owned by the payments team."
+CONTENDED_ASSERTION = "The fee schedule is owned by the payments team."
 
 # Every member of the `plans` document set, in enumeration order — the answer a
 # bulk-retirement finding must be backed by, listed here so a scenario asserts
@@ -192,9 +192,9 @@ volume; a tiered schedule has been proposed but not yet approved.
 
 _POLICY_DOC_TEXT = f"""# Fee policy
 
-{DUPLICATED_CLAIM}
+{DUPLICATED_ASSERTION}
 
-{CONTENDED_CLAIM}
+{CONTENDED_ASSERTION}
 
 Refunds reverse the fee at the rate charged, not the rate in force today.
 """
@@ -203,18 +203,18 @@ _FEE_TIERS_PLAN_TEXT = f"""# Plan: tiered fee schedule
 
 **Date:** 2026-07-21. **Status:** in-progress.
 
-{DUPLICATED_CLAIM}
+{DUPLICATED_ASSERTION}
 
 ## Rollout
 
-{DUPLICATED_CLAIM}
+{DUPLICATED_ASSERTION}
 """
 
 _FEE_ROLLOUT_PLAN_TEXT = f"""# Plan: fee rollout sequencing
 
 **Date:** 2026-07-22. **Status:** in-progress.
 
-{CONTENDED_CLAIM}
+{CONTENDED_ASSERTION}
 """
 
 _EXCLUDED_DOC_TEXT = """# Upstream vendor doc

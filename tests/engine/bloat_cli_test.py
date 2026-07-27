@@ -15,22 +15,17 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from support import RepoTestCase, run_command  # noqa: E402
+from support import (  # noqa: E402  (also puts the engine on sys.path)
+    CORPUS_REGISTRY as REGISTRY,
+    SHARED_SENTENCE as SHARED,
+    RepoTestCase,
+    run_command,
+)
 
 from doclifecycle import bloat  # noqa: E402
 from doclifecycle.context import build_context_index  # noqa: E402
 
-REGISTRY = """{
-  "schema_version": 1,
-  "roots": ["docs"],
-  "rules": [
-    {"glob": "docs/*.md", "kind": "living"},
-    {"glob": "docs/plans/*.md", "kind": "planning"}
-  ]
-}
-"""
 
-SHARED = "Fee changes require a migration note."
 
 
 class ContextIndexCommand(RepoTestCase):
@@ -102,7 +97,7 @@ class BloatPlanCommand(RepoTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             json.loads(result.stdout),
-            bloat.plan_chunks(build_context_index(repo), max_documents=2).to_dict(),
+            bloat.plan_repository_chunks(repo, max_documents=2).to_dict(),
         )
 
     def test_every_document_appears_in_exactly_one_chunk(self):

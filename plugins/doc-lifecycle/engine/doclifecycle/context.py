@@ -46,12 +46,13 @@ from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .results import STATUS_OK, Invalid
 from .segment import segment_text
 
-# Which document kind is a claim's home, most durable first. A living document
-# must be currently true, so it is where a durable claim belongs; a narrative
-# document is honestly dated rather than line-verified; a planning document is
-# temporary and ends in distillation or retirement, so content is never moved
-# *into* one. Ordering ownership by this is what makes "the legitimate
-# destination" a fact about the document model rather than a preference.
+# Which document kind is an assertion's home, most durable first. A living
+# document must be currently true, so it is where a durable assertion belongs; a
+# narrative document is honestly dated rather than line-verified; a planning
+# document is temporary and ends in distillation or retirement, so content is
+# never moved *into* one. Ordering ownership by this is what makes "the
+# legitimate destination" a fact about the document model rather than a
+# preference.
 KIND_PRECEDENCE = ("living", "narrative", "planning")
 
 
@@ -126,6 +127,11 @@ class Unexamined:
     Named rather than skipped: the audit built on this index declares the same
     gap as an `incomplete` scope, so the absence of a finding about a document
     the index never opened never reads as a clean verdict about it.
+
+    `scope` is the report contract's own word for this — the thing a run did not
+    examine, here always a path. It is not `bloat.ScopeEnumeration`'s sense of
+    the word, which is an inclusion rule; the contract owns the wire name, so
+    this field keeps it rather than translating at the boundary.
     """
 
     scope: str
@@ -147,8 +153,11 @@ class ContextIndex:
     units: Tuple[IndexedUnit, ...]
     unexamined: Tuple[Unexamined, ...]
     digest: str
+    # Built once by `build_context_index` and never mutated afterwards: the
+    # reverse map from content to positions, and a path lookup over
+    # `documents` so ownership questions are not linear scans.
     _occurrences: Dict[str, Tuple[Occurrence, ...]]
-    _kinds: Dict[str, str]
+    _by_path: Dict[str, IndexedDocument]
 
     def occurrences_of(self, unit_digest):
         """Every place this content appears, in (path, position) order.
@@ -183,13 +192,54 @@ class ContextIndex:
 
     def rank_of(self, path):
         """A document's ownership rank; unknown documents rank last."""
-        kind = self._kinds.get(path)
-        if kind not in KIND_PRECEDENCE:
+        document = self._by_path.get(path)
+        if document is None or document.kind not in KIND_PRECEDENCE:
             return len(KIND_PRECEDENCE)
-        return KIND_PRECEDENCE.index(kind)
+        return KIND_PRECEDENCE.index(document.kind)
 
     def document(self, path):
-        return next((d for d in self.documents if d.path == path), None)
+        return self._by_path.get(path)
+
+    def context_digest(self, path):
+        """What could have changed *this* document's bloat verdict.
+
+        A bloat verdict about a document is a statement about the corpus around
+        it, so this is that corpus, narrowed to the part that bears on this
+        document: for each of its units, in order, every *other* place that
+        content occurs and the kind of the document holding it — which is
+        exactly what duplication and ownership are decided from. An unrelated
+        document appearing, changing, or disappearing leaves it alone; the
+        other copy of a duplicated sentence being rewritten moves it.
+
+        Destination *eligibility* for content that occurs nowhere else is
+        deliberately not in here. That is checked against the live index every
+        time a verdict is recorded, never read back from a cache entry, so
+        folding it in would only cost hits.
+
+        `None` for a path the index does not hold.
+        """
+        document = self._by_path.get(path)
+        if document is None:
+            return None
+        return sha256_canonical({
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "path": path,
+            "units": [
+                {
+                    "unit": unit,
+                    "elsewhere": [
+                        {"path": place.path, "kind": self._kind_of(place.path)}
+                        for place in self.occurrences_of(unit)
+                        if place.path != path
+                    ],
+                }
+                for unit in document.units
+            ],
+        })
+
+    def _kind_of(self, path):
+        document = self._by_path.get(path)
+        return document.kind if document else None
 
     def to_dict(self):
         return {
@@ -235,7 +285,7 @@ def build_context_index(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
     if isinstance(inventory, Invalid):
         return inventory
 
-    documents, units, occurrences, kinds = [], {}, {}, {}
+    documents, units, occurrences = [], {}, {}
     unexamined = [
         Unexamined(scope=f.path, code=f.code, reason=f.message)
         for f in inventory.findings
@@ -262,7 +312,6 @@ def build_context_index(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
             continue
 
         segmentation = segment_text(text, path=document.path, kind=document.kind)
-        kinds[document.path] = document.kind
         documents.append(IndexedDocument(
             path=document.path,
             kind=document.kind,
@@ -300,5 +349,5 @@ def build_context_index(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
         unexamined=unexamined,
         digest=_index_digest(inventory.digest, documents, unexamined),
         _occurrences=frozen,
-        _kinds=kinds,
+        _by_path={d.path: d for d in documents},
     )

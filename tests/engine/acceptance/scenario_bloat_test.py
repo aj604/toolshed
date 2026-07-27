@@ -110,7 +110,7 @@ class TheDuplicateDestinationOutsideTheSlice(BloatScenario):
             "id": "BLOAT-001",
             "verdict": bloat.MERGE_DOC,
             "path": fixture.FEE_TIERS_PLAN,
-            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)],
+            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)],
             "evidence": "The fee policy already states this; the plan restates it.",
         }], chunk=chunk)
 
@@ -127,24 +127,30 @@ class TheDuplicateDestinationOutsideTheSlice(BloatScenario):
             "id": "BLOAT-001",
             "verdict": bloat.MERGE_DOC,
             "path": fixture.FEE_TIERS_PLAN,
-            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)],
+            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)],
             "evidence": "The fee policy already states this.",
         }])
 
-        occurrences = result.records()[0]["duplicate_search"]["occurrences"]
-        self.assertEqual(
-            [(o["path"], o["line"]) for o in occurrences],
-            [(fixture.POLICY_DOC, 3),
-             (fixture.FEE_TIERS_PLAN, 5), (fixture.FEE_TIERS_PLAN, 9)],
-        )
+        search = result.records()[0]["duplicate_search"]
+        # One deduplicated unit in the group, but two copies in this document
+        # — `here` is what says which copies the finding is about, and
+        # `elsewhere` is what makes the redundancy claim checkable.
         self.assertEqual(len(result.records()[0]["units"]), 1)
+        self.assertEqual(
+            [(o["path"], o["line"]) for o in search["here"]],
+            [(fixture.FEE_TIERS_PLAN, 5), (fixture.FEE_TIERS_PLAN, 9)],
+        )
+        self.assertEqual(
+            [(o["path"], o["line"]) for o in search["elsewhere"]],
+            [(fixture.POLICY_DOC, 3)],
+        )
 
     def test_the_search_that_informed_it_covered_the_whole_corpus(self):
         result = self.record([{
             "id": "BLOAT-001",
             "verdict": bloat.MERGE_DOC,
             "path": fixture.FEE_TIERS_PLAN,
-            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)],
+            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)],
             "evidence": "The fee policy already states this.",
         }])
 
@@ -160,7 +166,7 @@ class TheDuplicateDestinationOutsideTheSlice(BloatScenario):
             "id": "BLOAT-001",
             "verdict": bloat.MERGE_DOC,
             "path": fixture.FEE_TIERS_PLAN,
-            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)],
+            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)],
             "evidence": "Guessed a destination inside my own slice.",
             "destination": fixture.PLANNING_DOC,
         }], chunk=chunk)
@@ -193,15 +199,15 @@ class TwoChunksCompetingForOneMergeTarget(BloatScenario):
         self.assertNotEqual(tiers.chunk_id, rollout.chunk_id)
 
     def test_both_chunks_resolve_to_the_same_merge_target(self):
-        tiers = self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)
-        rollout = self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_CLAIM)
+        tiers = self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)
+        rollout = self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_ASSERTION)
 
         self.assertEqual(tiers["destination"]["path"], fixture.POLICY_DOC)
         self.assertEqual(rollout["destination"]["path"], fixture.POLICY_DOC)
 
     def test_each_chunk_sees_the_complete_claimant_list_and_its_own_rank(self):
-        tiers = self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)
-        rollout = self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_CLAIM)
+        tiers = self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)
+        rollout = self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_ASSERTION)
 
         claimants = [fixture.FEE_TIERS_PLAN, fixture.FEE_ROLLOUT_PLAN]
         self.assertEqual(tiers["contention"]["claimants"], claimants)
@@ -211,20 +217,20 @@ class TwoChunksCompetingForOneMergeTarget(BloatScenario):
 
     def test_the_order_the_chunks_are_audited_in_changes_no_answer(self):
         forward = [
-            self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM),
-            self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_CLAIM),
+            self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION),
+            self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_ASSERTION),
         ]
         backward = [
-            self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_CLAIM),
-            self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM),
+            self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_ASSERTION),
+            self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION),
         ]
 
         self.assertEqual(forward, list(reversed(backward)))
 
     def test_one_chunk_audited_alone_reaches_the_same_answer(self):
-        alone = self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)
-        self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_CLAIM)
-        together = self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)
+        alone = self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)
+        self.merge_from(fixture.FEE_ROLLOUT_PLAN, fixture.CONTENDED_ASSERTION)
+        together = self.merge_from(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)
 
         self.assertEqual(alone, together)
 
@@ -242,7 +248,7 @@ class ChunkResultsFlowThroughTheCache(BloatScenario):
             "id": "BLOAT-001",
             "verdict": bloat.MERGE_DOC,
             "path": fixture.FEE_TIERS_PLAN,
-            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)],
+            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)],
             "evidence": "The fee policy already states this.",
         }], chunk=chunk)
         results = {path: [] for path in chunk.documents}
@@ -297,7 +303,7 @@ class ChunkResultsFlowThroughTheCache(BloatScenario):
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         with open(path, "w", encoding="utf-8") as fh:
-            fh.write(text.replace(fixture.DUPLICATED_CLAIM, "Rewritten."))
+            fh.write(text.replace(fixture.DUPLICATED_ASSERTION, "Rewritten."))
 
         moved_index = build_context_index(self.repo)
         moved, problems = current_lineage(
@@ -412,7 +418,7 @@ class CoverageRendersTruthfully(BloatScenario):
             "id": "BLOAT-001",
             "verdict": bloat.MERGE_DOC,
             "path": fixture.FEE_TIERS_PLAN,
-            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_CLAIM)],
+            "units": [self.unit(fixture.FEE_TIERS_PLAN, fixture.DUPLICATED_ASSERTION)],
             "evidence": "The fee policy already states this.",
         }])
 

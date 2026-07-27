@@ -19,8 +19,8 @@ bloat lane. Approval sets and the applier land in later slices of the re-archite
 | `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, the canonical path form and target classes |
 | `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
 | `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
-| `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index digest |
-| `doclifecycle/bloat.py` | `plan_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, the chunk cache seam |
+| `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
+| `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, the chunk cache seam |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, lineage and report digests |
 | `doclifecycle/render.py` | `render_report()` — Markdown from a validated `Report`, and nothing else |
 | `doclifecycle/repository.py` | repository identity and base commit, read from git |
@@ -632,6 +632,7 @@ index = build_context_index(".")            # → ContextIndex or Invalid
 index.occurrences_of(unit_digest)           # every place that content appears
 index.duplicated_units()                    # units occurring more than once
 index.owner_of(unit_digest)                 # the document it belongs in
+index.context_digest(path)                  # the corpus, as it bears on one document
 ```
 
 ## Bloat audit
@@ -689,7 +690,9 @@ the trustworthy half of.
 
 Destinations are resolved, not asserted. For content the global search found elsewhere the
 destination *is* `index.owner_of()`, so a worker that proposed a different one was guessing from
-a partial view and is refused (`bloat-destination-contradicts-index`). For content occurring
+a partial view and is refused (`bloat-destination-contradicts-index`); a group whose units are
+owned in *two* places has no single right destination, so the grouping is refused rather than
+falling back to what the worker proposed (`bloat-destination-ambiguous`). For content occurring
 nowhere else the model names one and the index checks it: it must be an inventoried document
 (`bloat-destination-not-a-document`), not the document being judged
 (`bloat-destination-is-source`), and of a kind that accepts content
@@ -708,9 +711,12 @@ When a destination has more than one claimant, each finding carries `contention`
 claimant list and its own rank.
 
 Every finding also carries `duplicate_search`: the index digest the search ran against, how many
-documents it covered, and every occurrence found. A finding that says "this is redundant" is
-making a claim about the whole corpus, and a reader must be able to tell whether the whole corpus
-was actually consulted.
+documents it covered, and every occurrence found, split into `here` and `elsewhere`. A finding
+that says "this is redundant" is making a statement about the whole corpus, and a reader must be
+able to tell whether the whole corpus was actually consulted. The split is the half a unit group
+cannot express: the group is a deduplicated set of content digests, so `here` is what says which
+copies *in this document* the finding is about — two identical sentences are one group member and
+two `here` entries — and `elsewhere` is what makes the redundancy claim checkable.
 
 ### Deterministic scopes
 
@@ -728,18 +734,29 @@ finding digest cannot silently widen when the set grows.
 Sampling survives only as review prioritization: a `sample` list is recorded under
 `scope.sample`, alongside `scope.sample_is_not_authority`, and never narrows the enumeration. A
 `sample` on a single-document verdict is `bloat-sampling-not-authority` — there it would stand in
-for reading the subject. So is any attempt to supply `files`, `members`, `occurrences`, or
+for reading the subject — and a sample naming a path the enumeration does not cover is
+`bloat-sample-outside-scope`. So is any attempt to supply `files`, `members`, `occurrences`, or
 `contention` (`bloat.FORBIDDEN_VERDICT_FIELDS`): those are the engine's answers, and a model that
 could assert them could authorize a mutation nobody enumerated.
+
+A finding binds to assertion units, so an enumerated member holding none is
+`bloat-scope-member-empty` — named, with the fix, rather than quietly dropped from a judgment that
+claims to cover every affected file.
 
 ### Chunk results and the cache
 
 A bloat verdict about a document is checked against the rest of the corpus, so the corpus *is*
 its source evidence: `chunk_cache_keys()` builds one `cache.CacheKey` per document in the chunk
-with `source_digest` set to the context index's digest. Anything that could have changed the
-judgment — the document's own bytes, any *other* document's bytes, the registry, the audit
-configuration, the ruleset, the plugin — moves one of the two digests or a lineage field, and so
-moves the key.
+with `source_digest` set to `index.context_digest(path)`: for each of the document's units, in
+order, every *other* place that content occurs and the kind of the document holding it — which is
+exactly what duplication and ownership are decided from. An unrelated document changing leaves it
+alone; the other copy of a duplicated sentence being rewritten moves it.
+
+Note that #64's lineage already carries `inventory_digest`, which moves on any corpus edit at all,
+so today the narrower digest buys no extra hits. It is still the honest description of what a
+cached bloat verdict was judged against — a cache entry naming a different context slice is
+`MISS_IDENTITY` rather than a false hit — and it is what a later slice would need in order to
+narrow the lineage without re-deriving the rule.
 
 ```python
 from doclifecycle import bloat

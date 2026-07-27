@@ -16,45 +16,36 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from support import RepoTestCase  # noqa: E402  (also puts the engine on sys.path)
+from support import (  # noqa: E402  (also puts the engine on sys.path)
+    CORPUS_REGISTRY as REGISTRY,
+    SHARED_SENTENCE as SHARED,
+    RepoTestCase,
+)
 
+from finding_test import lineage as finding_lineage  # noqa: E402
 from report_test import GitRepoTestCase  # noqa: E402  (a real git repository)
 
 from doclifecycle import bloat  # noqa: E402
 from doclifecycle.context import build_context_index  # noqa: E402
-from doclifecycle.report import EvidenceBoundary, Lineage, current_lineage  # noqa: E402
+from doclifecycle.report import EvidenceBoundary, current_lineage  # noqa: E402
 from doclifecycle.results import Invalid  # noqa: E402
 
 
 def lineage(**overrides):
-    fields = {
-        "repository": "origin:github.com/aj604/toolshed",
-        "base_commit": "0" * 40,
+    """The lineage a bloat chunk runs under.
+
+    `finding_test`'s fixture with two fields moved, rather than a second copy:
+    a bloat verdict is produced by a chunk worker reading documentation, so the
+    mode is `chunk` and the evidence boundary is the corpus.
+    """
+    return finding_lineage(**{
         "audit_mode": "chunk",
-        "inventory_digest": "1" * 64,
-        "audit_config_digest": "2" * 64,
-        "registry_digest": "3" * 64,
-        "ruleset_version": 1,
-        "plugin_version": "0.18.0",
         "evidence_boundary": EvidenceBoundary(("docs/**",)),
-    }
-    fields.update(overrides)
-    return Lineage(**fields)
+        **overrides,
+    })
 
 
-REGISTRY = """{
-  "schema_version": 1,
-  "roots": ["docs"],
-  "sets": ["plans"],
-  "rules": [
-    {"glob": "docs/*.md", "kind": "living"},
-    {"glob": "docs/guides/*.md", "kind": "narrative"},
-    {"glob": "docs/plans/*.md", "kind": "planning", "set": "plans"}
-  ]
-}
-"""
 
-SHARED = "Fee changes require a migration note."
 
 
 def problem_codes(result):
@@ -278,8 +269,12 @@ class WhatAFindingExplains(RecorderTestCase):
         self.assertEqual(search["documents_searched"], 3)
         self.assertEqual(search["index_digest"], self.index.digest)
         self.assertEqual(
-            [(o["path"], o["line"]) for o in search["occurrences"]],
-            [("docs/a.md", 3), ("docs/plans/p.md", 3)],
+            [(o["path"], o["line"]) for o in search["here"]],
+            [("docs/plans/p.md", 3)],
+        )
+        self.assertEqual(
+            [(o["path"], o["line"]) for o in search["elsewhere"]],
+            [("docs/a.md", 3)],
         )
 
     def test_it_records_the_destination_constraints_that_were_checked(self):
@@ -301,6 +296,29 @@ class DestinationsComeFromTheIndex(RecorderTestCase):
 
         self.assertNotIn("docs/a.md", chunk.documents)
         self.assertEqual(result.records()[0]["destination"]["path"], "docs/a.md")
+
+    def test_a_group_whose_units_have_different_owners_is_refused(self):
+        # One destination cannot be right for a group owned in two places, and
+        # falling back to whatever the worker proposed would be exactly the
+        # slice-local guess the index exists to prevent.
+        index = build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/b.md": "# B\n\nA second owned claim.\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n\nA second owned claim.\n",
+        }))
+        by_text = {u.text: u.digest for u in index.units}
+
+        result = bloat.record_verdicts(index, self.lineage, [{
+            "id": "BLOAT-001",
+            "verdict": bloat.MERGE_DOC,
+            "path": "docs/plans/p.md",
+            "units": [by_text[SHARED], by_text["A second owned claim."]],
+            "evidence": "Both claims are stated elsewhere.",
+            "destination": "docs/a.md",
+        }])
+
+        self.assertEqual(problem_codes(result), ["bloat-destination-ambiguous"])
 
     def test_a_destination_the_index_contradicts_is_refused(self):
         result = self.record([self.verdict(
@@ -400,13 +418,14 @@ class ContentionIsResolvedByTheIndex(RepoTestCase):
 
 class BulkJudgmentsAreEnumerated(RepoTestCase):
     def setUp(self):
-        self.index = build_context_index(self.repo({
+        self.root = self.repo({
             ".doc-lifecycle/registry.json": REGISTRY,
             "docs/a.md": "# A\n\nAlpha.\n",
             "docs/plans/p1.md": "# P1\n\nOne.\n",
             "docs/plans/p2.md": "# P2\n\nTwo.\n",
             "docs/plans/p3.md": "# P3\n\nThree.\n",
-        }))
+        })
+        self.index = build_context_index(self.root)
         self.lineage = lineage()
 
     def record(self, **overrides):
@@ -456,6 +475,25 @@ class BulkJudgmentsAreEnumerated(RepoTestCase):
         }])
 
         self.assertEqual(problem_codes(result), ["bloat-sampling-not-authority"])
+
+    def test_a_sample_naming_a_file_outside_the_scope_is_refused(self):
+        result = self.record(sample=["docs/a.md"])
+
+        self.assertEqual(problem_codes(result), ["bloat-sample-outside-scope"])
+
+    def test_an_empty_member_is_named_rather_than_quietly_dropped(self):
+        # A finding binds to assertion units, and an empty document has none.
+        # Dropping it would break "every affected file"; the confusing generic
+        # refusal it used to raise named neither the member nor the fix.
+        with open(os.path.join(self.root, "docs/plans/p4.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("")
+        self.index = build_context_index(self.root)
+
+        result = self.record()
+
+        self.assertEqual(problem_codes(result), ["bloat-scope-member-empty"])
+        self.assertIn("docs/plans/p4.md", result.problems[0].message)
 
     def test_only_retirement_may_be_a_bulk_judgment(self):
         result = self.record(verdict=bloat.CONDENSE)

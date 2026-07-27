@@ -37,22 +37,17 @@ that never see each other reach the same answer.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .cache import cache_key, get as cache_get, put as cache_put
-from .context import KIND_PRECEDENCE
+from .context import KIND_PRECEDENCE, build_context_index
 from .digest import sha256_canonical
-from .finding import build_finding
+from .finding import Finding, build_finding
 from .inventory import DEFAULT_REGISTRY_PATH
 from .registry import compile_glob
-from .results import (
-    STATE_CLEAN,
-    STATE_FINDINGS,
-    STATE_PARTIAL,
-    Invalid,
-    Problem,
-)
+from .report import state_from_content
+from .results import STATUS_OK, Invalid, Problem
 
 # The verdicts, carried over from the skill this absorbs so a reviewer reading
 # an old report and a new one is reading the same vocabulary.
@@ -125,7 +120,7 @@ class ChunkPlan:
     chunks: Tuple[Chunk, ...]
     index_digest: str
     digest: str
-    status: str = "ok"
+    status: str = STATUS_OK
 
     def to_dict(self):
         return {
@@ -204,6 +199,23 @@ def plan_chunks(index, max_documents=DEFAULT_MAX_DOCUMENTS,
     )
 
 
+def plan_repository_chunks(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
+                           max_documents=DEFAULT_MAX_DOCUMENTS,
+                           max_units=DEFAULT_MAX_UNITS):
+    """Index `repo_root` and plan its chunks. A `ChunkPlan`, or `Invalid`.
+
+    The repository-level entrypoint, on `segment.segment_document()`'s pattern:
+    the index-then-plan composition lives here rather than in the command, so
+    the command stays a call to one library function and an import cannot
+    disagree with a CI invocation. An invalid registry invalidates the run, as
+    it does everywhere else.
+    """
+    index = build_context_index(repo_root, registry_path)
+    if isinstance(index, Invalid):
+        return index
+    return plan_chunks(index, max_documents=max_documents, max_units=max_units)
+
+
 # --------------------------------------------------------------------------
 # Destinations and contention
 # --------------------------------------------------------------------------
@@ -256,12 +268,6 @@ def merge_contention(index):
             for order, source in enumerate(sources)
         )
     return contention
-
-
-def _claim_for(contention, destination, source):
-    return next(
-        (c for c in contention.get(destination, ()) if c.source == source), None
-    )
 
 
 # --------------------------------------------------------------------------
@@ -345,10 +351,10 @@ def enumerate_scope(index, rule):
 class BloatResult:
     """Validated findings, plus the coverage gaps the run must declare."""
 
-    findings: Tuple[object, ...]
+    findings: Tuple[Finding, ...]
     incomplete: Tuple[dict, ...]
     index_digest: str
-    status: str = "ok"
+    status: str = STATUS_OK
 
     def records(self):
         return tuple(f.to_record() for f in self.findings)
@@ -362,20 +368,15 @@ class BloatResult:
         forces `partial`. So a corpus with an unregistered or symlinked path
         never reports `clean` about it, and the absence of a bloat finding for
         a document nobody read cannot be mistaken for a verdict that it is
-        lean. The state is derived from the content here for the same reason
-        the contract re-derives it: a run does not get to declare a coverage it
-        did not achieve.
+        lean. The state comes from `report.state_from_content()` — the rule's
+        one owner, the same call the validator re-derives with — because a run
+        does not get to declare a coverage it did not achieve, and a second copy
+        of the rule could only ever disagree with the first.
         """
         records = [f.to_record() for f in self.findings]
         incomplete = [dict(i) for i in self.incomplete]
-        if incomplete:
-            status = STATE_PARTIAL
-        elif records:
-            status = STATE_FINDINGS
-        else:
-            status = STATE_CLEAN
         return {
-            "status": status,
+            "status": state_from_content(records, incomplete),
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "lineage": lineage.to_dict(),
             "records": records,
@@ -394,35 +395,393 @@ class BloatResult:
 
 @dataclass
 class _Recorder:
-    """One pass over a model's verdicts, collecting every problem."""
+    """One pass over a model's verdicts, collecting every problem.
+
+    Holds the two things every check needs — the index it checks against and
+    the problem list it appends to — so the checks are methods rather than
+    functions passing the same four arguments around.
+    """
 
     index: object
     lineage: object
-    chunk: Optional[object] = None
+    contention: dict
+    in_chunk: object = None
     problems: list = field(default_factory=list)
+    seen_ids: set = field(default_factory=set)
+
+    # -- problem bookkeeping ------------------------------------------------
 
     def bad(self, code, message, where=None):
         self.problems.append(Problem(code=code, message=message, location=where))
 
+    def clean_since(self, mark):
+        """Whether *this* verdict is problem-free.
 
-def _duplicate_search(index, units):
-    """The record data that says a global search happened and what it saw.
+        Scoped to one verdict rather than to the whole response, so an earlier
+        verdict's problem never silently stops a later one from being built and
+        reported on. The response as a whole still fails closed — any problem
+        anywhere discards every finding — but the pass keeps collecting, which
+        is what makes one re-prompt able to address all of it.
+        """
+        return len(self.problems) == mark
 
-    A bloat finding that says "this is redundant" is making a claim about the
-    whole corpus, and a reader must be able to tell whether the whole corpus
-    was actually consulted. This is that evidence: the index the search ran
-    against, how much of the corpus it covered, and every occurrence found.
-    """
-    occurrences = []
-    for unit in sorted(set(units)):
-        occurrences.extend(index.occurrences_of(unit))
-    return {
-        "scope": "repository",
-        "index_digest": index.digest,
-        "documents_searched": len(index.documents),
-        "occurrences": [o.to_dict() for o in occurrences],
-        "occurrence_count": len(occurrences),
-    }
+    # -- one verdict --------------------------------------------------------
+
+    def record(self, raw, where):
+        """Validate one verdict and expand it into findings, or note problems."""
+        mark = len(self.problems)
+
+        if not isinstance(raw, dict):
+            self.bad("bloat-invalid-shape", f"{where} must be an object", where)
+            return ()
+
+        self._check_fields(raw, where)
+        self._check_id(raw, where)
+
+        verdict = raw.get("verdict")
+        if verdict not in VERDICTS:
+            self.bad("bloat-unknown-verdict",
+                     f"{verdict!r} is not a bloat verdict — expected one of "
+                     f"{list(VERDICTS)}", where)
+            return ()
+
+        if not _nonempty(raw.get("evidence")):
+            self.bad("bloat-missing-evidence",
+                     f"{where} states no evidence — a bloat verdict is a value "
+                     f"judgment, and one that does not say why is not "
+                     f"reviewable", where)
+
+        if raw.get("scope") is not None:
+            return self._bulk(raw, where, verdict, mark)
+        return self._one_document(raw, where, verdict, mark)
+
+    def _check_fields(self, raw, where):
+        for name in sorted(set(raw) - set(VERDICT_FIELDS)):
+            if name in FORBIDDEN_VERDICT_FIELDS:
+                self.bad("bloat-sampling-not-authority",
+                         f"{name!r} is not a field a verdict may carry — a bulk "
+                         f"finding's members are enumerated from the index, "
+                         f"never asserted by the model, so a list of files "
+                         f"supplied here could authorize a mutation nobody "
+                         f"enumerated", where)
+            else:
+                self.bad("bloat-invalid-shape",
+                         f"{name!r} is not a verdict field; expected "
+                         f"{list(VERDICT_FIELDS)}", where)
+
+    def _check_id(self, raw, where):
+        record_id = raw.get("id")
+        if not _nonempty(record_id):
+            self.bad("bloat-invalid-shape", f"{where} needs a non-empty id", where)
+        elif record_id in self.seen_ids:
+            self.bad("bloat-duplicate-id",
+                     f"id {record_id!r} is used by more than one verdict — two "
+                     f"records a reviewer cannot tell apart cannot be approved "
+                     f"apart", where)
+        else:
+            self.seen_ids.add(record_id)
+
+    # -- a verdict about one document ---------------------------------------
+
+    def _one_document(self, raw, where, verdict, mark):
+        path = raw.get("path")
+        document = self.index.document(path) if _nonempty(path) else None
+
+        if document is None:
+            self.bad("bloat-unknown-document",
+                     f"{path!r} is not a document in this repository's index — "
+                     f"a verdict about a path the registry does not claim cannot "
+                     f"be checked or applied", where)
+            return ()
+        if self.in_chunk is not None and path not in self.in_chunk:
+            self.bad("bloat-document-outside-chunk",
+                     f"{path} is outside this chunk's slice — a worker judges "
+                     f"the documents it was given, and the index answers "
+                     f"everything else", where)
+            return ()
+
+        units = raw.get("units")
+        if not isinstance(units, list) or not units:
+            self.bad("bloat-invalid-shape",
+                     f"{where} must name at least one assertion unit", where)
+            return ()
+        for unit in units:
+            if unit not in document.units:
+                self.bad("bloat-unknown-unit",
+                         f"unit {unit!r} does not occur in {path} — a verdict is "
+                         f"about content that is actually there", where)
+
+        destination = self._destination(raw, where, verdict, path, units)
+        extra = {
+            "verdict": verdict,
+            "evidence": raw.get("evidence"),
+            "duplicate_search": self._duplicate_search(path, units),
+            "destination": destination,
+            "proposal": self._proposal(raw, where, verdict),
+            "status": self._status(raw, where, verdict),
+        }
+        self._reject_sample(raw, where, scoped=False)
+        if destination is not None:
+            self._note_contention(extra, destination["path"], path)
+
+        if not self.clean_since(mark):
+            return ()
+        return self._build(raw["id"], verdict, path, units, extra)
+
+    # -- a bulk judgment over a deterministic scope --------------------------
+
+    def _bulk(self, raw, where, verdict, mark):
+        """Expand a bulk judgment into one finding per enumerated member."""
+        scope = raw["scope"]
+        if verdict not in SCOPE_VERDICTS:
+            self.bad("bloat-scope-verdict-ineligible",
+                     f"{verdict} cannot be a bulk judgment — only "
+                     f"{list(SCOPE_VERDICTS)} applies uniformly to every member "
+                     f"of a scope; anything else needs a per-document judgment "
+                     f"nobody made", where)
+            return ()
+        for name in ("path", "units", "destination", "proposal", "status"):
+            if raw.get(name) is not None:
+                self.bad("bloat-invalid-shape",
+                         f"{name!r} does not apply to a bulk {verdict} — its "
+                         f"subject is the scope, and its members come from the "
+                         f"enumeration", where)
+
+        enumeration = enumerate_scope(self.index, scope)
+        if isinstance(enumeration, Invalid):
+            self.problems.extend(enumeration.problems)
+            return ()
+        self._reject_sample(raw, where, scoped=True, enumeration=enumeration)
+
+        empty = [m for m in enumeration.members if not self.index.document(m).units]
+        for member in empty:
+            self.bad("bloat-scope-member-empty",
+                     f"{member} is in scope {scope!r} but holds no assertion "
+                     f"unit, so no finding can bind to it — exclude it from the "
+                     f"scope or give it content, rather than retiring a set one "
+                     f"of whose members no record could name", where)
+
+        if not self.clean_since(mark):
+            return ()
+
+        findings = []
+        for position, member in enumerate(enumeration.members):
+            extra = {
+                "verdict": verdict,
+                "evidence": raw["evidence"],
+                "destination": None,
+                "proposal": None,
+                "status": None,
+                "scope": {
+                    **enumeration.to_dict(),
+                    "member_index": position,
+                    # Recorded so a reviewer can see what was actually read, and
+                    # positioned as what it is: the review order, not the mandate.
+                    "sample": sorted(raw.get("sample") or ()),
+                    "sample_is_not_authority": True,
+                },
+            }
+            findings.extend(self._build(
+                f"{raw['id']}.{position}", verdict, member,
+                list(self.index.document(member).units), extra,
+            ))
+        return findings
+
+    # -- destinations -------------------------------------------------------
+
+    def _destination(self, raw, where, verdict, path, units):
+        """Where content goes — decided by the index, never by the slice.
+
+        For content the global search found elsewhere, the destination *is* the
+        index's owner: a worker that proposed a different one was guessing from
+        a partial view, so a mismatch is refused rather than preferred. For
+        content that occurs nowhere else there is nothing to derive, so the
+        model names a destination and the index checks it against the
+        constraints a destination has to satisfy.
+        """
+        proposed = raw.get("destination")
+
+        if verdict not in DESTINATION_VERDICTS:
+            if proposed is not None:
+                self.bad("bloat-destination-forbidden",
+                         f"{verdict} moves nothing, so it names no destination — "
+                         f"only {list(DESTINATION_VERDICTS)} do", where)
+            return None
+
+        owners = {
+            self.index.owner_of(unit) for unit in units
+            if len(self.index.occurrences_of(unit)) > 1
+        } - {path}
+
+        if len(owners) > 1:
+            # The group's content is owned in more than one place, so no single
+            # destination is right for it. Falling back to whatever the worker
+            # proposed would be exactly the slice-local guess the index exists
+            # to prevent, so the grouping is refused instead.
+            self.bad("bloat-destination-ambiguous",
+                     f"this group's units are owned by {sorted(owners)} — one "
+                     f"destination cannot be right for all of them; split the "
+                     f"verdict so each group has one owner", where)
+            return None
+
+        if owners:
+            derived = owners.pop()
+            if proposed is not None and proposed != derived:
+                self.bad("bloat-destination-contradicts-index",
+                         f"the index owns this content at {derived}, not "
+                         f"{proposed!r} — a destination for duplicated content "
+                         f"is derived from the whole corpus, so a slice-local "
+                         f"answer that disagrees is a guess", where)
+                return None
+            return self._destination_record(derived, "index-owner", path, where)
+
+        if not _nonempty(proposed):
+            self.bad("bloat-destination-required",
+                     f"{verdict} must name a destination, and the index found no "
+                     f"other occurrence of this content to derive one from",
+                     where)
+            return None
+        return self._destination_record(proposed, "model-proposed", path, where)
+
+    def _destination_record(self, destination, selected_by, source, where):
+        """Check a destination against every constraint, and record which held."""
+        document = self.index.document(destination)
+        if document is None:
+            self.bad("bloat-destination-not-a-document",
+                     f"{destination!r} is not a document in this repository's "
+                     f"index — content cannot be moved somewhere the registry "
+                     f"does not claim", where)
+            return None
+        if destination == source:
+            self.bad("bloat-destination-is-source",
+                     f"{destination} is the document being judged — a move to "
+                     f"itself changes nothing and would read as an approved "
+                     f"edit", where)
+            return None
+        if document.kind not in DESTINATION_KINDS:
+            self.bad("bloat-destination-kind-ineligible",
+                     f"{destination} is a {document.kind} document — content is "
+                     f"never moved into one, because its own lifecycle ends in "
+                     f"distillation or retirement and would take the moved "
+                     f"content with it", where)
+            return None
+        return {
+            "path": destination,
+            "kind": document.kind,
+            "set": document.doc_set,
+            "selected_by": selected_by,
+            "constraints": {
+                "is_inventoried_document": True,
+                "differs_from_source": True,
+                "kind_accepts_content": True,
+                "eligible_kinds": list(DESTINATION_KINDS),
+            },
+        }
+
+    def _note_contention(self, extra, destination, source):
+        """Record the arbitration when more than one document folds into one.
+
+        The claimant list comes from the index, so every chunk records the same
+        arbitration and the same order rather than each inventing one.
+        """
+        claimants = self.contention.get(destination, ())
+        claim = next((c for c in claimants if c.source == source), None)
+        if claim is not None and len(claimants) > 1:
+            extra["contention"] = {
+                "destination": destination,
+                "order": claim.order,
+                "claimants": [c.source for c in claimants],
+            }
+
+    # -- the rest of the record ----------------------------------------------
+
+    def _duplicate_search(self, path, units):
+        """The record data saying a global search happened and what it saw.
+
+        A finding that says "this is redundant" is making a claim about the
+        whole corpus, and a reader must be able to tell whether the whole corpus
+        was actually consulted. The occurrences are split by side, because that
+        is the question the unit group cannot answer: the group is a
+        deduplicated set of content digests, so `here` is what a reviewer needs
+        to know which copies in *this* document the finding is about, and
+        `elsewhere` is what makes the redundancy claim checkable.
+        """
+        here, elsewhere = [], []
+        for unit in sorted(set(units)):
+            for place in self.index.occurrences_of(unit):
+                (here if place.path == path else elsewhere).append(place.to_dict())
+        return {
+            "scope": "repository",
+            "index_digest": self.index.digest,
+            "documents_searched": len(self.index.documents),
+            "here": here,
+            "elsewhere": elsewhere,
+            "occurrence_count": len(here) + len(elsewhere),
+        }
+
+    def _proposal(self, raw, where, verdict):
+        proposal = raw.get("proposal")
+        if verdict in PROPOSAL_VERDICTS:
+            if not _nonempty(proposal):
+                self.bad("bloat-proposal-required",
+                         f"{verdict} replaces text, so it must carry the "
+                         f"replacement", where)
+                return None
+            return proposal
+        if proposal is not None:
+            self.bad("bloat-proposal-forbidden",
+                     f"{verdict} writes no replacement text, so it carries no "
+                     f"proposal", where)
+        return None
+
+    def _status(self, raw, where, verdict):
+        status = raw.get("status")
+        if verdict == DISTILL:
+            if status not in DISTILL_STATUSES:
+                self.bad("bloat-unknown-status",
+                         f"a {DISTILL} verdict's status must be one of "
+                         f"{list(DISTILL_STATUSES)}, not {status!r} — whether the "
+                         f"work landed decides whether anything may be applied "
+                         f"at all", where)
+                return None
+            return status
+        if status is not None:
+            self.bad("bloat-status-forbidden",
+                     f"only {DISTILL} carries a lifecycle status", where)
+        return None
+
+    def _reject_sample(self, raw, where, scoped, enumeration=None):
+        """A sample is review order. On anything but a bulk scope it is nothing."""
+        sample = raw.get("sample")
+        if sample is None:
+            return
+        if not scoped:
+            self.bad("bloat-sampling-not-authority",
+                     f"{where} is a judgment about one document, so a sample "
+                     f"says nothing — sampling prioritizes review of a bulk "
+                     f"scope and never stands in for reading the subject", where)
+            return
+        if not (isinstance(sample, list) and all(_nonempty(s) for s in sample)):
+            self.bad("bloat-invalid-shape",
+                     f"{where}: sample must be a list of paths", where)
+            return
+        outside = sorted(set(sample) - set(enumeration.members))
+        if outside:
+            self.bad("bloat-sample-outside-scope",
+                     f"{outside} are not in scope {enumeration.rule!r} — a sample "
+                     f"is the part of the scope that was read, so a path outside "
+                     f"it describes review of something this judgment does not "
+                     f"cover", where)
+
+    def _build(self, record_id, verdict, path, units, extra):
+        finding = build_finding(
+            lineage=self.lineage, code=verdict, path=path,
+            units=units, record_id=record_id, extra=extra,
+        )
+        if isinstance(finding, Invalid):
+            self.problems.extend(finding.problems)
+            return ()
+        return (finding,)
 
 
 def record_verdicts(index, lineage, verdicts, chunk=None):
@@ -438,11 +797,6 @@ def record_verdicts(index, lineage, verdicts, chunk=None):
     that way — a destination outside the slice is the normal case, and the whole
     reason the index exists.
     """
-    recorder = _Recorder(index=index, lineage=lineage, chunk=chunk)
-    contention = merge_contention(index)
-    in_chunk = set(chunk.documents) if chunk is not None else None
-    findings, seen_ids = [], set()
-
     if not isinstance(verdicts, list):
         return Invalid((Problem(
             code="bloat-invalid-shape",
@@ -453,11 +807,16 @@ def record_verdicts(index, lineage, verdicts, chunk=None):
             location="verdicts",
         ),))
 
+    recorder = _Recorder(
+        index=index,
+        lineage=lineage,
+        contention=merge_contention(index),
+        in_chunk=set(chunk.documents) if chunk is not None else None,
+    )
+
+    findings = []
     for position, raw in enumerate(verdicts):
-        where = f"verdicts[{position}]"
-        built = _record_one(recorder, raw, where, contention, in_chunk, seen_ids)
-        if built:
-            findings.extend(built)
+        findings.extend(recorder.record(raw, f"verdicts[{position}]"))
 
     if recorder.problems:
         return Invalid(tuple(recorder.problems))
@@ -469,316 +828,6 @@ def record_verdicts(index, lineage, verdicts, chunk=None):
         ),
         index_digest=index.digest,
     )
-
-
-def _record_one(recorder, raw, where, contention, in_chunk, seen_ids):
-    """Validate one verdict and expand it into findings, or record problems."""
-    index = recorder.index
-    bad = recorder.bad
-
-    if not isinstance(raw, dict):
-        bad("bloat-invalid-shape", f"{where} must be an object", where)
-        return ()
-
-    unknown = sorted(set(raw) - set(VERDICT_FIELDS))
-    for name in unknown:
-        code = (
-            "bloat-sampling-not-authority" if name in FORBIDDEN_VERDICT_FIELDS
-            else "bloat-invalid-shape"
-        )
-        message = (
-            f"{name!r} is not a field a verdict may carry — a bulk finding's "
-            f"members are enumerated from the index, never asserted by the "
-            f"model, so a list of files supplied here could authorize a "
-            f"mutation nobody enumerated"
-            if code == "bloat-sampling-not-authority" else
-            f"{name!r} is not a verdict field; expected {list(VERDICT_FIELDS)}"
-        )
-        bad(code, message, where)
-
-    record_id = raw.get("id")
-    if not _nonempty(record_id):
-        bad("bloat-invalid-shape", f"{where} needs a non-empty id", where)
-    elif record_id in seen_ids:
-        bad("bloat-duplicate-id",
-            f"id {record_id!r} is used by more than one verdict — two records "
-            f"a reviewer cannot tell apart cannot be approved apart", where)
-    else:
-        seen_ids.add(record_id)
-
-    verdict = raw.get("verdict")
-    if verdict not in VERDICTS:
-        bad("bloat-unknown-verdict",
-            f"{verdict!r} is not a bloat verdict — expected one of "
-            f"{list(VERDICTS)}", where)
-        return ()
-
-    if not _nonempty(raw.get("evidence")):
-        bad("bloat-missing-evidence",
-            f"{where} states no evidence — a bloat verdict is a value "
-            f"judgment, and one that does not say why is not reviewable", where)
-
-    scope = raw.get("scope")
-    if scope is not None:
-        return _record_scope_verdict(recorder, raw, where, verdict, scope)
-
-    return _record_document_verdict(
-        recorder, raw, where, verdict, contention, in_chunk
-    )
-
-
-def _record_document_verdict(recorder, raw, where, verdict, contention, in_chunk):
-    index, bad = recorder.index, recorder.bad
-    path = raw.get("path")
-    document = index.document(path) if _nonempty(path) else None
-
-    if document is None:
-        bad("bloat-unknown-document",
-            f"{path!r} is not a document in this repository's index — a verdict "
-            f"about a path the registry does not claim cannot be checked or "
-            f"applied", where)
-        return ()
-    if in_chunk is not None and path not in in_chunk:
-        bad("bloat-document-outside-chunk",
-            f"{path} is outside this chunk's slice — a worker judges the "
-            f"documents it was given, and the index answers everything else",
-            where)
-        return ()
-
-    units = raw.get("units")
-    if not isinstance(units, list) or not units:
-        bad("bloat-invalid-shape",
-            f"{where} must name at least one assertion unit", where)
-        return ()
-    unknown_units = [u for u in units if u not in document.units]
-    for unit in unknown_units:
-        bad("bloat-unknown-unit",
-            f"unit {unit!r} does not occur in {path} — a verdict is about "
-            f"content that is actually there", where)
-
-    destination = _resolve_destination(recorder, raw, where, verdict, path, units)
-    proposal = _check_proposal(recorder, raw, where, verdict)
-    status = _check_status(recorder, raw, where, verdict)
-    _reject_sample(recorder, raw, where, scoped=False)
-
-    if recorder.problems:
-        return ()
-
-    extra = {
-        "verdict": verdict,
-        "evidence": raw["evidence"],
-        "duplicate_search": _duplicate_search(index, units),
-        "destination": destination,
-        "proposal": proposal,
-        "status": status,
-    }
-    claim = _claim_for(contention, destination["path"], path) if destination else None
-    if claim is not None and len(contention[destination["path"]]) > 1:
-        # More than one document folds into this destination. The complete
-        # claimant list comes from the index, so both chunks record the same
-        # arbitration and the same order rather than each inventing one.
-        extra["contention"] = {
-            "destination": destination["path"],
-            "order": claim.order,
-            "claimants": [c.source for c in contention[destination["path"]]],
-        }
-    return _build(recorder, raw["id"], verdict, path, units, extra)
-
-
-def _record_scope_verdict(recorder, raw, where, verdict, scope):
-    """Expand a bulk judgment into one finding per enumerated member."""
-    index, bad = recorder.index, recorder.bad
-
-    if verdict not in SCOPE_VERDICTS:
-        bad("bloat-scope-verdict-ineligible",
-            f"{verdict} cannot be a bulk judgment — only {list(SCOPE_VERDICTS)} "
-            f"applies uniformly to every member of a scope; anything else needs "
-            f"a per-document judgment nobody made", where)
-        return ()
-    if raw.get("path") is not None:
-        bad("bloat-invalid-shape",
-            f"{where} is a bulk judgment, so its subject is the scope rather "
-            f"than one path", where)
-    if raw.get("units") is not None:
-        bad("bloat-invalid-shape",
-            f"{where} is a bulk judgment, so it names no unit group of its own",
-            where)
-    for name in ("destination", "proposal", "status"):
-        if raw.get(name) is not None:
-            bad("bloat-invalid-shape",
-                f"{name!r} does not apply to a bulk {verdict}", where)
-
-    enumeration = enumerate_scope(index, scope)
-    if isinstance(enumeration, Invalid):
-        recorder.problems.extend(enumeration.problems)
-        return ()
-    _reject_sample(recorder, raw, where, scoped=True)
-
-    if recorder.problems:
-        return ()
-
-    findings = []
-    for position, member in enumerate(enumeration.members):
-        document = index.document(member)
-        extra = {
-            "verdict": verdict,
-            "evidence": raw["evidence"],
-            "destination": None,
-            "proposal": None,
-            "status": None,
-            "scope": {
-                **enumeration.to_dict(),
-                "member_index": position,
-                # Recorded so a reviewer can see what was actually read, and
-                # positioned as what it is: the review order, not the mandate.
-                "sample": sorted(raw.get("sample") or ()),
-                "sample_is_not_authority": True,
-            },
-        }
-        built = _build(
-            recorder, f"{raw['id']}.{position}", verdict, member,
-            list(document.units), extra,
-        )
-        findings.extend(built)
-    return findings
-
-
-def _resolve_destination(recorder, raw, where, verdict, path, units):
-    """Where content goes — decided by the index, never by the slice.
-
-    For content the global search found elsewhere, the destination *is* the
-    index's owner: a worker that proposed a different one was guessing from a
-    partial view, so a mismatch is refused rather than preferred. For content
-    that occurs nowhere else there is nothing to derive, so the model names a
-    destination and the index checks it against the constraints a destination
-    has to satisfy.
-    """
-    index, bad = recorder.index, recorder.bad
-    proposed = raw.get("destination")
-
-    if verdict not in DESTINATION_VERDICTS:
-        if proposed is not None:
-            bad("bloat-destination-forbidden",
-                f"{verdict} moves nothing, so it names no destination — "
-                f"only {list(DESTINATION_VERDICTS)} do", where)
-        return None
-
-    duplicated = [u for u in units if len(index.occurrences_of(u)) > 1]
-    owners = {index.owner_of(u) for u in duplicated} - {path}
-    derived = sorted(owners)[0] if len(owners) == 1 else None
-
-    if derived is not None:
-        if proposed is not None and proposed != derived:
-            bad("bloat-destination-contradicts-index",
-                f"the index owns this content at {derived}, not {proposed!r} — "
-                f"a destination for duplicated content is derived from the "
-                f"whole corpus, so a slice-local answer that disagrees is a "
-                f"guess", where)
-            return None
-        return _destination_record(index, derived, "index-owner", path, recorder, where)
-
-    if not _nonempty(proposed):
-        bad("bloat-destination-required",
-            f"{verdict} must name a destination, and the index found no other "
-            f"occurrence of this content to derive one from", where)
-        return None
-    return _destination_record(index, proposed, "model-proposed", path, recorder, where)
-
-
-def _destination_record(index, destination, selected_by, source, recorder, where):
-    """Check a destination against every constraint, and record which held."""
-    bad = recorder.bad
-    document = index.document(destination)
-    if document is None:
-        bad("bloat-destination-not-a-document",
-            f"{destination!r} is not a document in this repository's index — "
-            f"content cannot be moved somewhere the registry does not claim",
-            where)
-        return None
-    if destination == source:
-        bad("bloat-destination-is-source",
-            f"{destination} is the document being judged — a move to itself "
-            f"changes nothing and would read as an approved edit", where)
-        return None
-    if document.kind not in DESTINATION_KINDS:
-        bad("bloat-destination-kind-ineligible",
-            f"{destination} is a {document.kind} document — content is never "
-            f"moved into one, because its own lifecycle ends in distillation "
-            f"or retirement and would take the moved content with it", where)
-        return None
-    return {
-        "path": destination,
-        "kind": document.kind,
-        "set": document.doc_set,
-        "selected_by": selected_by,
-        "constraints": {
-            "is_inventoried_document": True,
-            "differs_from_source": True,
-            "kind_accepts_content": True,
-            "eligible_kinds": list(DESTINATION_KINDS),
-        },
-    }
-
-
-def _check_proposal(recorder, raw, where, verdict):
-    proposal = raw.get("proposal")
-    if verdict in PROPOSAL_VERDICTS:
-        if not _nonempty(proposal):
-            recorder.bad("bloat-proposal-required",
-                         f"{verdict} replaces text, so it must carry the "
-                         f"replacement", where)
-            return None
-        return proposal
-    if proposal is not None:
-        recorder.bad("bloat-proposal-forbidden",
-                     f"{verdict} writes no replacement text, so it carries no "
-                     f"proposal", where)
-    return None
-
-
-def _check_status(recorder, raw, where, verdict):
-    status = raw.get("status")
-    if verdict == DISTILL:
-        if status not in DISTILL_STATUSES:
-            recorder.bad("bloat-unknown-status",
-                         f"a {DISTILL} verdict's status must be one of "
-                         f"{list(DISTILL_STATUSES)}, not {status!r} — whether "
-                         f"the work landed decides whether anything may be "
-                         f"applied at all", where)
-            return None
-        return status
-    if status is not None:
-        recorder.bad("bloat-status-forbidden",
-                     f"only {DISTILL} carries a lifecycle status", where)
-    return None
-
-
-def _reject_sample(recorder, raw, where, scoped):
-    """A sample is review order. On anything but a bulk scope it is nothing."""
-    sample = raw.get("sample")
-    if sample is None:
-        return
-    if not scoped:
-        recorder.bad("bloat-sampling-not-authority",
-                     f"{where} is a judgment about one document, so a sample "
-                     f"says nothing — sampling prioritizes review of a bulk "
-                     f"scope and never stands in for reading the subject",
-                     where)
-        return
-    if not (isinstance(sample, list) and all(_nonempty(s) for s in sample)):
-        recorder.bad("bloat-invalid-shape",
-                     f"{where}: sample must be a list of paths", where)
-
-
-def _build(recorder, record_id, verdict, path, units, extra):
-    finding = build_finding(
-        lineage=recorder.lineage, code=verdict, path=path,
-        units=units, record_id=record_id, extra=extra,
-    )
-    if isinstance(finding, Invalid):
-        recorder.problems.extend(finding.problems)
-        return ()
-    return (finding,)
 
 
 def _nonempty(value):
@@ -809,14 +858,22 @@ def chunk_cache_keys(index, lineage, chunk):
     """One cache key per document in the chunk.
 
     A bloat verdict about a document is checked against the rest of the corpus,
-    so the corpus *is* its source evidence: `source_digest` is the context
-    index's digest. Anything that could have changed the judgment — the
-    document's own bytes, any other document's bytes, the registry, the audit
-    configuration, the ruleset, the plugin — moves one of the two digests or a
-    lineage field, and so moves the key.
+    so the corpus *is* its source evidence: `source_digest` is
+    `index.context_digest(path)` — the part of the corpus that bears on this
+    document, rather than the whole index. Anything that could have changed the
+    judgment moves it or a lineage field, and so moves the key.
+
+    Note that #64's lineage already carries `inventory_digest`, which moves on
+    any corpus edit at all, so today the narrower digest buys no extra hits. It
+    is still the honest description of what a cached bloat verdict was judged
+    against — a cache entry that names a different context slice is
+    `MISS_IDENTITY` rather than a false hit — and it is what a later slice would
+    need in order to narrow the lineage without re-deriving this rule.
     """
     return {
-        path: cache_key(index.document(path).document_digest, index.digest, lineage)
+        path: cache_key(
+            index.document(path).document_digest, index.context_digest(path), lineage
+        )
         for path in chunk.documents
     }
 

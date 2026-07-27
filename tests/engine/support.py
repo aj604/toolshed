@@ -30,6 +30,26 @@ def run_command(*argv, cwd=None):
     )
 
 
+# A registry covering one document of each kind, with the planning rule in a
+# declared set so a bulk enumeration has something to expand. Shared by the
+# suites that need a corpus rather than one file, so "the same corpus" means
+# the same bytes in each.
+CORPUS_REGISTRY = """{
+  "schema_version": 1,
+  "roots": ["docs"],
+  "sets": ["plans"],
+  "rules": [
+    {"glob": "docs/*.md", "kind": "living"},
+    {"glob": "docs/guides/*.md", "kind": "narrative"},
+    {"glob": "docs/plans/*.md", "kind": "planning", "set": "plans"}
+  ]
+}
+"""
+
+# One sentence for suites that need the same content in two places.
+SHARED_SENTENCE = "Fee changes require a migration note."
+
+
 class RepoTestCase(unittest.TestCase):
     def repo(self, files):
         """Materialize {repo-relative path: contents} in a temp dir; return it."""
