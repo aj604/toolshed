@@ -400,9 +400,19 @@ def _binding_problems(i, operation, by_digest, bad):
     # A retirement retires the document the record is about, and a creation
     # brings the document the record names as its destination into being.
     # Neither is a path the other end of the record can stand in for.
+    #
+    # A positioned edit is narrower still: it is bounded by the passage the
+    # record's approved units are (`_approved_span_problems`), and those units
+    # segment the record's own document — a destination has no such passage, so
+    # a span edit there is one no reviewer could have read. Refusing it here is
+    # what keeps "an approval approves a passage" true of a record that names
+    # two documents.
     expected = {
         OP_RETIRE: (record.path,),
         OP_CREATE: (record.destination,) if record.destination else (),
+        # `move-with-provenance` returned above; these are the rest of
+        # `POSITIONED_OPS`, the ones a hull can and must bound.
+        **{positioned: (record.path,) for positioned in _PASSAGE_REMEDY},
     }.get(op, record.targets())
     if operation["path"] not in expected:
         bad("plan-target-not-record-target",
@@ -457,11 +467,12 @@ def _approved_span_problems(repo_root, operations, by_digest):
     part of the passage, and a remedy that removes two sentences legitimately
     removes what separated them.
 
-    Only operations on the record's *own* document are bounded this way. A
-    record's units segment that document alone, so on a move's destination —
-    or the residue document a distillation authors — they locate nothing; the
-    path is approved, the postimage is declared, and there is no passage to
-    measure against.
+    Only operations on the record's *own* document reach this check, and that
+    is not a gap: a record's units segment that document alone, so a
+    destination has no passage to measure against — and `_binding_problems`
+    refuses a positioned operation there rather than letting one through
+    unbounded. What may write a destination is the whole-document operations
+    and a move's append, each of which the approval covers entire.
     """
     problems = []
     hulls = {}

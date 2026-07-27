@@ -506,17 +506,14 @@ class ResidueDestinationsAreAuthorizedNotInventoried(RepoTestCase):
 
         self.assertEqual(self.refusals(result), ["bloat-destination-unauthorized"])
 
-    def test_an_existing_destination_is_recorded_as_the_inventoried_document(self):
-        # Residue often lands in a document that already exists — a decision
-        # log. The collision is never silent: the record says which case this
-        # is, and the applier refuses a `create-document` over a document that
-        # is there (`apply-create-exists`), so only insert/replace can execute.
+    def test_a_residue_destination_that_is_an_existing_document_is_refused(self):
+        # Create-only, and that is a bound on authority: DISTILL's remedy set
+        # includes the span edits, and the applier bounds a positioned edit to
+        # an approved passage only on the record's *own* document — so an
+        # existing destination would take a delete at any line of it.
         result = self.distill(destination="docs/a.md")
 
-        destination = result.records()[0]["destination"]
-        self.assertEqual(destination["path"], "docs/a.md")
-        self.assertTrue(destination["constraints"]["is_inventoried_document"])
-        self.assertNotEqual(destination["selected_by"], "model-proposed-residue")
+        self.assertEqual(self.refusals(result), ["bloat-destination-occupied"])
 
     def test_an_existing_planning_document_is_never_a_residue_destination(self):
         result = self.distill(destination="docs/plans/other.md")

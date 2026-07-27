@@ -871,25 +871,29 @@ nowhere else the model names one and the index checks it: it must be an inventor
 (`bloat-destination-kind-ineligible` — `bloat.DESTINATION_KINDS` is living and narrative). The
 checks that held travel on the record, under `destination.constraints`.
 
-`DISTILL` (`bloat.RESIDUE_VERDICTS`) names the document its residue lands in. Two things make it
-unlike every other destination. It is **optional** — a distillation whose residue already has a
-home retires the artifact alone, which is lossy only if the residue was never landed, a judgment
-for the person approving. And it may name a document that **does not exist yet**, so inventory
-membership is checked but never required.
+`DISTILL` (`bloat.RESIDUE_VERDICTS`) names the document its residue is authored into. Two things
+make it unlike every other destination. It is **optional** — a distillation whose residue already
+has a home retires the artifact alone, which is lossy only if the residue was never landed, a
+judgment for the person approving. And it must name a document that **does not exist yet**:
+inventory membership is checked and refused rather than required, which is the opposite of every
+other destination.
 
-Which case it is, is recorded rather than blurred. An inventoried destination (a decision log,
-typically) takes the same checks every move destination takes, and carries
-`selected_by: model-proposed` with `constraints.is_inventoried_document: true`. An uninventoried
-one is checked as an unwritten path and carries `selected_by: model-proposed-residue` with
-`is_inventoried_document: false` and `is_authorized_new_document: true` — and the applier still
-refuses a `create-document` over a document that is there (`apply-create-exists`), so the two
-cannot be swapped after the fact. The unwritten-path checks:
+Create-only is a bound on authority, not a limitation. `DISTILL`'s remedy set includes the span
+edits (an approved distillation legitimately rewrites the artifact it retires), and a positioned
+edit is bounded by the passage the record's approved units are — units that segment the record's
+*own* document. A destination that already existed would therefore take `replace`/`insert`/
+`delete` at any line of it: naming a decision log as the residue destination would authorize
+deleting an unrelated sentence from it. An unwritten path cannot, because its whole content is
+the `create-document` text the approval covers. Residue belonging in a document that does exist
+is unplaceable under this record and needs its own. The checks, recorded on the record as
+`selected_by: model-proposed-residue` with `is_inventoried_document: false` and
+`is_authorized_new_document: true`:
 
 | Refusal | Why |
 |---|---|
 | `bloat-destination-is-source` | the residue cannot be the artifact the same record retires |
 | `bloat-destination-unauthorized` | `paths.authorize_path` refused it — canonical spelling, containment in a declared root, no symlinked component, no case-folded collision, documentation class. The same owner the approval set's scope is authorized by, so a record that could never be applied is never minted |
-| `bloat-destination-occupied` | the index does not hold the path but something is on disk there — a file no audit read and no registry claims |
+| `bloat-destination-occupied` | a document is already there — in the index, or on disk since it was built (the index may predate the file) |
 | `bloat-destination-unclassified` / `bloat-destination-kind-ineligible` | no registry rule claims the path (classification is closed-world), or the kind it assigns is not one content durably lives in |
 
 `bloat-destination-uncheckable` is the fail-closed case: an index missing the repository it was
@@ -898,9 +902,10 @@ refusal. `build_context_index` always carries both, and the registry it carries 
 inventory classified by (`inventory.Inventory.registry`) — not a second parse of the same file,
 which could answer differently.
 
-Either way the applier accepts a `create-document` whose path is exactly that destination and
-nothing else (`plan-target-not-record-target`) — a record with no destination authorizes no
-creation at all.
+The applier accepts a `create-document` whose path is exactly that destination and nothing else
+(`plan-target-not-record-target`) — a record with no destination authorizes no creation at all —
+and refuses a creation over a document that is there (`apply-create-exists`), so a path occupied
+between audit and apply fails closed rather than overwriting.
 
 `chunk`, when supplied, binds the record's *own* document to the slice
 (`bloat-document-outside-chunk`). Destinations are deliberately not bound that way: a
@@ -1739,8 +1744,11 @@ The order of refusals is the contract:
    or it is `plan-span-outside-approved-units`. The hull is measured against HEAD, and checked
    *before* the idempotency step below: measured against the working tree it would be
    unavailable on exactly the re-run an attacker arranges, by pre-placing the result of an
-   out-of-passage edit on disk. On a move's destination, or the residue document a
-   distillation authors, the record's units locate nothing, so there is no hull.
+   out-of-passage edit on disk. A record's units locate nothing in the document it names as a
+   destination, so there is no hull to measure there — which is why a positioned operation may
+   name only the record's own document (`plan-target-not-record-target`). A destination is
+   written by the whole-document operations and by a move's append, both of which the approval
+   covers entire.
 4. **Idempotency.** `postimages` maps every written path to the sha256 of its bytes after the
    plan (`null` for a retired document). The no-op verdict is *derived*, never declared: this
    plan is applied to each written path **as HEAD has it** (`repository.head_bytes()`), and the

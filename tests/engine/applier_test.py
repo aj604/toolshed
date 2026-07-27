@@ -356,29 +356,14 @@ class TypedRefusals(ApplierTestCase):
         self.assert_untouched(before, result, ["apply-preimage-mismatch"])
 
     def test_span_beyond_the_document_is_refused(self):
-        # On the residue document a distillation authors, the record's units
-        # bound nothing — they segment the planning artifact. The span still
-        # has to be in the document it names.
-        units = self.units(self.repo, PLAN_DOC)
-        record = self.finding(
-            "BLOAT-002", "DISTILL", PLAN_DOC, units,
-            destination={"path": DOC_B},
-        )
-        report, approval = self.approve([record])
-        op = {
-            "op": "replace",
-            "record": record["digest"],
-            "target_class": "documentation",
-            "path": DOC_B,
-            "start_line": 40,
-            "end_line": 40,
-            "preimage": "whatever",
-            "text": "residue",
-        }
-        plan = self.plan(approval, [op], {DOC_B: sha256_text("x")})
+        # A span past the end of the record's own document names text that is
+        # not there, whatever the plan claims its preimage is.
+        report, approval, plan, _ = self.replace_fixture()
+        plan["operations"][0].update(start_line=40, end_line=40)
+        plan = self.plan(approval, plan["operations"], plan["postimages"])
         before = self.tree(self.repo)
         result = self.apply(plan, approval, report=report)
-        self.assert_untouched(before, result, ["apply-preimage-mismatch"])
+        self.assert_untouched(before, result, ["plan-span-outside-approved-units"])
 
     def test_overlapping_spans_are_refused(self):
         units = self.units(self.repo, DOC_A)
@@ -477,6 +462,36 @@ class TypedRefusals(ApplierTestCase):
         plan = self.plan(approval, ops, {
             path: sha256_text(f"# Residue\n\nAuthored into {path}.\n")
             for path in (approved, smuggled)
+        })
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-target-not-record-target"])
+
+    def test_a_positioned_edit_on_a_records_destination_is_refused(self):
+        # A positioned edit is bounded by the passage the record's units are,
+        # and those units segment the record's own document — a destination has
+        # no such passage. Without this the span edits in DISTILL's remedy set
+        # would reach any line of the destination document, and a record naming
+        # an existing document would authorize deleting an unrelated sentence
+        # from it.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-008", "DISTILL", PLAN_DOC, units,
+            destination={"path": DOC_B},
+        )
+        report, approval = self.approve([record])
+        removed = "The worker retries a failed job three times."
+        op = {
+            "op": "delete",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_B,
+            "start_line": 3,
+            "end_line": 3,
+            "preimage": removed,
+        }
+        plan = self.plan(approval, [op], {
+            DOC_B: sha256_text(DOC_B_TEXT.replace(removed + "\n", "")),
         })
         before = self.tree(self.repo)
         result = self.apply(plan, approval, report=report)

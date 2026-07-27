@@ -624,14 +624,6 @@ class _Recorder:
                          f"{verdict}'s destination must be the path of the "
                          f"residue document, or absent", where)
                 return None
-            if self.index.document(proposed) is not None:
-                # Residue often belongs in a document that already exists — a
-                # decision log. That is the destination every other verdict
-                # names, checked the same way, and recorded as inventoried so
-                # the two cases are told apart rather than blurred.
-                return self._destination_record(
-                    proposed, "model-proposed", path, where
-                )
             return self._residue_destination_record(proposed, path, where)
 
         if verdict not in DESTINATION_VERDICTS:
@@ -678,13 +670,25 @@ class _Recorder:
         return self._destination_record(proposed, "model-proposed", path, where)
 
     def _residue_destination_record(self, destination, source, where):
-        """Check a destination that names a document nobody has written yet.
+        """Check a destination that must name a document nobody has written yet.
 
-        The caller has already established that the index does not hold this
-        path, so the inventory cannot vouch for it — which is not a reason to
-        refuse (every residue document starts absent) and not a reason to trust
-        it either. These are the checks an unwritten path can be given, and any
-        one of them that cannot be answered is a refusal.
+        A residue destination is create-only, and that is a *bound on authority*,
+        not a limitation. `RECORD_REMEDIES[DISTILL]` includes the span edits — an
+        approved distillation legitimately rewrites the artifact it retires — and
+        the applier bounds a positioned edit to the hull of the record's approved
+        units only on the record's *own* document. A record's units segment that
+        document alone, so a destination that already existed would take
+        `replace`/`insert`/`delete` at any line of it, with no passage anyone
+        reviewed: naming a decision log as the destination would authorize
+        deleting an unrelated sentence from it. An unwritten path cannot: its
+        whole content is the `create-document` text the approval covers, and the
+        applier refuses a creation over a document that is there
+        (`apply-create-exists`).
+
+        So the inventory not vouching for this path is the requirement, not an
+        obstacle to work around — and residue belonging in a document that does
+        exist stays what it was before this route existed: unplaceable under this
+        record, needing its own record and its own approval.
 
         Confinement is not re-derived here: `paths.authorize_path` is the single
         owner of path safety, and it already reasons about unwritten
@@ -694,12 +698,12 @@ class _Recorder:
         function before an applier ever sees it; this is the audit-time half, so
         a record that could never be applied is never minted in the first place.
 
-        The other two are the registry's and the repository's: the registry
+        The rest are the registry's and the repository's: the registry
         classifies the path — closed-world, so a path no rule claims is refused
-        rather than assumed living — and the kind it assigns must be one content
-        durably lives in. And the path must be free *on disk*: a file the
-        inventory does not claim is still a file a creation would land on, and
-        the index may have been built before it appeared.
+        rather than assumed living — the kind it assigns must be one content
+        durably lives in, and the path must be free both in the index and *on
+        disk*, since a file the inventory does not claim is still a file a
+        creation would land on and the index may predate it.
         """
         repo_root, registry = self.index.repo_root, self.index.registry
         if repo_root is None or registry is None:
@@ -710,9 +714,13 @@ class _Recorder:
                      f"question is a refusal", where)
             return None
 
-        # No source check here: the record's own document is an indexed one, so
-        # a destination equal to it took the inventoried route above and was
-        # refused there (`bloat-destination-is-source`).
+        if destination == source:
+            self.bad("bloat-destination-is-source",
+                     f"{destination} is the planning artifact being distilled — "
+                     f"its residue cannot be the document the same record "
+                     f"retires", where)
+            return None
+
         authorization = authorize_path(
             destination, repo_root=repo_root, roots=registry.roots,
             target_class=DOCUMENTATION,
@@ -721,14 +729,6 @@ class _Recorder:
             self.bad("bloat-destination-unauthorized",
                      f"{destination!r} cannot be a residue document: "
                      f"{authorization.problem.message}", where)
-            return None
-
-        if os.path.lexists(os.path.join(repo_root, destination)):
-            self.bad("bloat-destination-occupied",
-                     f"{destination} is not in the index but something is there "
-                     f"on disk — residue authored at that path would land on a "
-                     f"file no audit read and no registry claims; register it "
-                     f"and re-run, or name a free path", where)
             return None
 
         rule = registry.classify(destination)
@@ -746,6 +746,16 @@ class _Recorder:
                      f"document — residue is never authored into one, because "
                      f"its own lifecycle ends in distillation or retirement and "
                      f"would take the residue with it", where)
+            return None
+
+        if (self.index.document(destination) is not None
+                or os.path.lexists(os.path.join(repo_root, destination))):
+            self.bad("bloat-destination-occupied",
+                     f"{destination} already exists — a residue destination is "
+                     f"a document this distillation *authors*, so an occupied "
+                     f"path would either be overwritten or take span edits "
+                     f"nobody reviewed a passage of; land the residue there "
+                     f"under its own record instead", where)
             return None
 
         return {
