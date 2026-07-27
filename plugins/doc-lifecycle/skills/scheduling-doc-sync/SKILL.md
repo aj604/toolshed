@@ -88,6 +88,34 @@ repo's `.github/` — vendoring the `doclifecycle` engine package, copying
 `render-audit-summary.py`, and rendering the `{{AUDIT_CRON}}` knob — is aj604/toolshed#75's job.
 Until then this file is the reviewable template only; don't hand-install it ahead of that door.
 
+## The new engine's apply lane (`doc-apply.yml`, aj604/toolshed#72)
+
+`doc-apply.yml` (base directory) is the manual apply dispatch: a reviewer reads a `doc-audit.yml`
+run's report, picks the record digests they approve, and dispatches this workflow with
+`report_run_id`, `report_digest`, `records`, and `base`. The named subset **is** the semantic
+approval — the workflow mints the approval set from it (`mint-approval`), and merging the pull
+request it opens is change approval of the actual diff.
+
+Three jobs, split by trust: `revalidate` (deterministic, `contents: read` + `actions: read`, no
+write scope) binds the downloaded report artifact to the dispatched digest, re-validates it
+against the requested base, and mints the approval set; `plan` (the only model, `contents: read`
++ `id-token: write`, no GH_TOKEN, `persist-credentials: false`) authors an edit plan and nothing
+else; `apply` (`contents: write` + `pull-requests: write`, no model) runs `apply-plan`, stages
+exactly the paths the verified result emitted, commits with the engine's approval trailers,
+pushes a branch named for the approval digest, and opens a real pull request — never a draft.
+
+A stale report refuses at revalidation naming the lineage field that moved, and `apply` runs only
+on both other jobs succeeding, so nothing is created. Dispatch inputs reach no shell: they travel
+through `env:` or an action's `with:`, and the record selection is validated to be sha256 digests
+before it becomes argv. `scripts/render-apply-summary.py` owns this lane's run surface — every
+refusal, the staged path list, and the PR title, body, and commit message
+(`tests/scripts/render-apply-summary_test.py`, `tests/scripts/apply-workflow_test.py`).
+
+**Not yet wired into Install/Upgrade above**, for the same reason `doc-audit.yml` is not: it needs
+a landed `.doc-lifecycle/registry.json`, the vendored engine, and `render-apply-summary.py` copied
+into `.github/doc-sync/` — aj604/toolshed#75's job. Until then this file is the reviewable
+template only.
+
 **Before retiring a repo's legacy lane, run the shadow comparison.** Both lanes look at the
 same documentation while only one may write; `scripts/compare-shadow-lanes.py compare` answers
 from their two artifacts what they agree on, what each saw alone, and how their coverage and

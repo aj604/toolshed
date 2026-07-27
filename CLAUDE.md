@@ -3,7 +3,7 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture is absorbing the helper scripts into; see its `README.md`) plus eleven skill
+re-architecture is absorbing the helper scripts into; see its `README.md`) plus twelve skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
@@ -14,13 +14,18 @@ helper scripts
 model's edit set),
 `scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
 the upgrade lane, not vendored into installs), `scripts/render-audit-summary.py` (the new
-engine's read-only audit lane's run-surface rendering — #71), and
+engine's read-only audit lane's run-surface rendering — #71),
+`scripts/render-apply-summary.py` (the new engine's apply lane's run surface — its refusals, its
+staged path list, and the PR title, body, and commit message that carry the approval set's digest
+and summary — #72), and
 `scripts/compare-shadow-lanes.py` (the shadow-mode parity comparison between the legacy lane
 and the new one, #76 — transitional, leaves with the legacy lane in #77), all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`, `doc-bloat.yml`, and
-`doc-sync-upgrade.yml`) and `doc-audit.yml` (the new engine's audit lane template, landed by #71
-alongside the other three; not yet installed anywhere — its dogfood install is #75). The sample
+`doc-sync-upgrade.yml`), `doc-audit.yml` (the new engine's audit lane template, landed by #71
+alongside the other three), and `doc-apply.yml` (the new engine's manual apply dispatch — the one
+lane that writes, #72); neither of the last two is installed anywhere yet — their dogfood install
+is #75. The sample
 repos under `tests/fixtures/` are the only other runnable
 code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`,
 `doc-sync/upgrade-gate.py`, `doc-sync/render-report.py`,
@@ -103,7 +108,11 @@ the legacy lane in #77).
   published report, never laundered as the original's status, and an empty/absent
   revalidated payload must not fail the step outright), alongside what
   `workflow-permissions_test.py` already covers generically for every
-  `scheduling-doc-sync/*.yml` template. `compare-shadow-lanes_test.py` covers the shadow-mode
+  `scheduling-doc-sync/*.yml` template. `render-apply-summary_test.py` covers the apply lane's
+  run surface (every refusal, the staged path list, and the rendered PR body, title, and commit
+  message), and `apply-workflow_test.py` adds `doc-apply.yml`'s static checks (three-job trust
+  split, no dispatch input in any `run:` block, staging confined to the apply result's paths, a
+  real PR rather than a draft). `compare-shadow-lanes_test.py` covers the shadow-mode
   parity comparison (assertion correspondence across two commits, coverage and cost deltas,
   auto-apply-eligibility split, determinism). `release.yml`'s CI runs every
   `tests/scripts/*_test.py` suite.
