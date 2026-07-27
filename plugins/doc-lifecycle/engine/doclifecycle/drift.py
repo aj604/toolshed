@@ -400,7 +400,7 @@ def plan_drift_audit(repo_root, mode=MODE_FULL, since=None,
     )
 
 
-def _load_waivers(repo_root, waivers_path):
+def load_waivers(repo_root, waivers_path):
     """(waivers, content digest, None) or ((), None, problem).
 
     An absent file is simply no waivers. A malformed one is not: a typo that
@@ -414,6 +414,10 @@ def _load_waivers(repo_root, waivers_path):
     from the repository. It is deliberately not in the audit-configuration
     digest: that is what freshness compares, and accepting a claim must not
     expire a prior report or re-key the findings an approval set selects.
+
+    Public because the migration door reads the same file to work out which
+    acceptances re-key onto the new contract. Two readers with two notions of
+    what a waiver is would let a dry run promise the audit something else.
     """
     if waivers_path is None:
         return (), None, None
@@ -1179,7 +1183,7 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
     if isinstance(plan, Invalid):
         return plan
 
-    accepted, waivers_digest, problem = _load_waivers(repo_root, waivers)
+    accepted, waivers_digest, problem = load_waivers(repo_root, waivers)
     if problem is not None:
         return Invalid((problem,))
 

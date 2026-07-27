@@ -3,6 +3,10 @@
 Deliberately thin: a command parses argv, calls one library function, prints its
 `to_dict()` payload, and maps the result state to an exit code. No command holds
 logic of its own, so an interactive import and a CI invocation cannot disagree.
+Two commands print something other than that payload — `render-report` prints
+Markdown, and `migration-draft --registry-only` prints the registry file's bytes
+so the door's output can be redirected straight to the path a human reviews —
+and in both cases the alternative rendering is of the same library result.
 
 Exit codes name the result state, so a workflow can gate without parsing JSON:
 0 the run completed and its scope was examined (`ok`, `clean`, `findings` —
@@ -30,6 +34,12 @@ from .drift import (
     plan_drift_audit,
 )
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
+from .migrate import (
+    INSTALLED_VERSION_PATH,
+    WAIVERS_PATH,
+    draft_registry,
+    dry_run_migration,
+)
 from .render import render_report
 from .report import Report, load_report
 from .segment import segment_document
@@ -142,6 +152,9 @@ def _parser():
         prog="python3 -m doclifecycle",
         description="doc-lifecycle engine commands.",
     )
+    # Every command answers this, so `main` never has to ask whether it was
+    # defined: only `migration-draft` offers the flag that turns it on.
+    parser.set_defaults(registry_only=False)
     commands = parser.add_subparsers(dest="command", required=True)
 
     inventory = commands.add_parser(
@@ -298,6 +311,74 @@ def _parser():
     _add_report_arguments(validate)
     validate.set_defaults(render=False)
 
+    draft = commands.add_parser(
+        "migration-draft",
+        help="infer a reviewable draft registry from a legacy install",
+        description=(
+            "Emit a draft registry inferred from the consumer's existing audit "
+            "scope, waivers, scope record, narrative markers, and directory "
+            "conventions — as glob rules, one per directory with per-file "
+            "overrides only where a directory is not uniform, so the adoption "
+            "review is a short diff rather than a per-file slog. Every rule "
+            "carries the evidence it came from. --registry-only prints just the "
+            "registry file's bytes, to redirect into the path being reviewed. "
+            "Writes nothing. Exits 1 if the legacy state cannot be read or no "
+            "documentation root can be inferred."
+        ),
+    )
+    _add_corpus_arguments(draft)
+    draft.add_argument(
+        "--root", action="append", default=None, metavar="PATH",
+        help=(
+            "a documentation root, repeatable; declaring any replaces inference "
+            "entirely"
+        ),
+    )
+    draft.add_argument(
+        "--registry-only", action="store_true",
+        help="print the drafted registry file instead of the draft payload",
+    )
+    draft.set_defaults(
+        run=lambda args: draft_registry(
+            args.repo, roots=args.root, registry_path=args.registry,
+        ),
+        render=False,
+    )
+
+    dry_run = commands.add_parser(
+        "migration-dry-run",
+        help="state what adopting the landed registry would cost",
+        description=(
+            "Emit the migration dry run as JSON: the versions the migration "
+            "spans, the audit obligation each document kind takes on, which "
+            "legacy waivers re-key cleanly onto assertion-unit identity and "
+            "which need re-waiving, which old artifacts are not carried across "
+            "and how to regenerate them, and which consumer files are preserved "
+            "untouched. Writes nothing. Exits 1 when the migration is blocked — "
+            "including when any document under a declared root is unclassified, "
+            "which is named rather than bucketed."
+        ),
+    )
+    _add_corpus_arguments(dry_run)
+    dry_run.add_argument(
+        "--waivers", default=WAIVERS_PATH,
+        help=f"repo-relative legacy waivers file (default: {WAIVERS_PATH})",
+    )
+    dry_run.add_argument(
+        "--installed-version", default=INSTALLED_VERSION_PATH,
+        help=(
+            f"repo-relative version lockfile the migration reads its from-version "
+            f"out of (default: {INSTALLED_VERSION_PATH})"
+        ),
+    )
+    dry_run.set_defaults(
+        run=lambda args: dry_run_migration(
+            args.repo, registry_path=args.registry, waivers=args.waivers,
+            installed_version=args.installed_version,
+        ),
+        render=False,
+    )
+
     render = commands.add_parser(
         "render-report",
         help="render a validated report as Markdown",
@@ -338,7 +419,13 @@ def _explain(result):
 def main(argv=None):
     args = _parser().parse_args(argv)
     result = args.run(args)
-    if args.render:
+    if args.registry_only:
+        # The registry file's exact bytes, so the door's output can be
+        # redirected to the path the human reviews. An invalid draft prints
+        # nothing, for the same reason an invalid report renders nothing.
+        if result.status != STATE_INVALID:
+            print(result.registry_text, end="")
+    elif args.render:
         # Rendering takes validated typed objects only, so an invalid result
         # prints nothing: there is no rendered form of a report that failed.
         if result.status != STATE_INVALID:

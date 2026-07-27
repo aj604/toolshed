@@ -1,5 +1,64 @@
 # Decisions
 
+## 2026-07-26 — migration door: registry inference + dry-run upgrade (#74)
+- Evidence: issue #57's distilled-decisions comment (2026-07-26), "Adoption / migration": infer
+  a draft registry from existing state, "a human reviews the draft as a normal PR diff (glob
+  rules, not per-file slog)", and "**Unclassified docs block the upgrade** (fail closed) — no
+  'unclassified' dumping-ground bucket."
+- Decided (the draft is globs, not files): `draft_registry()` emits one rule per directory
+  carrying that directory's dominant classification, plus a per-file override only where a
+  directory disagrees with itself. A per-file registry would be technically correct and
+  unreviewable — nobody audits a thousand-line diff, so the door would produce rubber-stamped
+  classification. Every rule carries the `basis` it was inferred from and the documents it
+  claims, so a wrong rule is traceable to its evidence rather than argued about.
+- Decided (roots come from evidence, not a sweep): top-level markdown files, the directory
+  holding `docs/doc-scope.md`, and directories the waivers / `policy_scope` / audit-scope
+  `include` reach into. `exclude` is deliberately *not* evidence — naming a subtree to keep it
+  out is not a declaration that it is a root — and no inferable root is `migration-no-roots`
+  rather than a guess. `--root` replaces inference outright.
+- Decided (living is the default kind): precedence is anchor → policy scope → planning
+  location → living, matching the legacy bloat planner so the door and the audit cannot disagree.
+  Living last is the safe default: it owes the most, so a wrong guess over-audits rather than
+  quietly exempting a document.
+- Decided (a dry run resolves the half of finding identity it can): a legacy waiver re-keys
+  cleanly when its quoted text lands on determinate assertion-capable units; the reported key is
+  the **unit digest** (plural, with the `matched` count), not a finding digest. A finding digest
+  also covers report lineage and the finding code, both bound when an audit runs — emitting one
+  here would be a promise about a run nobody has made. The breadth bound is the audit's own
+  `MAX_WAIVER_UNITS`, not a stricter one: calling anything past a single unit ambiguous would
+  report waivers as broken that will keep working, overstating the cost this dry run exists to
+  state accurately. Five named reasons cover the rest (not inventoried, carries no assertions,
+  unreadable, claim not found, claim too broad), each with what to do.
+- Decided (the draft's claims are re-derived, not assumed): a per-file override is still a glob,
+  so a document named with `*` or `?` emits a rule that also claims its neighbours — and
+  overrides sort last, so it wins silently. `registry.parse()` cannot catch it (the file is well
+  formed), so every claim is re-checked through the parsed registry and a mismatch is
+  `migration-draft-inconsistent`.
+- Decided (old artifacts are rejected, never coerced): closed-world over `.github/doc-sync/` —
+  anything the contract does not carry across and that is not a vendored script is an artifact
+  of the old world — plus the two report names the legacy workflows write at the repo root. A
+  name-based class (report / approval / cache) only picks which regeneration instruction the
+  reader gets; the disposition is the same for all three, because none of them carry the lineage
+  the new contract binds identity to.
+- Decided (version-to-version, and it refuses rather than guesses): one contract,
+  `legacy-doc-sync-to-registry`, spanning `installed-version` → `PLUGIN_VERSION`. Absent is a
+  fresh install; unparseable and ahead-of-engine are refusals, using the upgrade gate's numeric
+  comparison so the two agree about which install is older.
+- Decided (the door never writes): both commands are read-only and the suites compare the whole
+  tree byte for byte before and after, refusal paths included. The migration is a human landing
+  a reviewed file; the dogfood migration itself is #75.
+- Rejected: an `unclassified` kind or bucket for documents no rule claims. A bucket is how a
+  corpus quietly stops being audited — the paths are named and the upgrade stops.
+- Rejected: a second corpus walk inside the door. `registry.without_rules()` + the now-public
+  `inventory.walk_root()` mean the documents a draft proposes rules for are exactly the ones the
+  resulting inventory holds. `drift.load_waivers()` was made public for the same reason, and
+  root evidence goes through `paths.repository_relative_problem()` rather than hand-trimmed
+  strings, since path safety already has one owner.
+- Rejected: a registry of version-keyed migration steps. There is exactly one migration — every
+  pre-registry install looks alike, because none of them had a registry — so a step table would
+  be structure for a need that does not exist yet. The contract is named and the versions it
+  spans are reported; the second migration is what earns the table.
+
 ## 2026-07-26 — engine package + registry-driven closed-world inventory (#57 stage 1, #60)
 - Evidence: issue #57's distilled-decisions comment (2026-07-26) commits to "one stdlib-only
   Python package … thin `python3 -m` CLI entrypoints wrap library functions, so library and
