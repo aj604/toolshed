@@ -18,6 +18,7 @@ import sys
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .render import render_report
 from .report import Report, load_report
+from .segment import segment_document
 from .results import (
     STATE_CLEAN,
     STATE_FINDINGS,
@@ -99,6 +100,35 @@ def _parser():
     )
     inventory.set_defaults(
         run=lambda args: build_inventory(args.repo, args.registry), render=False
+    )
+
+    segment = commands.add_parser(
+        "segment",
+        help="split one registered document into assertion units",
+        description=(
+            "Emit a document's assertion units as JSON: one unit per sentence, "
+            "list item, or table row, each with the content digest that is its "
+            "identity, and a flag saying whether its structure can carry a "
+            "claim at all. A fixed parser with no model in the loop, so the "
+            "same bytes always produce the same units. Exits 1 if the registry "
+            "is invalid or the path is not a document in the inventory."
+        ),
+    )
+    segment.add_argument(
+        "--repo", default=".", help="repository root (default: the current directory)"
+    )
+    segment.add_argument(
+        "--path", required=True,
+        help="the document to segment, repository-relative; must be inventoried",
+    )
+    segment.add_argument(
+        "--registry",
+        default=DEFAULT_REGISTRY_PATH,
+        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
+    )
+    segment.set_defaults(
+        run=lambda args: segment_document(args.repo, args.path, args.registry),
+        render=False,
     )
 
     validate = commands.add_parser(
