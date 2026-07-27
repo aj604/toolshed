@@ -1,6 +1,6 @@
 # Docs as checkable claims — how doc-lifecycle thinks
 
-> As of 2026-07-05 (doc-lifecycle 0.6.2 @ e5201b8; skill files under `plugins/doc-lifecycle/skills/`)
+> As of 2026-07-27 (doc-lifecycle 0.28.0; skill files under `plugins/doc-lifecycle/skills/`, applier contract in `plugins/doc-lifecycle/engine/README.md`)
 
 Five minutes here explains every skill in the plugin. Each principle below names the
 skill file that enforces it, so none of this is aspiration — you can go read the rule.
@@ -35,15 +35,16 @@ elegant"; you can check "reset state = `make reset`".
 ## 3. Nothing edits your docs without your approval
 
 Both detectors are **read-only**. They emit structured records — a verdict from a fixed
-enum, cited evidence — and stop. The fixers apply only what a report authorizes, and
-nothing else: `fixing-doc-drift` takes the drift report you hand it as its whole mandate,
-landing each `STALE` record's drafted fix at its location and never touching a passage
-the report didn't flag; `fixing-doc-bloat` is gated harder still — every bloat record
-carries an ID, you approve a subset of IDs, and exactly those records get applied. No
-"while I'm here" cleanups, no rewording the proposal text. That discipline has one
-written owner, `plugins/doc-lifecycle/references/apply-discipline.md`, which both fixers
-cite. A fix that also lands its author's opinions stops being reviewable; this one stays
-reviewable by construction.
+enum, cited evidence — and stop. One skill applies them, `fixing-docs`, and only what you
+authorized: every record carries an ID, you approve a subset of IDs, and that selection is
+minted into an **approval set** — the artifact the applier treats as its sole authority, a
+report on its own being worth nothing. Drift and bloat land through the same door and the
+same gate: each approved `STALE` record's drafted fix at its location, each approved bloat
+record's span and nothing beside it. No "while I'm here" cleanups, no rewording the
+proposal text. That discipline has one written owner, the applier contract in
+`plugins/doc-lifecycle/engine/README.md` (its "Approval sets" and "The applier" sections),
+which `fixing-docs` cites. A fix that also lands its author's opinions stops being
+reviewable; this one stays reviewable by construction.
 
 ## 4. Automation is a graduation, not a default
 

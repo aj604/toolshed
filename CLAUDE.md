@@ -65,18 +65,20 @@ the legacy lane in #77).
   `superpowers:writing-skills` methodology; test records live under `tests/baselines/`, one dir
   per test milestone (see the directory for the current set), plus the original writing-docs
   records loose at the root.
-- `detecting-doc-bloat`/`fixing-doc-bloat` RED/GREEN baselines are retained at
-  `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/`, the 2026-07-06
+- The bloat lane's RED/GREEN baselines are retained at
+  `tests/baselines/bloat-red/` and `tests/baselines/bloat-fixing-red/` (recorded against
+  `detecting-doc-bloat` and the since-merged `fixing-doc-bloat`), the 2026-07-06
   rearchitecture's at `tests/baselines/bloat-rearch-red/` / `bloat-rearch-green/`, the
   2026-07-07 scale hardening's at `tests/baselines/bloat-scale-red/` / `bloat-scale-green/`,
-  and the 2026-07-09 distill-lane fan-out's at `tests/baselines/distill-fanout-red/` /
-  `distill-fanout-green/`;
+  the 2026-07-09 distill-lane fan-out's at `tests/baselines/distill-fanout-red/` /
+  `distill-fanout-green/`, and the fix-skill merge's at
+  `tests/baselines/fixing-docs-merge-red/` / `fixing-docs-merge-green/`;
   method, status, and resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md`
   (2026-06-09 suite entry; 2026-06-20 `docs/reference/` shape; 2026-07-06 rearchitecture
   entry; 2026-07-07 scale-hardening entry; 2026-07-09 distill-fan-out entry).
-- The generic apply-only rules for fix skills have one owner,
-  `plugins/doc-lifecycle/references/apply-discipline.md`, cited (not restated) by both
-  `fixing-doc-drift` and `fixing-doc-bloat`.
+- Apply discipline has one owner, the applier contract in
+  `plugins/doc-lifecycle/engine/README.md` ("Approval sets" and "The applier"), cited (not
+  restated) by `fixing-docs` — the single fix door for drift and bloat records alike.
 - **The helper scripts have unit tests** (stdlib `unittest`, no deps) at
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
   output contract — `sync-gate_test.py`/`render-report_test.py` also cover `doc-bloat.yml`'s

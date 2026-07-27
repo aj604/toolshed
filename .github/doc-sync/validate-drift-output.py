@@ -27,7 +27,7 @@ TIERS = {1, 2, 3}
 REQUIRED = ("claim", "location", "kind", "tier", "verdict", "evidence", "fix")
 SUMMARY_KEYS = ("verified", "stale", "unverifiable")
 # location is `file:line` — exactly one line, numbered from 1, no ranges,
-# e.g. CLAUDE.md:24. It is the only field fixing-doc-drift uses to place an
+# e.g. CLAUDE.md:24. It is the only field fixing-docs uses to place a drift
 # edit, so its shape is enforced.
 LOCATION_RE = re.compile(r"^.+:[1-9]\d*$")
 

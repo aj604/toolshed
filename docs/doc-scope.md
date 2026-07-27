@@ -2,7 +2,7 @@
 <!-- format: doc-lifecycle growing-docs -->
 
 ## Deferred
-- guide: drift-audit walkthrough (`detecting-doc-drift` → `fixing-doc-drift`) — promote
+- guide: drift-audit walkthrough (`detecting-doc-drift` → `fixing-docs`) — promote
   when: the README's demo + "What an audit hands you" section proves insufficient
   (a user asks how to run or apply a drift audit).
 

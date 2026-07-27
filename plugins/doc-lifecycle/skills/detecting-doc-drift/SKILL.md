@@ -20,8 +20,8 @@ Two non-negotiables make the output usable by automation:
 
 **REQUIRED SUB-SKILL:** Use **writing-docs** for any fix you propose — every `fix` must meet
 its bar (real output, no aspirational claims, marked+anchored rationale). This skill finds
-and classifies drift; writing-docs governs how the correction reads. **`fixing-doc-drift`**
-consumes this skill's records and applies the fixes (an optional auto-trigger layer, designed
+and classifies drift; writing-docs governs how the correction reads. **`fixing-docs`**
+consumes this skill's records and applies the approved fixes (an optional auto-trigger layer, designed
 and shipped as the `scheduling-doc-sync` skill, wires detect→fix to cron/PR).
 
 ## The engine (run these four steps, in order)
