@@ -37,12 +37,12 @@ a destination a reviewer cannot re-derive is a destination nobody can check.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .digest import sha256_canonical
-from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
+from .inventory import DEFAULT_REGISTRY_PATH, build_inventory, load_registry
 from .results import STATUS_OK, Invalid
 from .segment import segment_text
 
@@ -158,6 +158,14 @@ class ContextIndex:
     # `documents` so ownership questions are not linear scans.
     _occurrences: Dict[str, Tuple[Occurrence, ...]]
     _by_path: Dict[str, IndexedDocument]
+    # What the index was built from. Not identity — the digest already covers
+    # everything they produced — but a question about a path holding *no*
+    # document (a distillation's residue) can be answered from nothing else:
+    # the registry classifies it, and the repository says whether it is free.
+    # `None` when an index was assembled without them, which the caller must
+    # treat as "unanswerable", never as "no objection".
+    repo_root: Optional[str] = field(default=None, compare=False, repr=False)
+    registry: Optional[object] = field(default=None, compare=False, repr=False)
 
     def occurrences_of(self, unit_digest):
         """Every place this content appears, in (path, position) order.
@@ -284,6 +292,12 @@ def build_context_index(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
     inventory = build_inventory(repo_root, registry_path)
     if isinstance(inventory, Invalid):
         return inventory
+    registry = load_registry(repo_root, registry_path)
+    if isinstance(registry, Invalid):
+        # Unreachable in practice — the inventory just parsed the same file —
+        # but a registry that stopped parsing between the two reads leaves
+        # classification unanswerable, and that invalidates the run.
+        return registry
 
     documents, units, occurrences = [], {}, {}
     unexamined = [
@@ -350,4 +364,6 @@ def build_context_index(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
         digest=_index_digest(inventory.digest, documents, unexamined),
         _occurrences=frozen,
         _by_path={d.path: d for d in documents},
+        repo_root=repo_root,
+        registry=registry,
     )

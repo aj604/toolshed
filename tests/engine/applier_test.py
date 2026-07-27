@@ -31,7 +31,10 @@ from doclifecycle.applier import (
     load_edit_plan,
 )
 from doclifecycle.approval import mint_approval_set
+from doclifecycle.bloat import record_verdicts
+from doclifecycle.context import build_context_index
 from doclifecycle.digest import sha256_canonical
+from doclifecycle.report import EvidenceBoundary
 from doclifecycle.results import STATE_CLEAN, STATE_STALE, Invalid
 
 NEW_SENTENCE = "The payment service charges a flat 2.5% fee."
@@ -449,6 +452,77 @@ class TypedRefusals(ApplierTestCase):
         before = self.tree(self.repo)
         result = self.apply(plan, approval, report=report)
         self.assert_untouched(before, result, ["plan-forbidden-target-class"])
+
+    def test_a_second_created_document_is_not_smuggled_in_on_one_record(self):
+        # One record authorizes one residue document. A plan that creates the
+        # approved one *and* a second alongside it is a document nobody
+        # approved riding on an approval that looks satisfied.
+        approved, smuggled = "docs/decisions.md", "docs/extra.md"
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-005", "DISTILL", PLAN_DOC, units,
+            destination={"path": approved},
+        )
+        report, approval = self.approve([record])
+        ops = [
+            {
+                "op": "create-document",
+                "record": record["digest"],
+                "target_class": "documentation",
+                "path": path,
+                "text": f"# Residue\n\nAuthored into {path}.\n",
+            }
+            for path in (approved, smuggled)
+        ]
+        plan = self.plan(approval, ops, {
+            path: sha256_text(f"# Residue\n\nAuthored into {path}.\n")
+            for path in (approved, smuggled)
+        })
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-target-not-record-target"])
+
+    def test_a_creation_aimed_at_the_artifact_itself_is_refused(self):
+        # A record's two ends are not interchangeable: the artifact is what a
+        # distillation retires, and authoring over it would put unapproved
+        # content at the path the same record is about.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-007", "DISTILL", PLAN_DOC, units,
+            destination={"path": "docs/decisions.md"},
+        )
+        report, approval = self.approve([record])
+        content = "# Not the residue\n\nWritten over the artifact.\n"
+        op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "text": content,
+        }
+        plan = self.plan(approval, [op], {PLAN_DOC: sha256_text(content)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-target-not-record-target"])
+
+    def test_a_distillation_naming_no_residue_authorizes_no_creation(self):
+        # The retire-only case: with no destination the record authorizes one
+        # path, the artifact — so a creation attached to it is unapproved.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding("BLOAT-006", "DISTILL", PLAN_DOC, units)
+        report, approval = self.approve([record])
+        content = "# Residue\n\nAuthored with nobody's approval.\n"
+        op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": "docs/decisions.md",
+            "text": content,
+        }
+        plan = self.plan(approval, [op], {"docs/decisions.md": sha256_text(content)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-target-not-record-target"])
 
     def test_create_over_an_existing_document_is_refused(self):
         units = self.units(self.repo, PLAN_DOC)
@@ -904,6 +978,113 @@ class WorkingTreeIsClean(ApplierTestCase):
         before = self.tree(self.repo)
         result = self.apply(plan, approval, report=report)
         self.assert_untouched(before, result, ["apply-working-tree-not-clean"])
+
+
+class DistillationLandsItsResidue(ApplierTestCase):
+    """The honest path end to end: audited DISTILL, approved, applied.
+
+    The record is one the *bloat audit produced*, not one the test wrote, so
+    this is the whole route a distillation takes — the audit's residue
+    destination, the approval set minted over it, and the plan that authors the
+    document and retires the artifact in one apply.
+    """
+
+    RESIDUE = "docs/decisions.md"
+    RESIDUE_TEXT = (
+        "# Decisions\n\n"
+        "Fees are flat because the processor bills one per-transaction fee "
+        "(`docs/a.md`).\n"
+    )
+
+    def setUp(self):
+        super().setUp()
+        # The lineage a bloat chunk runs under: the record's digest commits to
+        # it, so the report it travels in is validated under the same one.
+        self.lineage = self.lineage_for(
+            self.repo, audit_mode="chunk",
+            evidence_boundary=EvidenceBoundary(("docs/**",)),
+        )
+
+    def audited_record(self, destination=RESIDUE):
+        index = build_context_index(self.repo)
+        self.assertNotIsInstance(index, Invalid, index)
+        entry = {
+            "id": "BLOAT-D1",
+            "verdict": "DISTILL",
+            "path": PLAN_DOC,
+            "units": list(index.document(PLAN_DOC).units),
+            "evidence": "The tiered-fee work landed; docs/a.md states the rate.",
+            "status": "ready",
+        }
+        if destination is not None:
+            entry["destination"] = destination
+        result = record_verdicts(index, self.lineage, [entry])
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        return result.records()[0]
+
+    def fixture(self):
+        record = self.audited_record()
+        report, approval = self.approve([record])
+        ops = [
+            {
+                "op": "create-document",
+                "record": record["digest"],
+                "target_class": "documentation",
+                "path": self.RESIDUE,
+                "text": self.RESIDUE_TEXT,
+            },
+            {
+                "op": "retire-document",
+                "record": record["digest"],
+                "target_class": "documentation",
+                "path": PLAN_DOC,
+                "preimage": PLAN_DOC_TEXT,
+            },
+        ]
+        plan = self.plan(approval, ops, {
+            self.RESIDUE: sha256_text(self.RESIDUE_TEXT),
+            PLAN_DOC: None,
+        })
+        return report, approval, plan
+
+    def test_the_audits_residue_destination_is_inside_the_approved_scope(self):
+        record = self.audited_record()
+        _, approval = self.approve([record])
+
+        self.assertEqual(record["destination"]["path"], self.RESIDUE)
+        self.assertIn(self.RESIDUE, approval.scope.paths)
+
+    def test_the_residue_lands_and_the_planning_artifact_is_retired(self):
+        report, approval, plan = self.fixture()
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assertIsInstance(result, ApplyResult, result)
+        self.assertEqual(result.status, STATE_CLEAN)
+        self.assertEqual(self.read(self.repo, self.RESIDUE), self.RESIDUE_TEXT)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, PLAN_DOC)))
+        self.assertEqual(sorted(result.changed_paths), [self.RESIDUE, PLAN_DOC])
+        # The whole diff is those two documents, and nothing was staged.
+        self.assertEqual(self.status_paths(self.repo), [self.RESIDUE, PLAN_DOC])
+        self.assertEqual(self.staged_paths(self.repo), [])
+
+    def test_the_residue_document_is_authored_before_the_artifact_is_retired(self):
+        # Nothing is lossy in either order here, but the result must say both
+        # halves happened: a retire recorded without its creation is the
+        # stranded-residue case this whole route exists to close.
+        report, approval, plan = self.fixture()
+
+        applied = self.apply(plan, approval, report=report).to_dict()["applied"]
+
+        self.assertEqual(
+            [(e["op"], e["path"]) for e in applied],
+            [("create-document", self.RESIDUE), ("retire-document", PLAN_DOC)],
+        )
+
+    def test_an_audit_that_named_no_residue_still_records_the_retirement(self):
+        record = self.audited_record(destination=None)
+
+        self.assertIsNone(record["destination"])
 
 
 class LoadEditPlan(ApplierTestCase):

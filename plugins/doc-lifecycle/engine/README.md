@@ -795,7 +795,14 @@ index.occurrences_of(unit_digest)           # every place that content appears
 index.duplicated_units()                    # units occurring more than once
 index.owner_of(unit_digest)                 # the document it belongs in
 index.context_digest(path)                  # the corpus, as it bears on one document
+index.repo_root, index.registry             # what it was built from; how an unwritten path classifies
 ```
+
+`repo_root` and `registry` are not part of the index's identity (the digest already covers
+everything they produced). They are there for the one question the indexed documents cannot
+answer: whether a path holding *no* document could hold one — which is what a distillation's
+residue destination is. Both are `None` on an index assembled without them, and a caller must
+read that as "unanswerable", never as "no objection".
 
 ## Bloat audit
 
@@ -809,7 +816,7 @@ and what should replace it — and nothing else; every fact comes from the index
 | `EXTRACT-AND-MOVE` | right content, wrong document | yes |
 | `MERGE-DOC` | near-duplicate; fold into the survivor | yes |
 | `RETIRE-DOC` | carries nothing another document lacks | no |
-| `DISTILL` | planning artifact; `ready` or `pending-implementation` | no |
+| `DISTILL` | planning artifact; `ready` or `pending-implementation` | optional — the residue document it authors |
 
 The legacy skill's `POLICY` verdict is deliberately absent. A bulk judgment no longer rides on
 a hand-declared directory whose file list the model echoes back: it declares an enumerable
@@ -860,6 +867,35 @@ nowhere else the model names one and the index checks it: it must be an inventor
 (`bloat-destination-is-source`), and of a kind that accepts content
 (`bloat-destination-kind-ineligible` — `bloat.DESTINATION_KINDS` is living and narrative). The
 checks that held travel on the record, under `destination.constraints`.
+
+`DISTILL` (`bloat.RESIDUE_VERDICTS`) names the document its residue lands in. Two things make it
+unlike every other destination. It is **optional** — a distillation whose residue already has a
+home retires the artifact alone, which is lossy only if the residue was never landed, a judgment
+for the person approving. And it may name a document that **does not exist yet**, so inventory
+membership is checked but never required.
+
+Which case it is, is recorded rather than blurred. An inventoried destination (a decision log,
+typically) takes the same checks every move destination takes, and carries
+`selected_by: model-proposed` with `constraints.is_inventoried_document: true`. An uninventoried
+one is checked as an unwritten path and carries `selected_by: model-proposed-residue` with
+`is_inventoried_document: false` and `is_authorized_new_document: true` — and the applier still
+refuses a `create-document` over a document that is there (`apply-create-exists`), so the two
+cannot be swapped after the fact. The unwritten-path checks:
+
+| Refusal | Why |
+|---|---|
+| `bloat-destination-is-source` | the residue cannot be the artifact the same record retires |
+| `bloat-destination-unauthorized` | `paths.authorize_path` refused it — canonical spelling, containment in a declared root, no symlinked component, no case-folded collision, documentation class. The same owner the approval set's scope is authorized by, so a record that could never be applied is never minted |
+| `bloat-destination-occupied` | the index does not hold the path but something is on disk there — a file no audit read and no registry claims |
+| `bloat-destination-unclassified` / `bloat-destination-kind-ineligible` | no registry rule claims the path (classification is closed-world), or the kind it assigns is not one content durably lives in |
+
+`bloat-destination-uncheckable` is the fail-closed case: an index carrying neither the
+repository it was built from nor its registry cannot answer any of them, and an unanswered
+safety question is a refusal. `build_context_index` always carries both.
+
+Either way the applier accepts a `create-document` whose path is exactly that destination and
+nothing else (`plan-target-not-record-target`) — a record with no destination authorizes no
+creation at all.
 
 `chunk`, when supplied, binds the record's *own* document to the slice
 (`bloat-document-outside-chunk`). Destinations are deliberately not bound that way: a

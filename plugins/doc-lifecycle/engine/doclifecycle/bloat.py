@@ -36,6 +36,7 @@ index, and for duplicated content it is *derived* from the index — so two chun
 that never see each other reach the same answer.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
@@ -45,6 +46,7 @@ from .context import KIND_PRECEDENCE, build_context_index
 from .digest import sha256_canonical
 from .finding import Finding, build_finding
 from .inventory import DEFAULT_REGISTRY_PATH
+from .paths import DOCUMENTATION, authorize_path
 from .registry import compile_glob
 from .report import state_from_content
 from .results import STATUS_OK, Invalid, Problem
@@ -63,6 +65,12 @@ VERDICTS = (CUT, CONDENSE, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC, DISTILL)
 # Verdicts that move content somewhere, and so must name where. These are
 # exactly the ones a worker cannot decide from its slice.
 DESTINATION_VERDICTS = (EXTRACT_AND_MOVE, MERGE_DOC)
+# Verdicts whose destination is a document that does not exist yet: a
+# distillation authors the durable residue of a planning artifact, so its
+# destination is *optional* (the residue may already have a home) and is checked
+# as an unwritten path rather than looked up in the inventory, which by
+# definition does not hold it.
+RESIDUE_VERDICTS = (DISTILL,)
 # Verdicts that replace text, and so must carry the replacement.
 PROPOSAL_VERDICTS = (CONDENSE, EXTRACT_AND_MOVE)
 # Verdicts eligible for bulk expansion over a deterministic scope. Retirement
@@ -601,11 +609,33 @@ class _Recorder:
         """
         proposed = raw.get("destination")
 
+        if verdict in RESIDUE_VERDICTS:
+            if proposed is None:
+                # Retire-only distillation: nothing is authored, so nothing is
+                # named. Legal, and lossy only if residue was never landed
+                # under its own record — a judgment for the person approving.
+                return None
+            if not _nonempty(proposed):
+                self.bad("bloat-invalid-shape",
+                         f"{verdict}'s destination must be the path of the "
+                         f"residue document, or absent", where)
+                return None
+            if self.index.document(proposed) is not None:
+                # Residue often belongs in a document that already exists — a
+                # decision log. That is the destination every other verdict
+                # names, checked the same way, and recorded as inventoried so
+                # the two cases are told apart rather than blurred.
+                return self._destination_record(
+                    proposed, "model-proposed", path, where
+                )
+            return self._residue_destination_record(proposed, path, where)
+
         if verdict not in DESTINATION_VERDICTS:
             if proposed is not None:
                 self.bad("bloat-destination-forbidden",
                          f"{verdict} moves nothing, so it names no destination — "
-                         f"only {list(DESTINATION_VERDICTS)} do", where)
+                         f"only {list(DESTINATION_VERDICTS + RESIDUE_VERDICTS)} "
+                         f"do", where)
             return None
 
         owners = {
@@ -642,6 +672,97 @@ class _Recorder:
                      where)
             return None
         return self._destination_record(proposed, "model-proposed", path, where)
+
+    def _residue_destination_record(self, destination, source, where):
+        """Check a destination that names a document nobody has written yet.
+
+        The caller has already established that the index does not hold this
+        path, so the inventory cannot vouch for it — which is not a reason to
+        refuse (every residue document starts absent) and not a reason to trust
+        it either. These are the checks an unwritten path can be given, and any
+        one of them that cannot be answered is a refusal.
+
+        Confinement is not re-derived here: `paths.authorize_path` is the single
+        owner of path safety, and it already reasons about unwritten
+        create-document targets (canonical spelling, containment in a declared
+        root, no symlinked component, no case-folded collision, documentation
+        class). The approval set authorizes the same path through the same
+        function before an applier ever sees it; this is the audit-time half, so
+        a record that could never be applied is never minted in the first place.
+
+        The other two are the registry's and the repository's: the registry
+        classifies the path — closed-world, so a path no rule claims is refused
+        rather than assumed living — and the kind it assigns must be one content
+        durably lives in. And the path must be free *on disk*: a file the
+        inventory does not claim is still a file a creation would land on, and
+        the index may have been built before it appeared.
+        """
+        repo_root = getattr(self.index, "repo_root", None)
+        registry = getattr(self.index, "registry", None)
+        if repo_root is None or registry is None:
+            self.bad("bloat-destination-uncheckable",
+                     f"this index carries neither the repository it was built "
+                     f"from nor its registry, so whether {destination!r} could "
+                     f"hold a new document is unanswerable — and an unanswered "
+                     f"safety question is a refusal", where)
+            return None
+
+        if destination == source:
+            self.bad("bloat-destination-is-source",
+                     f"{destination} is the planning artifact being distilled — "
+                     f"its residue cannot be the document the same record "
+                     f"retires", where)
+            return None
+
+        authorization = authorize_path(
+            destination, repo_root=repo_root, roots=registry.roots,
+            target_class=DOCUMENTATION,
+        )
+        if not authorization.authorized:
+            self.bad("bloat-destination-unauthorized",
+                     f"{destination!r} cannot be a residue document: "
+                     f"{authorization.problem.message}", where)
+            return None
+
+        if os.path.lexists(os.path.join(repo_root, destination)):
+            self.bad("bloat-destination-occupied",
+                     f"{destination} is not in the index but something is there "
+                     f"on disk — residue authored at that path would land on a "
+                     f"file no audit read and no registry claims; register it "
+                     f"and re-run, or name a free path", where)
+            return None
+
+        rule = registry.classify(destination)
+        if (rule is None or not registry.is_document(destination)
+                or registry.excludes(destination)):
+            self.bad("bloat-destination-unclassified",
+                     f"no registry rule claims {destination!r} as documentation "
+                     f"— classification is closed-world, so a residue document "
+                     f"at an unclassified path would be born outside the corpus "
+                     f"every later audit reads", where)
+            return None
+        if rule.kind not in DESTINATION_KINDS:
+            self.bad("bloat-destination-kind-ineligible",
+                     f"the registry classifies {destination} as a {rule.kind} "
+                     f"document — residue is never authored into one, because "
+                     f"its own lifecycle ends in distillation or retirement and "
+                     f"would take the residue with it", where)
+            return None
+
+        return {
+            "path": destination,
+            "kind": rule.kind,
+            "set": rule.doc_set,
+            "selected_by": "model-proposed-residue",
+            "constraints": {
+                "is_inventoried_document": False,
+                "is_authorized_new_document": True,
+                "differs_from_source": True,
+                "kind_accepts_content": True,
+                "eligible_kinds": list(DESTINATION_KINDS),
+                "registry_rule": rule.glob,
+            },
+        }
 
     def _destination_record(self, destination, selected_by, source, where):
         """Check a destination against every constraint, and record which held."""

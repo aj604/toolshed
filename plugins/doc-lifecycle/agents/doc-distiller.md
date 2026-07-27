@@ -27,9 +27,10 @@ A record with **no** `destination` authorizes one path, the artifact. Then the
 whole residue is unplaceable: draft it, report it in full, emit only the
 `retire-document` — and say plainly that retiring on that plan alone would be
 lossy, so a human can withhold it. Never widen the write set to compensate.
-(`bloat.DESTINATION_VERDICTS` does not currently include `DISTILL`, so records
-the bloat audit mints today take this path; a residue destination is the engine
-change that opens the other one.)
+(A `DISTILL` record's `destination` is optional — `bloat.RESIDUE_VERDICTS` — so
+both cases are ones the bloat audit mints: with one, the residue lands as
+`create-document` at exactly that path; without one, this paragraph is the whole
+of what you may do.)
 
 ## The procedure (in order, no steps skipped)
 

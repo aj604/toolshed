@@ -416,6 +416,148 @@ class ContentionIsResolvedByTheIndex(RepoTestCase):
         self.assertEqual(forward, tuple(reversed(backward)))
 
 
+class ResidueDestinationsAreAuthorizedNotInventoried(RepoTestCase):
+    """A distillation's destination is a document that does not exist yet.
+
+    Every other destination names an inventoried document, so the index vouches
+    for it. A residue document has nothing to look up — so the checks are the
+    ones that can be made about an unwritten path: it authorizes as a
+    documentation path inside a declared root, the registry classifies it as a
+    kind content may durably live in, and nothing is there yet.
+    """
+
+    def setUp(self):
+        self.root = self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/guides/g.md": "# G\n\nGuide prose.\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+            "docs/plans/other.md": "# Other\n\nA second plan.\n",
+        })
+        self.index = build_context_index(self.root)
+        self.lineage = lineage()
+
+    def refusals(self, result):
+        """The codes of a refusal — and a readable failure if it recorded.
+
+        A residue destination is a write target, so "it recorded something"
+        is the interesting way these tests fail; naming the record it built
+        beats an attribute error on a result that has no problems.
+        """
+        self.assertIsInstance(
+            result, Invalid, f"recorded {getattr(result, 'records', tuple)()}"
+        )
+        return problem_codes(result)
+
+    def distill(self, **overrides):
+        by_text = {u.text: u.digest for u in self.index.units}
+        entry = {
+            "id": "BLOAT-D1",
+            "verdict": bloat.DISTILL,
+            "path": "docs/plans/p.md",
+            "units": [by_text[SHARED]],
+            "evidence": "The design landed: src/fees.py:12 states the rate.",
+            "status": "ready",
+        }
+        entry.update(overrides)
+        return bloat.record_verdicts(self.index, self.lineage, [entry])
+
+    def test_a_distillation_may_name_a_residue_document_that_does_not_exist_yet(self):
+        result = self.distill(destination="docs/decisions.md")
+
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        destination = result.records()[0]["destination"]
+        self.assertEqual(destination["path"], "docs/decisions.md")
+        self.assertEqual(destination["kind"], "living")
+        self.assertEqual(destination["selected_by"], "model-proposed-residue")
+
+    def test_the_record_says_the_residue_document_is_not_inventoried(self):
+        result = self.distill(destination="docs/decisions.md")
+
+        constraints = result.records()[0]["destination"]["constraints"]
+        self.assertFalse(constraints["is_inventoried_document"])
+        self.assertTrue(constraints["is_authorized_new_document"])
+        self.assertTrue(constraints["kind_accepts_content"])
+
+    def test_a_distillation_that_names_no_destination_is_still_recorded(self):
+        # Retire-only distillation stays legal: the residue may already have
+        # landed under its own record.
+        result = self.distill()
+
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        self.assertIsNone(result.records()[0]["destination"])
+
+    def test_a_residue_destination_outside_the_declared_roots_is_refused(self):
+        result = self.distill(destination="../evil.md")
+
+        self.assertEqual(self.refusals(result), ["bloat-destination-unauthorized"])
+
+    def test_a_residue_destination_traversing_out_of_a_root_is_refused(self):
+        result = self.distill(destination="docs/../../etc/evil.md")
+
+        self.assertEqual(self.refusals(result), ["bloat-destination-unauthorized"])
+
+    def test_a_residue_destination_reached_through_a_symlink_is_refused(self):
+        outside = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
+        os.symlink(outside, os.path.join(self.root, "docs/elsewhere"))
+
+        result = self.distill(destination="docs/elsewhere/residue.md")
+
+        self.assertEqual(self.refusals(result), ["bloat-destination-unauthorized"])
+
+    def test_an_existing_destination_is_recorded_as_the_inventoried_document(self):
+        # Residue often lands in a document that already exists — a decision
+        # log. The collision is never silent: the record says which case this
+        # is, and the applier refuses a `create-document` over a document that
+        # is there (`apply-create-exists`), so only insert/replace can execute.
+        result = self.distill(destination="docs/a.md")
+
+        destination = result.records()[0]["destination"]
+        self.assertEqual(destination["path"], "docs/a.md")
+        self.assertTrue(destination["constraints"]["is_inventoried_document"])
+        self.assertNotEqual(destination["selected_by"], "model-proposed-residue")
+
+    def test_an_existing_planning_document_is_never_a_residue_destination(self):
+        result = self.distill(destination="docs/plans/other.md")
+
+        self.assertEqual(self.refusals(result),
+                         ["bloat-destination-kind-ineligible"])
+
+    def test_a_residue_destination_already_on_disk_is_refused_even_when_unindexed(self):
+        # The index was built before the file appeared, so "not in the
+        # inventory" is not enough to conclude the path is free.
+        with open(os.path.join(self.root, "docs/decisions.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("# Decisions\n\nAlready here.\n")
+
+        result = self.distill(destination="docs/decisions.md")
+
+        self.assertEqual(self.refusals(result), ["bloat-destination-occupied"])
+
+    def test_a_residue_destination_in_a_planning_location_is_refused(self):
+        result = self.distill(destination="docs/plans/residue.md")
+
+        self.assertEqual(self.refusals(result),
+                         ["bloat-destination-kind-ineligible"])
+
+    def test_a_residue_destination_no_registry_rule_claims_is_refused(self):
+        result = self.distill(destination="docs/deep/residue.md")
+
+        self.assertEqual(self.refusals(result), ["bloat-destination-unclassified"])
+
+    def test_a_residue_destination_that_is_the_artifact_itself_is_refused(self):
+        result = self.distill(destination="docs/plans/p.md")
+
+        self.assertEqual(self.refusals(result), ["bloat-destination-is-source"])
+
+    def test_a_verdict_that_moves_nothing_still_may_not_name_a_destination(self):
+        result = self.distill(verdict=bloat.CUT, status=None,
+                              destination="docs/decisions.md")
+
+        self.assertEqual(self.refusals(result), ["bloat-destination-forbidden"])
+
+
 class BulkJudgmentsAreEnumerated(RepoTestCase):
     def setUp(self):
         self.root = self.repo({
