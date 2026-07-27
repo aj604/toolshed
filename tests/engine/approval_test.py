@@ -38,6 +38,7 @@ from doclifecycle.report import (
 from doclifecycle.results import (
     STATE_CLEAN,
     STATE_FINDINGS,
+    STATE_PARTIAL,
     STATE_STALE,
     Invalid,
 )
@@ -399,6 +400,40 @@ class ReconciledSelection(ApprovalTestCase):
             self.finding("R-2", "CONDENSE", DOC_A, units[:1],
                          proposal="Fees: 2%."),
         )
+
+    def test_neither_a_cut_nor_a_distill_over_one_passage_can_be_approved(self):
+        # The reviewer's proof ran through minting, not reconciliation: with
+        # both remedy-less records collapsed onto one signature the group was
+        # `atomic`, so taking the CUT alone was refused *and* taking both was
+        # clean — walking a pending-implementation DISTILL through the gate.
+        unit = self.units(self.repo, DOC_A)[0]
+        cut = self.finding("R-1", "CUT", DOC_A, [unit])
+        distill = self.finding("R-2", "DISTILL", DOC_A, [unit],
+                               status="pending-implementation")
+        report = self.report([cut, distill])
+
+        for selection in ([cut["digest"]],
+                          [cut["digest"], distill["digest"]]):
+            with self.subTest(selection=len(selection)):
+                result = self.mint(report, selection)
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertEqual(codes(result), ["approval-exclusive-group"])
+
+    def test_a_non_canonical_leg_cannot_be_minted_on_its_own(self):
+        # The other half of that proof: spell one leg `./docs/a.md` and the
+        # contradictory pair split into two independent groups, so approving
+        # one leg minted clean.
+        unit = self.units(self.repo, DOC_A)[0]
+        cut = self.finding("R-1", "CUT", "./" + DOC_A, [unit])
+        condense = self.finding("R-2", "CONDENSE", DOC_A, [unit],
+                                proposal="Fees: 2%.")
+
+        result = self.mint(self.report([cut, condense]), [cut["digest"]])
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result),
+                         ["reconcile-record-path-not-canonical"])
 
     def test_one_leg_of_an_exclusive_pair_cannot_be_selected(self):
         cut, condense = self.conflicting_pair()
@@ -1060,11 +1095,24 @@ class Travelling(ApprovedTestCase):
                       approval_trailers(structural))
 
     def test_the_summary_shows_the_state_of_the_report_it_came_from(self):
-        # A `partial` report's absent records are the unexamined ones, and a
-        # coverage gap can hide a finding that would have grouped exclusively
-        # with something approved here. The change reviewer has to see it.
         self.assertIn("Report state when approved: `findings`",
                       render_approval_set(self.approval))
+
+    def test_a_partial_report_says_so_in_the_summary(self):
+        # A `partial` report's absent records are the unexamined ones, and
+        # reconciliation only groups the records that were present — so a
+        # coverage gap can hide a finding that would have grouped exclusively
+        # with something approved here. The change reviewer has to see it.
+        one, _ = self.two_findings()
+        report = self.report([one], status=STATE_PARTIAL, incomplete=[{
+            "scope": DOC_B,
+            "reason": "the chunk executor ran out of budget",
+        }])
+        approval = self.mint(report, [one["digest"]])
+
+        self.assertEqual(approval.report_state, STATE_PARTIAL)
+        self.assertIn("Report state when approved: `partial`",
+                      render_approval_set(approval))
 
 
 class ReadBackBindsTheTarget(ApprovedTestCase):
@@ -1166,7 +1214,30 @@ class ReadBackBindsTheTarget(ApprovedTestCase):
             self.rebuilt(record, lineage=other), report=self.source
         )
 
-        self.assertEqual(reasons(result), ["approval-report-changed"])
+        self.assertIn(
+            "carries a lineage the report it names does not",
+            result.stale_reasons[0].message,
+        )
+
+    def test_the_divergence_does_not_short_circuit_the_checks_after_it(self):
+        # A record's digest binds its lineage, so a diverging one is always
+        # also a selection the report cannot carry. Both are named: the reason
+        # a reader can act on must not be swallowed by the first one found,
+        # and the checks after it are the minter's refusals.
+        other = self.lineage_for(self.repo, audit_mode="incremental")
+        record = self.finding("R-1", "STALE", DOC_A,
+                              self.units(self.repo, DOC_A)[:1],
+                              lineage=other, fix="Fees: 2.5%.")
+
+        result = validate_approval_set(
+            self.rebuilt(record, lineage=other), report=self.source
+        )
+
+        self.assertEqual(
+            [r.message.split(" — ")[0] for r in result.stale_reasons],
+            ["the approval set carries a lineage the report it names does not",
+             "the approval set selects 1 record(s) the report does not carry"],
+        )
 
 
 class SelfDescribingVerdicts(ApprovedTestCase):

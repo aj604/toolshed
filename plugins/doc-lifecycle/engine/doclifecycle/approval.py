@@ -668,6 +668,25 @@ def _path_problem(value):
     return None if problem is None else problem[1]
 
 
+def _unsorted(digests, field, bad):
+    """True — and refused — if `field`'s digests are not in ascending order.
+
+    Both arrays are inside the approval digest and are read in file order, so
+    an order that may vary is one selection with more than one identity, and
+    the digest is what a trailer pins. Sorted is the order minting produces, so
+    it is the only one that reads back: canonicality by refusal, never by
+    silent reordering, which would make the file disagree with its own digest.
+    """
+    if list(digests) == sorted(digests):
+        return False
+    bad(f"approval-{field}-not-sorted",
+        f"{field} must be listed in ascending digest order — the approval "
+        f"digest is taken over the list as written, so an approval set that "
+        f"may be reordered has more than one digest for one selection",
+        field)
+    return True
+
+
 def _approved_records(raw, bad, lineage):
     if not isinstance(raw, list) or not raw:
         bad("approval-empty-selection",
@@ -717,22 +736,20 @@ def _approved_records(raw, bad, lineage):
                 where)
             ok = False
             continue
-        spelling = next(
-            (
-                (name, _path_problem(entry[name]))
-                for name in ("path", "destination")
-                if entry[name] is not None
-                and _path_problem(entry[name]) is not None
-            ),
-            None,
-        )
-        if spelling is not None:
-            bad("approval-invalid-record",
-                f"records[{i}].{spelling[0]} {entry[spelling[0]]!r} "
-                f"{spelling[1]} — every path in an approval set is a document "
-                f"the applier may write, and a spelling that leaves the "
-                f"repository is a forged scope, not a repository that moved",
-                where)
+        misspelled = False
+        for name in ("path", "destination"):
+            reason = (
+                None if entry[name] is None else _path_problem(entry[name])
+            )
+            if reason is not None:
+                bad("approval-invalid-record",
+                    f"records[{i}].{name} {entry[name]!r} {reason} — every "
+                    f"path in an approval set is a document the applier may "
+                    f"write, and a spelling that leaves the repository is a "
+                    f"forged scope, not a repository that moved",
+                    where)
+                misspelled = True
+        if misspelled:
             ok = False
             continue
         if entry["digest"] in seen:
@@ -772,17 +789,7 @@ def _approved_records(raw, bad, lineage):
             path=entry["path"], units=tuple(sorted(set(units))),
             destination=destination,
         ))
-    if ok and [r.digest for r in records] != sorted(r.digest for r in records):
-        # The digest is taken over the record array as written, so two orderings
-        # of one selection would be two approval digests — and the digest is
-        # what a trailer pins. Sorted is the one order minting produces, so it
-        # is the only one that reads back: canonicality by refusal, never by
-        # silent reordering, which would make the file disagree with its digest.
-        bad("approval-records-not-sorted",
-            "records must be listed in ascending digest order — the approval "
-            "digest is taken over the list as written, so an approval set that "
-            "may be reordered has more than one digest for one selection",
-            "records")
+    if ok and _unsorted([r.digest for r in records], "records", bad):
         ok = False
     return records if ok else None
 
@@ -812,12 +819,7 @@ def _skipped_records(raw, bad):
             ok = False
             continue
         entries.append(SkippedRecord(digest=entry["digest"], record_id=entry["id"]))
-    if ok and [e.digest for e in entries] != sorted(e.digest for e in entries):
-        bad("approval-skipped-not-sorted",
-            "skipped must be listed in ascending digest order — it is inside "
-            "the approval digest, so an order that may vary is a selection with "
-            "more than one identity",
-            "skipped")
+    if ok and _unsorted([e.digest for e in entries], "skipped", bad):
         ok = False
     return entries if ok else None
 
@@ -1222,7 +1224,11 @@ def _report_reasons(payload, records, skipped, report, approval_lineage):
         # the world can be re-read for. Nothing else could ever catch a
         # divergence there, and "binds the report's lineage verbatim" has to be
         # true of the file, not just of what minting wrote.
-        return [StaleReason(
+        #
+        # Recorded and carried on, never returned early: the checks below are
+        # the minter's refusals, and a forged selection that also diverges here
+        # must still come back `invalid` rather than being softened to `stale`.
+        reasons.append(StaleReason(
             code="approval-report-changed",
             message=(
                 "the approval set carries a lineage the report it names does "
@@ -1231,7 +1237,7 @@ def _report_reasons(payload, records, skipped, report, approval_lineage):
             ),
             reported=lineage_digest(approval_lineage),
             current=lineage_digest(report.lineage),
-        )], []
+        ))
 
     carried = {record.digest for record in report.records}
     missing = sorted(r.digest for r in records if r.digest not in carried)
