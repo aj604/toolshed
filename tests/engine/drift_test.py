@@ -764,15 +764,17 @@ class WaiverState(DriftRepoTestCase):
         self.assertIn("waived", waived.records[0].extra)
         self.assertEqual(waived.records[0].digest, raw.records[0].digest)
 
-    def test_a_waiver_never_reaches_a_stale_finding(self):
-        """An accuracy defect is not dispositionable — only an unverifiable
-        claim is."""
+    def test_a_waiver_on_a_stale_claim_surfaces_as_a_dispute(self):
+        """A human accepted a claim the audit calls stale. The finding stands —
+        and says so, because a dispute a report did not show is one an
+        auto-apply policy would act straight through."""
         root = self.waived_repo(claim=LIVING_CLAIM, file=LIVING)
 
         report = self.audit(root, waivers=WAIVERS,
                             verdicts=self.verdicts_for(root, self.verdict(root)))
 
-        self.assertNotIn("waived", report.records[0].extra)
+        self.assertEqual([r.extra["code"] for r in report.records], ["STALE"])
+        self.assertEqual(report.records[0].extra["waived"]["source"], WAIVERS)
 
     def test_a_malformed_waivers_file_invalidates_the_run(self):
         """A typo that silently un-waived everything would defeat the

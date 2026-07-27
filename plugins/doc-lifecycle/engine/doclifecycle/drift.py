@@ -29,10 +29,12 @@ failed, or returned verdicts that do not validate for, becomes an enumerated
 entry in the report's `incomplete` list — so the result is `partial`, and
 neither the payload nor any rendering of it can read as clean.
 
-Waivers are disposition, not deletion: an accepted UNVERIFIABLE claim keeps its
-record in the raw report and gains a `waived` annotation naming where the
-acceptance is recorded. Nothing is ever removed from a report because someone
-accepted it.
+Waivers are disposition, not deletion: an accepted claim keeps its record in the
+raw report and gains a `waived` annotation naming where the acceptance is
+recorded. Nothing is ever removed from a report because someone accepted it —
+on an UNVERIFIABLE claim the annotation says a human has stopped asking, and on
+a STALE one it says a human disputes the finding, which is what keeps an
+auto-apply policy off it.
 """
 
 import datetime
@@ -412,6 +414,10 @@ def _waiver_for(waivers, waivers_path, path, claim):
     Containment rather than equality: a waiver names the claim text a human
     read on a line, and an assertion unit is the whole sentence that line sits
     in. A waiver is therefore exactly as broad as the text it quotes.
+
+    Reaches every finding code, not only UNVERIFIABLE. On a STALE finding an
+    acceptance is a human disputing the verdict, and a dispute a report did not
+    show is one an auto-apply policy would act straight through.
     """
     for waiver in waivers:
         if waiver["file"] == path and waiver["claim"] in claim:
@@ -927,7 +933,7 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
     records = []
     for number, spec in enumerate(specs, start=1):
         extra = dict(spec.extra)
-        if spec.code == VERDICT_UNVERIFIABLE:
+        if "claim" in extra:
             # Disposition, never deletion: an accepted claim keeps its record
             # and says who accepted it. Waivers are not part of any digest, so
             # accepting a claim cannot re-key what an approval set selects.
