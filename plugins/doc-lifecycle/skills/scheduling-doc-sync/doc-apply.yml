@@ -251,11 +251,26 @@ jobs:
           name: apply-approval
           path: ${{ runner.temp }}/apply
 
-      # The edit-plan contract is spelled out here rather than delegated to a skill, for the
-      # same reason doc-audit.yml spells out the verdicts shape: the authoring skills have not
-      # been migrated to the new document model yet (aj604/toolshed#70), so a skill's stated
-      # output contract would be wrong for this lane. Nothing here is trusted — `apply-plan`
-      # re-derives every claim below against the approval set and the repository.
+      # Two reasons this prompt does not defer to an authoring skill or to the doc-distiller
+      # agent, and both are worth stating where the next editor will look:
+      #
+      #   1. `DISTILL` is not applyable end to end today. A DISTILL record can never carry a
+      #      `destination` (`bloat.DESTINATION_VERDICTS` is EXTRACT-AND-MOVE and MERGE-DOC
+      #      only), and the applier resolves `create-document`'s allowed targets from exactly
+      #      that field — so the residue half of the remedy refuses as
+      #      `plan-target-not-record-target` while the `retire-document` half would execute.
+      #      Deferring to the distiller before that is fixed buys a lossy retirement: the
+      #      planning artifact deleted and its residue stranded. Refusing the plan is the safe
+      #      outcome, and is what happens today.
+      #   2. The edit-plan contract is spelled out here rather than delegated, for the same
+      #      reason doc-audit.yml spells out the verdicts shape: the authoring skills have not
+      #      been migrated to the new document model yet (aj604/toolshed#70), so a skill's
+      #      stated output contract would be wrong for this lane. When #70 lands, its
+      #      `fixing-docs` skill carries the worked edit-plan example, and that becomes the
+      #      contract's owner to reconcile this prompt against.
+      #
+      # Nothing here is trusted either way — `apply-plan` re-derives every claim below against
+      # the approval set, the record's own remedy table, and the repository.
       - name: Author the edit plan (headless)
         id: model
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
