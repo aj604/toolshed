@@ -64,13 +64,15 @@ Two special cases worth knowing before your first approval:
   classification and the landed-code proof — nothing expensive was authored before you
   approved. On approval `fixing-docs` dispatches the `doc-distiller` agent, which walks
   the artifact, drafts the durable claims and insights (verifying each claim against the
-  code it cites), and returns them as edit-plan operations — the residue into the
-  destination the record names, the artifact retired. They land through the same applier
-  as every other approved record, so the staged diff shows you exactly what was
-  extracted. Residue belonging in a document that record does not authorize — a
-  `docs/decisions.md` entry, an inbound reference to repoint — comes back reported, for
-  its own approval rather than a silent edit. Decisions survive; scaffolding goes to git history, where it still
-  lives if you ever need it.
+  code it cites), and **returns them as edit-plan operations rather than writing
+  anything**. What it may place is bounded by the record: one record authorizes its own
+  document and its `destination`, and residue belonging anywhere else comes back
+  reported, for its own approval rather than a silent edit. Today that bound is the whole
+  story — the bloat audit cannot put a `destination` on a `DISTILL` record
+  (`bloat.DESTINATION_VERDICTS`), so the residue is entirely unplaceable and only the
+  retirement is plannable. **Expect the drafted residue back as text to route yourself,
+  and do not accept a retire-only diff without deciding where its residue goes** — the
+  scaffolding is in git history either way, but the decisions are not.
 - **`DISTILL` (pending-implementation)** — a design doc for code that *hasn't* landed —
   is never actionable, even if you approve it. A pending design is accurate about the
   future; the record exists to say so, not to propose an edit.

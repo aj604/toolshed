@@ -116,10 +116,13 @@ remedied by a single `replace`:
 
 `preimage` is the exact current bytes of lines `start_line`..`end_line`, newlines
 included; `text` is what replaces them. Each operation's field set is exact and closed —
-`delete` drops `text`, `insert` takes `after_line` and `text` and no preimage,
-`create-document` takes `path` and `text`, `retire-document` takes the whole document as
-`preimage`, `move-with-provenance` adds `destination` — and an extra or missing field is
-`plan-invalid-operation`. `postimages` names every written path (`null` for a retired
+`delete` is the `replace` fields minus `text`, `insert` takes `after_line` and `text`
+with no span and no preimage, `create-document` takes `path` and `text` only,
+`retire-document` takes `path` and the whole document as `preimage`, and
+`move-with-provenance` is `delete`'s fields plus `destination` (it carries no `text` —
+what moves is the preimage). Every one also carries `op`, `record`, and `target_class`.
+An extra or a missing field is `plan-invalid-operation`, so build each op from its own
+row rather than by editing the example above. `postimages` names every written path (`null` for a retired
 document) and is re-derived, not believed: compute it from the bytes your operations
 produce, or it is `plan-postimages-not-derived`.
 
@@ -133,8 +136,9 @@ python3 -m doclifecycle apply-plan --repo . --plan plan.json \
 
 `--report` is required: without it the approval set's authority check is a function of
 public repository state, so a selection nobody minted would validate. The working tree
-must be **clean** before you run it — the applier applies onto the committed baseline,
-and an unrelated edit sitting in the tree is `apply-working-tree-not-clean`. Commit or
+must be **clean** before you run it — the applier applies onto the committed baseline, so
+an unrelated edit sitting in the tree refuses the run: outside the approval's scope as
+`apply-working-tree-not-confined`, inside it as `apply-working-tree-not-clean`. Commit or
 discard first.
 
 Exit codes: `0` applied (or already applied — the no-op verdict is derived, so
@@ -164,6 +168,7 @@ The approval set itself never enters the repository. Its digest and rendered sum
 | The verdict is **invalid** (exit 1) | Stop and report every problem. An invalid artifact is a forgery or a bug, not a state to work around. |
 | The report is `clean`, or a record you were given is not in it | Stop. The inputs disagree; never guess which record was meant. |
 | A record you were **not** given is obviously right | Surface it. Unapproved is unapproved, and an unminted record cannot reach a plan at all. |
+| A record's code is not in the remedy table above — `POLICY`, or anything a newer detector emits | Stop and surface it. `RECORD_REMEDIES` is closed and fail-shut: a code nobody listed authorizes **no** operation, so there is no plan to write. `POLICY` in particular is a legacy bulk verdict the bloat engine replaced with enumerable scopes, and its records expand to one per file — approve those instead. |
 
 **Never edit the approval set, the report, or the plan's declared digests to make a
 refusal go away.** Repairing a stale `base_commit`, recomputing a digest over altered

@@ -83,7 +83,7 @@ Three properties make this more than a report:
 
 Closing the loop is one more request — "apply that drift report" — and `fixing-docs` lands each approved `STALE` record's `fix` at its `location`, touching nothing the report didn't flag.
 
-Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum, cited evidence, [their own validator](plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py) — and go through the same door: you approve fixes **by record ID**; the [bloat guide](docs/guides/auditing-doc-bloat.md) walks one end to end.
+Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum, cited evidence, [their own validator](plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py) — and go through the same door: you approve fixes **by record ID**, and `fixing-docs` mints that selection into the approval set the applier will not write without — the ID is how you say it, the record's digest is what gets bound. The [bloat guide](docs/guides/auditing-doc-bloat.md) walks one end to end.
 
 ## What's in it
 

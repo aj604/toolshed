@@ -1,5 +1,35 @@
 # Decisions
 
+## 2026-07-27 — one fixing-docs door; apply discipline moves into the engine (#70)
+- Evidence: issue #57's distilled-decisions comment (2026-07-26), "Engineering shape": skills go
+  8 → 7, "`fixing-doc-drift` + `fixing-doc-bloat` merge into one `fixing-docs` door … with
+  per-record-type guidance as internal routing; `references/apply-discipline.md` is superseded by
+  the applier contract", and "`doc-distiller` emits edit plans … instead of writing files."
+- Decided: the merge is a consequence of the applier (#69), not a cleanup — after minting, both
+  bodies are the same flow (mint approval set → edit plan → applier → present the staged diff),
+  and the record's finding code routes the remedy inside one skill via `RECORD_REMEDIES`.
+- Decided (discipline is enforced, not restated): `references/apply-discipline.md` is deleted
+  rather than repointed. Its five rules each have a mechanical owner now — the approval set is the
+  authorized set, the confinement check is the blast radius, the preimage check is the anchor, the
+  trailers are the evidence — and its §5 had gone actively wrong, telling the agent the evidence
+  rides in a commit it produces, where the applier never stages and never commits.
+- Decided (the distiller stops writing): `agents/doc-distiller.md` returns edit-plan operations
+  and its tools drop `Write`/`Edit`. One record authorizes two paths, so residue for a third
+  document is reported for its own approval rather than smuggled past a check that would refuse it.
+- Still binds: a validated, current approval set is the only authority a write may rest on, and
+  the applier is the only writer — an interactive skill has no exemption from either. Superseded:
+  the 2026-07-03 entry below names `references/apply-discipline.md` as the owner of apply-only
+  discipline; that owner is now the applier contract in `plugins/doc-lifecycle/engine/README.md`.
+- Known gap, filed not fixed: `bloat.DESTINATION_VERDICTS` excludes `DISTILL`, so no record the
+  bloat audit mints can carry a `destination` — `create-document` refuses
+  `plan-target-not-record-target` and only the lossy `retire-document` half executes. A residue
+  destination has to be its own concept, since bloat's destination check refuses any path the
+  inventory does not already hold. Recorded in `tests/baselines/fixing-docs-merge-green/GREEN-results.md`.
+- Code: `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
+  `plugins/doc-lifecycle/agents/doc-distiller.md`,
+  `plugins/doc-lifecycle/engine/doclifecycle/applier.py`
+- Baselines: `tests/baselines/fixing-docs-merge-red/`, `tests/baselines/fixing-docs-merge-green/`
+
 ## 2026-07-26 — migration door: registry inference + dry-run upgrade (#74)
 - Evidence: issue #57's distilled-decisions comment (2026-07-26), "Adoption / migration": infer
   a draft registry from existing state, "a human reviews the draft as a normal PR diff (glob
