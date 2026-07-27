@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "CLAUDE.md",
+    "CONTEXT.md",
+    "README.md",
+    "docs",
+    "plugins"
+  ],
+  "exclude": [
+    "tests/fixtures/**",
+    "tests/baselines/**",
+    "tests/docs-ab/**"
+  ],
+  "sets": [
+    "plans",
+    "specs"
+  ],
+  "extensions": [
+    ".md"
+  ],
+  "rules": [
+    {
+      "glob": "CLAUDE.md",
+      "kind": "living"
+    },
+    {
+      "glob": "CONTEXT.md",
+      "kind": "living"
+    },
+    {
+      "glob": "README.md",
+      "kind": "living"
+    },
+    {
+      "glob": "docs/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "docs/design-rationale.md",
+      "kind": "narrative"
+    },
+    {
+      "glob": "docs/agents/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "docs/guides/*.md",
+      "kind": "narrative"
+    },
+    {
+      "glob": "docs/plans/*.md",
+      "kind": "planning",
+      "set": "plans"
+    },
+    {
+      "glob": "docs/superpowers/specs/*.md",
+      "kind": "planning",
+      "set": "specs"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/agents/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/engine/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/skills/bootstrapping-docs/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/skills/detecting-doc-bloat/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/skills/detecting-doc-drift/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/skills/fixing-docs/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/skills/growing-docs/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/skills/scheduling-doc-sync/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/skills/writing-docs/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/*.md",
+      "kind": "living"
+    }
+  ]
+}

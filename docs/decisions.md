@@ -1,5 +1,31 @@
 # Decisions
 
+## 2026-07-27 — this repo's registry, and what the migration leaves behind (#75)
+- Evidence: `python3 -m doclifecycle migration-draft` and `migration-dry-run` against this
+  repository, run through the `scheduling-doc-sync` migration door; issue #57's
+  distilled-decisions comment (2026-07-26), "Classification lives in a registry".
+- Decided (roots are widened past the inference): the drafted roots were `CLAUDE.md`,
+  `CONTEXT.md`, `README.md`, and `docs`, which left every `plugins/**/*.md` file unaudited —
+  and the plugin's skills are markdown that makes claims about this repo, which the legacy
+  diff-scoped drift lane did audit (`.github/doc-sync/last-stales.json` records a STALE it
+  found in `skills/scheduling-doc-sync/SKILL.md`). `plugins` is declared a fifth root, so the
+  registry claims the product's own docs.
+- Decided (the remaining narrowing is ratified, not a gap): `migration-coverage-narrowed`
+  reports 214 tracked `.md` files under no root, all of them under `tests/baselines/`,
+  `tests/fixtures/`, and `tests/docs-ab/`. Those are recorded test evidence — a RED baseline is
+  supposed to stay wrong — so they stay outside the roots, and the legacy `audit-scope.json`
+  exclusions carry into the registry's `exclude` as the record of that call.
+- Decided (no waiver re-keying was needed): `drift-waivers.json` holds no waivers, so the dry
+  run reports `rekeyed: []` and `needs_rewaiving: []`. Nothing was dropped because nothing was
+  there; a future waiver re-keys through the same door.
+- Decided (`last-stales.json` is kept, against the dry run's disposition): the dry run
+  classifies it as a `cache` artifact, `carried: false` — its recurrence keys are file-and-line,
+  which the new contract replaces with content digests, so it cannot be re-keyed. It is
+  nonetheless left in place rather than deleted, because the legacy read lanes still consume it
+  and are still running. It retires with them (#77). Recorded here so the drop is stated, not
+  silent.
+- Code: `.doc-lifecycle/registry.json`
+
 ## 2026-07-27 — one fixing-docs door; apply discipline moves into the engine (#70)
 - Evidence: issue #57's distilled-decisions comment (2026-07-26), "Engineering shape": skills go
   8 → 7, "`fixing-doc-drift` + `fixing-doc-bloat` merge into one `fixing-docs` door … with
