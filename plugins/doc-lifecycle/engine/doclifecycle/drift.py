@@ -931,9 +931,13 @@ def _anchor_findings(repo_root, path, anchor, as_of, references):
     """Findings about one well-formed anchor: what has moved under it."""
     stale, unverifiable = [], []
     for reference in references:
-        if not os.path.isfile(os.path.join(repo_root, reference)):
+        if not os.path.exists(os.path.join(repo_root, reference)):
             stale.append((reference, "is no longer in the repository"))
             continue
+        # A directory anchor's freshness is the most recent change to
+        # anything beneath it — `last_change` already gets this for free,
+        # since it hands the reference to git as a pathspec rather than
+        # requiring it to name a single file.
         change, problem = repository_mod.last_change(repo_root, reference)
         if problem is not None or change is None:
             unverifiable.append((

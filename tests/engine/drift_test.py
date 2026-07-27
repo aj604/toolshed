@@ -872,6 +872,34 @@ class NarrativeAnchors(DriftRepoTestCase):
         self.assertNotIn("Welcome aboard.",
                          json.dumps(report.to_dict(), sort_keys=True))
 
+    def test_a_directory_anchor_is_not_falsely_reported_missing(self):
+        """Issue #93: the anchor check gated every reference on `os.path.
+        isfile`, which is False for a directory, so a narrative anchor naming
+        a real directory (`src/`) was falsely reported "no longer in the
+        repository" even though nothing beneath it had moved."""
+        root = self.drift_repo()
+        today = self.git(root, "log", "-1", "--format=%cs")
+        self.write(root, NARRATIVE, f"# Tour\n\n> As of {today} (`src/`)\n\nHi.\n")
+        self.commit(root, "refresh the anchor")
+
+        report = self.audit(root)
+
+        self.assertEqual(report.records, ())
+
+    def test_a_directory_anchor_is_stale_when_something_beneath_it_changes(self):
+        """A directory anchor's freshness is the most recent change to
+        anything beneath it, not just the directory entry itself."""
+        root = self.drift_repo(
+            **{NARRATIVE: "# Tour\n\n> As of 2026-01-01 (`src/`)\n\nHi.\n"})
+        self.write(root, SOURCE, "RATE = 0.025\n")
+        self.commit(root, "raise the rate")
+
+        report = self.audit(root)
+
+        record = self.anchor_records(report)["ANCHOR-STALE"]
+        self.assertEqual(record.extra["evidence"]["source"], "src/")
+        self.assertIn("last changed", record.extra["evidence"]["observed"])
+
 
 class EvidencePointers(DriftRepoTestCase):
     def stale_record(self, root, **overrides):
