@@ -52,12 +52,16 @@ from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .approval import UNCHECKED_MEANING, validate_approval_set
+from .bloat import (
+    CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC,
+)
 from .digest import sha256_canonical
+from .drift import VERDICT_STALE, VERDICT_UNVERIFIABLE
 from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import DECLARABLE_TARGET_CLASSES, write_target_problem
 from .report import DIGEST, StaleReason
 from .repository import head_bytes, worktree_changes
-from .segment import segment_document
+from .segment import segment_text
 from .results import STATE_CLEAN, STATE_STALE, Invalid, Problem
 
 # What the artifact says it is, for the same reason an approval set says so:
@@ -94,20 +98,24 @@ OPERATION_FIELDS = {
 # policy — mechanical drift fixes yes, retirements and creations never — is
 # unenforceable without this table, since the policy mints records and the plan
 # would otherwise attach any operation to one.
+# The codes are imported from the audits that mint them rather than spelled
+# here, so renaming a verdict is an import error rather than a table that
+# quietly authorizes nothing.
+_PASSAGE_REMEDY = (OP_REPLACE, OP_DELETE, OP_INSERT)
 RECORD_REMEDIES = {
     # Drift. Both verdicts are about a passage that no longer holds; the
     # remedy rewrites, removes, or completes that passage, and nothing else.
-    "STALE": (OP_REPLACE, OP_DELETE, OP_INSERT),
-    "UNVERIFIABLE": (OP_REPLACE, OP_DELETE, OP_INSERT),
+    VERDICT_STALE: _PASSAGE_REMEDY,
+    VERDICT_UNVERIFIABLE: _PASSAGE_REMEDY,
     # Bloat.
-    "CUT": (OP_DELETE,),
-    "CONDENSE": (OP_REPLACE, OP_DELETE, OP_INSERT),
-    "EXTRACT-AND-MOVE": (OP_MOVE,),
-    "MERGE-DOC": (OP_MOVE, OP_RETIRE),
-    "RETIRE-DOC": (OP_RETIRE,),
+    CUT: (OP_DELETE,),
+    CONDENSE: _PASSAGE_REMEDY,
+    EXTRACT_AND_MOVE: (OP_MOVE,),
+    MERGE_DOC: (OP_MOVE, OP_RETIRE),
+    RETIRE_DOC: (OP_RETIRE,),
     # Distillation authors the durable residue and then retires the planning
     # artifact — the one remedy that legitimately brings a document into being.
-    "DISTILL": (OP_CREATE, OP_REPLACE, OP_INSERT, OP_DELETE, OP_RETIRE),
+    DISTILL: (OP_CREATE, OP_REPLACE, OP_INSERT, OP_DELETE, OP_RETIRE),
 }
 
 # The operations that name a line span in an existing document.
@@ -405,23 +413,40 @@ def _binding_problems(i, operation, by_digest, bad):
             where)
 
 
-def _approved_hull(repo_root, record, registry_path):
+def _approved_hull(repo_root, record):
     """((first line, last line), None) of a record's approved units, or
-    (None, why not) — the passage a remedy for this record may edit."""
-    segmentation = segment_document(repo_root, record.path, registry_path)
-    if isinstance(segmentation, Invalid):
-        return None, segmentation.problems[0].message
+    (None, why not) — the passage a remedy for this record may edit.
+
+    Measured against the committed baseline, which is the state the plan's
+    line numbers are stated in: the write path requires the tree to equal it,
+    and on an idempotent re-run the approved passage is necessarily no longer
+    on disk — so reading the working tree would make the bound unavailable in
+    exactly the case an attacker arranges.
+    """
+    data, problem = head_bytes(repo_root, record.path)
+    if problem is not None:
+        return None, problem.message
+    if data is None:
+        return None, f"{record.path} is not in the committed baseline"
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return None, (
+            f"{record.path} is not valid UTF-8 at HEAD ({exc.reason} at byte "
+            f"{exc.start})"
+        )
     approved = set(record.units)
     lines = [
         (unit.line, unit.end_line)
-        for unit in segmentation.units if unit.digest in approved
+        for unit in segment_text(text, path=record.path).units
+        if unit.digest in approved
     ]
     if not lines:
-        return None, f"none of its units is in {record.path} now"
+        return None, f"none of its units is in {record.path} at HEAD"
     return (min(s for s, _ in lines), max(e for _, e in lines)), None
 
 
-def _approved_span_problems(repo_root, operations, by_digest, registry_path):
+def _approved_span_problems(repo_root, operations, by_digest):
     """Positioned operations, checked against the passage that was approved.
 
     A record names its target by assertion-unit digest, and those units are a
@@ -454,15 +479,13 @@ def _approved_span_problems(repo_root, operations, by_digest, registry_path):
         if operation["path"] != record.path:
             continue
         if record.digest not in hulls:
-            hulls[record.digest] = _approved_hull(
-                repo_root, record, registry_path
-            )
+            hulls[record.digest] = _approved_hull(repo_root, record)
         hull, why = hulls[record.digest]
         if hull is None:
             bad(f"operations[{i}] edits {record.path}, and where record "
                 f"{record.record_id}'s approved units are cannot be "
                 f"established: {why} — an unanswered question about the "
-                f"target is a refusal",
+                f"target is a refusal. Re-run the audit and mint afresh",
                 f"operations[{i}]")
             continue
         first, last = hull
@@ -472,7 +495,9 @@ def _approved_span_problems(repo_root, operations, by_digest, registry_path):
                 bad(f"operations[{i}] inserts after line {point} of "
                     f"{record.path}, and record {record.record_id} was "
                     f"approved about lines {first}..{last} — an edit outside "
-                    f"the approved passage is an edit nobody reviewed",
+                    f"the approved passage is an edit nobody reviewed. Move "
+                    f"the insertion inside it, or mint an approval for a "
+                    f"record that covers where it goes",
                     f"operations[{i}]")
             continue
         start, end = operation["start_line"], operation["end_line"]
@@ -481,7 +506,8 @@ def _approved_span_problems(repo_root, operations, by_digest, registry_path):
                 f"{record.path}, and record {record.record_id} was approved "
                 f"about lines {first}..{last} — an approval binds to the "
                 f"passage its units are, so a wider span is text nobody "
-                f"approved a remedy for",
+                f"approved a remedy for. Narrow the operation to the approved "
+                f"passage, or mint an approval that covers the rest",
                 f"operations[{i}]")
     return tuple(problems)
 
@@ -1023,6 +1049,30 @@ def _confinement_problem(repo_root, scope, code):
     return changed, None
 
 
+def _unaccounted_problem(paths):
+    """The refusal for a difference from HEAD this plan did not make, or None.
+
+    The applier certifies its whole diff as the approved change, so it applies
+    onto the committed baseline and nothing else. The scope check above is
+    path-granular; this one is not, because a change to another passage of an
+    approved document is a change no record covers and no unit-level preimage
+    check sees.
+    """
+    if not paths:
+        return None
+    return Problem(
+        code="apply-working-tree-not-clean",
+        message=(
+            f"the working tree already differs from HEAD at {list(paths)}, "
+            f"which this plan does not write — inside the approval set's "
+            f"scope, but produced by something other than this plan, so it "
+            f"would ride into the diff this run certifies. Commit or discard "
+            f"what is there first"
+        ),
+        location=paths[0],
+    )
+
+
 def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
                     registry_path=DEFAULT_REGISTRY_PATH,
                     audit_config_digest=None, expected_digest=None):
@@ -1082,6 +1132,16 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
         )
 
     operations = plan["operations"]
+    # Before idempotency, not after: the approved passage is measured against
+    # the committed baseline, and an operation reaching outside it is one an
+    # attacker can pre-place on disk so that nothing has to be written for the
+    # run to certify it.
+    spans = _approved_span_problems(
+        repo_root, operations, {r.digest: r for r in approval.records}
+    )
+    if spans:
+        return Invalid(spans)
+
     if _already_applied(repo_root, operations, plan["postimages"]):
         # This plan applied to the committed baseline is exactly what is on
         # disk, and the diff is confined to the paths the plan writes. A
@@ -1091,19 +1151,9 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
             repo_root, approval.scope, "apply-working-tree-not-confined"
         )
         if problem is None:
-            unaccounted = sorted(set(changed) - _written_paths(operations))
-            if unaccounted:
-                problem = Problem(
-                    code="apply-working-tree-not-clean",
-                    message=(
-                        f"the working tree differs from HEAD at "
-                        f"{unaccounted}, which this plan does not write — an "
-                        f"already-applied run certifies the diff as the change "
-                        f"the approval authorized, so a change it did not make "
-                        f"must not ride into it"
-                    ),
-                    location=unaccounted[0],
-                )
+            problem = _unaccounted_problem(
+                sorted(set(changed) - _written_paths(operations))
+            )
         if problem is not None:
             return Invalid((problem,))
         return ApplyResult(
@@ -1125,13 +1175,6 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
             stale_reasons=approval.stale_reasons,
         )
 
-    by_digest = {record.digest: record for record in approval.records}
-    spans = _approved_span_problems(
-        repo_root, operations, by_digest, registry_path
-    )
-    if spans:
-        return Invalid(spans)
-
     # Nothing may already differ from HEAD. The whole-diff confinement check
     # below is path-granular, so without this a change to another passage of
     # an approved document — one no record covers, and so one no unit-level
@@ -1139,21 +1182,10 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
     changed, problem = _confinement_problem(
         repo_root, approval.scope, "apply-working-tree-not-confined"
     )
+    if problem is None:
+        problem = _unaccounted_problem(changed)
     if problem is not None:
         return Invalid((problem,))
-    if changed:
-        return Invalid((Problem(
-            code="apply-working-tree-not-clean",
-            message=(
-                f"the working tree already differs from HEAD at "
-                f"{list(changed)} — inside the approval set's scope, but "
-                f"produced by something other than this plan. The applier "
-                f"certifies its whole diff as the approved change, so it "
-                f"applies onto the committed baseline and nothing else: "
-                f"commit or discard what is there first"
-            ),
-            location=changed[0],
-        ),))
 
     problems = []
     texts = _read_texts(repo_root, operations, problems)

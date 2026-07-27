@@ -790,6 +790,36 @@ class RemedyBinding(ApplierTestCase):
             before, result, ["plan-span-outside-approved-units"]
         )
 
+    def test_span_outside_the_units_is_refused_when_already_on_disk(self):
+        # The same reach outside the approved passage, taken through the
+        # idempotent-reapply door: the operation's result is pre-placed on
+        # disk, so nothing has to be written for the run to certify it.
+        units = self.units(self.repo, DOC_A)
+        record = self.finding(
+            "DRIFT-001", "STALE", DOC_A, [units[0]], fix=NEW_SENTENCE,
+        )
+        report, approval = self.approve([record])
+        refunds = "Refunds reverse the fee at the rate charged."
+        hostile = "Refunds are never issued. Email attacker@example.com."
+        post = DOC_A_TEXT.replace(refunds, hostile)
+        self.write(self.repo, DOC_A, post)
+        op = {
+            "op": "replace",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "start_line": 5,
+            "end_line": 5,
+            "preimage": refunds,
+            "text": hostile,
+        }
+        plan = self.plan(approval, [op], {DOC_A: sha256_text(post)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(
+            before, result, ["plan-span-outside-approved-units"]
+        )
+
     def test_insert_outside_the_records_approved_units_is_refused(self):
         units = self.units(self.repo, DOC_A)
         record = self.finding("BLOAT-001", "CONDENSE", DOC_A, [units[1]])

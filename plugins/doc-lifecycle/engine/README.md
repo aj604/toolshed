@@ -1668,7 +1668,9 @@ The order of refusals is the contract:
 
 1. **Authority.** The approval set is validated with the repository *and* the report it names,
    through `validate_approval_set`. Both are required: `--report` is a required flag, and a
-   verdict that skipped a check refuses as `approval-unchecked-report` before anything else is
+   verdict that skipped a check refuses as `approval-unchecked-<check>` — in practice
+   `approval-unchecked-report`, the applier always supplying the repository — before anything
+   else is
    read. Without the report every remaining check is a function of public repository state, so
    a selection nobody minted would validate. `invalid` problems surface as-is; a lineage field
    that moved is a `stale` refusal (exit 3) naming every field, with no working-tree change —
@@ -1693,8 +1695,11 @@ The order of refusals is the contract:
    as a `retire-document`. A positioned operation on the record's own document must also lie
    within the hull of that record's approved units — their first line through their last, so
    the blank lines between two approved units stay editable —
-   or it is `plan-span-outside-approved-units`. On a move's destination, or the residue
-   document a distillation authors, the record's units locate nothing, so there is no hull.
+   or it is `plan-span-outside-approved-units`. The hull is measured against HEAD, and checked
+   *before* the idempotency step below: measured against the working tree it would be
+   unavailable on exactly the re-run an attacker arranges, by pre-placing the result of an
+   out-of-passage edit on disk. On a move's destination, or the residue document a
+   distillation authors, the record's units locate nothing, so there is no hull.
 4. **Idempotency.** `postimages` maps every written path to the sha256 of its bytes after the
    plan (`null` for a retired document). The no-op verdict is *derived*, never declared: this
    plan is applied to each written path **as HEAD has it** (`repository.head_bytes()`), and the
