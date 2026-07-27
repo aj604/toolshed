@@ -85,13 +85,14 @@ legacy `sync-gate.py`/`render-report.py`/`validate-drift-output.py` trio, and ev
 action it invokes is pinned to an immutable commit SHA (a stricter bar than the legacy
 templates currently meet — see `tests/scripts/audit-workflow_test.py`).
 
-**Not yet wired into Install/Upgrade above.** This template requires a landed
-`.doc-lifecycle/registry.json` (the new document model's classification manifest), which no
-consumer has until it runs the migration door (aj604/toolshed#74 — "Migration to the registry
-contract", below); installing this lane into a
-repo's `.github/` — vendoring the `doclifecycle` engine package, copying
-`render-audit-summary.py`, and rendering the `{{AUDIT_CRON}}` knob — is aj604/toolshed#75's job.
-Until then this file is the reviewable template only; don't hand-install it ahead of that door.
+**Installed only into a repo that has been through the migration door.** This template requires
+a landed `.doc-lifecycle/registry.json` (the new document model's classification manifest),
+which no consumer has until it runs the migration door (aj604/toolshed#74 — "Migration to the
+registry contract", below), and it is closed-world over that registry, so it would fail on every
+run without one. That file's presence is exactly what switches this lane on:
+`apply-upgrade.py`'s `adopted_registry()` reads it, and only then does Upgrade mode render
+`doc-audit.yml`'s `{{AUDIT_CRON}}`, copy `render-audit-summary.py`, and vendor the engine (see
+Upgrade mode's ownership table). Never hand-install it ahead of that door.
 
 ## The new engine's apply lane (`doc-apply.yml`, aj604/toolshed#72)
 
@@ -116,10 +117,15 @@ before it becomes argv. `scripts/render-apply-summary.py` owns this lane's run s
 refusal, the staged path list, and the PR title, body, and commit message
 (`tests/scripts/render-apply-summary_test.py`, `tests/scripts/apply-workflow_test.py`).
 
-**Not yet wired into Install/Upgrade above**, for the same reason `doc-audit.yml` is not: it needs
-a landed `.doc-lifecycle/registry.json`, the vendored engine, and `render-apply-summary.py` copied
-into `.github/doc-sync/` — aj604/toolshed#75's job. Until then this file is the reviewable
-template only.
+**Installed on the same condition `doc-audit.yml` is**: it needs a landed
+`.doc-lifecycle/registry.json`, the vendored engine, and `render-apply-summary.py` in
+`.github/doc-sync/`, so Upgrade mode installs it for exactly the repos that carry a registry. It
+has no knob — manual dispatch carries no schedule to preserve. **Disable the legacy lanes before
+enabling it in a repo that still runs them**, so two generations never propose edits to one
+corpus at once — at the entry job, not only at the write job, since these lanes render every
+terminal summary from inside the job that writes and a half-disabled lane ends saying nothing.
+This repository's own install did that first (aj604/toolshed#75); aj604/toolshed#77 removes them
+from the templates.
 
 **Before retiring a repo's legacy lane, run the shadow comparison.** Both lanes look at the
 same documentation while only one may write; `scripts/compare-shadow-lanes.py compare` answers
@@ -257,12 +263,19 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | `.github/doc-sync-marker` | sync state | **Never touch.** |
 | `.github/doc-sync/audit-scope.json` | consumer (tuned config) | **Never touch.** |
 | `.github/doc-sync/drift-waivers.json` | consumer (accepted-claim record) | **Never touch.** Seed `{"waivers": []}` only if absent (pre-0.11 installs lack it). |
+| `doc-audit.yml`, `doc-apply.yml` | plugin (wiring) | **Regenerate**, knobs preserved — but only for an install holding `.doc-lifecycle/registry.json`. An install without one is left exactly as it was. |
+| `.github/doc-sync/render-audit-summary.py`, `render-apply-summary.py` | plugin (wiring) | **Overwrite**, on the same registry condition. |
+| `.github/doc-sync/engine/` | plugin (wiring) | **Replace wholesale**, on the same registry condition — the destination is emptied first, so a module deleted upstream stops being importable. Never edited in place. |
+| `.doc-lifecycle/registry.json` | consumer (classification) | **Never touch.** Migration mode produces it; this mode only reads whether it exists. |
 
 **Knobs are preserved, not reset** — `apply-upgrade.py` reads each install-time value out of the
 currently-installed workflow and substitutes it back into the new template:
 - `doc-sync.yml`: the `cron:` under `schedule` → `{{CRON_SCHEDULE}}`; the `CAP:` env → `{{BLAST_RADIUS_CAP}}`.
 - `doc-bloat.yml`: its `cron:` → `{{BLOAT_CRON}}`.
 - `doc-sync-upgrade.yml`: its `cron:` → `{{UPGRADE_CRON}}`.
+- `doc-audit.yml` (registry installs only): its `cron:` → `{{AUDIT_CRON}}`. Absent on an install
+  that adopted the registry before this lane existed, so it seeds `0 1 * * *` and warns, the same
+  shape `doc-sync-upgrade.yml` uses. `doc-apply.yml` has no knob.
 A knob it can't extract fails the run red rather than default-guessing; the one exception is a
 missing `doc-sync-upgrade.yml` (an install predating self-upgrade), where it seeds the default
 upgrade cron (`0 2 * * 1`) and warns on stderr.

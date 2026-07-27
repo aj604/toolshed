@@ -36,6 +36,10 @@ env:
 
 jobs:
   plan:
+    # doc-lifecycle#75: the legacy lane is disabled in this install, ahead
+    # of the new audit and apply lanes and of #77 removing it from the
+    # template. Stopping the entry job skips every job that needs it.
+    if: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -243,7 +247,11 @@ jobs:
   # stages exactly those.
   land:
     needs: [plan, detect, fix]
-    if: always() && needs.detect.result == 'success' && needs.fix.result != 'failure'
+    # doc-lifecycle#75: the legacy write path is disabled in this install,
+    # ahead of the new apply lane (doc-apply.yml) and of #77 removing this
+    # job from the template. Original condition: always() &&
+    # needs.detect.result == 'success' && needs.fix.result != 'failure'
+    if: false
     runs-on: ubuntu-latest
     permissions:
       contents: write

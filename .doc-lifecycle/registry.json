@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "CLAUDE.md",
+    "CONTEXT.md",
+    "README.md",
+    "docs",
+    "plugins"
+  ],
+  "sets": [
+    "plans",
+    "specs"
+  ],
+  "extensions": [
+    ".md"
+  ],
+  "rules": [
+    {
+      "glob": "CLAUDE.md",
+      "kind": "living"
+    },
+    {
+      "glob": "CONTEXT.md",
+      "kind": "living"
+    },
+    {
+      "glob": "README.md",
+      "kind": "living"
+    },
+    {
+      "glob": "docs/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "docs/decisions.md",
+      "kind": "narrative"
+    },
+    {
+      "glob": "docs/design-rationale.md",
+      "kind": "narrative"
+    },
+    {
+      "glob": "docs/agents/*.md",
+      "kind": "living"
+    },
+    {
+      "glob": "docs/guides/*.md",
+      "kind": "narrative"
+    },
+    {
+      "glob": "docs/plans/*.md",
+      "kind": "planning",
+      "set": "plans"
+    },
+    {
+      "glob": "docs/superpowers/specs/*.md",
+      "kind": "planning",
+      "set": "specs"
+    },
+    {
+      "glob": "plugins/**/*.md",
+      "kind": "living"
+    }
+  ]
+}
