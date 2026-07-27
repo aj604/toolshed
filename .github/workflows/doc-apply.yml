@@ -1,0 +1,510 @@
+# doc-apply — the scheduler adapter's apply lane (aj604/toolshed#72).
+# Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill alongside doc-audit.yml,
+# whose read-only run this one consumes: a reviewer reads that run's report, picks the record
+# digests they approve, and dispatches this workflow with them. The named subset **is** the
+# semantic approval; this lane mints the approval set from it, and merging the pull request it
+# opens is change approval of the actual diff. Nothing else lands anything.
+#
+# Three jobs, split strictly by trust, per the re-architecture's scheduler-adapter contract:
+#
+#   revalidate — deterministic, no model. Re-fetches the requested base, binds the downloaded
+#     report artifact to the dispatched report digest, and re-validates that report against the
+#     repository as it is *now*. A base that moved, a registry or configuration that changed, or
+#     a preimage that no longer matches refuses here, naming the lineage field that moved — and
+#     the lane stops, so no branch and no pull request exist to review. Only then does it mint
+#     the approval set (`mint-approval`), whose own refusals — unknown record, exclusive group,
+#     unauthorized target, stale preimage — are the engine's, not this workflow's.
+#   plan — the only job with a model, and it holds no credential at all: `contents: read`, a
+#     checkout with no persisted credential, and no GH_TOKEN. It authors an edit plan and
+#     nothing else. The plan is a *proposal*: the applier re-derives every operation against the
+#     approval set, the record's own remedy table, and the exact preimages, so a hostile plan
+#     buys nothing a validated approval set does not already allow.
+#   apply — credentialed, and runs no model. It executes the engine's `apply-plan` (which is
+#     itself capability-limited: no shell, no exec, no network), stages exactly the paths the
+#     verified apply result emitted after whole-diff confinement, commits with the approval
+#     trailers, pushes a derived branch, and opens a real pull request — never a draft. It
+#     executes nothing a model wrote: every model-authored byte reaches it as data inside a JSON
+#     artifact, and every argument it hands to a program comes from a validated artifact or a
+#     `render-apply-summary.py` subcommand that checked it first.
+#
+# Dispatch inputs never reach a shell. They travel through `env:` (so a value is a quoted
+# variable, never a substitution the runner splices into a script) and through action `with:`
+# inputs, and the record selection is validated to be sha256 digests before it becomes argv.
+#
+# Design: the distilled-decisions comment on aj604/toolshed#57 (2026-07-26); this workflow's
+# ticket is aj604/toolshed#72.
+name: doc-apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_run_id:
+        description: "Run id of the doc-audit run whose report is being approved"
+        required: true
+      report_digest:
+        description: "Digest of that report — binds the artifact to what you read"
+        required: true
+      records:
+        description: "Record digests to approve, space- or comma-separated"
+        required: true
+      base:
+        description: "Branch to apply onto and open the pull request against"
+        required: true
+        default: main
+
+# Least privilege by default; each job widens only what it needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: doc-apply
+  cancel-in-progress: false
+
+jobs:
+  # Deterministic, no model. Everything that can refuse the dispatch refuses here, before any
+  # branch exists. `actions: read` is for reading the audit run's artifact; it is a read scope,
+  # and this job holds no write scope at all.
+  revalidate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      approval_digest: ${{ steps.approval.outputs.approval_digest }}
+    steps:
+      - name: Checkout the requested base
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.base }}
+          fetch-depth: 0   # anchor/evidence checks read file history
+          persist-credentials: false
+
+      # Shape-check the dispatched run id before it names a run anywhere. It
+      # reaches two consumers that read it differently — a `gh api
+      # repos/.../actions/runs/<id>` path (a `/`-bearing value walks to another
+      # run) and `download-artifact`'s `run-id` (parseInt) — so a value like
+      # `1/../../repos/other/repo/actions/runs/999` could bind one run while the
+      # artifact came from another. Validated to decimal digits here, both
+      # consumers below read the one value this step wrote, never the raw input.
+      - name: Validate the dispatched report run id
+        id: runid
+        env:
+          REPORT_RUN_ID: ${{ inputs.report_run_id }}
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/render-apply-summary.py run-id \
+            --run-id "$REPORT_RUN_ID" --out "$GITHUB_OUTPUT"
+
+      # Bind the dispatched run to *this repository's* doc-audit lane before its
+      # artifact is trusted for anything: `download-artifact` will hand back an
+      # `audit-report` from any run that published one, so without this a
+      # dispatch could point `report_run_id` at some other workflow's run whose
+      # artifact happens to share the name. `.path` is the workflow file the run
+      # executed. Cheap by design (#72): it does not also pin the run's ref or
+      # actor, so a doc-audit.yml modified on a branch would still pass — the
+      # residual a change reviewer covers, noted in this lane's ticket.
+      - name: Bind the report run to the doc-audit lane
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT_RUN_ID: ${{ steps.runid.outputs.report_run_id }}
+        run: |
+          set -euo pipefail
+          workflow_path=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${REPORT_RUN_ID}" \
+            --jq '.path')
+          echo "report_run_id ${REPORT_RUN_ID} ran ${workflow_path}"
+          if [ "$workflow_path" != ".github/workflows/doc-audit.yml" ]; then
+            echo "::error::report_run_id ${REPORT_RUN_ID} ran ${workflow_path}, not the doc-audit lane — refusing to approve records from a report this repo's audit lane did not produce"
+            exit 1
+          fi
+
+      # Into RUNNER_TEMP, never the work tree: an approval set is never repository state, and
+      # the applier's confinement check reads the *complete* working-tree diff — an artifact
+      # downloaded into the checkout would be an untracked change it must refuse.
+      - name: Download the report being approved
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: audit-report
+          run-id: ${{ steps.runid.outputs.report_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/dispatch
+
+      - name: Bind the artifact to the dispatched report digest
+        env:
+          REPORT_DIGEST: ${{ inputs.report_digest }}
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/render-apply-summary.py verify-report \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
+            --expected-digest "$REPORT_DIGEST"
+
+      # The consumer's current audit configuration, read off a fresh deterministic engine run
+      # under this lane's declared boundary. Supplied to every check below, so configuration
+      # drift is compared rather than silently skipped — a check that omits it cannot honestly
+      # clear a config-stale report.
+      - name: Derive the current audit configuration digest (no model)
+        run: |
+          set -uo pipefail
+          # `|| true`, not a bare call: the runner's shell is `bash -e`, and a
+          # verdict-carrying exit (a model-free run is `partial`, exit 4) would
+          # abort the step before the digest is read. The payload is the answer
+          # here, not the exit code — and a payload without one refuses below.
+          python3 .github/doc-sync/engine/doc-lifecycle.py drift-audit --repo . --mode full \
+            > "${RUNNER_TEMP}/current-lineage.json" || true
+          python3 .github/doc-sync/render-apply-summary.py config-digest \
+            --report "${RUNNER_TEMP}/current-lineage.json" \
+            --out "${RUNNER_TEMP}/config-digest.txt"
+
+      - name: Revalidate the report against the requested base
+        run: |
+          set -uo pipefail
+          # validate-report's stale/partial/invalid exits are typed outcomes to
+          # capture, not crashes to abort on — and the runner's shell is
+          # `bash -e`, so the code is captured with `||` rather than read from
+          # `$?` after a command that would already have ended the step.
+          code=0
+          python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" --repo . \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
+            > "${RUNNER_TEMP}/revalidated.json" || code=$?
+          # 4 is `partial`: a report that did not examine everything it declared
+          # still carries records an approval set can be minted from, and its
+          # coverage gaps travel into the pull-request body.
+          python3 .github/doc-sync/render-apply-summary.py gate --stage revalidation \
+            --payload "${RUNNER_TEMP}/revalidated.json" --exit-code "$code" \
+            --accept-exit-code 4
+
+      - name: Turn the dispatched record subset into argv
+        env:
+          RECORDS: ${{ inputs.records }}
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/render-apply-summary.py record-args \
+            --records "$RECORDS" --out "${RUNNER_TEMP}/record-args.txt"
+
+      # The semantic approval, minted from the named subset. The argv comes from the file the
+      # step above validated — read as whole lines into an array, so nothing is word-split, and
+      # so the engine's own exit code reaches the gate rather than a wrapper's.
+      - name: Mint the approval set
+        env:
+          MINTER: ${{ github.actor }}
+        run: |
+          set -uo pipefail
+          mapfile -t RECORD_ARGS < "${RUNNER_TEMP}/record-args.txt"
+          code=0
+          python3 .github/doc-sync/engine/doc-lifecycle.py mint-approval \
+            "${RECORD_ARGS[@]}" \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" --repo . \
+            --minter "$MINTER" --minter-kind human \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
+            --out "${RUNNER_TEMP}/approval.json" \
+            > "${RUNNER_TEMP}/mint-result.json" || code=$?
+          python3 .github/doc-sync/render-apply-summary.py gate --stage minting \
+            --payload "${RUNNER_TEMP}/mint-result.json" --exit-code "$code"
+
+      - name: Publish the approval digest to the credentialed job
+        id: approval
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/render-apply-summary.py approval-digest \
+            --approval "${RUNNER_TEMP}/approval.json" --out "$GITHUB_OUTPUT"
+
+      # The summary and trailers the change carries. Rendered here, where the approval set
+      # validated clean against both its report and the repository — after the apply, its own
+      # preimages have legitimately moved, and a summary rendered then would say so.
+      - name: Render the approval summary and trailers
+        run: |
+          set -uo pipefail
+          code=0
+          python3 .github/doc-sync/engine/doc-lifecycle.py render-approval \
+            --approval "${RUNNER_TEMP}/approval.json" --repo . \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
+            > "${RUNNER_TEMP}/approval-summary.md" || code=$?
+          # `|| exit` so this gate's refusal is not masked by the second one
+          # below: a step's status is its *last* command's, errexit or not, so a
+          # non-terminal gate that only returned 1 would let the trailers render
+          # and the step pass. The refusal must end the step here.
+          python3 .github/doc-sync/render-apply-summary.py gate --stage rendering \
+            --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code" || exit 1
+          # Gated too, and not as an afterthought: an approval set this command
+          # refuses prints nothing at all, and an empty trailers block is what a
+          # change would land looking authorized without.
+          code=0
+          python3 .github/doc-sync/engine/doc-lifecycle.py render-approval \
+            --approval "${RUNNER_TEMP}/approval.json" --repo . \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
+            --trailers > "${RUNNER_TEMP}/trailers.txt" || code=$?
+          python3 .github/doc-sync/render-apply-summary.py gate --stage rendering \
+            --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code"
+
+      - name: Derive the branch name from the approval digest
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/render-apply-summary.py branch-name \
+            --approval "${RUNNER_TEMP}/approval.json" \
+            --out "${RUNNER_TEMP}/branch.txt"
+
+      # The report was downloaded one directory down, in `dispatch/`; the other
+      # five bundle files sit at RUNNER_TEMP. `upload-artifact` roots a
+      # multi-path artifact at the least-common-ancestor of its search paths and
+      # keeps each file's path relative to it, so a report left in `dispatch/`
+      # would be stored at `dispatch/drift-report.json` and, extracted into the
+      # consumers' `apply/` directory, land at `apply/dispatch/drift-report.json`
+      # — where the plan prompt, `apply-plan --report`, and `pr-body --report`
+      # do not look. Copy it up to the bundle root so all six entries are
+      # siblings and the artifact is flat: one directory, one artifact.
+      - name: Flatten the report into the approval bundle root
+        run: |
+          set -euo pipefail
+          cp "${RUNNER_TEMP}/dispatch/drift-report.json" \
+             "${RUNNER_TEMP}/drift-report.json"
+
+      # An Actions artifact, deliberately: an approval set is an untracked artifact that expires
+      # with the change it authorizes, and this is how it reaches the two jobs below without
+      # ever becoming repository state.
+      - name: Upload the approval bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: apply-approval
+          path: |
+            ${{ runner.temp }}/drift-report.json
+            ${{ runner.temp }}/approval.json
+            ${{ runner.temp }}/approval-summary.md
+            ${{ runner.temp }}/trailers.txt
+            ${{ runner.temp }}/config-digest.txt
+            ${{ runner.temp }}/branch.txt
+          if-no-files-found: error
+
+  # The only job that runs a model, and the only one that holds no credential: no GH_TOKEN, and
+  # a checkout that persists none. It authors a proposal; it cannot land one.
+  plan:
+    needs: revalidate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # claude-code-action OAuth exchange only — not repo write
+    steps:
+      - name: Checkout the requested base
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.base }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Pin the plugin marketplace to the installed release, exactly as doc-audit.yml does — the
+      # skills a model step executes must be frozen at the vendored wiring's version.
+      - name: Pin plugin marketplace
+        run: |
+          set -euo pipefail
+          VERSION=$(cat .github/doc-sync/installed-version)
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch "v${VERSION}" \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
+
+      - name: Download the approval bundle
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: apply-approval
+          path: ${{ runner.temp }}/apply
+
+      # Two reasons this prompt does not defer to an authoring skill or to the doc-distiller
+      # agent, and both are worth stating where the next editor will look:
+      #
+      #   1. `DISTILL` is not applyable end to end today. A DISTILL record can never carry a
+      #      `destination` (`bloat.DESTINATION_VERDICTS` is EXTRACT-AND-MOVE and MERGE-DOC
+      #      only), and the applier resolves `create-document`'s allowed targets from exactly
+      #      that field — so the residue half of the remedy refuses as
+      #      `plan-target-not-record-target` while the `retire-document` half would execute.
+      #      Deferring to the distiller before that is fixed buys a lossy retirement: the
+      #      planning artifact deleted and its residue stranded. Refusing the plan is the safe
+      #      outcome, and is what happens today.
+      #   2. The edit-plan contract has a single owner — `fixing-docs/SKILL.md` (aj604/toolshed#70,
+      #      landed) carries the worked edit-plan example and is authoritative for its shape,
+      #      including the trailing-newline rule below. This prompt is reconciled against that
+      #      owner rather than deferring to the skill at run time: the headless model authors
+      #      from this prompt alone — it is not driven to read the skill — so the contract has to
+      #      travel inline. When `fixing-docs/SKILL.md` changes, re-reconcile this copy against it.
+      #
+      # Nothing here is trusted either way — `apply-plan` re-derives every claim below against
+      # the approval set, the record's own remedy table, and the repository.
+      - name: Author the edit plan (headless)
+        id: model
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
+          plugins: doc-lifecycle@toolshed
+          prompt: |
+            Author an edit plan that executes exactly the approved records in the approval set
+            at ${{ runner.temp }}/apply/approval.json, against the report at
+            ${{ runner.temp }}/apply/drift-report.json. Apply nothing yourself: you are writing
+            a JSON proposal that a deterministic applier validates and executes. Do not edit any
+            documentation file, and do not run git.
+
+            Write ./edit-plan.json in this shape:
+            {"artifact": "edit-plan", "schema_version": 1,
+             "approval_digest": <the approval set's "digest">,
+             "operations": [ ... ], "postimages": {<path>: <sha256 of the file after the plan,
+             or null for a retired document>}, "digest": <see below>}
+
+            One operation per approved remedy, each an object with:
+              "op": "replace" | "delete" | "insert" | "create-document" | "retire-document" |
+                    "move-with-provenance"
+              "record": the approved record's digest (from the approval set's "records")
+              "path": the record's own document
+              "target_class": "documentation"
+              span operations ("replace", "delete", "move-with-provenance") carry 1-based
+              "start_line" and "end_line" plus "preimage": the exact current text of those
+              lines; "insert" carries "after_line" and "text"; "replace" carries "text";
+              "move-with-provenance" carries "destination"; "retire-document" carries the whole
+              document as "preimage"; "create-document" carries "text".
+
+            A span's "preimage" and "text" carry **no trailing newline**: the applier compares
+            them against the lines joined by "\n", so a preimage ending in the line's own
+            newline is refused as apply-preimage-mismatch even when every character before it
+            is right. "retire-document" is the exception — its preimage is the whole file's
+            bytes, trailing newline included.
+
+            Rules the applier enforces, so get them right or it refuses the plan. An operation
+            may only
+            be one of the operations that record's finding code authorizes; a positioned
+            operation must lie within the approved units' own passage; every preimage must be
+            the exact current text; and every written path must be in the approval set's
+            "scope"."paths". Read each target with Read before you write its preimage.
+
+            Finally stamp the plan's digest with the engine's own canonical digest, which is
+            what binds the plan to review:
+            python3 -c 'import json,sys; sys.path.insert(0,".github/doc-sync/engine"); from doclifecycle.digest import sha256_canonical as d; p=json.load(open("edit-plan.json")); p.pop("digest",None); p["digest"]=d(p); json.dump(p,open("edit-plan.json","w"))'
+
+            If you cannot author a correct operation for an approved record, write the plan
+            without it and say so — a partial plan is refused honestly; a guessed preimage is
+            not.
+          claude_args: --allowedTools "Read,Grep,Glob,Write,Bash(python3 *)"
+
+      - name: Upload the edit plan
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: apply-plan
+          path: edit-plan.json
+          if-no-files-found: error
+
+  # Credentialed, and model-free. The engine decides what may be written; this job stages
+  # exactly what the verified result emitted, and opens the pull request that carries the
+  # provenance a change reviewer needs.
+  apply:
+    needs: [revalidate, plan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout the requested base
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.base }}
+          fetch-depth: 0
+
+      # Into RUNNER_TEMP, never the work tree — the applier refuses to run against a working
+      # tree holding any change at all, and a downloaded artifact is a change.
+      - name: Download the approval bundle
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: apply-approval
+          path: ${{ runner.temp }}/apply
+
+      # The model-authored plan lands in its OWN directory, never the trusted
+      # bundle's: upload-artifact roots an artifact at its upload directory, so
+      # a plan job that made `edit-plan.json` a directory bundling `trailers.txt`
+      # or `branch.txt` would, extracted into `${{ runner.temp }}/apply`,
+      # overwrite the revalidate job's trusted files — the exact bytes that
+      # become the commit trailers, the PR body, and the branch this job pushes.
+      # Two directories, so the model's artifact can never land on the bundle's.
+      - name: Download the edit plan
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: apply-plan
+          path: ${{ runner.temp }}/plan
+
+      # `--expected-digest` binds the approval file this job downloaded to the one the
+      # revalidation job actually minted: a different artifact, however well-formed, is refused.
+      - name: Apply the plan (deterministic engine — no model, no shell)
+        env:
+          EXPECTED_APPROVAL: ${{ needs.revalidate.outputs.approval_digest }}
+        run: |
+          set -uo pipefail
+          code=0
+          python3 .github/doc-sync/engine/doc-lifecycle.py apply-plan --repo . \
+            --plan "${RUNNER_TEMP}/plan/edit-plan.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --report "${RUNNER_TEMP}/apply/drift-report.json" \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/apply/config-digest.txt")" \
+            --expected-digest "$EXPECTED_APPROVAL" \
+            > "${RUNNER_TEMP}/apply-result.json" || code=$?
+          python3 .github/doc-sync/render-apply-summary.py gate --stage apply \
+            --payload "${RUNNER_TEMP}/apply-result.json" --exit-code "$code"
+
+      - name: Derive the staged path list from the verified apply result
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/render-apply-summary.py staged-paths \
+            --result "${RUNNER_TEMP}/apply-result.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --out "${RUNNER_TEMP}/staged-paths.txt"
+
+      - name: Stage exactly those paths
+        run: |
+          set -euo pipefail
+          git switch -c "$(cat "${RUNNER_TEMP}/apply/branch.txt")"
+          git add --pathspec-from-file="${RUNNER_TEMP}/staged-paths.txt" --pathspec-file-nul
+          git diff --cached --name-only -z --no-renames > "${RUNNER_TEMP}/staged.txt"
+          { git diff --name-only -z; \
+            git ls-files --others --exclude-standard -z; } \
+            > "${RUNNER_TEMP}/unstaged.txt"
+          python3 .github/doc-sync/render-apply-summary.py verify-staged \
+            --paths "${RUNNER_TEMP}/staged-paths.txt" \
+            --staged "${RUNNER_TEMP}/staged.txt" \
+            --unstaged "${RUNNER_TEMP}/unstaged.txt"
+
+      - name: Render the commit message, pull-request title, and body
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/render-apply-summary.py commit-message \
+            --result "${RUNNER_TEMP}/apply-result.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --trailers "${RUNNER_TEMP}/apply/trailers.txt" \
+            --out "${RUNNER_TEMP}/commit-message.txt"
+          python3 .github/doc-sync/render-apply-summary.py pr-title \
+            --result "${RUNNER_TEMP}/apply-result.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --out "${RUNNER_TEMP}/pr-title.txt"
+          python3 .github/doc-sync/render-apply-summary.py pr-body \
+            --result "${RUNNER_TEMP}/apply-result.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --report "${RUNNER_TEMP}/apply/drift-report.json" \
+            --approval-summary "${RUNNER_TEMP}/apply/approval-summary.md" \
+            --out "${RUNNER_TEMP}/pr-body.md"
+
+      - name: Commit and push the branch
+        run: |
+          set -euo pipefail
+          git config user.name "doc-lifecycle[bot]"
+          git config user.email "doc-lifecycle@users.noreply.github.com"
+          git commit -F "${RUNNER_TEMP}/commit-message.txt"
+          git push origin "HEAD:refs/heads/$(cat "${RUNNER_TEMP}/apply/branch.txt")"
+
+      # A real pull request, never a draft: merging it is the change approval that lands the
+      # diff, and a draft cannot be merged.
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE: ${{ inputs.base }}
+        run: |
+          set -euo pipefail
+          gh pr create --base "$BASE" \
+            --head "$(cat "${RUNNER_TEMP}/apply/branch.txt")" \
+            --title "$(cat "${RUNNER_TEMP}/pr-title.txt")" \
+            --body-file "${RUNNER_TEMP}/pr-body.md" \
+            >> "$GITHUB_STEP_SUMMARY"

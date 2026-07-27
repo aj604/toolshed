@@ -36,8 +36,8 @@ Ownership (total on wiring, idempotent on state):
 
     An install that has been through the migration door — one holding a landed
     .doc-lifecycle/registry.json — also owns the new engine's lanes:
-    .github/workflows/doc-audit.yml                              regenerate, knobs preserved
-    .github/doc-sync/render-audit-summary.py                     overwrite
+    .github/workflows/{doc-audit,doc-apply}.yml                  regenerate, knobs preserved
+    .github/doc-sync/render-{audit,apply}-summary.py             overwrite
     .github/doc-sync/engine/                                     replaced wholesale
     .doc-lifecycle/registry.json is consumer judgment and is never touched here;
     the migration door (scheduling-doc-sync's Migration mode) is what produces it.
@@ -96,10 +96,13 @@ SCRIPTS = {
 # it is what switches these on — never a flag a caller can assert.
 NEW_LANE_PLACEHOLDERS = {
     "doc-audit.yml": ["{{AUDIT_CRON}}"],
+    # Manual dispatch only, so no schedule to preserve and nothing to substitute.
+    "doc-apply.yml": [],
 }
 
 NEW_LANE_SCRIPTS = {
     "render-audit-summary.py": "scheduling-doc-sync/scripts",
+    "render-apply-summary.py": "scheduling-doc-sync/scripts",
 }
 
 # Before doc-sync's 03:00 daily, so a nightly reader sees the new lane's report
