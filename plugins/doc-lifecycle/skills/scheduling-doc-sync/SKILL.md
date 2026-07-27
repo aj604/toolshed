@@ -63,6 +63,30 @@ from the sibling skills that own them (install steps 3–4). `apply-upgrade.py` 
 engine — run from the pinned checkout by the upgrade lane, never vendored into the install (see
 Upgrade mode).
 
+## The new engine's audit lane (`doc-audit.yml`, aj604/toolshed#57)
+
+`doc-audit.yml` (base directory, alongside the three templates above) is a **fourth, separate**
+template: the re-architecture's read-only scheduled audit, rebuilt on the `doclifecycle` engine
+package rather than the eight legacy scripts. It runs *alongside* `doc-sync.yml`, not instead of
+it — the two coexist until the shadow-mode parity gate (aj604/toolshed#76) clears the way to
+retire the legacy lane (aj604/toolshed#77). Its own script, `scripts/render-audit-summary.py`,
+owns that lane's run-surface rendering exactly as `render-report.py` owns the legacy lane's.
+
+Structurally it is the same two-job trust split as every other lane here — `audit` (the model,
+`contents: read` + `id-token: write`, no credential) and `publish` (no model, `contents: read` +
+`issues: write` only — never `contents: write`, never a PR, never a direct commit) — but calls
+the engine's own public CLI (`drift-plan`, `drift-audit`, `validate-report`) instead of the
+legacy `sync-gate.py`/`render-report.py`/`validate-drift-output.py` trio, and every third-party
+action it invokes is pinned to an immutable commit SHA (a stricter bar than the legacy
+templates currently meet — see `tests/scripts/audit-workflow_test.py`).
+
+**Not yet wired into Install/Upgrade above.** This template requires a landed
+`.doc-lifecycle/registry.json` (the new document model's classification manifest), which no
+consumer has until it runs the migration door (aj604/toolshed#74); installing this lane into a
+repo's `.github/` — vendoring the `doclifecycle` engine package, copying
+`render-audit-summary.py`, and rendering the `{{AUDIT_CRON}}` knob — is aj604/toolshed#75's job.
+Until then this file is the reviewable template only; don't hand-install it ahead of that door.
+
 ## Preflight (run all; report failures, don't silently skip)
 
 1. Target repo has a GitHub remote: `git remote get-url origin`. No remote → stop; this

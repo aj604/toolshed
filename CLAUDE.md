@@ -3,7 +3,7 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture is absorbing the helper scripts into; see its `README.md`) plus nine skill
+re-architecture is absorbing the helper scripts into; see its `README.md`) plus ten skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
@@ -12,11 +12,14 @@ helper scripts
 `scripts/plan-distill.py` (doc-bloat's distill-lane planner + deterministic patch merge),
 `scripts/authorize-paths.py` (the path authority the credentialed workflow jobs enforce over a
 model's edit set),
-and `scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
-the upgrade lane, not vendored into installs), all `python3`, no deps)
+`scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
+the upgrade lane, not vendored into installs), and `scripts/render-audit-summary.py` (the new
+engine's read-only audit lane's run-surface rendering — #71), all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`, `doc-bloat.yml`, and
-`doc-sync-upgrade.yml`). The sample repos under `tests/fixtures/` are the only other runnable
+`doc-sync-upgrade.yml`) and `doc-audit.yml` (the new engine's audit lane template, landed by #71
+alongside the other three; not yet installed anywhere — its dogfood install is #75). The sample
+repos under `tests/fixtures/` are the only other runnable
 code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`,
 `doc-sync/upgrade-gate.py`, `doc-sync/render-report.py`,
 `doc-sync/plan-chunks.py`, `doc-sync/plan-distill.py`, `doc-sync/authorize-paths.py`,
@@ -79,7 +82,12 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
   wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
   token-free, write jobs model-free and staging explicit paths) and `install-parity_test.py`
   (the dogfooded `.github/` install is byte-identical to what `apply-upgrade.py` would lay down
-  from the plugin with this install's knobs). `release.yml`'s CI runs every
+  from the plugin with this install's knobs). `render-audit-summary_test.py` covers the new
+  engine's audit lane's run-surface rendering (every report result state, plus the
+  report-never-produced case, and cost/turn observability); `audit-workflow_test.py` adds
+  `doc-audit.yml`-specific static checks (SHA-pinned third-party actions, no direct branch
+  commits) alongside what `workflow-permissions_test.py` already covers generically for every
+  `scheduling-doc-sync/*.yml` template. `release.yml`'s CI runs every
   `tests/scripts/*_test.py` suite.
 - **The engine's tests live at `tests/engine/*_test.py`** and are found by discovery
   (`python3 -m unittest discover -s tests/engine -p '*_test.py'`), which is how `release.yml`'s
