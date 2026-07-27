@@ -238,6 +238,44 @@ fails loud with `git apply` instructions (`render-report.py upgrade-summary --st
 blocked-workflows`). A human applies that patch with a `workflow`-scoped credential. This is rare
 and expected; don't try to "fix" it by widening the token — the restriction is GitHub's.
 
+## Migration to the registry contract
+
+A one-time, guided, **interactive** run — not Upgrade mode, which is deterministic and
+model-free. An install predating the registry has no `.doc-lifecycle/registry.json`, and the new
+audit is closed-world, so it needs one before it can run at all. The engine owns every decision
+here; this skill only sequences it. Both commands are **read-only** — the migration is the human
+landing a file, never the door.
+
+    ENGINE="$CLAUDE_PLUGIN_ROOT/engine/doc-lifecycle.py"
+
+1. **Draft.** `python3 "$ENGINE" migration-draft --repo . --registry-only >
+   .doc-lifecycle/registry.json`. It infers roots and kinds from `audit-scope.json`, the waivers,
+   `docs/doc-scope.md`, first-line `> As of` markers, and directory conventions. `--root <path>`
+   (repeatable) replaces inference for a repo whose docs sit somewhere unconventional.
+2. **Review the diff, as globs.** The draft is one rule per directory plus per-file overrides —
+   a short diff, deliberately. Run `python3 "$ENGINE" migration-draft --repo .` (no
+   `--registry-only`) to see each rule's `basis` and the documents it claims before judging it.
+   Edit the file; don't argue with the inference.
+3. **Dry-run.** `python3 "$ENGINE" migration-dry-run --repo .`. Read the obligations per kind,
+   the waivers that re-keyed, and the ones that need re-waiving. **Exit 1 means blocked** — most
+   often a document under a declared root that no rule claims, named in the output. Add a rule or
+   an exclude and repeat from step 2. There is no unclassified bucket.
+4. **Re-waive.** Rewrite each `needs_rewaiving` entry against what the document says now. Its
+   `message` states which of the five reasons applies.
+5. **Delete the rejected artifacts.** The dry run's `artifacts` names every old report, cache, or
+   approval found and how to regenerate it. Delete them; never edit one into the new shape.
+6. **Land it** as a normal PR: the registry, the rewritten waivers, the deletions.
+
+Rules for this mode:
+- **Never hand-write the registry from scratch** when a legacy install exists — the draft is what
+  makes the review a diff instead of a per-file slog.
+- **Never bypass a block.** A blocked dry run is the closed-world rule doing its job.
+- `audit-scope.json`, `drift-waivers.json`, and the marker are preserved untouched; the dry run
+  lists them under `preserved` with their digests.
+- Fresh installs run steps 1–3 too (the door is also **bootstrapping-docs**' registry step) —
+  with no legacy state it infers from markers and directory conventions alone, and reports
+  `from_version: null`.
+
 ## Rules
 
 - **Runs as a GitHub Action** (`schedule` + `workflow_dispatch`), not a Claude scheduled task

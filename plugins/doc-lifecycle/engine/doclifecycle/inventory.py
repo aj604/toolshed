@@ -65,7 +65,7 @@ def _document_payload(documents):
     ]
 
 
-def _walk_root(repo_root, root, registry):
+def walk_root(repo_root, root, registry):
     """Yield (repo-relative path, is_symlink) under `root`, in sorted order.
 
     A root may be a single file (`CLAUDE.md`) or a subtree (`docs`). Only files
@@ -76,6 +76,11 @@ def _walk_root(repo_root, root, registry):
     walked. Symlinks are yielded but never followed: a symlinked directory is
     reported and pruned rather than descended, so an innocuous-looking
     documentation path cannot pull in a subtree from outside its root.
+
+    Public because the migration door walks a corpus before any rule exists to
+    classify it (`registry.unclassified`), and a draft built from a second,
+    subtly different enumeration would propose rules for documents the
+    inventory will not hold.
     """
     absolute = os.path.join(repo_root, root)
     if os.path.islink(absolute):
@@ -147,7 +152,7 @@ def build_inventory(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
 
     documents, findings = [], []
     for root in reg.roots:
-        for rel, is_symlink in _walk_root(repo_root, root, reg):
+        for rel, is_symlink in walk_root(repo_root, root, reg):
             if is_symlink:
                 findings.append(Finding(
                     code="symlinked-path",

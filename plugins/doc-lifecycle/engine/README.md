@@ -8,8 +8,8 @@ and when a path last changed. Nothing here writes to a repository.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
 contract, the lineage-keyed cache, the segmenter, finding identity, the context index, the
-bloat lane, and the drift audit. Approval sets and the applier land in later slices of the
-re-architecture (issue #57).
+bloat lane, the drift audit, and the migration door. Approval sets and the applier land in later
+slices of the re-architecture (issue #57).
 
 ## Modules
 
@@ -23,6 +23,7 @@ re-architecture (issue #57).
 | `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
 | `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, the chunk cache seam |
 | `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, `load_verdicts()`, the verdicts and anchor checks |
+| `doclifecycle/migrate.py` | `draft_registry()`, `dry_run_migration()`, the legacy-install inference and the migration contract |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/render.py` | `render_report()` — Markdown from a validated `Report`, and nothing else |
 | `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()` — everything read from git |
@@ -1194,6 +1195,109 @@ verdicts = load_verdicts("verdicts.json")                           # → payloa
 audit_drift(".", mode="full", verdicts=verdicts)                    # → Report or Invalid
 ```
 
+## Migration door
+
+Issue #74. How a consumer already running the pre-registry doc-sync install adopts the registry
+contract, and how a fresh install gets a registry at all. Two commands, neither of which writes
+anything: the migration itself is a human landing a file and a workflow bump.
+
+### Drafting a registry
+
+```bash
+python3 -m doclifecycle migration-draft --repo . > draft.json
+python3 -m doclifecycle migration-draft --repo . --registry-only \
+  > .doc-lifecycle/registry.json
+```
+
+`draft_registry()` infers classification from what the consumer already wrote down, and emits it
+as **glob rules**: one rule per directory carrying that directory's dominant classification, plus
+a per-file rule for each document that disagrees with it. That is the point of the door — the
+adoption review is a dozen globs in a normal PR diff, not a line per markdown file.
+
+Four sources of evidence, in precedence order per document: a `> As of` marker in the first six
+lines is `narrative` (`narrative-anchor`); a directory under a legacy `policy_scope` is
+`planning` (`policy-scope`); a `plans` or `specs` path segment is `planning`
+(`planning-location`); everything else is `living` (`living-default`). Living last is the safe
+default — it is the kind that owes the most, so a wrong guess over-audits rather than quietly
+exempting a document. The precedence is the legacy bloat planner's, and `ANCHOR_LINE` is built
+from `drift.ANCHOR_PREFIX`, so the door and the audit cannot disagree about what marks a document
+narrative.
+
+Roots come from evidence the consumer wrote, not from a filesystem sweep: every markdown file at
+the top of the repository, the directory holding `docs/doc-scope.md`, and any directory the
+waivers, `policy_scope`, or audit-scope `include` entries reach into. Exclusions are deliberately
+not evidence — naming a subtree to keep it out is not a declaration that it is a root. A root
+inside another is dropped, because the registry refuses overlapping roots outright. `--root`
+(repeatable) replaces inference entirely. No inferable root is `migration-no-roots`.
+
+`audit-scope.json`'s `exclude` becomes the registry's `exclude`; a planning directory becomes a
+declared set named after it; an `include` entry that is not `.md` is a note, since the draft
+declares `.md` only. An audit scope or waivers file that will not parse invalidates the draft
+rather than defaulting: the exclusions are the only record of what a consumer kept out, and a
+draft that lost them proposes auditing vendored documentation.
+
+Two things make the draft trustworthy. Every rule carries the `basis` it was inferred from and
+the `documents` it claims, so a wrong rule is traceable to its evidence. And the drafted text is
+run back through `registry.parse()` before it is returned — the review is of glob rules, not of
+whether the file parses — so `--registry-only` on an invalid draft prints nothing at all.
+
+The draft walks the corpus through `registry.unclassified()` and `inventory.walk_root()`, the
+same enumeration `build_inventory()` uses, so the documents a draft proposes rules for are
+exactly the documents the resulting inventory will hold.
+
+### The dry run
+
+```bash
+python3 -m doclifecycle migration-dry-run --repo .
+```
+
+`dry_run_migration()` reads the registry the human landed and states what adopting it costs:
+
+- **`migration`** — the contract (`legacy-doc-sync-to-registry`) and the versions it spans, read
+  from `.github/doc-sync/installed-version` and `PLUGIN_VERSION`. Absent is a fresh install
+  (`from_version: null`). Unparseable is `migration-version-unreadable`; ahead of this engine is
+  `migration-version-ahead`. The comparison is numeric, like the upgrade lane's gate.
+- **`obligations`** — one row per document kind, always all three: `living` owes `assertions`,
+  `narrative` owes `anchor`, `planning` owes `lifecycle` and carries the drift audit's own
+  out-of-scope reason. A kind with no documents is still a row, because "nothing here is
+  narrative" is part of what the registry commits the consumer to.
+- **`waivers`** — which acceptances survive the move onto assertion-unit identity. A legacy
+  waiver names a file and quotes claim text; the new contract keys a finding to a document and a
+  group of units identified by content digest. So an acceptance re-keys cleanly exactly when its
+  text lands on **one** assertion-capable unit, and needs re-waiving otherwise:
+  `waiver-document-not-inventoried`, `waiver-document-carries-no-assertions` (narrative and
+  planning documents are never line-verified), `waiver-document-unreadable`,
+  `waiver-claim-not-found`, `waiver-claim-ambiguous`. Each carries the message saying what to do.
+  The waivers file is read through `drift.load_waivers()` — the audit's own reader, so a dry run
+  cannot promise the audit something else.
+- **`artifacts`** — the three classes of old artifact, each with why it stops here, how to
+  regenerate it, and every instance found. Closed-world over `.github/doc-sync/`: anything there
+  the contract does not carry across and that is not a vendored script is an artifact of the old
+  world, plus `drift-report.json` and `bloat-report.json` at the repository root. Nothing is
+  coerced — a report that predates lineage cannot be given one after the fact.
+- **`preserved`** — the consumer files the contract carries across untouched
+  (`audit-scope.json`, `drift-waivers.json`, `.github/doc-sync-marker`), each with the digest it
+  had when read. `tests/engine/migrate_test.py` compares the whole tree byte for byte before and
+  after every call, refusal paths included.
+
+A cleanly re-keyed waiver reports the **unit** its acceptance now names, not a finding digest: a
+finding digest also covers the report lineage and the finding code, which are bound when an audit
+runs. Naming them here would be a promise about a run nobody has made; the document-and-unit half
+is the part that has to be stable, and is what "re-keys cleanly" can mean before an audit.
+
+**Unclassified documents block the upgrade.** Every `unregistered-document` the inventory found
+becomes a `migration-unclassified-document` problem naming the path, and the run is `invalid`
+with no payload. There is no unclassified bucket, because a bucket is how a corpus quietly stops
+being audited. Problems are reported exhaustively — the version and every unclassified path in
+one pass — so one fix round can address all of them.
+
+```python
+from doclifecycle.migrate import draft_registry, dry_run_migration
+
+draft = draft_registry(".")          # → Draft (has .registry_text) or Invalid
+dry_run_migration(".")               # → DryRun or Invalid
+```
+
 ## Digests
 
 `digest.sha256_canonical` hashes the canonical JSON form (sorted keys, compact separators),
@@ -1236,7 +1340,8 @@ Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `record_classifications()`, `build_context_index()`, `bloat.plan_chunks()`,
 `bloat.merge_contention()`, `bloat.enumerate_scope()`, `bloat.record_verdicts()`,
 `bloat.load_chunk()`, `bloat.store_chunk()`, `plan_drift_audit()`, `audit_drift()`,
-`load_verdicts()`, `repository.lineage()`, `repository.resolve_commit()`,
+`load_verdicts()`, `draft_registry()`, `dry_run_migration()`, `repository.lineage()`,
+`repository.resolve_commit()`,
 `repository.changed_paths()`, `repository.last_change()`), and the commands as subprocesses
 whose payload must equal the library result. Path authorization, the git reads, the cache,
 finding identity, and verdict recording have no command of their own — they are substrate the other components (and, for the cache, the bloat lane)
@@ -1249,6 +1354,10 @@ against a repository — and a diff-scoped scope is a question about a commit ra
 one would prove nothing. `drift_cli_test.py` imports `drift_test.py`'s repository fixture rather
 than rebuilding it. `repository_test.py` holds the git reads to their read-only contract
 directly, probing every argument with the spellings git would read as options.
+`migrate_test.py` builds a real pre-registry consumer on disk — the `.github/doc-sync/` config
+and state a scheduled install carries, plus the documents it managed — and `migrate_cli_test.py`
+imports that fixture rather than rebuilding it; both compare the whole tree byte for byte
+before and after, because a door that mutates during a dry run is the failure that matters.
 
 `tests/engine/acceptance/` is the repository-level fixture (a real `git init`, real commits,
 real symlinks, real prompt-injection content) and the scenarios built on it: scenario one is

@@ -1,0 +1,382 @@
+"""The migration door: inferring a draft registry from a legacy install.
+
+Every test builds a real legacy consumer on disk — the `.github/doc-sync/`
+config and state a scheduled install carries, plus the documents it managed —
+and asks the door what the new contract would look like. Nothing here writes to
+the consumer; the suite asserts that, byte for byte.
+"""
+
+import json
+import os
+import unittest
+
+from support import RepoTestCase
+
+from doclifecycle import PLUGIN_VERSION
+from doclifecycle.migrate import (
+    MIGRATION_CONTRACT,
+    draft_registry,
+    dry_run_migration,
+)
+from doclifecycle.results import Invalid
+
+MARKER = "e63285c4a4c2b35183aab492f459bbeb63eed22e\n"
+
+ARCHITECTURE = """# Architecture
+
+The billing service calculates fees at a flat 2% rate. Invoices settle nightly.
+"""
+
+ONBOARDING = """# Onboarding
+
+> As of 2026-01-04 (src/billing.py:12)
+
+New engineers start with the billing walkthrough.
+"""
+
+PLAN = """# Migration plan
+
+Move the ledger to the new schema before the quarter closes.
+"""
+
+VENDOR = """# Upstream notes
+
+Vendored from the upstream project and never edited here.
+"""
+
+README = """# Ledger
+
+Run `make dev` to start the service.
+"""
+
+SCOPE_RECORD = """# Doc scope record
+<!-- format: doc-lifecycle growing-docs -->
+
+## Deferred
+- guide: billing walkthrough — promote when: a second engineer asks.
+
+## Done
+- 2026-01-02 `docs/guides/` ← onboarding gap.
+"""
+
+AUDIT_SCOPE = '{"exclude": ["docs/vendor/**"], "include": []}\n'
+
+WAIVERS = """{
+  "waivers": [
+    {"file": "docs/architecture.md",
+     "claim": "calculates fees at a flat 2% rate",
+     "reason": "the rate is set per-tenant in config",
+     "date": "2026-01-03"}
+  ]
+}
+"""
+
+
+def legacy_consumer(extra=None):
+    """The files a pre-registry doc-sync install carries, plus its documents."""
+    files = {
+        ".github/doc-sync-marker": MARKER,
+        ".github/doc-sync/audit-scope.json": AUDIT_SCOPE,
+        ".github/doc-sync/drift-waivers.json": WAIVERS,
+        ".github/doc-sync/installed-version": "0.12.0\n",
+        "README.md": README,
+        "docs/doc-scope.md": SCOPE_RECORD,
+        "docs/architecture.md": ARCHITECTURE,
+        "docs/guides/onboarding.md": ONBOARDING,
+        "docs/plans/2026-01-01-ledger.md": PLAN,
+        "docs/vendor/upstream.md": VENDOR,
+    }
+    files.update(extra or {})
+    return files
+
+
+def tree_digest(root):
+    """Every file under `root`, with its bytes — the preservation oracle."""
+    seen = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(dirnames)
+        for name in sorted(filenames):
+            path = os.path.join(dirpath, name)
+            with open(path, "rb") as fh:
+                seen[os.path.relpath(path, root)] = fh.read()
+    return seen
+
+
+class DraftRegistryTest(RepoTestCase):
+    def draft(self, files=None):
+        root = self.repo(files or legacy_consumer())
+        result = draft_registry(root)
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        return root, result
+
+    def test_drafts_one_glob_rule_per_directory_not_one_per_file(self):
+        _, draft = self.draft()
+        self.assertEqual(
+            [(r["glob"], r["kind"], r.get("set"))
+             for r in draft.to_dict()["registry"]["rules"]],
+            [
+                ("README.md", "living", None),
+                ("docs/*.md", "living", None),
+                ("docs/guides/*.md", "narrative", None),
+                ("docs/plans/*.md", "planning", "plans"),
+            ],
+        )
+
+    def test_declares_the_roots_the_legacy_install_evidenced(self):
+        _, draft = self.draft()
+        self.assertEqual(draft.to_dict()["registry"]["roots"], ["README.md", "docs"])
+
+    def test_carries_the_audit_scope_exclusions_into_the_registry(self):
+        _, draft = self.draft()
+        self.assertEqual(
+            draft.to_dict()["registry"]["exclude"], ["docs/vendor/**"]
+        )
+
+    def test_declares_the_set_a_planning_directory_forms(self):
+        _, draft = self.draft()
+        self.assertEqual(draft.to_dict()["registry"]["sets"], ["plans"])
+
+    def test_the_drafted_registry_is_one_the_engine_accepts(self):
+        from doclifecycle import registry as registry_mod
+
+        _, draft = self.draft()
+        parsed, problems = registry_mod.parse(draft.registry_text)
+        self.assertEqual(problems, [])
+        self.assertEqual(parsed.digest, draft.registry_digest)
+
+    def test_names_the_basis_and_documents_behind_every_rule(self):
+        _, draft = self.draft()
+        by_glob = {r["glob"]: r for r in draft.to_dict()["rules"]}
+        self.assertEqual(by_glob["docs/guides/*.md"]["basis"], "narrative-anchor")
+        self.assertEqual(
+            by_glob["docs/guides/*.md"]["documents"], ["docs/guides/onboarding.md"]
+        )
+        self.assertEqual(by_glob["docs/plans/*.md"]["basis"], "planning-location")
+        self.assertEqual(by_glob["docs/*.md"]["basis"], "living-default")
+
+    def test_records_which_legacy_sources_it_read(self):
+        _, draft = self.draft()
+        sources = {s["path"]: s for s in draft.to_dict()["sources"]}
+        self.assertTrue(sources[".github/doc-sync/audit-scope.json"]["present"])
+        self.assertTrue(sources["docs/doc-scope.md"]["present"])
+        self.assertTrue(sources[".github/doc-sync/drift-waivers.json"]["present"])
+
+    def test_overrides_the_directory_rule_for_the_odd_document_out(self):
+        _, draft = self.draft(legacy_consumer({
+            "docs/history.md": "# History\n\n> As of 2026-01-05 (src/billing.py)\n",
+        }))
+        self.assertEqual(
+            [(r["glob"], r["kind"]) for r in draft.to_dict()["registry"]["rules"]],
+            [
+                ("README.md", "living"),
+                ("docs/*.md", "living"),
+                ("docs/history.md", "narrative"),
+                ("docs/guides/*.md", "narrative"),
+                ("docs/plans/*.md", "planning"),
+            ],
+        )
+
+    def test_an_override_sorts_after_its_directory_rule_whatever_it_is_called(self):
+        # Precedence is rule order, and a filename sorting before `*` would put
+        # the override first and let the directory rule overwrite it.
+        _, draft = self.draft(legacy_consumer({
+            "docs/(draft)-ledger.md": "# Ledger\n\n> As of 2026-01-06 (src/x.py)\n",
+        }))
+        globs = [r["glob"] for r in draft.to_dict()["registry"]["rules"]]
+        self.assertLess(globs.index("docs/*.md"), globs.index("docs/(draft)-ledger.md"))
+
+    def test_refuses_when_no_documentation_root_can_be_inferred(self):
+        root = self.repo({"src/billing.py": "RATE = 0.02\n"})
+        result = draft_registry(root)
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(
+            [p.code for p in result.problems], ["migration-no-roots"]
+        )
+
+    def test_writes_nothing_to_the_consumer(self):
+        root = self.repo(legacy_consumer())
+        before = tree_digest(root)
+        draft_registry(root)
+        self.assertEqual(tree_digest(root), before)
+
+
+class DryRunTest(RepoTestCase):
+    def migrated(self, files=None):
+        """A legacy consumer that has landed the draft registry, and nothing else."""
+        root = self.repo(files or legacy_consumer())
+        draft = draft_registry(root)
+        self.assertNotIsInstance(draft, Invalid, getattr(draft, "problems", None))
+        path = os.path.join(root, draft.registry_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(draft.registry_text)
+        return root
+
+    def run_dry(self, root):
+        result = dry_run_migration(root)
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        return result.to_dict()
+
+    def test_enumerates_the_obligation_each_document_kind_takes_on(self):
+        payload = self.run_dry(self.migrated())
+        obligations = {o["kind"]: o for o in payload["obligations"]}
+        self.assertEqual(obligations["living"]["obligation"], "assertions")
+        self.assertEqual(
+            obligations["living"]["documents"],
+            ["README.md", "docs/architecture.md", "docs/doc-scope.md"],
+        )
+        self.assertEqual(obligations["narrative"]["obligation"], "anchor")
+        self.assertEqual(
+            obligations["narrative"]["documents"], ["docs/guides/onboarding.md"]
+        )
+        self.assertEqual(obligations["planning"]["obligation"], "lifecycle")
+        self.assertEqual(obligations["planning"]["count"], 1)
+
+    def test_re_keys_a_waiver_onto_the_assertion_unit_it_now_names(self):
+        payload = self.run_dry(self.migrated())
+        self.assertEqual(payload["waivers"]["needs_rewaiving"], [])
+        rekeyed = payload["waivers"]["rekeyed"]
+        self.assertEqual(len(rekeyed), 1)
+        self.assertEqual(rekeyed[0]["file"], "docs/architecture.md")
+        self.assertEqual(len(rekeyed[0]["unit"]), 64)
+        self.assertIn("flat 2% rate", rekeyed[0]["unit_text"])
+
+    def test_a_waiver_on_a_document_outside_the_corpus_needs_re_waiving(self):
+        root = self.migrated(legacy_consumer({
+            ".github/doc-sync/drift-waivers.json": json.dumps({"waivers": [
+                {"file": "docs/vendor/upstream.md",
+                 "claim": "Vendored from the upstream project"},
+            ]}),
+        }))
+        stuck = self.run_dry(root)["waivers"]["needs_rewaiving"]
+        self.assertEqual([w["code"] for w in stuck],
+                         ["waiver-document-not-inventoried"])
+
+    def test_a_waiver_whose_claim_no_longer_appears_needs_re_waiving(self):
+        root = self.migrated(legacy_consumer({
+            ".github/doc-sync/drift-waivers.json": json.dumps({"waivers": [
+                {"file": "docs/architecture.md", "claim": "settles fees hourly"},
+            ]}),
+        }))
+        stuck = self.run_dry(root)["waivers"]["needs_rewaiving"]
+        self.assertEqual([w["code"] for w in stuck], ["waiver-claim-not-found"])
+
+    def test_a_waiver_matching_two_units_needs_re_waiving(self):
+        root = self.migrated(legacy_consumer({
+            "docs/architecture.md": (
+                "# Architecture\n\n"
+                "The billing service settles invoices at a flat rate today. "
+                "The ledger settles invoices at a flat rate as well.\n"
+            ),
+            ".github/doc-sync/drift-waivers.json": json.dumps({"waivers": [
+                {"file": "docs/architecture.md",
+                 "claim": "settles invoices at a flat rate"},
+            ]}),
+        }))
+        stuck = self.run_dry(root)["waivers"]["needs_rewaiving"]
+        self.assertEqual([w["code"] for w in stuck], ["waiver-claim-ambiguous"])
+
+    def test_a_waiver_on_a_narrative_document_needs_re_waiving(self):
+        root = self.migrated(legacy_consumer({
+            ".github/doc-sync/drift-waivers.json": json.dumps({"waivers": [
+                {"file": "docs/guides/onboarding.md",
+                 "claim": "New engineers start with the billing walkthrough"},
+            ]}),
+        }))
+        stuck = self.run_dry(root)["waivers"]["needs_rewaiving"]
+        self.assertEqual([w["code"] for w in stuck],
+                         ["waiver-document-carries-no-assertions"])
+
+    def test_an_unclassified_document_blocks_the_upgrade_and_is_named(self):
+        root = self.migrated()
+        os.makedirs(os.path.join(root, "docs/notes"))
+        for name in ("scratch.md", "later.md"):
+            with open(os.path.join(root, "docs/notes", name), "w") as fh:
+                fh.write("# Notes\n\nSomething nobody classified.\n")
+        result = dry_run_migration(root)
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(
+            [(p.code, p.location) for p in result.problems],
+            [("migration-unclassified-document", "docs/notes/later.md"),
+             ("migration-unclassified-document", "docs/notes/scratch.md")],
+        )
+
+    def test_rejects_a_legacy_report_with_a_regeneration_instruction(self):
+        root = self.migrated(legacy_consumer({
+            "drift-report.json": '{"records": []}\n',
+        }))
+        classes = {a["class"]: a for a in self.run_dry(root)["artifacts"]}
+        self.assertEqual(classes["report"]["found"], ["drift-report.json"])
+        self.assertIn("drift-audit", classes["report"]["regenerate"])
+
+    def test_rejects_an_uncarried_file_in_the_legacy_state_directory(self):
+        root = self.migrated(legacy_consumer({
+            ".github/doc-sync/approval-set.json": '{"approved": []}\n',
+            ".github/doc-sync/last-stales.json": '{"stales": []}\n',
+        }))
+        classes = {a["class"]: a for a in self.run_dry(root)["artifacts"]}
+        self.assertEqual(classes["approval"]["found"],
+                         [".github/doc-sync/approval-set.json"])
+        self.assertEqual(classes["cache"]["found"],
+                         [".github/doc-sync/last-stales.json"])
+
+    def test_a_vendored_script_is_not_mistaken_for_an_uncarried_artifact(self):
+        root = self.migrated(legacy_consumer({
+            ".github/doc-sync/sync-gate.py": "# gate\n",
+        }))
+        found = [p for a in self.run_dry(root)["artifacts"] for p in a["found"]]
+        self.assertEqual(found, [])
+
+    def test_names_the_versions_the_migration_spans(self):
+        payload = self.run_dry(self.migrated())
+        self.assertEqual(payload["migration"], {
+            "contract": MIGRATION_CONTRACT,
+            "from_version": "0.12.0",
+            "to_version": PLUGIN_VERSION,
+        })
+
+    def test_a_fresh_install_migrates_from_no_version_at_all(self):
+        files = legacy_consumer()
+        del files[".github/doc-sync/installed-version"]
+        payload = self.run_dry(self.migrated(files))
+        self.assertIsNone(payload["migration"]["from_version"])
+
+    def test_refuses_an_install_ahead_of_this_engine(self):
+        root = self.migrated(legacy_consumer({
+            ".github/doc-sync/installed-version": "99.0.0\n",
+        }))
+        result = dry_run_migration(root)
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems],
+                         ["migration-version-ahead"])
+
+    def test_refuses_an_installed_version_it_cannot_read(self):
+        root = self.migrated(legacy_consumer({
+            ".github/doc-sync/installed-version": "nightly\n",
+        }))
+        result = dry_run_migration(root)
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems],
+                         ["migration-version-unreadable"])
+
+    def test_lists_the_consumer_configuration_it_preserves_untouched(self):
+        payload = self.run_dry(self.migrated())
+        preserved = {p["path"]: p for p in payload["preserved"]}
+        self.assertEqual(
+            sorted(preserved),
+            [".github/doc-sync-marker",
+             ".github/doc-sync/audit-scope.json",
+             ".github/doc-sync/drift-waivers.json"],
+        )
+        self.assertTrue(all(p["present"] for p in preserved.values()))
+        self.assertEqual(len(preserved[".github/doc-sync-marker"]["digest"]), 64)
+
+    def test_writes_nothing_to_the_consumer(self):
+        root = self.migrated()
+        before = tree_digest(root)
+        dry_run_migration(root)
+        self.assertEqual(tree_digest(root), before)
+
+
+if __name__ == "__main__":
+    unittest.main()
