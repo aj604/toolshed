@@ -399,19 +399,34 @@ repository holds two files for each of those basenames — the installed copy an
 .github/workflows/doc-bloat.yml       plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat.yml
 ```
 
-`install-parity_test.py` holds each pair byte-identical, so no content check distinguishes
-them, but they are separate paths with separate histories — and history is exactly what
-`_anchor_findings` dates an anchor against. The anchor naming them
+They are near-duplicates rather than copies: the template carries knob placeholders
+(`{{CRON_SCHEDULE}}`, `{{BLAST_RADIUS_CAP}}`) where the install carries this consumer's values,
+and `install-parity_test.py` asserts the install equals what `apply-upgrade.py` would
+*generate from* the template — a generative relationship, not identity. Either way they are
+separate paths with separate histories, and history is exactly what `_anchor_findings` dates an
+anchor against. The anchor naming them
 (`docs/guides/scheduling-doc-sync.md:3`) is a guide about the *skill* and establishes the skill
 directory with its first reference, so it means the templates. A rule keyed on the repository
 root or on first match lands on `.github/workflows/` instead, binding the anchor to a file the
 author did not name, with nothing saying it did.
 
-Stated precisely, because the overstated version is tempting: at this commit the two copies'
-last-change dates coincide, so today the wrong resolution happens to yield the right date. That
-is a property of this repository's install-parity discipline and of both copies changing in one
-commit — not of the resolution rule. A rule that is correct only while an unrelated invariant
-holds is the kind that fails quietly once it stops.
+Stated precisely, because both the overstated and the understated versions are tempting: at
+this commit the two copies' last-change dates coincide — both last moved in `9d84df0` — so
+today the wrong resolution happens to yield the right date.
+
+What couples them is worth naming exactly, because it is the whole argument.
+`install-parity_test.py` never touches git; it regenerates into a scratch tree and compares
+bytes, and asserts nothing about commits. The dates coincide because this repository dogfoods
+its own plugin, so whoever edits a template regenerates the install and lands both halves
+together. That is a **convention enforced by nothing**, and the ordinary case breaks it: a
+template change landing without a regeneration run, or the upgrade lane advancing an install on
+its own cadence. For an actual consumer there is no template in the repository at all, so the
+coincidence that rescues the resolution rule here cannot arise there.
+
+So the honest form is: *a resolution rule would produce the right date in this repository
+today, by an accident of dogfooding that no test enforces and that holds for no consumer of the
+plugin.* Being right for a reason unrelated to the rule is worse than being wrong, because it
+survives review.
 
 The hit rate makes it worse: the other two abbreviated references (`growing-docs/SKILL.md`,
 `fixing-doc-bloat/SKILL.md`) have exactly one match each, so a resolution rule works for two of
