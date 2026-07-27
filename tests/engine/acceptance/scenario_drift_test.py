@@ -44,10 +44,12 @@ from doclifecycle.results import (  # noqa: E402
 )
 from doclifecycle.segment import segment_document  # noqa: E402
 
-# The fixture's living documents, in the order a sorted walk reaches them.
+# Every living document in the fixture: the ordinary one, the fee policy the
+# bloat scenario added, and the three filenames chosen to break naive tooling.
 LIVING_DOCS = (
     fixture.HOSTILE_LEADING_DASH_DOC,
     fixture.LIVING_DOC,
+    fixture.POLICY_DOC,
     fixture.HOSTILE_SHELL_METACHAR_DOC,
     fixture.HOSTILE_HOMOGLYPH_DOC,
 )

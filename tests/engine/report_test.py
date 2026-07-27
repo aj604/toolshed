@@ -28,6 +28,7 @@ from doclifecycle import (  # noqa: E402
     RULESET_VERSION,
 )
 from doclifecycle import repository  # noqa: E402
+from doclifecycle.digest import sha256_canonical  # noqa: E402
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import (  # noqa: E402
     AUDIT_MODES,
@@ -1300,11 +1301,20 @@ class DeclaredScope(unittest.TestCase):
         self.assertNotEqual(wide.digest, narrow.digest)
 
     def test_omitting_the_scope_leaves_a_reports_digest_where_it_was(self):
-        """Additive: a report that declares no scope digests as it always did."""
-        self.assertEqual(
-            validate_report(report_payload()).digest,
-            "79c9a42eaf74ff65f10e97df58dcdf84bf43d95434d5639a86734af217490110",
-        )
+        """Additive: a report that declares no scope digests as it always did.
+
+        Spelled as the digested shape rather than a literal, because the
+        lineage a fixture carries moves with every plugin release, and the
+        claim here is about the absent key, not about today's version.
+        """
+        payload = report_payload()
+
+        self.assertEqual(validate_report(payload).digest, sha256_canonical({
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "lineage": payload["lineage"],
+            "records": payload["records"],
+            "incomplete": payload["incomplete"],
+        }))
 
     def test_a_scope_that_is_not_an_object_is_refused(self):
         result = validate_report(report_payload(scope=["docs/architecture.md"]))
