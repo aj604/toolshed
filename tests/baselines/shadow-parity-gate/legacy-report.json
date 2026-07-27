@@ -1,0 +1,288 @@
+{
+  "records": [
+    {
+      "claim": "docs/ layout is `plans/` (design docs + HANDOFF.md), `guides/` (narrative user guides); not published",
+      "location": "CLAUDE.md:23",
+      "kind": "structure",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "docs/guides/ contains 4 files (principles.md, starting-docs-from-scratch.md, auditing-doc-bloat.md, scheduling-doc-sync.md); .claude-plugin/marketplace.json lists only plugins/doc-lifecycle, no docs/ entry.",
+      "fix": null
+    },
+    {
+      "claim": "bloat baselines' method/status notes are in docs/plans/HANDOFF.md; design lives in docs/decisions.md (2026-06-09 suite entry; 2026-06-20 docs/reference/ shape entry)",
+      "location": "CLAUDE.md:45",
+      "kind": "path",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "docs/decisions.md:3 has '## 2026-06-09 — Documentation skills suite design'; docs/decisions.md:121 has '## 2026-06-20 — Reference-doc containment design'.",
+      "fix": null
+    },
+    {
+      "claim": "apply-discipline.md is cited (not restated) by both fixing-doc-drift and fixing-doc-bloat",
+      "location": "CLAUDE.md:48",
+      "kind": "path",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "fixing-doc-drift/SKILL.md:24,45,50,67,73 and fixing-doc-bloat/SKILL.md:29 all reference `${CLAUDE_PLUGIN_ROOT}/references/apply-discipline.md`.",
+      "fix": null
+    },
+    {
+      "claim": "sync-gate_test.py/render-report_test.py also cover doc-bloat.yml's gate/render wiring since both workflows share the two scripts",
+      "location": "CLAUDE.md:51",
+      "kind": "command",
+      "tier": 3,
+      "verdict": "VERIFIED",
+      "evidence": "tests/scripts/sync-gate_test.py:156-174 exercises 'bloat-pre'/'bloat-lane' subcommands; `python3 tests/scripts/sync-gate_test.py` and `render-report_test.py` both run OK (25 and separate suites pass).",
+      "fix": null
+    },
+    {
+      "claim": "sync PR bodies/titles render via render-report.py's pr-body/pr-title subcommands, never inline YAML jq",
+      "location": "CLAUDE.md:54",
+      "kind": "command",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": ".github/doc-sync/render-report.py:266,271,282,285 define 'pr-body'/'pr-title'/'bloat-pr-body'/'bloat-pr-title' subparsers; .github/workflows/*.yml invoke render-report.py, not inline jq.",
+      "fix": null
+    },
+    {
+      "claim": "this repo's docs/ stays flat (plans/, guides/); the plugin's docs/reference/ convention does not apply here",
+      "location": "CLAUDE.md:59",
+      "kind": "structure",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "`ls docs/` = decisions.md, design-rationale.md, doc-scope.md, guides/, plans/ — no reference/ subtree exists.",
+      "fix": null
+    },
+    {
+      "claim": "installing the plugin schedules nothing and changes nothing",
+      "location": "README.md:45",
+      "kind": "behavior",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "plugins/doc-lifecycle/.claude-plugin/plugin.json has no hooks/automation field — only name/version/description/keywords/author.",
+      "fix": null
+    },
+    {
+      "claim": "guide links docs/guides/principles.md, starting-docs-from-scratch.md, auditing-doc-bloat.md, scheduling-doc-sync.md resolve",
+      "location": "README.md:49",
+      "kind": "path",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "all four files exist under docs/guides/ (confirmed via `ls docs/guides/`).",
+      "fix": null
+    },
+    {
+      "claim": "\"should we document X?\" invokes growing-docs",
+      "location": "README.md:58",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "growing-docs/SKILL.md:3 description frontmatter includes '...someone asking \"should we document X?\"...'.",
+      "fix": null
+    },
+    {
+      "claim": "bloat's own validator is at plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py",
+      "location": "README.md:84",
+      "kind": "path",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "file exists at plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py.",
+      "fix": null
+    },
+    {
+      "claim": "bootstrapping-docs deliberately stops, recording deferrals in docs/doc-scope.md",
+      "location": "README.md:90",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "docs/doc-scope.md has a '## Deferred' section listing the drift-audit walkthrough guide with a promote-when note.",
+      "fix": null
+    },
+    {
+      "claim": "growing-docs owns the docs/doc-scope.md format",
+      "location": "README.md:91",
+      "kind": "path",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "growing-docs/SKILL.md:49 heading: '## The scope record: `docs/doc-scope.md` (this skill owns the format)'.",
+      "fix": null
+    },
+    {
+      "claim": "fixing-doc-bloat dispatches DISTILL records to doc-distiller",
+      "location": "README.md:96",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "fixing-doc-bloat/SKILL.md:73 'dispatch the `doc-lifecycle:doc-distiller` agent' for an approved DISTILL ready record.",
+      "fix": null
+    },
+    {
+      "claim": "scheduling-doc-sync installs the nightly drift Action and the weekly bloat sweep (draft PRs per lane), marker-idempotent, with a blast-radius stop",
+      "location": "README.md:97",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": ".github/workflows/doc-sync.yml runs nightly (schedule cron), doc-bloat.yml runs weekly and opens draft PRs (`gh pr create --draft` at lines 167 and 229); sync-gate.py:52 returns 'blast-radius' to gate the escalation.",
+      "fix": null
+    },
+    {
+      "claim": "doc-distiller lands claims and insights in their living docs, appends one docs/decisions.md entry, one staged commit",
+      "location": "README.md:99",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "agents/doc-distiller.md steps 3-5 land extractions/insights and append the decision entry; step 7 stages everything as ONE commit.",
+      "fix": null
+    },
+    {
+      "claim": "past its blast-radius cap the nightly sync files an issue instead of one giant PR; bloat sweeps only ever open draft PRs",
+      "location": "README.md:114",
+      "kind": "behavior",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": ".github/workflows/doc-bloat.yml has no blast-radius CAP env var (grep for 'CAP'/'blast' returns nothing) and both 'Open draft PR' steps pass `--draft`; sync-gate.py implements the drift-side blast-radius→issue branch.",
+      "fix": null
+    },
+    {
+      "claim": "doc-bloat.yml's design pointer: docs/decisions.md's 2026-07-03/04 doc-bloat nightly entries",
+      "location": ".github/workflows/doc-bloat.yml:6",
+      "kind": "path",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "docs/decisions.md:64 '## 2026-07-03/04 — Doc bloat nightly plan' and :77 '## 2026-07-03 — Doc bloat nightly design' exist.",
+      "fix": null
+    },
+    {
+      "claim": "doc-sync.yml's design pointer: docs/decisions.md's 2026-07-02 doc-sync automation entries",
+      "location": ".github/workflows/doc-sync.yml:4",
+      "kind": "path",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "docs/decisions.md:41 '## 2026-07-02 — Doc-sync automation plan' and :53 '## 2026-07-02 — Doc-sync automation design' exist.",
+      "fix": null
+    },
+    {
+      "claim": "the scheduling-doc-sync skill's doc-bloat.yml/doc-sync.yml templates match the installed .github/workflows copies",
+      "location": "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml:9",
+      "kind": "structure",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "`diff` between the two template files and their .github/workflows/*.yml counterparts shows only the expected `{{CRON_SCHEDULE}}`/`{{BLAST_RADIUS_CAP}}`/`{{BLOAT_CRON}}` placeholder substitutions.",
+      "fix": null
+    },
+    {
+      "claim": "the bloat lanes have no blast-radius cap, deliberately",
+      "location": "docs/design-rationale.md:20",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": ".github/workflows/doc-bloat.yml has no CAP/blast-radius env var, unlike doc-sync.yml's `CAP: \"10\"`.",
+      "fix": null
+    },
+    {
+      "claim": "the bloat sweep covers docs/plans/; audit-scope.json does not exclude it",
+      "location": "docs/design-rationale.md:38",
+      "kind": "value",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": ".github/doc-sync/audit-scope.json = `{\"exclude\": [\"tests/fixtures/**\", \"tests/baselines/**\"], \"include\": []}` — no docs/plans exclude.",
+      "fix": null
+    },
+    {
+      "claim": "the always-loaded file is a router, single owner writing-docs/agent-context.md",
+      "location": "docs/decisions.md:133",
+      "kind": "path",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "plugins/doc-lifecycle/skills/writing-docs/agent-context.md:50 heading '## The router rule (owns always-loaded placement, suite-wide)'.",
+      "fix": null
+    },
+    {
+      "claim": "bootstrapping-docs now exits by writing docs/doc-scope.md, whose format growing-docs single-owns",
+      "location": "docs/decisions.md:150",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "bootstrapping-docs/SKILL.md:73 'write `docs/doc-scope.md` — format owned by growing-docs'; growing-docs/SKILL.md:49 confirms ownership.",
+      "fix": null
+    },
+    {
+      "claim": "the `> As of` first line is also the durable-narrative marker: bloat tooling classifies an anchored doc as narrative, never a planning artifact, wherever it sits",
+      "location": "plugins/doc-lifecycle/skills/growing-docs/SKILL.md:98",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "detecting-doc-bloat/SKILL.md STOP list: 'Classifying a doc whose first line is the `> As of` anchor as a planning artifact, or proposing `DISTILL` for it → ... only its own-bar verdicts (step 2) apply, wherever the file sits.'",
+      "fix": null
+    },
+    {
+      "claim": "narrative docs live in the docs/reference/ tree (never plans/), template/placement owned by growing-docs",
+      "location": "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md:67",
+      "kind": "path",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "growing-docs/SKILL.md:78-90 '### Where narrative docs live' section prescribes exactly this placement (docs/reference/ if present, never docs/plans/).",
+      "fix": null
+    },
+    {
+      "claim": "fixing-doc-drift's \"no while I'm here\" and \"evidence travels with the change\" rules are owned by apply-discipline.md §2/§5 (restated text removed)",
+      "location": "plugins/doc-lifecycle/skills/fixing-doc-drift/SKILL.md:45",
+      "kind": "path",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "apply-discipline.md:14 '## 2. No \"while I'm here\"' and :34 '## 5. Evidence travels with the change' both carry the content that was removed from fixing-doc-drift/SKILL.md as duplicated restatement.",
+      "fix": null
+    },
+    {
+      "claim": "upgrade preserves the marker (step 6 of the install procedure)",
+      "location": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md:88",
+      "kind": "value",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "SKILL.md:59 numbered step '6. Seed the marker — only if absent' is indeed the marker step referenced.",
+      "fix": null
+    },
+    {
+      "claim": "doc-distiller lands anchored insights in durable narrative docs and repoints inbound references (agent description)",
+      "location": "plugins/doc-lifecycle/agents/doc-distiller.md:3",
+      "kind": "behavior",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "doc-distiller.md step 4 'Land insights' and step 6 'Repoint inbound references' implement exactly what the frontmatter description claims.",
+      "fix": null
+    },
+    {
+      "claim": "plugin version is 0.6.2",
+      "location": "plugins/doc-lifecycle/.claude-plugin/plugin.json:3",
+      "kind": "value",
+      "tier": 1,
+      "verdict": "VERIFIED",
+      "evidence": "docs/guides/*.md anchor lines all cite 'doc-lifecycle 0.6.2 @ e5201b8'; `git show e5201b8:plugins/doc-lifecycle/.claude-plugin/plugin.json` shows version 0.6.2 at that commit.",
+      "fix": null
+    },
+    {
+      "claim": "DISTILL ready payload: claims may be empty, insights optional, at least one claim or insight required",
+      "location": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md:202",
+      "kind": "value",
+      "tier": 3,
+      "verdict": "VERIFIED",
+      "evidence": "scripts/validate-bloat-output.py's check_distill (added 'insights' key handling and the 'not payload[\"claims\"] and not insights' rejection); `python3 tests/scripts/validate-bloat-output_test.py` → 36 tests OK, covering this exact shape.",
+      "fix": null
+    },
+    {
+      "claim": "output-contract.md's B3 insights entry shows the shape for durable breadth, anchored to provenance (path @ SHA); insights are optional",
+      "location": "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md:82",
+      "kind": "structure",
+      "tier": 2,
+      "verdict": "VERIFIED",
+      "evidence": "the B3 example payload.insights[0] carries {insight, target: 'docs/reference/caching.md', anchor: 'docs/plans/... @ 4f3a2b1'}, matching the validator's {insight,target,anchor} shape requirement.",
+      "fix": null
+    }
+  ],
+  "summary": {
+    "verified": 31,
+    "stale": 0,
+    "unverifiable": 0
+  }
+}

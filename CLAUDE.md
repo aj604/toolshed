@@ -3,7 +3,7 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture is absorbing the helper scripts into; see its `README.md`) plus ten skill
+re-architecture is absorbing the helper scripts into; see its `README.md`) plus eleven skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
@@ -13,8 +13,10 @@ helper scripts
 `scripts/authorize-paths.py` (the path authority the credentialed workflow jobs enforce over a
 model's edit set),
 `scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
-the upgrade lane, not vendored into installs), and `scripts/render-audit-summary.py` (the new
-engine's read-only audit lane's run-surface rendering — #71), all `python3`, no deps)
+the upgrade lane, not vendored into installs), `scripts/render-audit-summary.py` (the new
+engine's read-only audit lane's run-surface rendering — #71), and
+`scripts/compare-shadow-lanes.py` (the shadow-mode parity comparison between the legacy lane
+and the new one, #76 — transitional, leaves with the legacy lane in #77), all `python3`, no deps)
 plus the GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`, `doc-bloat.yml`, and
 `doc-sync-upgrade.yml`) and `doc-audit.yml` (the new engine's audit lane template, landed by #71
@@ -87,7 +89,9 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
   report-never-produced case, and cost/turn observability); `audit-workflow_test.py` adds
   `doc-audit.yml`-specific static checks (SHA-pinned third-party actions, no direct branch
   commits) alongside what `workflow-permissions_test.py` already covers generically for every
-  `scheduling-doc-sync/*.yml` template. `release.yml`'s CI runs every
+  `scheduling-doc-sync/*.yml` template. `compare-shadow-lanes_test.py` covers the shadow-mode
+  parity comparison (assertion correspondence across two commits, coverage and cost deltas,
+  auto-apply-eligibility split, determinism). `release.yml`'s CI runs every
   `tests/scripts/*_test.py` suite.
 - **The engine's tests live at `tests/engine/*_test.py`** and are found by discovery
   (`python3 -m unittest discover -s tests/engine -p '*_test.py'`), which is how `release.yml`'s

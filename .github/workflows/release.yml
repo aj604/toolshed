@@ -60,6 +60,9 @@ jobs:
           python3 tests/scripts/marketplace-pin_test.py
           python3 tests/scripts/workflow-permissions_test.py
           python3 tests/scripts/install-parity_test.py
+          python3 tests/scripts/render-audit-summary_test.py
+          python3 tests/scripts/audit-workflow_test.py
+          python3 tests/scripts/compare-shadow-lanes_test.py
       # The engine's suites are found by ordinary discovery, so a new suite is
       # wired the moment its file lands — no enumeration to forget.
       - name: Engine tests

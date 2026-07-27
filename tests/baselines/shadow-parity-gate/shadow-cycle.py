@@ -8,9 +8,16 @@ verdicts file); here they are separated so the cycle can be run locally,
 recorded, and re-run.
 
     shadow-cycle.py digest --repo .
-        A sha256 over every file in the worktree except .git/, as
-        sorted "mode path sha256" lines. The before/after evidence for the
-        gate's G1b criterion: the new lane must leave the tree byte-identical.
+        A sha256 over every file in the worktree except .git/ and whatever the
+        repository's own ignore rules exclude, as sorted "mode path sha256"
+        lines. The before/after evidence for the gate's G1b criterion: the new
+        lane must leave the tree byte-identical.
+
+        The ignore rules are not a convenience. CPython writes
+        `engine/doclifecycle/__pycache__/*.pyc` the moment anything imports the
+        engine, and a `.pyc` embeds its source's mtime — so `git checkout` of an
+        unchanged source file re-keys 16 files that no process wrote to the
+        repository. Counting those measured the instrument, not the lane.
 
     shadow-cycle.py slices --repo . --registry <path> --out <dir>
         One task file per declared living document, each carrying that
@@ -18,9 +25,13 @@ recorded, and re-run.
         Also writes segments.json, the whole-run segmentation the comparison
         reads. Everything lands in --out, which must be outside the repository.
 
-    shadow-cycle.py merge --slices <dir> --out <path>
-        Fold the workers' answers into the one verdicts file
-        `drift-audit --verdicts` consumes.
+    shadow-cycle.py merge --slices <dir> --repair <dir> --out <path>
+        Fold both rounds' answers into the one verdicts file
+        `drift-audit --verdicts` consumes. Later rounds win per unit — that is
+        what a repair round means. Answers naming a digest the document does
+        not contain, and second answers for a unit already covered, are
+        dropped: neither carries information, and the engine refuses the whole
+        document over either.
 """
 
 import argparse
@@ -43,13 +54,30 @@ def engine(repo, *argv):
     return json.loads(result.stdout)
 
 
+def ignored(repo):
+    """The paths the repository's own ignore rules exclude, as a prefix set."""
+    result = subprocess.run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard",
+         "--directory"],
+        capture_output=True, text=True, cwd=repo,
+    )
+    return tuple(line.rstrip("/") for line in result.stdout.splitlines() if line)
+
+
 def digest(repo):
+    skip = ignored(repo)
     entries = []
     for root, dirnames, filenames in os.walk(repo):
-        dirnames[:] = sorted(d for d in dirnames if d != ".git")
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d != ".git"
+            and os.path.relpath(os.path.join(root, d), repo) not in skip
+        )
         for name in sorted(filenames):
             path = os.path.join(root, name)
             relative = os.path.relpath(path, repo)
+            if relative in skip:
+                continue
             info = os.lstat(path)
             if os.path.islink(path):
                 body = os.readlink(path).encode()
@@ -86,17 +114,42 @@ def slices(repo, registry, out):
           f"{sum(len(d['units']) for d in documents)} units")
 
 
-def merge(slices_dir, out):
-    documents = []
-    for name in sorted(os.listdir(slices_dir)):
+def _answers(directory):
+    out = {}
+    if not directory or not os.path.isdir(directory):
+        return out
+    for name in sorted(os.listdir(directory)):
         if not name.endswith(".answer.json"):
             continue
-        with open(os.path.join(slices_dir, name), encoding="utf-8") as fh:
-            documents.append(json.load(fh))
+        with open(os.path.join(directory, name), encoding="utf-8") as fh:
+            answer = json.load(fh)
+        out.setdefault(answer["path"], []).extend(answer.get("verdicts", []))
+    return out
+
+
+def merge(slices_dir, repair_dir, out):
+    with open(os.path.join(slices_dir, "segments.json"), encoding="utf-8") as fh:
+        segments = {d["path"]: d["units"] for d in json.load(fh)["documents"]}
+    rounds = [_answers(slices_dir), _answers(repair_dir)]
+
+    documents, dropped, kept = [], 0, 0
+    for path in sorted(rounds[0]):
+        known = {u["digest"] for u in segments[path]}
+        by_unit = {}
+        for round_answers in rounds:
+            for answer in round_answers.get(path, []):
+                unit = answer.get("unit")
+                if unit not in known:
+                    dropped += 1
+                    continue
+                by_unit[unit] = answer
+        verdicts = [by_unit[u] for u in sorted(by_unit)]
+        kept += len(verdicts)
+        documents.append({"path": path, "status": "ok", "verdicts": verdicts})
+
     with open(out, "w", encoding="utf-8") as fh:
-        json.dump({"documents": documents}, fh, indent=2)
-    print(f"{len(documents)} documents, "
-          f"{sum(len(d.get('verdicts', [])) for d in documents)} answers")
+        json.dump({"documents": documents}, fh, indent=2, ensure_ascii=False)
+    print(f"{len(documents)} documents, {kept} answers, {dropped} dropped")
 
 
 def main(argv=None):
@@ -113,6 +166,7 @@ def main(argv=None):
 
     fold = commands.add_parser("merge")
     fold.add_argument("--slices", required=True)
+    fold.add_argument("--repair", default=None)
     fold.add_argument("--out", required=True)
 
     args = parser.parse_args(argv)
@@ -123,7 +177,7 @@ def main(argv=None):
         slices(os.path.abspath(args.repo), args.registry,
                os.path.abspath(args.out))
     else:
-        merge(args.slices, args.out)
+        merge(args.slices, args.repair, args.out)
     return 0
 
 
