@@ -106,7 +106,7 @@ jobs:
             skill's — this run validates through `python3 .github/doc-sync/engine/doc-lifecycle.py
             drift-audit`, whose --verdicts contract is:
             {"documents": [{"path": <doc path from drift-plan.json>, "status": "ok",
-            "verdicts": [{"unit": <unit digest>, "assertion_class":
+            "verdicts": [{"unit": <unit ordinal, an integer>, "assertion_class":
             "factual"|"normative"|"rationale"|"non-assertive", "verdict":
             "VERIFIED"|"STALE"|"UNVERIFIABLE" (omit for non-assertive), "kind":
             "command"|"path"|"symbol"|"behavior"|"structure"|"value", "tier": 1|2|3,
@@ -114,8 +114,10 @@ jobs:
             "observed": <what you read>}, "fix": <complete replacement line, STALE only>}]}]}.
             For every document drift-plan.json lists under "documents" with obligation
             "assertions": run `python3 .github/doc-sync/engine/doc-lifecycle.py segment --repo .
-            --path <path>` to get its assertion units and their digests — use exactly those
-            digests, never invented ones. Classify every unit, and for every "factual" unit reach
+            --path <path>` to get its assertion units, and answer for each by its "ordinal" field
+            (the small integer printed alongside it) — never its 64-character "digest": the
+            engine maps the ordinal back to the unit for you, so there is nothing to transcribe.
+            Classify every unit, and for every "factual" unit reach
             a verdict with evidence per the shapes above. Documents with obligation "anchor" need
             no verdicts from you — the engine checks those deterministically. Write the result to
             verdicts.json in the repository root. A document you could not examine still needs an
