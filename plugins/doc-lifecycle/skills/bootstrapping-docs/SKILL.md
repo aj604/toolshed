@@ -88,11 +88,16 @@ section in an always-loaded agent file (CLAUDE.md/AGENTS.md), where it becomes m
 residue re-read every session. A pointer line to `docs/doc-scope.md` is fine.
 
 Then write the registry, so the docs you just created are classified rather than merely present:
-`python3 "$CLAUDE_PLUGIN_ROOT/engine/doc-lifecycle.py" migration-draft --repo . --registry-only >
-.doc-lifecycle/registry.json`, review the globs, and check it with `migration-dry-run --repo .`.
-The full sequence, including what a blocked dry run means, is **scheduling-doc-sync**'s
-"Migration to the registry contract" — one owner, and it is the same door an existing install
-uses.
+
+    ENGINE="$CLAUDE_PLUGIN_ROOT/engine/doc-lifecycle.py"
+    mkdir -p .doc-lifecycle
+    python3 "$ENGINE" migration-draft --repo . --registry-only > .doc-lifecycle/registry.json
+    python3 "$ENGINE" migration-dry-run --repo .
+
+Review the globs in the first file; the dry run exits 1 and names any document under a declared
+root that no rule claims. The full sequence, including what a blocked dry run means, is
+**scheduling-doc-sync**'s "Migration to the registry contract" — one owner, and it is the same
+door an existing install uses.
 
 ## Red flags — STOP
 

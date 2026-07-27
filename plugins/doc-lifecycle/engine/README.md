@@ -1205,8 +1205,8 @@ anything: the migration itself is a human landing a file and a workflow bump.
 
 ```bash
 python3 -m doclifecycle migration-draft --repo . > draft.json
-python3 -m doclifecycle migration-draft --repo . --registry-only \
-  > .doc-lifecycle/registry.json
+mkdir -p .doc-lifecycle && python3 -m doclifecycle migration-draft --repo . \
+  --registry-only > .doc-lifecycle/registry.json
 ```
 
 `draft_registry()` infers classification from what the consumer already wrote down, and emits it
@@ -1214,8 +1214,9 @@ as **glob rules**: one rule per directory carrying that directory's dominant cla
 a per-file rule for each document that disagrees with it. That is the point of the door — the
 adoption review is a dozen globs in a normal PR diff, not a line per markdown file.
 
-Four sources of evidence, in precedence order per document: a `> As of` marker in the first six
-lines is `narrative` (`narrative-anchor`); a directory under a legacy `policy_scope` is
+Four sources of evidence, in precedence order per document: a `> As of` marker on the first line,
+or on the first non-blank line under a `#` title (within the first six lines either way), is
+`narrative` (`narrative-anchor`); a directory under a legacy `policy_scope` is
 `planning` (`policy-scope`); a `plans` or `specs` path segment is `planning`
 (`planning-location`); everything else is `living` (`living-default`). Living last is the safe
 default — it is the kind that owes the most, so a wrong guess over-audits rather than quietly
@@ -1228,9 +1229,11 @@ migration over one unreadable file would block it on something the audit refuses
 is never silent: `migration-unreadable-document` names the path in `notes`, so the classification
 is reviewed rather than trusted.
 
-Roots come from evidence the consumer wrote, not from a filesystem sweep: every markdown file at
-the top of the repository, the directory holding `docs/doc-scope.md`, and any directory the
-waivers, `policy_scope`, or audit-scope `include` entries reach into. Exclusions are deliberately
+Roots are bounded by what the consumer wrote, not by a walk of the tree: every markdown file at
+the top level of the repository, the directory the scope-record path names (`docs/` by default)
+when that directory exists, and any directory the waivers, `policy_scope`, or audit-scope
+`include` entries reach into. Nothing below the top level is discovered on its own. Exclusions
+are deliberately
 not evidence — naming a subtree to keep it out is not a declaration that it is a root. Evidence
 is filtered through `paths.repository_relative_problem()`, path safety's one owner, so a waiver
 naming `../elsewhere/x.md` declares no root; a trailing `/` on a directory prefix is repaired
@@ -1239,8 +1242,8 @@ refuses overlapping roots outright. `--root` (repeatable) replaces inference ent
 inferable root is `migration-no-roots`.
 
 `audit-scope.json`'s `exclude` becomes the registry's `exclude`; a planning directory becomes a
-declared set named after it; an `include` entry that is not `.md` is a note, since the draft
-declares `.md` only. An audit scope or waivers file that will not parse invalidates the draft
+declared set named after it; an `include` entry that names neither `.md` nor a wildcard suffix is
+a note, since the draft declares `.md` only. An audit scope or waivers file that will not parse invalidates the draft
 rather than defaulting: the exclusions are the only record of what a consumer kept out, and a
 draft that lost them proposes auditing vendored documentation.
 
