@@ -159,7 +159,9 @@ def resolve_commit(repo_root, revision):
     before the audit declares a scope derived from it — a scope derived from a
     revision nobody has is not a scope.
     """
-    resolved, detail = _git(repo_root, "rev-parse", "--verify", f"{revision}^{{commit}}")
+    resolved, detail = _git(
+        repo_root, "rev-parse", "--verify", f"{revision}^{{commit}}"
+    )
     if detail is not None:
         return None, _problem(repo_root, f"{revision} is not a commit in it")
     return resolved, None

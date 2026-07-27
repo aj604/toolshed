@@ -47,11 +47,17 @@ from typing import Optional, Tuple
 from . import ARTIFACT_SCHEMA_VERSION
 from . import repository as repository_mod
 from .digest import sha256_canonical
-from .finding import build_finding
+from .finding import (
+    FACTUAL,
+    NON_ASSERTIVE,
+    build_finding,
+    record_classifications,
+)
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .registry import compile_glob
 from .report import (
     EvidenceBoundary,
+    Incomplete,
     Lineage,
     current_lineage,
     state_from_content,
@@ -60,7 +66,7 @@ from .report import (
 from .results import STATUS_OK, Invalid, Problem
 from .segment import segment_document
 
-# How much of the corpus a run set out to examine. Both are report audit modes:
+# How much of the inventory a run set out to examine. Both are report audit modes:
 # `full` is the whole inventory, `incremental` is a commit range.
 MODE_FULL = "full"
 MODE_INCREMENTAL = "incremental"
@@ -75,6 +81,11 @@ KIND_OBLIGATIONS = {
     "living": OBLIGATION_ASSERTIONS,
     "narrative": OBLIGATION_ANCHOR,
 }
+# The inventory finding that means "a document, but nobody said what kind" —
+# the one closed-world finding a drift audit must answer for, because it is the
+# one that names something the audit was supposed to examine.
+UNREGISTERED_DOCUMENT = "unregistered-document"
+
 PLANNING_REASON = (
     "a planning document carries lifecycle state rather than standing claims "
     "about the code — its obligation is distillation or retirement, not drift"
@@ -93,14 +104,28 @@ POINTED_VERDICTS = (VERDICT_VERIFIED, VERDICT_STALE)
 # The verdicts that become records. A VERIFIED claim is coverage, not a finding.
 FINDING_VERDICTS = (VERDICT_STALE, VERDICT_UNVERIFIABLE)
 
-# What kind of thing the claim asserts, and how hard it was checked. Both are
-# the legacy vocabulary, unchanged: 1 static (grep), 2 shallow (read the cited
-# line), 3 deep (read the implementing code).
-CLAIM_KINDS = ("command", "path", "symbol", "behavior", "structure", "value")
+# What sort of thing the assertion is about, and how hard it was checked. Both
+# are the legacy vocabulary, unchanged, because downstream tooling switches on
+# them: tier 1 static (grep), 2 shallow (read the cited line), 3 deep (read the
+# implementing code).
+SUBJECT_KINDS = ("command", "path", "symbol", "behavior", "structure", "value")
 TIERS = (1, 2, 3)
 
-VERDICT_FIELDS = ("unit", "verdict", "kind", "tier", "evidence", "fix")
-REQUIRED_VERDICT_FIELDS = ("unit", "verdict", "kind", "tier", "evidence")
+# Which classes are judged. Only `factual` carries an evidence obligation, so
+# only it must be: a factual unit nobody judged is a hole in coverage.
+# `non-assertive` prose connects, illustrates, or signposts — it asserts nothing
+# the code could contradict, so a verdict against it is a claim nobody made.
+# `normative` and `rationale` sit between: a rule or an explanation can go
+# stale, but neither owes evidence, so a verdict is accepted and not required.
+VERDICT_REQUIRED_CLASSES = (FACTUAL,)
+VERDICT_FORBIDDEN_CLASSES = (NON_ASSERTIVE,)
+
+VERDICT_FIELDS = ("unit", "assertion_class", "verdict", "kind", "tier",
+                  "evidence", "fix")
+REQUIRED_VERDICT_FIELDS = ("unit", "assertion_class")
+# Owed by a unit whose class carries an evidence obligation, and refused for one
+# whose class does not.
+VERDICT_ONLY_FIELDS = ("verdict", "kind", "tier", "evidence")
 EVIDENCE_FIELDS = ("source", "line", "observed")
 ENTRY_FIELDS = ("path", "status", "verdicts", "reason", "chunk")
 VERDICTS_FIELDS = ("schema_version", "documents")
@@ -115,6 +140,7 @@ CODE_ANCHOR_MISSING = "ANCHOR-MISSING"
 CODE_ANCHOR_MALFORMED = "ANCHOR-MALFORMED"
 CODE_ANCHOR_STALE = "ANCHOR-STALE"
 CODE_ANCHOR_UNVERIFIABLE = "ANCHOR-UNVERIFIABLE"
+CODE_ANCHOR_FUTURE_DATED = "ANCHOR-FUTURE-DATED"
 
 # `> As of <YYYY-MM-DD> (<anchors current at writing>)`, as growing-docs writes
 # it — matched against the segmenter's normalized block-quote text, where the
@@ -191,6 +217,7 @@ class DriftPlan:
     since: Optional[str]
     documents: Tuple[PlannedDocument, ...]
     excluded: Tuple[ExcludedDocument, ...]
+    unclassified: Tuple[str, ...] = ()
     status: str = STATUS_OK
 
     def to_dict(self):
@@ -202,28 +229,18 @@ class DriftPlan:
             "since": self.since,
             "documents": [d.to_dict() for d in self.documents],
             "excluded": [d.to_dict() for d in self.excluded],
+            "unclassified": list(self.unclassified),
         }
 
 
 @dataclass(frozen=True)
-class _Spec:
+class _DraftFinding:
     """One finding the audit reached, before it is numbered and digested."""
 
     code: str
     path: str
     units: Tuple[str, ...]
     extra: dict = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class _Gap:
-    """One declared document the audit did not examine, and why."""
-
-    scope: str
-    reason: str
-
-    def to_dict(self):
-        return {"scope": self.scope, "reason": self.reason}
 
 
 def _document_text(repo_root, path):
@@ -316,8 +333,8 @@ def plan_drift_audit(repo_root, mode=MODE_FULL, since=None,
         )
     else:
         basis = (
-            "full corpus: every living and narrative document in the document "
-            "inventory"
+            "full inventory: every living and narrative document the registry "
+            "classifies"
         )
 
     documents, excluded = [], []
@@ -342,9 +359,21 @@ def plan_drift_audit(repo_root, mode=MODE_FULL, since=None,
                 path=document.path, kind=document.kind, obligation=obligation,
             ))
 
+    # Closed-world: a document under a declared root that no rule claims has no
+    # known obligation, so the audit cannot examine it. It is neither declared
+    # nor quietly skipped — it becomes a coverage gap, which is what an
+    # unexaminable document in the corpus actually is. A `symlinked-path` is
+    # not one: it is not a document at all, and the inventory says so.
+    unclassified = tuple(
+        finding.path for finding in inventory.findings
+        if finding.code == UNREGISTERED_DOCUMENT
+        and (mode == MODE_FULL or _affected(repo_root, finding.path, changed))
+    )
+
     return DriftPlan(
         mode=mode, basis=basis, since=baseline,
         documents=tuple(documents), excluded=tuple(excluded),
+        unclassified=unclassified,
     )
 
 
@@ -408,7 +437,7 @@ def _audit_config_digest(boundary):
     })
 
 
-def _waiver_for(waivers, waivers_path, path, claim):
+def _waiver_for(waivers, waivers_path, path, assertion):
     """The waiver accepting this claim, as record data, or None.
 
     Containment rather than equality: a waiver names the claim text a human
@@ -420,7 +449,7 @@ def _waiver_for(waivers, waivers_path, path, claim):
     show is one an auto-apply policy would act straight through.
     """
     for waiver in waivers:
-        if waiver["file"] == path and waiver["claim"] in claim:
+        if waiver["file"] == path and waiver["claim"] in assertion:
             annotation = {"claim": waiver["claim"], "source": waivers_path}
             for name in ("reason", "date"):
                 if _one_line(waiver.get(name)):
@@ -479,7 +508,15 @@ def _evidence(raw, verdict, boundary, bad, where):
 
 
 def _validated_verdicts(segmentation, entries, boundary, path):
-    """(specs, problems) for one document's verdicts.
+    """(drafts, problems) for one document's answers.
+
+    Two answers per unit, and the split is the document model's. *What the unit
+    is* — its assertion class — is validated by `finding.record_classifications`,
+    the landed owner of that rule, which also refuses a class against structure
+    and names every unit nobody answered for. *Whether it is still true* is a
+    verdict, and only the classes that carry an evidence obligation may have one:
+    connective prose and rationale are answers in themselves, and forcing a
+    verdict onto them would manufacture a claim nobody made.
 
     Exhaustive, like every other check on model output: one pass names every
     problem, so a re-prompt can address all of them. Any problem at all means
@@ -494,13 +531,12 @@ def _validated_verdicts(segmentation, entries, boundary, path):
     if not isinstance(entries, list):
         return (), (Problem(
             code="drift-verdict-invalid-shape",
-            message="a document's verdicts must be a list",
+            message="a document's answers must be a list",
             location=path,
         ),)
 
-    capable = {u.digest for u in segmentation.units if u.assertion_capable}
     known = {u.digest: u for u in segmentation.units}
-    specs, seen = [], set()
+    drafts, shaped = [], []
 
     for i, entry in enumerate(entries):
         where = f"{path}:verdicts[{i}]"
@@ -508,24 +544,62 @@ def _validated_verdicts(segmentation, entries, boundary, path):
             not set(REQUIRED_VERDICT_FIELDS) <= set(entry)
         ):
             bad("drift-verdict-invalid-shape",
-                f"a verdict is an object with {list(REQUIRED_VERDICT_FIELDS)} "
-                f"and, for {VERDICT_STALE}, 'fix' — nothing else",
+                f"an answer is an object with {list(REQUIRED_VERDICT_FIELDS)}, "
+                f"plus {list(VERDICT_ONLY_FIELDS)} when the class carries an "
+                f"evidence obligation — nothing else",
+                where)
+            continue
+        shaped.append((where, entry))
+
+    # One owner for the classification rules: unknown class, unknown unit, a
+    # class against structure, one unit answered twice, and a unit nobody
+    # answered for are all its verdicts, not a second set derived here.
+    classified = record_classifications(segmentation, [
+        {"unit": entry["unit"], "assertion_class": entry["assertion_class"]}
+        for _, entry in shaped
+    ])
+    if isinstance(classified, Invalid):
+        problems.extend(classified.problems)
+
+    for where, entry in shaped:
+        unit = entry["unit"]
+        assertion_class = entry["assertion_class"]
+        judged = set(VERDICT_ONLY_FIELDS) & set(entry)
+        if assertion_class in VERDICT_FORBIDDEN_CLASSES:
+            if judged:
+                bad("drift-verdict-not-obligated",
+                    f"a {assertion_class!r} unit asserts nothing the code could "
+                    f"contradict, so it takes no verdict — {sorted(judged)} "
+                    f"would record a claim nobody made",
+                    where)
+            continue
+        if not judged:
+            if assertion_class in VERDICT_REQUIRED_CLASSES:
+                bad("drift-verdict-owed",
+                    f"a {assertion_class!r} unit carries an evidence "
+                    f"obligation, so it must be judged: "
+                    f"{list(VERDICT_ONLY_FIELDS)} are owed for it",
+                    where)
+            continue
+        if not set(VERDICT_ONLY_FIELDS) <= set(entry):
+            bad("drift-verdict-invalid-shape",
+                f"a judged unit carries all of {list(VERDICT_ONLY_FIELDS)}; "
+                f"this one carries only {sorted(judged)}",
                 where)
             continue
 
-        unit, verdict = entry["unit"], entry["verdict"]
-        valid = True
+        verdict, valid = entry["verdict"], True
         if verdict not in VERDICTS:
             bad("drift-unknown-verdict",
-                f"{verdict!r} is not a drift verdict — a claim is one of "
+                f"{verdict!r} is not a drift verdict — an assertion is one of "
                 f"{list(VERDICTS)}, and an unrecognized answer says nothing "
                 f"about whether the documentation is still true",
                 where)
             valid = False
-        if entry["kind"] not in CLAIM_KINDS:
+        if entry["kind"] not in SUBJECT_KINDS:
             bad("drift-verdict-unknown-kind",
-                f"{entry['kind']!r} is not a claim kind — it is one of "
-                f"{list(CLAIM_KINDS)}, which downstream tooling switches on",
+                f"{entry['kind']!r} is not a subject kind — it is one of "
+                f"{list(SUBJECT_KINDS)}, which downstream tooling switches on",
                 where)
             valid = False
         tier = entry["tier"]
@@ -533,29 +607,11 @@ def _validated_verdicts(segmentation, entries, boundary, path):
             tier not in TIERS
         ):
             bad("drift-verdict-invalid-tier",
-                f"tier must be one of {list(TIERS)} — how hard the claim was "
-                f"checked is part of what a reviewer is being asked to trust",
+                f"tier must be one of {list(TIERS)} — how hard the assertion "
+                f"was checked is part of what a reviewer is being asked to "
+                f"trust",
                 where)
             valid = False
-        if unit not in known:
-            bad("drift-verdict-unknown-unit",
-                f"no assertion unit in {path} has digest {unit!r} — a verdict "
-                f"about a unit the document does not contain describes nothing",
-                where)
-            valid = False
-        elif unit not in capable:
-            bad("drift-verdict-not-assertion-capable",
-                f"a {known[unit].kind} cannot carry a claim, so it cannot be "
-                f"found stale — it is structure, not prose",
-                where)
-            valid = False
-        if unit in seen:
-            bad("drift-verdict-duplicate",
-                f"unit {unit!r} is judged more than once — a claim has one "
-                f"verdict, and two answers is no answer",
-                where)
-            valid = False
-        seen.add(unit)
 
         evidence, ok = _evidence(entry["evidence"], verdict, boundary, bad, where)
         valid = valid and ok
@@ -575,11 +631,12 @@ def _validated_verdicts(segmentation, entries, boundary, path):
                 where)
             valid = False
 
-        if not valid or verdict not in FINDING_VERDICTS:
+        if not valid or verdict not in FINDING_VERDICTS or unit not in known:
             continue
         unit_data = known[unit]
         extra = {
-            "claim": unit_data.text,
+            "assertion": unit_data.text,
+            "assertion_class": assertion_class,
             "location": f"{path}:{unit_data.line}",
             "kind": entry["kind"],
             "tier": tier,
@@ -587,18 +644,13 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         }
         if verdict == VERDICT_STALE:
             extra["fix"] = fix
-        specs.append(_Spec(code=verdict, path=path, units=(unit,), extra=extra))
-
-    for unit in sorted(capable - seen):
-        bad("drift-verdict-missing",
-            f"assertion unit {unit!r} in {path} was left unjudged — an "
-            f"unjudged claim is indistinguishable from one nobody found a "
-            f"problem with, so the document was not examined",
-            path)
+        drafts.append(_DraftFinding(
+            code=verdict, path=path, units=(unit,), extra=extra
+        ))
 
     if problems:
         return (), tuple(problems)
-    return tuple(specs), ()
+    return tuple(drafts), ()
 
 
 def _verdict_entries(payload, plan):
@@ -751,10 +803,10 @@ def _anchor_findings(repo_root, path, anchor, as_of, references):
         observed = f"{source} {detail}"
         if len(offenders) > 1:
             observed += f" (and {len(offenders) - 1} more the anchor names)"
-        specs.append(_Spec(
+        specs.append(_DraftFinding(
             code=code, path=path, units=(anchor.digest,),
             extra={
-                "claim": anchor.text,
+                "assertion": anchor.text,
                 "location": f"{path}:{anchor.line}",
                 "as_of": as_of,
                 "references": [reference for reference, _ in offenders],
@@ -773,10 +825,12 @@ def _audit_anchor(repo_root, path, registry_path):
     """
     segmentation = segment_document(repo_root, path, registry_path)
     if isinstance(segmentation, Invalid):
-        return (), _Gap(scope=path, reason=_gap_reason(segmentation.problems))
+        return (), Incomplete(
+            scope=path, reason=_gap_reason(segmentation.problems)
+        )
     units = segmentation.units
     if not units:
-        return (), _Gap(
+        return (), Incomplete(
             scope=path,
             reason="the document is empty, so it carries no anchor to check",
         )
@@ -787,7 +841,7 @@ def _audit_anchor(repo_root, path, registry_path):
         None,
     )
     if anchor is None:
-        return (_Spec(
+        return (_DraftFinding(
             code=CODE_ANCHOR_MISSING, path=path, units=(units[0].digest,),
             extra={
                 "location": f"{path}:{units[0].line}",
@@ -809,16 +863,38 @@ def _audit_anchor(repo_root, path, registry_path):
     else:
         match = None
     if match is None:
-        return (_Spec(
+        return (_DraftFinding(
             code=CODE_ANCHOR_MALFORMED, path=path, units=(anchor.digest,),
             extra={
-                "claim": anchor.text,
+                "assertion": anchor.text,
                 "location": f"{path}:{anchor.line}",
                 "message": (
                     "the anchor must read `As of <YYYY-MM-DD> (<anchors current "
                     "at writing>)` — a date nobody can compare cannot say "
                     "whether the document is honestly dated"
                 ),
+            },
+        ),), None
+
+    # "Honestly dated" has two directions. A date the repository has not
+    # reached cannot be when anything was checked, and no reference comparison
+    # would catch it — every file's last change is behind such a date.
+    head, problem = repository_mod.last_change(repo_root, ".")
+    if problem is None and head is not None and as_of > head[0]:
+        return (_DraftFinding(
+            code=CODE_ANCHOR_FUTURE_DATED, path=path, units=(anchor.digest,),
+            extra={
+                "assertion": anchor.text,
+                "location": f"{path}:{anchor.line}",
+                "as_of": as_of,
+                "evidence": {
+                    "source": path,
+                    "observed": (
+                        f"the anchor is dated {as_of}, after the repository's "
+                        f"latest commit ({head[0]}, {head[1]}) — nothing could "
+                        f"have been checked then"
+                    ),
+                },
             },
         ),), None
 
@@ -835,7 +911,7 @@ def _gap_reason(problems):
 def _audit_assertions(repo_root, path, entry, boundary, registry_path):
     """(specs, gap) for one living document, given what the lane returned."""
     if entry is None:
-        return (), _Gap(
+        return (), Incomplete(
             scope=path,
             reason=(
                 "no verdict set was returned for this document, so none of its "
@@ -846,17 +922,19 @@ def _audit_assertions(repo_root, path, entry, boundary, registry_path):
         reason = entry["reason"]
         if "chunk" in entry:
             reason = f"{entry['chunk']}: {reason}"
-        return (), _Gap(scope=path, reason=reason)
+        return (), Incomplete(scope=path, reason=reason)
 
     segmentation = segment_document(repo_root, path, registry_path)
     if isinstance(segmentation, Invalid):
-        return (), _Gap(scope=path, reason=_gap_reason(segmentation.problems))
+        return (), Incomplete(
+            scope=path, reason=_gap_reason(segmentation.problems)
+        )
 
     specs, problems = _validated_verdicts(
         segmentation, entry["verdicts"], boundary, path
     )
     if problems:
-        return (), _Gap(
+        return (), Incomplete(
             scope=path,
             reason=(
                 f"the verdicts returned for this document did not validate: "
@@ -885,7 +963,8 @@ def load_verdicts(path):
 
 
 def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
-                waivers=None, evidence_sources=DEFAULT_EVIDENCE, evidence_excluded=(),
+                waivers=None, evidence_sources=DEFAULT_EVIDENCE,
+                evidence_excluded=(),
                 registry_path=DEFAULT_REGISTRY_PATH):
     """Run a drift audit. Returns a validated `Report`, or `Invalid`.
 
@@ -917,7 +996,17 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
     if problems:
         return Invalid(problems)
 
-    specs, gaps = [], []
+    specs, gaps = [], [
+        Incomplete(
+            scope=path,
+            reason=(
+                "the registry claims no rule for this document, so its "
+                "obligation is unknown and it could not be examined — "
+                "classify it in the registry or exclude it"
+            ),
+        )
+        for path in plan.unclassified
+    ]
     for document in plan.documents:
         if document.obligation == OBLIGATION_ANCHOR:
             found, gap = _audit_anchor(repo_root, document.path, registry_path)
@@ -933,11 +1022,11 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
     records = []
     for number, spec in enumerate(specs, start=1):
         extra = dict(spec.extra)
-        if "claim" in extra:
+        if "assertion" in extra:
             # Disposition, never deletion: an accepted claim keeps its record
             # and says who accepted it. Waivers are not part of any digest, so
             # accepting a claim cannot re-key what an approval set selects.
-            waived = _waiver_for(accepted, waivers, spec.path, extra["claim"])
+            waived = _waiver_for(accepted, waivers, spec.path, extra["assertion"])
             if waived is not None:
                 extra["waived"] = waived
         finding = build_finding(

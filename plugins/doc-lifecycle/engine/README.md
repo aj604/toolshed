@@ -22,10 +22,10 @@ re-architecture (issue #57).
 | `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
 | `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
 | `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, the chunk cache seam |
-| `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, the verdicts, the anchor checks |
-| `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, lineage and report digests |
+| `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, `load_verdicts()`, the verdicts and anchor checks |
+| `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `state_from_content()`, lineage and report digests |
 | `doclifecycle/render.py` | `render_report()` — Markdown from a validated `Report`, and nothing else |
-| `doclifecycle/repository.py` | repository identity and base commit, read from git |
+| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the five result states, the `ok`/`invalid` status strings |
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
@@ -377,7 +377,7 @@ A result state says whether the *declared* scope completed. Only the optional
 
 ```json
 "scope": {
-  "basis": "full corpus: every living and narrative document in the document inventory",
+  "basis": "full inventory: every living and narrative document the registry classifies",
   "documents": ["docs/architecture.md", "docs/guides/onboarding.md"]
 }
 ```
@@ -835,9 +835,15 @@ checkable when what it leaves out is visible beside what it takes in. Drift neve
 its obligation is distillation or retirement.
 
 Diff scope is a lower bound, and the basis says so: a document is affected when the range
-changed it, or when its text contains a path the range changed. That is a text search —
-deterministic, cheap, and exactly why a diff-scoped report declares a narrower scope instead of
-claiming coverage.
+changed it, when its text contains a path the range changed, or when it cannot be read at all
+(planning errs toward examining). That is a text search — deterministic, cheap, and exactly why
+a diff-scoped report declares a narrower scope instead of claiming coverage.
+
+A document the registry claims no rule for is neither declared nor walked past: classification
+is closed-world, so its obligation is unknown and it cannot be examined. The plan lists it under
+`unclassified` and the audit turns each one into a coverage gap, which is what an unexaminable
+document in the corpus is. A `symlinked-path` is not one — it is not a document at all, and the
+inventory says so.
 
 | Code | Refused because |
 |---|---|
@@ -852,27 +858,42 @@ An invalid registry invalidates the plan, as it does everywhere else.
 python3 -m doclifecycle drift-plan --repo . --mode incremental --since <commit>
 ```
 
-### Verdicts on a living document
+### Answers about a living document
 
-What a claim is worth is the model's call, and `audit_drift()` validates that answer before it
-becomes a record. A lane returns one entry per declared living document:
+Two answers per assertion unit, and the split is the document model's: *what the unit is* — its
+assertion class — and, when the class carries an obligation, *whether it is still true*. A lane
+returns one entry per declared living document:
 
 ```json
 {"documents": [
   {"path": "docs/architecture.md", "status": "ok", "verdicts": [
-    {"unit": "<assertion-unit digest>", "verdict": "STALE", "kind": "value", "tier": 3,
+    {"unit": "<assertion-unit digest>", "assertion_class": "factual",
+     "verdict": "STALE", "kind": "value", "tier": 3,
      "evidence": {"source": "src/payment_service.py", "line": 7,
                   "observed": "FLAT_FEE_RATE = 0.025"},
-     "fix": "The payment service charges a flat 2.5% rate."}
+     "fix": "The payment service charges a flat 2.5% rate."},
+    {"unit": "<another digest>", "assertion_class": "non-assertive"}
   ]},
   {"path": "docs/runbook.md", "status": "failed", "chunk": "chunk-2",
    "reason": "the chunk worker failed twice"}
 ]}
 ```
 
-The verdicts are the legacy skill's three, unchanged, because consumers switch on the strings:
-`VERIFIED` (someone read the code and the claim holds — coverage, not a finding), `STALE` (the
-claim is wrong and there is a true value to restore), `UNVERIFIABLE` (nothing checkable is
+The classes are `finding.py`'s four, and `record_classifications()` — their landed owner —
+validates them: an unknown class, a class against a unit the document lacks or against
+structure, one unit answered twice, and a unit nobody answered for are all its verdicts
+(`classification-*`), not a second set derived here.
+
+Which of them are judged follows from the obligation each carries. Only `factual` owes evidence,
+so only it *must* be judged — a factual unit nobody judged is a hole in coverage. `non-assertive`
+prose asserts nothing the code could contradict, so a verdict against it is refused outright:
+that is the same category error a narrative document is protected from, inside a living one.
+`normative` and `rationale` sit between — a rule or an explanation can go stale, but neither
+owes evidence, so a verdict is accepted and not required.
+
+The verdicts themselves are the legacy skill's three, unchanged, because consumers switch on the
+strings: `VERIFIED` (someone read the code and the assertion holds — coverage, not a finding),
+`STALE` (it is wrong and there is a true value to restore), `UNVERIFIABLE` (nothing checkable is
 named; that *is* the finding). `kind` is one of `command`, `path`, `symbol`, `behavior`,
 `structure`, `value`; `tier` is 1 static, 2 shallow, 3 deep.
 
@@ -883,26 +904,25 @@ nothing to point at. A `source` outside the run's declared evidence boundary is
 `drift-evidence-outside-boundary`: a verdict resting on something the report says was not
 consulted is not checkable.
 
-What the document says is never the model's to report. `claim` and `location` on a record come
-from the segmentation — the unit's own text and line — so a verdict cannot misquote the passage
-it is about.
+What the document says is never the model's to report. A record's `assertion` and `location`
+come from the segmentation — the unit's own text and line — so a verdict cannot misquote the
+passage it is about. The recorded class travels on the record too, as `assertion_class`.
 
 | Code | Refused because |
 |---|---|
-| `drift-verdict-invalid-shape` | not `{unit, verdict, kind, tier, evidence}` (plus `fix` for STALE) |
+| `drift-verdict-invalid-shape` | not `{unit, assertion_class}` plus, when judged, all of `{verdict, kind, tier, evidence}` |
+| `drift-verdict-not-obligated` | a `non-assertive` unit was given a verdict |
+| `drift-verdict-owed` | a `factual` unit was left unjudged |
 | `drift-unknown-verdict` | not one of the three |
-| `drift-verdict-unknown-kind` | not one of the six claim kinds |
+| `drift-verdict-unknown-kind` | not one of the six subject kinds |
 | `drift-verdict-invalid-tier` | not 1, 2, or 3 (and `true` is not tier 1) |
-| `drift-verdict-unknown-unit` | no unit in that document has the digest |
-| `drift-verdict-not-assertion-capable` | structure cannot carry a claim, so it cannot be found stale |
-| `drift-verdict-duplicate` | one unit, two verdicts |
 | `drift-verdict-invalid-evidence` | missing, malformed, or unpointed where a pointer is owed |
 | `drift-evidence-outside-boundary` | the source is outside the declared evidence boundary |
 | `drift-verdict-invalid-fix` | STALE without a replacement line, or a fix on a verdict proposing no edit |
-| `drift-verdict-missing` | a unit that can carry a claim was left unjudged |
 
-Any of these means that document was **not validly examined**, so it becomes a coverage gap
-rather than a silently missing finding — and the run is partial, not clean.
+Any of these — or any `classification-*` problem — means that document was **not validly
+examined**, so it becomes a coverage gap rather than a silently missing finding, and the run is
+partial, not clean.
 
 Five things invalidate the whole run instead, because they leave the report unable to describe
 what happened: `drift-verdicts-invalid-shape` (the payload is not
@@ -921,24 +941,32 @@ one, and a verdict offered for one is refused. Its `> As of <YYYY-MM-DD> (<ancho
 |---|---|
 | `ANCHOR-MISSING` | no `As of` line, so nothing says what the document was true of |
 | `ANCHOR-MALFORMED` | no readable `YYYY-MM-DD` date, or no parenthesized anchors |
+| `ANCHOR-FUTURE-DATED` | dated after the repository's latest commit — nothing could have been checked then |
 | `ANCHOR-STALE` | a path the anchor names is gone, or last changed after the as-of date |
 | `ANCHOR-UNVERIFIABLE` | a path the anchor names has no commit history to check against |
 
+Honest dating has two directions, which is why the future-dated check exists at all: no
+reference comparison would catch it, since every file's last change is behind such a date. What
+is deliberately *not* checked is the document's own last-change date — an as-of line says when
+the code it describes was current, not when the file was last touched, so a typo fix would
+otherwise read as drift.
+
 The anchor's references are its backticked tokens, and only those: reading unbackticked prose as
-filenames would open paths a sentence merely mentioned. A token is a path when it names a
-directory or ends in an extension starting with a letter, which is what keeps `` `v1.2` `` from
-being read as a file that has gone missing. A trailing `:<line>` is trimmed, and an absolute
-path or one containing `..` is not a repository reference at all. Anchor findings group the
-anchor's own unit, so they point at the line to fix; the prose around it is never read as a
-claim.
+filenames would open paths a sentence merely mentioned. A token is a path when it contains a `/`
+or ends in an extension starting with a letter, which is what keeps `` `v1.2` `` from being read
+as a file that has gone missing. A trailing `:<line>` is trimmed, and an absolute path or one
+containing `..` is not a repository reference at all. Anchor findings group the anchor's own
+unit, so they point at the line to fix; the prose around it is never read as an assertion.
 
 ### Coverage gaps
 
-`incomplete` names every declared document the run did not examine, and each entry forces
-`partial` — where a missing record proves nothing and no rendering reads as clean. A document
-becomes a gap when the lane returned nothing for it, returned `status: "failed"` (with the chunk
-id folded into the reason, when it named one), returned verdicts that did not validate (the
-reason names their codes), or can no longer be segmented.
+`incomplete` names every document the run did not examine, and each entry forces `partial` —
+where a missing record proves nothing and no rendering reads as clean. A document becomes a gap
+when the registry classifies it under no rule, when the lane returned nothing for it, returned
+`status: "failed"` (with the chunk id folded into the reason, when it named one), returned
+answers that did not validate (the reason names their codes), or when it can no longer be
+segmented. A document that failed stays in the declared scope it failed inside: dropping it
+would turn a gap into a silence.
 
 ### Waivers
 
@@ -952,8 +980,10 @@ An acceptance reaches any finding code, not only UNVERIFIABLE: on a STALE record
 disputing the verdict, and a dispute the report did not show is one an auto-apply policy would
 act straight through. Waivers are deliberately **not** part of the audit configuration digest —
 accepting a claim changes what a reader is asked to look at, never what the audit found, so it
-neither expires prior reports nor re-keys the findings an approval set selects. The evidence
-boundary is in that digest, because narrowing it could change a verdict.
+neither expires prior reports (the lineage is untouched) nor re-keys the finding digests an
+approval set selects. The *report* digest does move, because the annotated report says something
+the unannotated one did not, and a report's digest covers what it says. The evidence boundary,
+by contrast, is in the configuration digest: narrowing it could change a verdict.
 
 An absent waivers file is simply no waivers; a malformed one is `drift-waivers-invalid` and
 invalidates the run, since a typo that silently un-waived everything would defeat the mechanism.

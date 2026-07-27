@@ -33,6 +33,12 @@ from doclifecycle.drift import (  # noqa: E402
     audit_drift,
     plan_drift_audit,
 )
+from doclifecycle.finding import (  # noqa: E402
+    FACTUAL,
+    NON_ASSERTIVE,
+    NORMATIVE,
+    RATIONALE,
+)
 from doclifecycle.report import Report  # noqa: E402
 from doclifecycle.results import (  # noqa: E402
     STATE_CLEAN,
@@ -61,6 +67,16 @@ WAIVERS = ".github/doc-sync/drift-waivers.json"
 
 LIVING_CLAIM = "The fee is 2% of the amount, in `src/fees.py`."
 UNRELATED_CLAIM = "Support answers within one business day."
+
+# A living document whose prose is not all of one kind: the four assertion
+# classes, in the one place they can be told apart.
+MIXED = "docs/mixed.md"
+MIXED_CONNECTIVE = "For example, consider a refund."
+MIXED_RATIONALE = "The rate is flat because the processor bills once per charge."
+MIXED_NORMATIVE = "Every endpoint must carry an integration test."
+MIXED_TEXT = (
+    f"# Mixed\n\n{MIXED_CONNECTIVE}\n\n{MIXED_RATIONALE}\n\n{MIXED_NORMATIVE}\n"
+)
 
 # Anchors nothing in the repository, so nothing can have moved out from under
 # it: the honestly-dated baseline every other narrative case is a departure from.
@@ -131,6 +147,7 @@ class DriftRepoTestCase(RepoTestCase):
     def verdict(self, root, path=LIVING, text=LIVING_CLAIM, **overrides):
         entry = {
             "unit": self.claim_unit(root, path, text).digest,
+            "assertion_class": FACTUAL,
             "verdict": "STALE",
             "kind": "value",
             "tier": 2,
@@ -139,6 +156,11 @@ class DriftRepoTestCase(RepoTestCase):
         }
         entry.update(overrides)
         return entry
+
+    def unit_entry(self, root, path, text, assertion_class):
+        """An answer for a unit that carries no evidence obligation."""
+        return {"unit": self.claim_unit(root, path, text).digest,
+                "assertion_class": assertion_class}
 
     def verdicts_for(self, root, *entries, path=LIVING):
         return {"documents": [{"path": path, "status": "ok",
@@ -376,13 +398,13 @@ class CoverageGaps(DriftRepoTestCase):
         self.assertEqual(report.status, STATE_PARTIAL)
         self.assertIn("drift-unknown-verdict", report.incomplete[0].reason)
 
-    def test_a_claim_left_unjudged_makes_the_document_a_gap(self):
+    def test_a_unit_left_unanswered_makes_the_document_a_gap(self):
         root = self.drift_repo()
 
         report = self.audit(root, verdicts=self.verdicts_for(root))
 
         self.assertEqual(report.status, STATE_PARTIAL)
-        self.assertIn("drift-verdict-missing", report.incomplete[0].reason)
+        self.assertIn("classification-missing", report.incomplete[0].reason)
 
     def test_findings_and_gaps_together_still_read_as_partial(self):
         root = self.drift_repo(**{UNRELATED: f"# U\n\n{UNRELATED_CLAIM}\n"})
@@ -395,6 +417,85 @@ class CoverageGaps(DriftRepoTestCase):
         self.assertEqual(report.status, STATE_PARTIAL)
         self.assertEqual(len(report.records), 1)
         self.assertEqual([i.scope for i in report.incomplete], [UNRELATED])
+
+
+class UnclassifiedDocuments(DriftRepoTestCase):
+    """A document the registry does not claim is a hole in coverage.
+
+    Classification is closed-world within the declared roots, so an
+    unregistered document has no known obligation — the audit cannot examine
+    it, and a full-corpus run that stayed silent about it would be claiming a
+    coverage it does not have.
+    """
+
+    STRAY = "docs/notes/stray.md"
+
+    def stray_repo(self, **changes):
+        changes.setdefault(self.STRAY, "# Stray\n\nMatched by no rule.\n")
+        return self.drift_repo(**changes)
+
+    def test_the_plan_names_it_rather_than_walking_past_it(self):
+        root = self.stray_repo()
+
+        plan = plan_drift_audit(root, mode=MODE_FULL)
+
+        self.assertEqual(plan.unclassified, (self.STRAY,))
+
+    def test_it_becomes_an_enumerated_coverage_gap(self):
+        root = self.stray_repo()
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root)))
+
+        self.assertEqual(report.status, STATE_PARTIAL)
+        self.assertIn(self.STRAY, [i.scope for i in report.incomplete])
+
+    def test_the_gap_says_what_would_close_it(self):
+        root = self.stray_repo()
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root)))
+
+        reason = next(i.reason for i in report.incomplete
+                      if i.scope == self.STRAY)
+        self.assertIn("registry", reason)
+
+    def test_it_is_not_in_the_declared_scope_it_was_never_examinable_in(self):
+        root = self.stray_repo()
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root)))
+
+        self.assertNotIn(self.STRAY, report.scope.documents)
+
+    def test_a_diff_scoped_run_leaves_one_its_range_never_reached(self):
+        root = self.stray_repo()
+        self.write(root, SOURCE, "RATE = 0.025\n")
+        self.commit(root, "raise the rate")
+
+        report = self.audit(root, mode=MODE_INCREMENTAL, since=self.base,
+                            verdicts=self.verdicts_for(root, self.verdict(root)))
+
+        self.assertNotIn(self.STRAY, [i.scope for i in report.incomplete])
+
+    def test_a_diff_scoped_run_reports_one_its_range_did_reach(self):
+        root = self.stray_repo()
+        self.write(root, self.STRAY, "# Stray\n\nEdited.\n")
+        self.commit(root, "edit the stray note")
+
+        report = self.audit(root, mode=MODE_INCREMENTAL, since=self.base)
+
+        self.assertIn(self.STRAY, [i.scope for i in report.incomplete])
+
+    def test_a_registered_corpus_can_still_complete(self):
+        """The gap is the unregistered document, not the closed-world rule: a
+        fully classified corpus reaches a state with no gaps at all."""
+        root = self.drift_repo()
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root, self.verdict(root)))
+
+        self.assertEqual(report.incomplete, ())
 
 
 class VerdictDiscipline(DriftRepoTestCase):
@@ -467,19 +568,20 @@ class VerdictDiscipline(DriftRepoTestCase):
         self.assertIn("drift-verdict-invalid-shape",
                       self.gap_reason(root, confidence=0.9))
 
-    def test_a_verdict_against_a_unit_the_document_lacks_is_refused(self):
+    def test_an_answer_about_a_unit_the_document_lacks_is_refused(self):
         root = self.drift_repo()
 
-        self.assertIn("drift-verdict-unknown-unit",
+        self.assertIn("classification-unknown-unit",
                       self.gap_reason(root, unit="a" * 64))
 
     def test_a_verdict_against_a_heading_is_refused(self):
-        """Structure cannot carry a claim, so it cannot be found stale — that
-        is how injected prose in a non-assertive unit stays unactionable."""
+        """Structure cannot carry an assertion, so it cannot be found stale —
+        that is how injected prose in a non-assertive unit stays
+        unactionable."""
         root = self.drift_repo()
         heading = self.units_of(root, LIVING)["Reference"]
 
-        self.assertIn("drift-verdict-not-assertion-capable",
+        self.assertIn("classification-not-assertion-capable",
                       self.gap_reason(root, unit=heading.digest))
 
     def test_one_unit_judged_twice_is_refused(self):
@@ -490,7 +592,7 @@ class VerdictDiscipline(DriftRepoTestCase):
             self.verdict(root, verdict="VERIFIED", fix=None)))
 
         self.assertEqual(report.status, STATE_PARTIAL)
-        self.assertIn("drift-verdict-duplicate", report.incomplete[0].reason)
+        self.assertIn("classification-duplicate", report.incomplete[0].reason)
 
     def test_evidence_outside_the_declared_boundary_is_refused(self):
         root = self.drift_repo()
@@ -500,6 +602,114 @@ class VerdictDiscipline(DriftRepoTestCase):
 
         self.assertIn("drift-evidence-outside-boundary",
                       report.incomplete[0].reason)
+
+
+class AssertionClasses(DriftRepoTestCase):
+    """What each unit *is* is the model's other answer, and it is recorded.
+
+    A structurally capable sentence is not automatically a claim: connective
+    prose is a real answer, not the absence of one, and forcing a verdict onto
+    it would manufacture a claim nobody made.
+    """
+
+    def mixed_repo(self):
+        return self.drift_repo(**{MIXED: MIXED_TEXT})
+
+    def mixed_audit(self, root, *overrides):
+        """The three mixed-document units, classified but unjudged by default."""
+        entries = {
+            MIXED_CONNECTIVE: self.unit_entry(root, MIXED, MIXED_CONNECTIVE,
+                                              NON_ASSERTIVE),
+            MIXED_RATIONALE: self.unit_entry(root, MIXED, MIXED_RATIONALE,
+                                             RATIONALE),
+            MIXED_NORMATIVE: self.unit_entry(root, MIXED, MIXED_NORMATIVE,
+                                             NORMATIVE),
+        }
+        for text, entry in overrides:
+            entries[text] = entry
+        return self.audit(root, verdicts={"documents": [
+            {"path": LIVING, "status": "ok",
+             "verdicts": [self.verdict(root)]},
+            {"path": MIXED, "status": "ok",
+             "verdicts": [e for e in entries.values() if e is not None]},
+        ]})
+
+    def gap_for(self, report, path=MIXED):
+        return next(i.reason for i in report.incomplete if i.scope == path)
+
+    def test_prose_carrying_no_obligation_needs_no_verdict(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root)
+
+        self.assertEqual(report.status, STATE_FINDINGS)
+        self.assertEqual([i.scope for i in report.incomplete], [])
+
+    def test_a_normative_unit_may_still_be_found_stale(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root, (MIXED_NORMATIVE, self.verdict(
+            root, path=MIXED, text=MIXED_NORMATIVE,
+            assertion_class=NORMATIVE, kind="behavior",
+            fix="Every endpoint must carry two integration tests.")))
+
+        self.assertEqual(sorted(r.extra["path"] for r in report.records),
+                         sorted([LIVING, MIXED]))
+
+    def test_the_recorded_class_travels_on_the_finding(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root)
+
+        self.assertEqual(report.records[0].extra["assertion_class"], FACTUAL)
+
+    def test_a_verdict_against_non_assertive_prose_is_refused(self):
+        """The category error AC3 forbids for a narrative document, inside a
+        living one."""
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root, (MIXED_CONNECTIVE, self.verdict(
+            root, path=MIXED, text=MIXED_CONNECTIVE,
+            assertion_class=NON_ASSERTIVE)))
+
+        self.assertIn("drift-verdict-not-obligated", self.gap_for(report))
+
+    def test_a_factual_unit_without_a_verdict_is_refused(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root, (MIXED_RATIONALE, self.unit_entry(
+            root, MIXED, MIXED_RATIONALE, FACTUAL)))
+
+        self.assertIn("drift-verdict-owed", self.gap_for(report))
+
+    def test_a_unit_nobody_classified_is_a_coverage_gap(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root, (MIXED_RATIONALE, None))
+
+        self.assertEqual(report.status, STATE_PARTIAL)
+        self.assertIn("classification-missing", self.gap_for(report))
+
+    def test_an_unknown_assertion_class_is_refused(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root, (MIXED_RATIONALE, self.unit_entry(
+            root, MIXED, MIXED_RATIONALE, "editorial")))
+
+        self.assertIn("classification-unknown-class", self.gap_for(report))
+
+    def test_a_class_against_a_heading_is_refused_by_its_one_owner(self):
+        """`finding.record_classifications` owns that rule; the drift audit
+        calls it rather than re-deriving it."""
+        root = self.mixed_repo()
+        heading = self.units_of(root, MIXED)["Mixed"]
+
+        report = self.mixed_audit(root, (MIXED_RATIONALE, {
+            "unit": heading.digest, "assertion_class": FACTUAL,
+        }))
+
+        self.assertIn("classification-not-assertion-capable",
+                      self.gap_for(report))
 
 
 class VerdictsTheAuditRefusesOutright(DriftRepoTestCase):
@@ -617,9 +827,22 @@ class NarrativeAnchors(DriftRepoTestCase):
 
         self.assertIn("ANCHOR-MALFORMED", self.anchor_records(report))
 
-    def test_an_anchor_ahead_of_the_code_it_names_is_left_alone(self):
+    def test_an_anchor_dated_after_the_repository_exists_is_dishonest(self):
+        """"Honestly dated" has two directions. A date the repository has not
+        reached cannot be when anything was checked."""
         root = self.drift_repo(**{
             NARRATIVE: "# Tour\n\n> As of 2099-01-01 (`src/fees.py`)\n\nHi.\n"})
+
+        report = self.audit(root)
+
+        self.assertIn("ANCHOR-FUTURE-DATED", self.anchor_records(report))
+
+    def test_an_anchor_as_current_as_the_code_it_names_is_left_alone(self):
+        root = self.drift_repo()
+        today = self.git(root, "log", "-1", "--format=%cs")
+        self.write(root, NARRATIVE,
+                   f"# Tour\n\n> As of {today} (`src/fees.py`)\n\nHi.\n")
+        self.commit(root, "refresh the anchor")
 
         report = self.audit(root)
 
@@ -662,12 +885,12 @@ class EvidencePointers(DriftRepoTestCase):
 
         self.assertEqual(self.stale_record(root).extra["location"], f"{LIVING}:3")
 
-    def test_a_finding_quotes_the_claim_the_document_makes(self):
+    def test_a_finding_quotes_the_assertion_the_document_makes(self):
         """Taken from the segmentation, never from the model: what the document
         says is not the model's to report."""
         root = self.drift_repo()
 
-        self.assertEqual(self.stale_record(root).extra["claim"], LIVING_CLAIM)
+        self.assertEqual(self.stale_record(root).extra["assertion"], LIVING_CLAIM)
 
     def test_a_finding_carries_the_observed_fact_and_where_it_was_seen(self):
         root = self.drift_repo()

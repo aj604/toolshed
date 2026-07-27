@@ -34,6 +34,7 @@ from doclifecycle.drift import (  # noqa: E402
     audit_drift,
     plan_drift_audit,
 )
+from doclifecycle.finding import FACTUAL, NORMATIVE, RATIONALE  # noqa: E402
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import validate_report  # noqa: E402
 from doclifecycle.results import (  # noqa: E402
@@ -72,9 +73,16 @@ class DriftScenarioTestCase(fixture.AcceptanceFixtureTestCase):
     def verdicts(self, repo, plan, stale=(fixture.LIVING_FACTUAL,)):
         """A lane's answer for every living document the plan declared.
 
-        Everything is VERIFIED against the fixture's evidence source except the
-        texts named in `stale`, so a scenario states only what it is about.
+        The fixture's own prose supplies three of the four assertion classes:
+        its normative sentence and its rationale sentence carry no evidence
+        obligation and so are classified and left unjudged, and everything else
+        is factual and VERIFIED against the fixture's evidence source — except
+        the texts named in `stale`, so a scenario states only what it is about.
         """
+        unjudged = {
+            fixture.LIVING_NORMATIVE: NORMATIVE,
+            fixture.LIVING_RATIONALE: RATIONALE,
+        }
         documents = []
         for planned in plan.documents:
             if planned.obligation != "assertions":
@@ -84,18 +92,21 @@ class DriftScenarioTestCase(fixture.AcceptanceFixtureTestCase):
             for unit in segmentation.units:
                 if not unit.assertion_capable:
                     continue
-                if unit.text in stale:
+                if unit.text in unjudged:
+                    entries.append({"unit": unit.digest,
+                                    "assertion_class": unjudged[unit.text]})
+                elif unit.text in stale:
                     entries.append({
-                        "unit": unit.digest, "verdict": "STALE", "kind": "value",
-                        "tier": 3,
+                        "unit": unit.digest, "assertion_class": FACTUAL,
+                        "verdict": "STALE", "kind": "value", "tier": 3,
                         "evidence": {"source": fixture.EVIDENCE_SOURCE,
                                      "line": 7, "observed": OBSERVED_RATE},
                         "fix": unit.text.replace("2% rate", "2.5% rate"),
                     })
                 else:
                     entries.append({
-                        "unit": unit.digest, "verdict": "VERIFIED",
-                        "kind": "behavior", "tier": 2,
+                        "unit": unit.digest, "assertion_class": FACTUAL,
+                        "verdict": "VERIFIED", "kind": "behavior", "tier": 2,
                         "evidence": {"source": fixture.EVIDENCE_SOURCE,
                                      "line": 7, "observed": OBSERVED_RATE},
                     })
@@ -149,13 +160,29 @@ class TruthfulScopeClaims(DriftScenarioTestCase):
         self.assertIn(marker(repo), diff.scope.basis)
         self.assertLess(len(diff.scope.documents), len(full.scope.documents))
 
-    def test_a_full_corpus_run_may_claim_full_coverage_when_all_completed(self):
+    def test_every_declared_document_completed(self):
         repo = self.build_fixture()
 
         report = self.full_report(repo)
 
-        self.assertEqual(report.status, STATE_FINDINGS)
-        self.assertEqual(report.incomplete, ())
+        self.assertEqual(
+            [i.scope for i in report.incomplete
+             if i.scope in report.scope.documents],
+            [],
+        )
+
+    def test_an_unclassified_document_stops_it_claiming_full_coverage(self):
+        """The fixture holds one document under the declared root that no rule
+        claims. Its obligation is unknown, so it could not be examined — and a
+        full-corpus run that stayed silent about it would be claiming a
+        coverage it does not have."""
+        repo = self.build_fixture()
+
+        report = self.full_report(repo)
+
+        self.assertEqual(report.status, STATE_PARTIAL)
+        self.assertEqual([i.scope for i in report.incomplete],
+                         [fixture.STRAY_DOC])
 
     def test_the_excluded_planning_document_is_named_with_its_reason(self):
         repo = self.build_fixture()
@@ -208,9 +235,9 @@ class AFailedChunkIsNeverClean(DriftScenarioTestCase):
 
         report = self.failed_chunk_report(repo)
 
-        self.assertEqual([i.scope for i in report.incomplete],
-                         [fixture.LIVING_DOC])
-        self.assertIn("chunk-2", report.incomplete[0].reason)
+        gap = next(i for i in report.incomplete
+                   if i.scope == fixture.LIVING_DOC)
+        self.assertIn("chunk-2", gap.reason)
 
     def test_the_document_stays_in_the_declared_scope_it_failed_inside(self):
         """Dropping it from the scope would turn a gap into a silence."""
@@ -273,7 +300,7 @@ class TheNarrativeDocument(DriftScenarioTestCase):
 
         self.assertEqual(record.extra["location"],
                          f"{fixture.NARRATIVE_DOC}:3")
-        self.assertEqual(record.extra["claim"], fixture.NARRATIVE_ANCHOR)
+        self.assertEqual(record.extra["assertion"], fixture.NARRATIVE_ANCHOR)
 
     def test_the_check_fires_in_the_diff_scoped_run_too(self):
         repo = self.build_fixture()
@@ -295,9 +322,10 @@ class TheNarrativeDocument(DriftScenarioTestCase):
         payload["documents"].append({
             "path": fixture.NARRATIVE_DOC, "status": "ok",
             "verdicts": [{
-                "unit": unit.digest, "verdict": "VERIFIED", "kind": "behavior",
-                "tier": 1, "evidence": {"source": fixture.EVIDENCE_SOURCE,
-                                        "observed": OBSERVED_RATE},
+                "unit": unit.digest, "assertion_class": FACTUAL,
+                "verdict": "VERIFIED", "kind": "behavior", "tier": 1,
+                "evidence": {"source": fixture.EVIDENCE_SOURCE,
+                             "observed": OBSERVED_RATE},
             }],
         })
 
@@ -329,7 +357,7 @@ class FollowableEvidence(DriftScenarioTestCase):
         record = self.stale_record(self.full_report(repo))
 
         self.assertEqual(record.extra["location"], f"{fixture.LIVING_DOC}:3")
-        self.assertEqual(record.extra["claim"], fixture.LIVING_FACTUAL)
+        self.assertEqual(record.extra["assertion"], fixture.LIVING_FACTUAL)
 
     def test_it_names_the_source_line_and_the_fact_observed_there(self):
         repo = self.build_fixture()
@@ -386,8 +414,8 @@ class FollowableEvidence(DriftScenarioTestCase):
         for entry in payload["documents"]:
             if entry["path"] == fixture.LIVING_DOC:
                 entry["verdicts"].append({
-                    "unit": injected.digest, "verdict": "VERIFIED",
-                    "kind": "behavior", "tier": 1,
+                    "unit": injected.digest, "assertion_class": FACTUAL,
+                    "verdict": "VERIFIED", "kind": "behavior", "tier": 1,
                     "evidence": {"source": fixture.EVIDENCE_SOURCE,
                                  "observed": OBSERVED_RATE},
                 })
@@ -396,7 +424,7 @@ class FollowableEvidence(DriftScenarioTestCase):
 
         self.assertEqual(report.status, STATE_PARTIAL)
         gap = next(i for i in report.incomplete if i.scope == fixture.LIVING_DOC)
-        self.assertIn("drift-verdict-not-assertion-capable", gap.reason)
+        self.assertIn("classification-not-assertion-capable", gap.reason)
         self.assertTrue(os.path.exists(
             os.path.join(repo, fixture.EXCLUDED_DOC)))
 
