@@ -9,7 +9,7 @@
 The re-architecture of issue #57 is under way, sliced into issues #59–#77. Authoritative spec:
 the "Distilled decisions (grilling session, 2026-07-26)" comment on #57 (the issue body is a
 review artifact it amends); vocabulary: `CONTEXT.md`; durable decisions: `docs/decisions.md`
-(two 2026-07-26 entries — stage 0, then this slice).
+(three 2026-07-26 entries — stage 0, then this slice, then the migration door).
 
 Stage 0 landed first (#59, v0.12.0): the scheduled lanes' model steps hold no repository write
 authority — model jobs are `contents: read` and token-free, credentialed jobs run no model and
@@ -22,9 +22,7 @@ Interface reference: `plugins/doc-lifecycle/engine/README.md`. Suites at `tests/
 discovery in `release.yml`. The eight helper scripts are untouched — they are absorbed in later
 stages, so both generations coexist for now.
 
-**Next:** #61 (acceptance fixture) and #62 (report contract with lineage and the five result
-states), both of which build directly on the inventory. `gh issue list --label ready-for-agent`
-has the full sequence with its blocked-by edges.
+**Next:** #61 (acceptance fixture) and #62 (report contract with lineage and the five result states) have both landed since; `gh issue list --label ready-for-agent` has the current sequence with its blocked-by edges.
 
 ## Earlier milestone (2026-07-12): review-finding grow-loop + disposition owners (v0.11.0)
 
@@ -280,7 +278,7 @@ union the records); Haiku is adequate for diff-scoped/single-doc checks.
   signature" (agent refuses under pressure, cites the skill, names the temptation).
 - **Deploy step:** copy skill dir to `~/.claude/skills/<name>/` so it loads in new sessions.
 
-Repo layout: see CLAUDE.md's Layout section for top-level shape; run `ls -R plugins/doc-lifecycle/ tests/` for current file-level detail (this hand-maintained tree drifts easily — already stale for `list-docs.py`, `doc-bloat.yml`, and three `docs/plans/` files).
+Repo layout: see CLAUDE.md's Layout section (pointers, not descriptions) for top-level shape; run `ls -R plugins/doc-lifecycle/ tests/` for current file-level detail.
 
 ## Conventions used in this project
 

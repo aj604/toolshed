@@ -25,9 +25,9 @@ input to them:
   31 records, all `VERIFIED`, `$2.7202`, 60 turns, 480.7s), and the 14 consecutive nightly
   failures from 2026-07-12 to 2026-07-26 in which it produced no report at all.
 - The **new lane's deterministic scope**, which is model-free and contains no findings: the
-  shadow registry classifies 42 documents (27 living, 6 narrative, 9 planning) with zero
+  shadow registry classifies 43 documents (27 living, 6 narrative, 10 planning) with zero
   closed-world findings, and `drift-plan --mode full` declares 33 of them (27 assertion
-  obligations totalling 1331 assertion-capable units, 6 anchor obligations) and excludes 9 as
+  obligations totalling 1331 assertion-capable units, 6 anchor obligations) and excludes 10 as
   `planning-kind`.
 
 What was **not** known: any verdict, record, or comparison from the new lane. Scope sizing
@@ -269,7 +269,7 @@ make none. #75 owns the decision when it lands the durable registry.
 
 Coverage otherwise moves sharply the other way — the new lane examined 33 documents against
 the legacy lane's 15, declared its scope deterministically rather than letting a model choose
-inside a diff, and accounted for all 42 inventoried documents (33 declared, 9 excluded as
+inside a diff, and accounted for all 43 inventoried documents (33 declared, 10 excluded as
 `planning-kind`) with zero closed-world findings.
 
 **A second registry finding for #75.** #74's `migration-draft` door, merged after this
@@ -355,7 +355,7 @@ defects with owners, not noise:
 `os.path.isfile(os.path.join(repo_root, reference))`. That misreads two ordinary anchor
 spellings as "is no longer in the repository":
 
-- a **directory** reference — `os.path.isfile` is false for a directory. `docs/guides/principles.md`'s
+- a **directory** reference — `os.path.isfile` was false for a directory; fixed in `dcff17d` (#93) to `os.path.exists`. `docs/guides/principles.md`'s
   anchor names `` `plugins/doc-lifecycle/skills/` ``, which exists.
 - a **shorthand continuation** — an anchor that writes one fully-qualified path and then
   abbreviates its siblings (`` `…/scheduling-doc-sync/SKILL.md`, `doc-sync.yml`, `doc-bloat.yml` ``).
@@ -554,9 +554,7 @@ behave the same on a corpus nobody wrote the engine against.
 
 ## What #77 needs before this gate can be re-run and pass
 
-1. Fix `drift._anchor_findings`'s reference resolution — **two disjoint fixes**, the directory
-   predicate and the abbreviated-reference path, of which the first cures 1 of 5 cases (Cause
-   A). Do not close the finding when the directory half lands.
+1. Finish `drift._anchor_findings`'s reference resolution — the directory-predicate half already landed in `dcff17d` (#93); only the abbreviated-reference path (Cause A) remains open.
 2. Settle how the report contract records non-path evidence, or narrow the method that
    sanctions it (Cause B). This one is a contract decision, not a patch.
 3. Remove the digest-transcription failure mode — ordinal-keyed answers are the cheapest fix —
