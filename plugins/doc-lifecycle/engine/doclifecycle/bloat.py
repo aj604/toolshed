@@ -89,6 +89,31 @@ DISTILL_STATUSES = ("pending-implementation", "ready")
 # ever moved *into* one — the move would be undone by the target's own lifecycle.
 DESTINATION_KINDS = ("living", "narrative")
 
+
+def residue_destination_ineligibility(registry, destination):
+    """Why the registry refuses `destination` as distilled residue, or None.
+
+    The single reading — closed-world classification, then kind-eligibility —
+    that the audit plans a DISTILL destination against
+    (`_residue_destination_record`) and the applier re-answers at
+    create-document time, so the two seams cannot diverge on what the registry
+    says a residue path is. Confinement (`paths.authorize_path`) and occupancy
+    (a path already there) are separate owners, re-answered separately.
+
+    Returns `(reason, rule)`: `reason` is `"unclassified"` (no rule claims the
+    path as documentation, or a rule excludes it — `rule` is then None or the
+    excluded rule and not to be trusted), `"kind-ineligible"` (classified, but
+    of a kind residue is never authored into — `rule` is that rule), or None
+    (eligible — `rule` is the classifying rule the caller records).
+    """
+    rule = registry.classify(destination)
+    if (rule is None or not registry.is_document(destination)
+            or registry.excludes(destination)):
+        return "unclassified", rule
+    if rule.kind not in DESTINATION_KINDS:
+        return "kind-ineligible", rule
+    return None, rule
+
 VERDICT_FIELDS = (
     "id", "verdict", "path", "units", "evidence",
     "destination", "proposal", "status", "scope", "sample",
@@ -731,16 +756,15 @@ class _Recorder:
                      f"{authorization.problem.message}", where)
             return None
 
-        rule = registry.classify(destination)
-        if (rule is None or not registry.is_document(destination)
-                or registry.excludes(destination)):
+        reason, rule = residue_destination_ineligibility(registry, destination)
+        if reason == "unclassified":
             self.bad("bloat-destination-unclassified",
                      f"no registry rule claims {destination!r} as documentation "
                      f"— classification is closed-world, so a residue document "
                      f"at an unclassified path would be born outside the corpus "
                      f"every later audit reads", where)
             return None
-        if rule.kind not in DESTINATION_KINDS:
+        if reason == "kind-ineligible":
             self.bad("bloat-destination-kind-ineligible",
                      f"the registry classifies {destination} as a {rule.kind} "
                      f"document — residue is never authored into one, because "

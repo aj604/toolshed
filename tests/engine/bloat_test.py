@@ -555,6 +555,72 @@ class ResidueDestinationsAreAuthorizedNotInventoried(RepoTestCase):
         self.assertEqual(self.refusals(result), ["bloat-destination-forbidden"])
 
 
+class ResidueClassificationHasThreeLegs(RepoTestCase):
+    """Closed-world classification refuses more than an unclaimed path.
+
+    `residue_destination_ineligibility` refuses a destination when *any* of
+    three things holds: no rule claims it, a rule claims it but the path is not
+    a document (wrong extension), or a rule claims it but an exclude covers it.
+    The unclaimed leg is exercised elsewhere; these two guard the other legs,
+    so collapsing the condition to `rule is None` fails here rather than
+    silently letting an excluded or non-document destination be authored.
+    """
+
+    # A rule classifies docs/vendor/*.md, but an exclude covers docs/vendor;
+    # a rule classifies everything under docs/notes, catching a non-.md file.
+    REGISTRY = """{
+  "schema_version": 1,
+  "roots": ["docs"],
+  "sets": ["plans"],
+  "exclude": ["docs/vendor"],
+  "rules": [
+    {"glob": "docs/*.md", "kind": "living"},
+    {"glob": "docs/plans/*.md", "kind": "planning", "set": "plans"},
+    {"glob": "docs/vendor/*.md", "kind": "living"},
+    {"glob": "docs/notes/*", "kind": "living"}
+  ]
+}
+"""
+
+    def setUp(self):
+        self.root = self.repo({
+            ".doc-lifecycle/registry.json": self.REGISTRY,
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        })
+        self.index = build_context_index(self.root)
+        self.lineage = lineage()
+
+    def distill(self, destination):
+        by_text = {u.text: u.digest for u in self.index.units}
+        return bloat.record_verdicts(self.index, self.lineage, [{
+            "id": "BLOAT-D1",
+            "verdict": bloat.DISTILL,
+            "path": "docs/plans/p.md",
+            "units": [by_text[SHARED]],
+            "evidence": "The design landed: src/fees.py:12 states the rate.",
+            "status": "ready",
+            "destination": destination,
+        }])
+
+    def test_a_destination_a_rule_claims_but_an_exclude_covers_is_refused(self):
+        # docs/vendor/*.md classifies as a living document, but docs/vendor is
+        # excluded — so the path is not documentation the corpus reads.
+        result = self.distill("docs/vendor/residue.md")
+
+        self.assertIsInstance(result, Invalid, getattr(result, "records", None))
+        self.assertEqual(problem_codes(result),
+                         ["bloat-destination-unclassified"])
+
+    def test_a_destination_a_rule_claims_but_is_not_a_document_is_refused(self):
+        # docs/notes/* classifies as living, but a .txt file is not a document
+        # under the registry's extensions — residue is never authored there.
+        result = self.distill("docs/notes/data.txt")
+
+        self.assertIsInstance(result, Invalid, getattr(result, "records", None))
+        self.assertEqual(problem_codes(result),
+                         ["bloat-destination-unclassified"])
+
+
 class BulkJudgmentsAreEnumerated(RepoTestCase):
     def setUp(self):
         self.root = self.repo({

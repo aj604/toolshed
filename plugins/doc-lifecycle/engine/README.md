@@ -905,7 +905,16 @@ which could answer differently.
 The applier accepts a `create-document` whose path is exactly that destination and nothing else
 (`plan-target-not-record-target`) — a record with no destination authorizes no creation at all —
 and refuses a creation over a document that is there (`apply-create-exists`), so a path occupied
-between audit and apply fails closed rather than overwriting.
+between audit and apply fails closed rather than overwriting. It also re-classifies the
+destination against the registry at create time, refusing one no rule claims
+(`apply-destination-unclassified`) or of a kind residue is never authored into
+(`apply-destination-kind-ineligible`) — the same reading the audit uses
+(`bloat.residue_destination_ineligibility`, the single owner both share), because the record digest
+does not cover the destination and a tampered or stale report could otherwise repoint an approved
+create at a planning or unclassified path. Confinement is re-answered too, through the approval
+scope (`paths.authorize_path`). So all four audit-time destination refusals hold at apply as well —
+a destination the audit rejects is not creatable by any downstream stage — and an unreadable
+registry is `apply-destination-unclassifiable`, the fail-closed case.
 
 `chunk`, when supplied, binds the record's *own* document to the slice
 (`bloat-document-outside-chunk`). Destinations are deliberately not bound that way: a

@@ -558,6 +558,61 @@ class TypedRefusals(ApplierTestCase):
         result = self.apply(plan, approval, report=report)
         self.assert_untouched(before, result, ["apply-create-exists"])
 
+    def _repointed_distill_plan(self, destination):
+        """A create-document plan whose destination the audit would refuse.
+
+        The record digest does not cover `destination` (it lives in `extra`),
+        so repointing an approved DISTILL record's destination leaves the
+        digest a human approved unchanged. This is the tampered/stale-report
+        shape: mint accepts the record, and only the applier's own re-reading
+        of the registry stands between it and a create at a refused path.
+        """
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-002", "DISTILL", PLAN_DOC, units,
+            destination={"path": destination},
+        )
+        report, approval = self.approve([record])
+        op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": destination,
+            "text": "# Residue\n\nA claim about the repo.\n",
+        }
+        plan = self.plan(
+            approval, [op],
+            {destination: sha256_text("# Residue\n\nA claim about the repo.\n")},
+        )
+        return report, approval, plan
+
+    def test_a_create_at_a_kind_ineligible_destination_is_refused(self):
+        # docs/plans/*.md classifies as planning — a kind residue is never
+        # authored into. The audit refuses this destination
+        # (bloat-destination-kind-ineligible); the applier must too, because a
+        # repointed report can carry the create past mint.
+        report, approval, plan = self._repointed_distill_plan(
+            "docs/plans/residue.md"
+        )
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(
+            before, result, ["apply-destination-kind-ineligible"]
+        )
+
+    def test_a_create_at_an_unclassified_destination_is_refused(self):
+        # No registry rule claims docs/deep/residue.md — classification is
+        # closed-world, so a document born there is outside the corpus every
+        # later audit reads. Audit-refused; applier-refused.
+        report, approval, plan = self._repointed_distill_plan(
+            "docs/deep/residue.md"
+        )
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(
+            before, result, ["apply-destination-unclassified"]
+        )
+
     def test_create_with_empty_content_is_refused(self):
         new_doc = "docs/empty.md"
         units = self.units(self.repo, PLAN_DOC)
