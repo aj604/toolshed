@@ -61,3 +61,37 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
+      # The action's log reports a denial *count* and never the tool names, which
+      # leaves an incomplete --allowedTools list above undiagnosable — a review can
+      # do its whole job and drop the findings, with a green check and a bare number
+      # as the only trace. The saved SDK log does carry the names. Print those, and
+      # nothing else from it: no model output, no diff, no repo content.
+      - name: Report denied tools
+        if: always()
+        env:
+          EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+          if [ -z "${EXECUTION_FILE:-}" ] || [ ! -f "${EXECUTION_FILE}" ]; then
+            echo "No execution file — the review step did not run (skipped or failed early)."
+            exit 0
+          fi
+          jq -r '.[]? | select(.type == "result") | .permission_denials[]? | .tool_name' \
+            "${EXECUTION_FILE}" | sort | uniq -c | sort -rn > denied-tools.txt
+          if [ -s denied-tools.txt ]; then
+            {
+              echo "### Tools denied during this review"
+              echo
+              echo 'Each of these was a call the review wanted to make and could not.'
+              echo 'Add the missing ones to `--allowedTools` above.'
+              echo
+              echo '```'
+              cat denied-tools.txt
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+            cat denied-tools.txt
+          else
+            echo "No tools were denied." >> "${GITHUB_STEP_SUMMARY}"
+            echo "No tools were denied."
+          fi
+
