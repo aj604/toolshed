@@ -316,6 +316,16 @@ one of these should change:
 
 The first is the cheapest and removes the failure mode rather than retrying it.
 
+**A corollary, because this measurement generalizes.** Any contract that asks a model to
+reproduce a 64-character hex string verbatim carries this error rate. That is an argument
+against the tempting next step of re-keying `drift-waivers.json` onto unit digests instead of
+`{file, claim}` text. Here a garbled digest fails a document closed — loud, and the reason it
+cost three rounds instead of silently losing coverage. In a waivers file the same slip would
+silently *un-waive* an accepted claim, and nothing would fail. Text-keyed waivers are the more
+robust shape while a model is in the loop, and this is the measurement that says so. (Raised
+by #74 while reviewing this record; the waivers file is `{file, claim}` today, so this is
+prospective rather than a correction.)
+
 ### G4 — FAIL
 
 Every one of the 41 records was adjudicated against the repository — the five STALE records by
