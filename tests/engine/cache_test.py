@@ -227,6 +227,24 @@ class CachePoisoning(CacheTestCase):
         self.assertFalse(result.hit)
         self.assertEqual(result.reason, cache.MISS_STALE)
 
+    def test_an_entry_with_more_than_one_record_is_a_miss(self):
+        # The report contract itself permits any number of records; a cache
+        # entry describing more than one is not a shape this module ever
+        # writes, and must not be trusted as "the" cached result for `key`.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        first = self.valid_record(record_id="R1", digest="a" * 64)
+        second = self.valid_record(record_id="R2", digest="b" * 64)
+        payload = self.raw_payload_for(key, first)
+        payload["records"].append(second)
+        self.write_raw(cache_dir, key, payload)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.reason, cache.MISS_RECORD_COUNT)
+
     def test_an_incomplete_result_is_a_miss(self):
         repo = self.git_repo()
         cache_dir = self.cache_dir()

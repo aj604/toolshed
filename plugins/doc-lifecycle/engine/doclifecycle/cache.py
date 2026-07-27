@@ -30,6 +30,7 @@ still valid comes back as a miss, never a warning and never the stale payload.
 
 import json
 import os
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 
@@ -48,7 +49,7 @@ MISS_INVALID = "cache-miss-invalid-payload"
 MISS_STALE = "cache-miss-stale-lineage"
 MISS_INCOMPLETE = "cache-miss-incomplete-result"
 MISS_IDENTITY = "cache-miss-identity-mismatch"
-MISS_SHAPE = "cache-miss-malformed-entry"
+MISS_RECORD_COUNT = "cache-miss-unexpected-record-count"
 
 # Everything that can change a semantic judgment about one document checked
 # against one piece of source evidence. The tuple's order is for readability
@@ -193,7 +194,10 @@ def put(cache_dir, key, record, evidence_sources=("cached-semantic-result",)):
         "incomplete": [],
     }
     path = entry_path(cache_dir, key)
-    tmp_path = f"{path}.tmp-{os.getpid()}"
+    # Unique per call, not just per process: two threads in one process
+    # writing the same key concurrently must not interleave into one temp
+    # file before either rename.
+    tmp_path = f"{path}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
     with open(tmp_path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh)
     os.replace(tmp_path, path)
@@ -242,8 +246,10 @@ def get(cache_dir, key, repo_root, registry_path=DEFAULT_REGISTRY_PATH):
         return CacheResult(False, reason=MISS_INCOMPLETE)
     if len(result.records) != 1:
         # A cache entry is one semantic result about one document/source
-        # pair; anything else is not a shape this module ever wrote itself.
-        return CacheResult(False, reason=MISS_SHAPE)
+        # pair; the report contract itself permits any number of records, so
+        # this is a check of this module's own narrower shape, not a
+        # duplicate of validate_report's.
+        return CacheResult(False, reason=MISS_RECORD_COUNT)
 
     record = result.records[0]
     if (
