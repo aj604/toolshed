@@ -556,8 +556,13 @@ def _carried_stale_reasons(raw, bad, status):
     return reasons
 
 
-def _state_from_content(records, incomplete):
+def state_from_content(records, incomplete):
     """The only state the report's own content supports.
+
+    Public because a producing run must declare the state its content supports
+    and this validator re-derives it: two copies of the rule could only ever
+    disagree, and the disagreement would surface as `report-state-inconsistent`
+    on a report that was honest about what it did.
 
     Derived rather than trusted: a run cannot both leave part of its scope
     unexamined and call itself clean, and the state a reader acts on must
@@ -715,7 +720,7 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     ):
         # Derived from the raw lists, not the parsed ones: a record this
         # validator rejected is still a record the run claims to have found.
-        derived = _state_from_content(payload.get("records", []),
+        derived = state_from_content(payload.get("records", []),
                                       payload.get("incomplete", []))
         if derived != status:
             bad("report-state-inconsistent",
@@ -771,7 +776,7 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     # Every comparable field matches, and every carried reason was re-checked,
     # so the verdict is cleared and the state follows from the content again.
     return Report(
-        status=_state_from_content(records, incomplete), lineage=lineage,
+        status=state_from_content(records, incomplete), lineage=lineage,
         records=records, incomplete=incomplete, digest=digest,
     )
 

@@ -15,6 +15,12 @@ import argparse
 import json
 import sys
 
+from .bloat import (
+    DEFAULT_MAX_DOCUMENTS,
+    DEFAULT_MAX_UNITS,
+    plan_repository_chunks,
+)
+from .context import build_context_index
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .render import render_report
 from .report import Report, load_report
@@ -73,6 +79,25 @@ def _add_report_arguments(command):
     ))
 
 
+def _add_corpus_arguments(command):
+    """`--repo`/`--registry`, for the commands that read the whole corpus."""
+    command.add_argument(
+        "--repo", default=".", help="repository root (default: the current directory)"
+    )
+    command.add_argument(
+        "--registry",
+        default=DEFAULT_REGISTRY_PATH,
+        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
+    )
+
+
+def _positive(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, not {value}")
+    return number
+
+
 def _parser():
     parser = argparse.ArgumentParser(
         prog="python3 -m doclifecycle",
@@ -90,14 +115,7 @@ def _parser():
             "invalid, which invalidates the whole run."
         ),
     )
-    inventory.add_argument(
-        "--repo", default=".", help="repository root (default: the current directory)"
-    )
-    inventory.add_argument(
-        "--registry",
-        default=DEFAULT_REGISTRY_PATH,
-        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
-    )
+    _add_corpus_arguments(inventory)
     inventory.set_defaults(
         run=lambda args: build_inventory(args.repo, args.registry), render=False
     )
@@ -114,20 +132,57 @@ def _parser():
             "is invalid or the path is not a document in the inventory."
         ),
     )
-    segment.add_argument(
-        "--repo", default=".", help="repository root (default: the current directory)"
-    )
+    _add_corpus_arguments(segment)
     segment.add_argument(
         "--path", required=True,
         help="the document to segment, repository-relative; must be inventoried",
     )
-    segment.add_argument(
-        "--registry",
-        default=DEFAULT_REGISTRY_PATH,
-        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
-    )
     segment.set_defaults(
         run=lambda args: segment_document(args.repo, args.path, args.registry),
+        render=False,
+    )
+
+    context = commands.add_parser(
+        "context-index",
+        help="index every document in the repository, and where each unit occurs",
+        description=(
+            "Emit the repository-wide context index as JSON: every inventoried "
+            "document with its units, every distinct unit, and every place each "
+            "unit occurs. This is the global view a bloat chunk worker queries "
+            "instead of guessing about duplication or ownership from its own "
+            "slice. Read-only and model-free. Exits 1 if the registry is invalid."
+        ),
+    )
+    _add_corpus_arguments(context)
+    context.set_defaults(
+        run=lambda args: build_context_index(args.repo, args.registry), render=False
+    )
+
+    plan = commands.add_parser(
+        "bloat-plan",
+        help="partition the corpus into bounded bloat-audit chunks",
+        description=(
+            "Emit the chunk plan as JSON: every indexed document assigned to "
+            "exactly one bounded chunk, each with a content-addressed id, so an "
+            "unchanged chunk keeps its id across re-plans and an edited document "
+            "re-keys only the chunk holding it. Exits 1 if the registry is "
+            "invalid."
+        ),
+    )
+    _add_corpus_arguments(plan)
+    plan.add_argument(
+        "--max-documents", type=_positive, default=DEFAULT_MAX_DOCUMENTS,
+        help=f"documents per chunk (default: {DEFAULT_MAX_DOCUMENTS})",
+    )
+    plan.add_argument(
+        "--max-units", type=_positive, default=DEFAULT_MAX_UNITS,
+        help=f"assertion units per chunk (default: {DEFAULT_MAX_UNITS})",
+    )
+    plan.set_defaults(
+        run=lambda args: plan_repository_chunks(
+            args.repo, args.registry,
+            max_documents=args.max_documents, max_units=args.max_units,
+        ),
         render=False,
     )
 
