@@ -29,8 +29,10 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
 `doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `doc-sync/drift-waivers.json`
 (accepted-UNVERIFIABLE waivers the sync run surfaces consume), `doc-sync/installed-version`
 (the plugin-version lockfile the upgrade workflow reads), `workflows/doc-sync.yml`,
-`workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`) and the ci+release workflow
-(`workflows/release.yml`).
+`workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`), the ci+release workflow
+(`workflows/release.yml`), and the shadow-mode parity gate's harness
+(`tests/baselines/shadow-parity-gate/shadow-cycle.py`, #76 — recorded scaffolding, retired with
+the legacy lane in #77).
 
 ## Layout (pointers, not descriptions)
 
@@ -41,7 +43,8 @@ code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-ga
 - `CONTEXT.md` — the ubiquitous language for the #57 re-architecture (component, contract, and
   document-model terms, each with an _Avoid_ list). Use its vocabulary in engine code and tests.
 - `docs/` — `plans/` (design docs + `HANDOFF.md`), `guides/` (narrative user guides). Not published.
-- `tests/` — `fixtures/` (runnable sample repos), `baselines/` (RED/GREEN skill-test records),
+- `tests/` — `fixtures/` (runnable sample repos), `baselines/` (RED/GREEN skill-test records,
+  plus `shadow-parity-gate/`, the #76 gate's run evidence and its harness),
   `scripts/` (helper-script suites), `engine/` (engine suites). Not published.
 
 ## Working on the plugin

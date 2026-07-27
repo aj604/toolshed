@@ -1,7 +1,8 @@
 # Shadow-mode parity gate (issue #76)
 
-**Status:** criteria pre-registered 2026-07-26 (commit `bb15649`); cycle run and verdict
-recorded the same day. **Verdict: FAIL** — G4 (false positives) and G5 (cost). See Verdict.
+**Status:** criteria pre-registered 2026-07-26 in their own commit; cycle run and verdict
+recorded the same day, in later commits. **Verdict: FAIL** — G1b (write proof, on its
+instrument), G4 (false positives), G5 (cost). See Verdict.
 **Blocks:** #77 (remove legacy mutation paths) cites this file's Verdict section.
 **Spec:** #57's distilled-decisions comment (2026-07-26), which promotes its shadow-mode note
 to a blocking gate; issue #76's acceptance criteria.
@@ -167,20 +168,31 @@ This file carries the verdict, the artifacts are committed under
 
 # FAIL — #77 stays blocked.
 
-Criteria pre-registered in commit `bb15649`; cycle recorded in `2bb2492`; this verdict written
-after. Five of seven criteria pass. **G4 (false positives) and G5 (cost) fail**, and the gate
+Criteria pre-registered first, in their own commit, before the cycle ran and before any
+comparison existed; the cycle and then this verdict landed in later commits. Five of eight
+criteria pass. **G1b (write proof), G4 (false positives), and G5 (cost) fail**, and the gate
 was declared to pass only if every criterion passes.
+
+G4 is a finding about the lane. G1b and G5 are findings about this gate: both criteria were
+mis-specified, both were mis-specified in ways that only running them revealed, and neither may
+be re-specified after seeing its result. They are recorded as failures and listed for
+re-registration.
 
 | | Criterion | Verdict |
 |---|---|---|
 | G1a | new lane declares no write permission | **PASS** |
-| G1b | shadow cycle leaves the tree byte-identical | **PASS** |
+| G1b | shadow cycle leaves the tree byte-identical | **FAIL** — as written; see below, the lane did not write |
 | G2 | coverage not silently narrower | **PASS** |
 | G3 | new lane completes its declared scope | **PASS** (with a caveat that matters) |
 | G4 | new lane does not manufacture drift | **FAIL** — 8 false positives, budget 4 |
-| G5 | cost measured and bounded | **FAIL** — 8.43x per document, budget 3x |
+| G5 | cost measured and bounded | **FAIL** — 8.43x per document, budget 3x; turns/duration not recorded |
 | G6 | comparison is a program | **PASS** |
 | G7 | record is citable | **PASS** |
+
+Issue #76's own acceptance criteria are a different list from these, and they fare better —
+see "Against issue #76's acceptance criteria" at the end. In particular #76 asks that the new
+lane "demonstrably has no write path", which the evidence does establish; it is this file's
+**G1b**, a stricter and — it turned out — mis-specified instrument, that fails.
 
 The cycle itself is real: 33 documents declared, 1331 assertion units judged, 748 factual
 verdicts, 41 records, `findings` with nothing unexamined. Artifacts:
@@ -195,25 +207,47 @@ nothing else. No step in the file commits, pushes, or opens a PR.
 `tests/scripts/audit-workflow_test.py` (12 tests) and
 `tests/scripts/workflow-permissions_test.py` (8 tests) both pass.
 
-### G1b — PASS
+### G1b — FAIL as written
 
-Worktree digest `94e1d79b105e8c68ebaf249b570681e0debdf99a2c24ca34c0056ca720bd8ff8` (396 files)
-before and after a pass of `drift-plan`, 27 `segment` calls, `drift-audit`, `validate-report`,
-and a live headless model worker. `git status --porcelain` reported only the harness edit that
-was already pending, unchanged by the run. The model workers ran with no `Write` and no `Edit`
-in their tool set at all.
+The criterion said: a sha256 over **every file in the worktree excluding `.git/`**, equal
+before and after, with `git status --porcelain` empty at both points. Measured against that
+text, it fails:
 
-**The first measurement of this criterion was wrong, and the correction is the interesting
-part.** The digest hashed every file except `.git/`, which included
-`plugins/doc-lifecycle/engine/doclifecycle/__pycache__/*.pyc` — and a `.pyc` embeds its
-source's mtime, so `git checkout` of an *unchanged* source file re-keys 16 files that nothing
-wrote to the repository. Mid-cycle I edited four tracked files by mistake and reverted them
-with `git checkout`; that reverted the content and moved the mtimes, and the post-cycle digest
-duly differed with a clean `git status`. Demonstrated rather than argued: deleting
-`__pycache__` drops the count 412 → 396 and the digest to `e4938616…`, and one engine import
-restores `afbf05f6…` exactly. The instrument now asks git what the repository ignores.
+- The digests differed — `fcf4cb87…` before, `afbf05f6…` after.
+- The re-measurement that came out equal (`94e1d79b…`, 396 files) used a **changed
+  instrument** — one that also skips whatever the repository's ignore rules exclude — and ran
+  with `git status --porcelain` non-empty (a harness edit of mine was pending).
 
-The lane did not write. The instrument was measuring itself.
+I changed the instrument after it produced a difference and initially recorded this criterion
+as a PASS. That is the same move G5 below refuses, and it is not available here either. The
+criterion was mis-specified; a mis-specified criterion is re-registered, not reinterpreted
+mid-evaluation. **FAIL**, and G1b joins G5 on the re-registration list.
+
+**What the evidence does show, separately from the criterion.** The difference was entirely
+`plugins/doc-lifecycle/engine/doclifecycle/__pycache__/*.pyc`, which CPython writes the moment
+anything imports the engine, and whose bytes embed the source file's mtime. Mid-cycle I edited
+four tracked files by mistake and reverted them with `git checkout`, which restored the content
+and moved the mtimes; the next import re-keyed 16 `.pyc` files that no process had written to
+the repository. Demonstrated rather than argued: deleting `__pycache__` drops the count
+412 → 396 and the digest to `e4938616…`, and a single engine import restores `afbf05f6…`
+exactly.
+
+Three independent observations that the lane wrote nothing, none of which depends on the
+digest:
+
+1. `git status --porcelain` was empty both before and after the cycle proper — every tracked
+   file matched `HEAD`.
+2. The only untracked files present afterwards were the 16 ignored `.pyc` byproducts, and their
+   bytes are reproducible from an import.
+3. The model workers ran with no `Write` and no `Edit` tool at all — their tool set was
+   `Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git ls-files:*),Bash(python3:*)`.
+
+So the lane did not write, and issue #76's acceptance criterion on that point is met. What
+failed is this file's instrument for proving it, which measured itself.
+
+The re-registered form should hash the repository's content as the repository defines it —
+tracked files plus untracked-but-not-ignored — and require a clean porcelain, with the
+measurement taken around a cycle that nobody edits mid-flight.
 
 ### G2 — PASS
 
@@ -247,10 +281,19 @@ should too.
 
 ### G3 — PASS, and the caveat is the finding
 
-The report is `findings`, `incomplete` is empty, and `validate-report --repo .` returns
-`findings` with no stale reasons against the live repository. The audit is deterministic given
-its verdicts: re-running it produced a byte-identical report
+The report is `findings` and `incomplete` is empty. The audit is deterministic given its
+verdicts: re-running it produced a byte-identical report
 (`0c8ce572dfd6e1c2325589fb9acd6c1f7dd57d32fe1149cc076f2775db7e6048`).
+
+The freshness re-check passed **at the audited commit**: run there, before this branch was
+rebased and before the version bump,
+`validate-report --report report.json --repo . --registry <the shadow registry>` exited 0 with
+`findings` and no stale reasons. It does not pass now, and should not: the branch was rebased
+onto `main`, so the pinned `base_commit` is no longer an ancestor, and the plugin version moved
+0.20.0 → 0.22.0, which the contract says marks every prior report stale on purpose. Bare
+`--repo .` without `--registry` returns `invalid`, because this repository still has no
+`.doc-lifecycle/registry.json` — that is #75's to land. Read the criterion as satisfied at the
+commit the report describes, which is the only commit it claims anything about.
 
 **It took three rounds to get there, and the first round failed 13 of 27 living documents.**
 The cause is one design decision, not model sloppiness: a unit's identity is a 64-character hex
@@ -363,6 +406,14 @@ The pre-registered bound was 3x per examined document. The measured figure is 8.
 criterion fails as written, and the honest report of a pre-registered criterion is the number
 it produced.
 
+It fails on a second clause too. G5 said "model cost, turns, and wall-clock are recorded for
+**both** lanes"; `shadow-meta.json` records `turns: null` and `duration_ms: null`. The reason
+is real — this cycle ran 55 sessions, so a turn total would add up unrelated sessions and a
+duration would report wall-clock under 8-way parallelism, neither comparable to the legacy
+lane's single-session figures — but a reason for not measuring something is not a measurement.
+The re-registered criterion should ask for per-session turn and duration distributions, which
+are recorded in the run logs and would have been comparable.
+
 **The normalizer is also wrong, and saying so is not a way out of the FAIL.** Per document is
 only comparable when the lanes examine a document to the same depth, and they do not: the
 legacy lane produced 31 claims across 15 documents (~2 per document, model-chosen inside a
@@ -394,8 +445,28 @@ committed `comparison.json` exactly.
 
 ### G7 — PASS
 
-This file carries the verdict; the artifacts are under `tests/baselines/shadow-parity-gate/`;
-#76 and #77 carry comments pointing here.
+This file carries the verdict and the artifacts are under
+`tests/baselines/shadow-parity-gate/`. Comments pointing here are posted on #76 and #77 when
+the PR opens — until then the record lives only on a branch, and #77 cannot cite a branch.
+
+## Against issue #76's acceptance criteria
+
+The criteria above are this file's own, and deliberately stricter than the ticket's. The
+ticket's four:
+
+| #76 acceptance criterion | Met |
+|---|---|
+| comparison report: agreements, findings unique to each, coverage and cost deltas, false-positive assessment | **yes** — `comparison.json`, produced by a tested program, plus the adjudication above |
+| the new lane demonstrably has no write path during shadow operation | **yes** — G1a, plus the three observations under G1b |
+| pass criteria written down before the comparison is evaluated; verdict recorded where #77 can cite it | **yes** — criteria in `bb15649`, cycle and verdict in later commits, verdict here |
+| at least one full shadow cycle on the dogfood repository's real documentation | **yes** — 33 documents, 1331 units, 41 records |
+
+One clause of the ticket was **not** exercised: "against the dogfood repository *(and a large
+consumer where available)*". No external consumer install is known — the dogfooded `.github/`
+install is the only one this repository knows of, and `doc-audit.yml` is not installed
+anywhere yet (#75). Recorded as not available rather than silently skipped; a consumer shadow
+run would test the one thing this cycle could not, which is whether the findings and the cost
+behave the same on a corpus nobody wrote the engine against.
 
 ## What #77 needs before this gate can be re-run and pass
 
@@ -407,7 +478,10 @@ This file carries the verdict; the artifacts are under `tests/baselines/shadow-p
    or give the lane a repair round.
 4. Decide the registry's `extensions` and roots for the dogfood install (#75), knowing that
    `.md`-only and `plugins/`-less each drop documents the legacy lane covered.
-5. Re-register G5 against a normalizer the owner signs off on.
+5. Re-register **G1b** (hash the repository's content as the repository defines it) and **G5**
+   (a normalizer the owner signs off on, plus per-session turn and duration distributions).
+   Both failed on their instruments rather than on the lane, and both must be fixed *before*
+   the next cycle runs, not after it reports.
 
 Items 1–3 are also worth doing on their own merits, independent of the gate: each is a defect
 this cycle found in code that is already merged.

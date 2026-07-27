@@ -39,7 +39,6 @@ import json
 import sys
 
 SCHEMA_VERSION = 1
-LEGACY_VERDICTS = ("VERIFIED", "STALE", "UNVERIFIABLE")
 # The class #57's auto-apply policy may mint an approval set for without a
 # human: a STALE record carrying the exact replacement line and a pointer to
 # the evidence that moved. Nothing else lands unattended, so nothing else
@@ -189,7 +188,8 @@ def correspond(records, report, segments):
     matched_units = set()
 
     for record in records:
-        path, line = split_location(record.get("location"))
+        location = record.get("location")
+        path, line = split_location(location)
         lines = index.get(path)
         if lines is None:
             unresolved.append({
@@ -213,7 +213,7 @@ def correspond(records, report, segments):
         matched_units.add(unit)
         legacy_verdict = record.get("verdict")
         shadow_verdict, shadow_record = judged[unit]
-        pair = {"path": path, "line": line, "unit": unit}
+        pair = {"path": path, "line": line, "location": location, "unit": unit}
         if legacy_verdict == shadow_verdict:
             agreed.append({**pair, "verdict": legacy_verdict})
             continue
@@ -298,8 +298,9 @@ def cost(legacy, shadow, legacy_meta, shadow_meta):
     shadow_documents = len(set(shadow["declared"]) - set(shadow["incomplete"]))
     legacy_rate = per_document(legacy_meta.get("cost_usd"), legacy_documents)
     shadow_rate = per_document(shadow_meta.get("cost_usd"), shadow_documents)
+    # A ratio needs both figures, and a legacy rate of zero has none to give.
     ratio = None
-    if legacy_rate and shadow_rate is not None:
+    if shadow_rate is not None and legacy_rate:
         ratio = round(shadow_rate / legacy_rate, 6)
     return {
         "legacy": {
@@ -399,7 +400,7 @@ def render(comparison):
     eligible = set(comparison["adjudication"]["auto_apply_eligible"])
     for record in assertions["shadow_only"] + [
         {"id": pair["shadow_record"], "code": pair["shadow_verdict"],
-         "location": f"{pair['path']}:{pair['line']}"}
+         "location": pair["location"]}
         for pair in assertions["disagreed"] if pair["shadow_record"]
     ]:
         gate = "auto-apply-eligible" if record["id"] in eligible else "human"
