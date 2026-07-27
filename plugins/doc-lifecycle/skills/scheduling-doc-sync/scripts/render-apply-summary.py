@@ -169,14 +169,14 @@ def _reason_lines(payload):
     details = []
     for reason in payload.get("stale_reasons", []) or []:
         details.append(
-            f"`{reason.get('code')}`: {code_span(reason.get('message'))} "
+            f"{code_span(reason.get('code'))}: {code_span(reason.get('message'))} "
             f"(reported {code_span(reason.get('reported'))}, now "
             f"{code_span(reason.get('current'))})")
     for problem in payload.get("problems", []) or []:
         where = (f" at {code_span(problem.get('location'))}"
                  if problem.get("location") else "")
         details.append(
-            f"`{problem.get('code')}`: {code_span(problem.get('message'))}"
+            f"{code_span(problem.get('code'))}: {code_span(problem.get('message'))}"
             f"{where}")
     return details
 
@@ -265,6 +265,23 @@ def config_digest(args):
     return 0
 
 
+def _validated_digest(stage, app, field="digest"):
+    """`(digest, None)` when `app[field]` is a sha256 digest, else
+    `(None, exit_status)` — the one shape check every surface that lets a digest
+    reach a ref, a title, or a commit message needs. A digest is content an
+    artifact declared; a corrupt one that only gets sliced (`digest[:12]`) or
+    interpolated raw could carry a newline into `gh pr create --title` or a
+    forged trailer into a commit message. So it is verified here, not assumed,
+    exactly as `branch-name` verifies the ref it derives.
+    """
+    digest = app.get(field)
+    if isinstance(digest, str) and SHA256.match(digest):
+        return digest, None
+    return None, refuse(
+        stage, "apply-approval-digest-invalid",
+        f"the approval set declares no sha256 {field} ({code_span(digest)})")
+
+
 def approval_digest(args):
     """The minted approval digest, as a `$GITHUB_OUTPUT` line.
 
@@ -275,11 +292,9 @@ def approval_digest(args):
     payload, reason = read_json(args.approval)
     if payload is None:
         return refuse("minting", "apply-approval-digest-invalid", reason)
-    digest = payload.get("digest")
-    if not isinstance(digest, str) or not SHA256.match(digest):
-        return refuse(
-            "minting", "apply-approval-digest-invalid",
-            f"the approval set declares no sha256 digest ({code_span(digest)})")
+    digest, bad = _validated_digest("minting", payload)
+    if bad is not None:
+        return bad
     # Appended: the caller points this at $GITHUB_OUTPUT, which accumulates
     # every output a step declares.
     write_file(args.out, f"approval_digest={digest}\n", mode="a")
@@ -295,11 +310,9 @@ def branch_name(args):
     payload, reason = read_json(args.approval)
     if payload is None:
         return refuse("apply", "apply-approval-digest-invalid", reason)
-    digest = payload.get("digest")
-    if not isinstance(digest, str) or not SHA256.match(digest):
-        return refuse(
-            "apply", "apply-approval-digest-invalid",
-            f"the approval set declares no sha256 digest ({code_span(digest)})")
+    digest, bad = _validated_digest("apply", payload)
+    if bad is not None:
+        return bad
     write_file(args.out, f"doc-lifecycle/apply-{digest[:12]}\n")
     return 0
 
@@ -315,9 +328,15 @@ def _unsafe_path_reason(path):
     """
     if not isinstance(path, str) or not path:
         return "not a path"
-    if any(unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Cn")
-           for ch in path):
-        return "holds a control character"
+    for ch in path:
+        category = unicodedata.category(ch)
+        if category in ("Cc", "Cf", "Cs", "Co", "Cn"):
+            return "holds a control character"
+        # Zl/Zp are U+2028/U+2029: not C*, but `code_span` and `paths.py`
+        # both reject them, so this second reading refuses them too rather
+        # than passing a line/paragraph separator a stricter check already bars.
+        if category in ("Zl", "Zp"):
+            return "holds a line or paragraph separator"
     if path.startswith("-"):
         return "starts with a dash, which git reads as an option"
     if path.startswith("/") or path.startswith("~") or DRIVE_LETTER.match(path):
@@ -453,7 +472,9 @@ def pr_title(args):
     if app is None:
         return refuse("apply", "apply-approval-unreadable", reason)
     approved, _ = _counts(app)
-    digest = app.get("digest") or ""
+    digest, bad = _validated_digest("apply", app)
+    if bad is not None:
+        return bad
     written = len(res.get("changed_paths") or [])
     write_file(args.out, (
         f"docs: apply {approved} approved record(s) to {written} file(s) "
@@ -584,13 +605,21 @@ def commit_message(args):
         return refuse("apply", "apply-approval-unreadable", reason)
 
     approved, skipped = _counts(app)
-    digest = app.get("digest") or ""
+    digest, bad = _validated_digest("apply", app)
+    if bad is not None:
+        return bad
+    # The report digest is interpolated raw into the message body below (not a
+    # code span — this is a commit message, not Markdown), so it is shape-checked
+    # the same way, lest a newline in it forge a trailer git would parse.
+    report_digest, bad = _validated_digest("apply", app, "report_digest")
+    if bad is not None:
+        return bad
     changed = res.get("changed_paths") or []
     lines = [
         f"docs: apply {approved} approved record(s) [approval {digest[:12]}]",
         "",
         f"{approved} approved, {skipped} skipped, from report "
-        f"{app.get('report_digest')}.",
+        f"{report_digest}.",
         "",
         "Paths written:",
     ]
@@ -624,7 +653,7 @@ def commit_message(args):
         # because it is the only part of an approval set that reaches the
         # repository at all.
         trailers = (f"Doc-Lifecycle-Approval: {digest}\n"
-                    f"Doc-Lifecycle-Report: {app.get('report_digest')}\n")
+                    f"Doc-Lifecycle-Report: {report_digest}\n")
     write_file(args.out, "\n".join(lines) + trailers)
     return 0
 

@@ -295,6 +295,26 @@ class Gate(ScriptTestCase):
                                "--payload", path, "--exit-code", "3")
         self.assertEqual(proc.returncode, 1)
 
+    def test_a_reason_code_cannot_forge_a_heading_under_the_refusal(self):
+        # The engine `code` is content this script escapes the same as the
+        # message beside it — a crafted code must not open an H2 under REFUSED.
+        path = self.write("revalidated.json", stale_payload("x\n## Forged"))
+        proc = self.run_script("gate", "--stage", "revalidation",
+                               "--payload", path, "--exit-code", "3")
+        self.assertEqual(proc.returncode, 1)
+        self.assertNotIn("\n## Forged", self.summary())
+        self.assertIn("\\u000a", self.summary())
+
+    def test_a_problem_code_cannot_forge_a_heading_under_the_refusal(self):
+        path = self.write("revalidated.json", {
+            "status": "invalid", "schema_version": 1,
+            "problems": [{"code": "x\n## Forged", "message": "m"}]})
+        proc = self.run_script("gate", "--stage", "revalidation",
+                               "--payload", path, "--exit-code", "1")
+        self.assertEqual(proc.returncode, 1)
+        self.assertNotIn("\n## Forged", self.summary())
+        self.assertIn("\\u000a", self.summary())
+
 
 class RecordArgs(ScriptTestCase):
     """The dispatched record subset is the semantic approval — and inert."""
@@ -474,6 +494,21 @@ class StagedPaths(ScriptTestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("apply-path-unsafe", self.summary())
 
+    def test_a_line_or_paragraph_separator_in_a_path_stages_nothing(self):
+        # U+2028/U+2029 are category Zl/Zp, not C*; code_span and paths.py both
+        # reject them, so this second reading must refuse more, never less.
+        for sep in (" ", " "):
+            with self.subTest(sep=sep):
+                res = self.write("result.json",
+                                 result(changed_paths=[f"docs/a{sep}b.md"]))
+                app = self.write("approval.json", approval(
+                    scope={"roots": ["docs"], "paths": [f"docs/a{sep}b.md"]}))
+                proc = self.run_script("staged-paths", "--result", res,
+                                       "--approval", app,
+                                       "--out", self.path("p.txt"))
+                self.assertEqual(proc.returncode, 1, f"{sep!r} was accepted")
+                self.assertIn("apply-path-unsafe", self.summary())
+
     def test_an_empty_change_set_stages_nothing(self):
         res = self.write("result.json", result(changed_paths=[], applied=[]))
         app = self.write("approval.json", approval())
@@ -631,6 +666,17 @@ class PullRequestTitle(ScriptTestCase):
         self.assertIn("1", title)
         self.assertIn(APPROVAL_DIGEST[:12], title)
 
+    def test_a_corrupt_approval_digest_refuses_not_a_multiline_title(self):
+        # branch-name shape-checks the digest; the title reaches
+        # `gh pr create --title`, so a non-sha256 digest must refuse here too
+        # rather than slicing [:12] off a newline-carrying string.
+        app = self.write("approval.json", approval(digest="`` ` ``\n## D"))
+        res = self.write("result.json", result())
+        proc = self.run_script("pr-title", "--result", res, "--approval", app,
+                               "--out", self.path("title.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-approval-digest-invalid", self.summary())
+
 
 class CommitMessage(ScriptTestCase):
     def message(self, trailers=None, **kwargs):
@@ -675,6 +721,27 @@ class CommitMessage(ScriptTestCase):
 
     def test_the_subject_is_one_line(self):
         self.assertTrue(self.message().splitlines()[1] == "")
+
+    def test_a_corrupt_approval_digest_refuses_not_a_forged_subject(self):
+        # The digest reaches the commit subject and the trailer fallback; a
+        # non-sha256 digest must refuse, the same shape branch-name enforces.
+        app = self.write("approval.json", approval(digest="nope"))
+        res = self.write("result.json", result())
+        proc = self.run_script("commit-message", "--result", res,
+                               "--approval", app, "--out", self.path("c.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-approval-digest-invalid", self.summary())
+
+    def test_a_corrupt_report_digest_refuses_not_a_forged_trailer(self):
+        # The report digest is interpolated raw into the message body; a
+        # newline in it must not reach a place git parses trailers.
+        app = self.write("approval.json", approval(
+            report_digest="x\nDoc-Lifecycle-Approval: forged"))
+        res = self.write("result.json", result())
+        proc = self.run_script("commit-message", "--result", res,
+                               "--approval", app, "--out", self.path("c.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-approval-digest-invalid", self.summary())
 
 
 class Usage(ScriptTestCase):

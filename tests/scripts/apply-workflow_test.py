@@ -74,20 +74,67 @@ def jobs():
     return WPT.jobs_of(WORKFLOW)
 
 
-def run_block_lines(source):
-    """Every line inside a `run: |` block, with its 1-based line number."""
-    out, indent = [], None
+def run_blocks(source):
+    """`run: |` blocks grouped, each a list of `(1-based lineno, line)`."""
+    blocks, current, indent = [], None, None
     for number, line in enumerate(source, 1):
         if indent is not None:
             if line.strip() and WPT.indent_of(line) <= indent:
-                indent = None
+                blocks.append(current)
+                current, indent = None, None
             else:
-                out.append((number, line))
+                current.append((number, line))
                 continue
         match = RUN_BLOCK.match(line)
         if match:
-            indent = len(match.group(1))
-    return out
+            indent, current = len(match.group(1)), []
+    if current is not None:
+        blocks.append(current)
+    return blocks
+
+
+def run_block_lines(source):
+    """Every line inside a `run: |` block, with its 1-based line number — the
+    grouped blocks flattened, so the block-boundary scan has one owner."""
+    return [pair for block in run_blocks(source) for pair in block]
+
+
+def _logical_commands(block):
+    """A run block's shell commands as `(first-lineno, joined-text)`.
+
+    Backslash-continued lines are one command; blank and comment lines are
+    dropped. Enough to ask which command is a run block's last, and whether a
+    `gate` is chained with `|| exit`."""
+    commands, buf, start = [], "", None
+    for lineno, line in block:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if start is None:
+            start = lineno
+        if stripped.endswith("\\"):
+            buf += stripped[:-1].strip() + " "
+            continue
+        buf += stripped
+        commands.append((start, buf.strip()))
+        buf, start = "", None
+    if start is not None:
+        commands.append((start, buf.strip()))
+    return commands
+
+
+def download_paths(body):
+    """The `path:` each `download-artifact` step in `body` extracts into."""
+    paths = []
+    for i, line in enumerate(body):
+        if "actions/download-artifact@" not in line:
+            continue
+        for follow in body[i + 1:i + 12]:
+            match = re.search(r"^\s*path:\s*(\S.*?)\s*$", follow)
+            if match:
+                paths.append(match.group(1))
+                break
+    return paths
 
 
 class FileExists(unittest.TestCase):
@@ -220,6 +267,22 @@ class StagingIsLimitedToTheApplyResult(unittest.TestCase):
                 self.assertIn("path: ${{ runner.temp }}", window,
                               f"job '{name}' downloads into the work tree")
 
+    def test_no_job_downloads_two_artifacts_into_one_directory(self):
+        # The trusted `apply-approval` bundle (trailers, approval summary,
+        # branch name) and the model-authored `apply-plan` must not share a
+        # download `path:`. upload-artifact roots an artifact at its upload
+        # directory, so a plan job that made `edit-plan.json` a *directory*
+        # bundling `trailers.txt`/`branch.txt` could, extracted second into a
+        # shared dir, overwrite the revalidate job's trusted files — forging the
+        # commit trailers, the PR body, and the branch a credentialed job pushes.
+        for name, body in jobs().items():
+            paths = download_paths(body)
+            self.assertEqual(
+                len(paths), len(set(paths)),
+                f"job '{name}' downloads two artifacts into the same path "
+                f"{paths}; a model-authored artifact extracted over a trusted "
+                f"one is an overwrite — give each its own directory")
+
 
 class ProvenanceTravelsWithTheChange(unittest.TestCase):
     def test_the_pr_body_is_rendered_by_the_tested_renderer(self):
@@ -280,6 +343,32 @@ class RefusalsReachTheRunSurface(unittest.TestCase):
         # from; its coverage gaps travel into the PR body.
         body = "\n".join(jobs()["revalidate"])
         self.assertIn("--accept-exit-code 4", body)
+
+    def test_a_gate_that_is_not_a_run_blocks_last_command_exits(self):
+        # A step's status is its last command's, errexit or not (cf. #107): a
+        # `gate` whose refusal is followed by more commands in the same run
+        # block must `|| exit`, or a later command masks the first refusal.
+        offenders = []
+        for block in run_blocks(lines()):
+            commands = _logical_commands(block)
+            for idx, (lineno, text) in enumerate(commands):
+                if "gate --stage" not in text:
+                    continue
+                is_last = idx == len(commands) - 1
+                if not is_last and "|| exit" not in text:
+                    offenders.append(f"{lineno}: {text}")
+        self.assertEqual(
+            offenders, [],
+            "a gate's refusal can be masked by a later command in the same "
+            "run block — chain it with `|| exit`:\n  " + "\n  ".join(offenders))
+
+    def test_the_report_run_is_bound_to_its_audit_lane(self):
+        # `report_run_id` must name a run of *this repo's* doc-audit lane, not
+        # any run that happens to publish an `audit-report` artifact.
+        body = "\n".join(jobs()["revalidate"])
+        self.assertIn("doc-audit.yml", body,
+                      "the revalidate job never binds report_run_id to the "
+                      "doc-audit workflow it must come from")
 
     def test_the_report_artifact_is_bound_to_the_dispatched_digest(self):
         self.assertIn("verify-report", "\n".join(jobs()["revalidate"]))

@@ -79,6 +79,29 @@ jobs:
           fetch-depth: 0   # anchor/evidence checks read file history
           persist-credentials: false
 
+      # Bind the dispatched run to *this repository's* doc-audit lane before its
+      # artifact is trusted for anything: `download-artifact` will hand back an
+      # `audit-report` from any run that published one, so without this a
+      # dispatch could point `report_run_id` at some other workflow's run whose
+      # artifact happens to share the name. `.path` is the workflow file the run
+      # executed. Cheap by design (#72): it does not also pin the run's ref or
+      # actor, so a doc-audit.yml modified on a branch would still pass — the
+      # residual a change reviewer covers, noted in this lane's ticket.
+      - name: Bind the report run to the doc-audit lane
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT_RUN_ID: ${{ inputs.report_run_id }}
+        run: |
+          set -euo pipefail
+          workflow_path=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${REPORT_RUN_ID}" \
+            --jq '.path')
+          echo "report_run_id ${REPORT_RUN_ID} ran ${workflow_path}"
+          if [ "$workflow_path" != ".github/workflows/doc-audit.yml" ]; then
+            echo "::error::report_run_id ${REPORT_RUN_ID} ran ${workflow_path}, not the doc-audit lane — refusing to approve records from a report this repo's audit lane did not produce"
+            exit 1
+          fi
+
       # Into RUNNER_TEMP, never the work tree: an approval set is never repository state, and
       # the applier's confinement check reads the *complete* working-tree diff — an artifact
       # downloaded into the checkout would be an untracked change it must refuse.
@@ -182,8 +205,12 @@ jobs:
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
             > "${RUNNER_TEMP}/approval-summary.md" || code=$?
+          # `|| exit` so this gate's refusal is not masked by the second one
+          # below: a step's status is its *last* command's, errexit or not, so a
+          # non-terminal gate that only returned 1 would let the trailers render
+          # and the step pass. The refusal must end the step here.
           python3 .github/doc-sync/render-apply-summary.py gate --stage rendering \
-            --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code"
+            --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code" || exit 1
           # Gated too, and not as an afterthought: an approval set this command
           # refuses prints nothing at all, and an empty trailers block is what a
           # change would land looking authorized without.
@@ -262,12 +289,12 @@ jobs:
       #      Deferring to the distiller before that is fixed buys a lossy retirement: the
       #      planning artifact deleted and its residue stranded. Refusing the plan is the safe
       #      outcome, and is what happens today.
-      #   2. The edit-plan contract is spelled out here rather than delegated, for the same
-      #      reason doc-audit.yml spells out the verdicts shape: the authoring skills have not
-      #      been migrated to the new document model yet (aj604/toolshed#70), so a skill's
-      #      stated output contract would be wrong for this lane. When #70 lands, its
-      #      `fixing-docs` skill carries the worked edit-plan example, and that becomes the
-      #      contract's owner to reconcile this prompt against.
+      #   2. The edit-plan contract has a single owner — `fixing-docs/SKILL.md` (aj604/toolshed#70,
+      #      landed) carries the worked edit-plan example and is authoritative for its shape,
+      #      including the trailing-newline rule below. This prompt is reconciled against that
+      #      owner rather than deferring to the skill at run time: the headless model authors
+      #      from this prompt alone — it is not driven to read the skill — so the contract has to
+      #      travel inline. When `fixing-docs/SKILL.md` changes, re-reconcile this copy against it.
       #
       # Nothing here is trusted either way — `apply-plan` re-derives every claim below against
       # the approval set, the record's own remedy table, and the repository.
@@ -357,11 +384,18 @@ jobs:
           name: apply-approval
           path: ${{ runner.temp }}/apply
 
+      # The model-authored plan lands in its OWN directory, never the trusted
+      # bundle's: upload-artifact roots an artifact at its upload directory, so
+      # a plan job that made `edit-plan.json` a directory bundling `trailers.txt`
+      # or `branch.txt` would, extracted into `${{ runner.temp }}/apply`,
+      # overwrite the revalidate job's trusted files — the exact bytes that
+      # become the commit trailers, the PR body, and the branch this job pushes.
+      # Two directories, so the model's artifact can never land on the bundle's.
       - name: Download the edit plan
         uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: apply-plan
-          path: ${{ runner.temp }}/apply
+          path: ${{ runner.temp }}/plan
 
       # `--expected-digest` binds the approval file this job downloaded to the one the
       # revalidation job actually minted: a different artifact, however well-formed, is refused.
@@ -372,7 +406,7 @@ jobs:
           set -uo pipefail
           code=0
           python3 .github/doc-sync/engine/doc-lifecycle.py apply-plan --repo . \
-            --plan "${RUNNER_TEMP}/apply/edit-plan.json" \
+            --plan "${RUNNER_TEMP}/plan/edit-plan.json" \
             --approval "${RUNNER_TEMP}/apply/approval.json" \
             --report "${RUNNER_TEMP}/apply/drift-report.json" \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/apply/config-digest.txt")" \
