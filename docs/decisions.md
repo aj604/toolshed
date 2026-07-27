@@ -4,6 +4,47 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-27 — the evidence boundary grows a second half: declared tools (#115)
+- Evidence: `docs/plans/2026-07-26-shadow-parity-gate.md`, "Cause B" under criterion G4 — six
+  false `UNVERIFIABLE` findings over `docs/agents/issue-tracker.md`, and one genuine `STALE`
+  the same gap hid (`gh pr list --json …,authorAssociation,…`; `gh pr list --json bogus`
+  enumerates the real fields and that is not one).
+- Decided (of the design doc's three named directions, (a) — grow the boundary): a drift
+  verdict's evidence may cite `command` instead of `source`, and `evidence_boundary` gains
+  `commands`, the bare executable names a run declared it could run. Rejected (b), narrowing
+  `detecting-doc-drift`'s method to stop sanctioning tier-2 tool evidence: the claims are
+  genuinely checkable, and a method that refused to check them would convert six false
+  findings into six permanently unanswerable ones — including the real drift. Rejected (c), a
+  document kind for external-tooling claims: kind is the *truth obligation* a document carries,
+  and `docs/agents/issue-tracker.md` owes exactly what every living document owes (currently
+  true, assertions carry evidence); a fourth kind would have split the taxonomy along where the
+  evidence lives rather than along what is owed, and a document mixing tool claims with repo
+  claims would have had no kind at all.
+- Decided (against the design doc's suggested output *digest*): the citation is the command
+  plus the existing `observed` fact, not a hash of the tool's output. An external tool's output
+  changes with its version, so a digest would expire on every upgrade of a program this
+  repository does not pin — it would pin nothing durable while reading as though it did. It
+  would also ask a model to compute a hash, which is the transcription failure #116 exists to
+  fix. The cost is named rather than papered over: a `source` is pinned by `base_commit` and a
+  `command` only to the environment that ran it, which is precisely why auto-apply refuses one.
+- Not decided here (deliberately out of scope): Cause B named *two* forcing conditions, and this
+  settles the first. The second — the audit lane's workers cannot run `gh` at all — is a
+  trust-boundary question about a credentialed workflow (`--allowedTools` is prefix-matched, so
+  there is no way to allow `gh <sub> --help` without allowing `gh api`), and it gets its own
+  change: #118.
+- Still binds (the guarantees the growth had to leave intact): the world stays closed —
+  `commands` is empty by default, and a citation outside it is `drift-evidence-outside-boundary`,
+  the same code and reason as a path outside the globs. The boundary is still lineage and still
+  never opened: the engine executes nothing it declares. A citation must be one shell-free
+  command line, so a report never presents a shell program as a single read-only command a
+  reader re-runs. And auto-apply refuses a command-cited record by name
+  (`policy-external-evidence`): mechanical means re-derivable from the commit, and this pointer
+  is not.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/report.py,
+  plugins/doc-lifecycle/engine/doclifecycle/drift.py,
+  plugins/doc-lifecycle/engine/doclifecycle/policy.py,
+  plugins/doc-lifecycle/engine/README.md, CONTEXT.md
+
 ## 2026-07-27 — this repo's registry, and what the migration leaves behind (#75)
 - Evidence: `python3 -m doclifecycle migration-draft` and `migration-dry-run` against this
   repository, run through the `scheduling-doc-sync` migration door; issue #57's

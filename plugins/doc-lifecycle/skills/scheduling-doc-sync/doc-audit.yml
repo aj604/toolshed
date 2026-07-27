@@ -110,8 +110,13 @@ jobs:
             "factual"|"normative"|"rationale"|"non-assertive", "verdict":
             "VERIFIED"|"STALE"|"UNVERIFIABLE" (omit for non-assertive), "kind":
             "command"|"path"|"symbol"|"behavior"|"structure"|"value", "tier": 1|2|3,
-            "evidence": {"source": <repo path, required for VERIFIED/STALE>, "line": <int>,
-            "observed": <what you read>}, "fix": <complete replacement line, STALE only>}]}]}.
+            "evidence": {"source": <repo path>, "line": <int>, "observed": <what you read>},
+            "fix": <complete replacement line, STALE only>}]}]}.
+            VERIFIED and STALE each need a citation — "source", or "command" (the single
+            command line you ran) where the evidence boundary declares that tool. This lane
+            declares no tools, so cite a repository path: a claim only an external program
+            could settle is genuinely UNVERIFIABLE here, and the report's evidence boundary
+            says why.
             For every document drift-plan.json lists under "documents" with obligation
             "assertions": run `python3 .github/doc-sync/engine/doc-lifecycle.py segment --repo .
             --path <path>` to get its assertion units, and answer for each by its "ordinal" field

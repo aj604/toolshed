@@ -71,7 +71,14 @@ REQUIRED_LINEAGE_FIELDS = (
 # it lives at the report's top level, where every other engine artifact carries
 # it, rather than being spelled twice in two places that could disagree.
 
-EVIDENCE_FIELDS = ("sources", "excluded")
+EVIDENCE_FIELDS = ("sources", "excluded", "commands")
+
+# A tool the evidence boundary may declare: a bare executable name. Named by
+# the shape it must have rather than by the shapes it must not, because the
+# boundary says *which programs* a verdict could rest on, and a reader who
+# cannot tell the program from its arguments cannot tell that. `gh`, `python3`,
+# and `docker-compose` pass; `gh pr list`, `/usr/bin/gh`, and `../gh` do not.
+EXECUTABLE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")  # sha-1 or sha-256 git
@@ -142,13 +149,23 @@ class EvidenceBoundary:
 
     Enumerable on purpose: a reader can tell what a verdict could and could not
     have been based on, and a later run can tell whether the boundary moved.
+
+    Two kinds of evidence, because documentation makes two kinds of claim.
+    `sources`/`excluded` are repository-relative globs — what may be opened.
+    `commands` names the local tools a verdict may be settled by running, for
+    the claims no file in the repository can answer: a document that documents
+    another program's flags is checked against that program, and nowhere else
+    (#115). Empty by default, so a run that declares no tool cannot have
+    consulted one — the world stays closed either way.
     """
 
     sources: Tuple[str, ...]
     excluded: Tuple[str, ...] = ()
+    commands: Tuple[str, ...] = ()
 
     def to_dict(self):
-        return {"sources": list(self.sources), "excluded": list(self.excluded)}
+        return {"sources": list(self.sources), "excluded": list(self.excluded),
+                "commands": list(self.commands)}
 
 
 @dataclass(frozen=True)
@@ -481,9 +498,32 @@ def _evidence_boundary(raw, bad):
                     f"repository-relative glob",
                     f"lineage.evidence_boundary.{name}[{i}]")
                 ok = False
+    commands = raw.get("commands", [])
+    if not isinstance(commands, list):
+        bad("report-invalid-evidence-boundary",
+            "commands must be a list of executable names the run was permitted "
+            "to run for evidence",
+            "lineage.evidence_boundary.commands")
+        ok = False
+    else:
+        for i, value in enumerate(commands):
+            # A bare executable name, not a command line: the boundary says
+            # which programs a verdict could rest on, and a reader who cannot
+            # tell the program from its arguments cannot tell that. Shape only,
+            # exactly as the globs above — the engine never runs any of these.
+            # `fullmatch`, not `match`: `$` in a Python pattern also matches
+            # before a trailing newline, which would put a control character
+            # into a lineage field.
+            if not isinstance(value, str) or not EXECUTABLE_NAME.fullmatch(value):
+                bad("report-invalid-evidence-boundary",
+                    f"commands[{i}] must be a bare executable name matching "
+                    f"{EXECUTABLE_NAME.pattern} — no whitespace, no path "
+                    f"separator, no shell punctuation",
+                    f"lineage.evidence_boundary.commands[{i}]")
+                ok = False
     if not ok:
         return None
-    return EvidenceBoundary(tuple(sources), tuple(excluded))
+    return EvidenceBoundary(tuple(sources), tuple(excluded), tuple(commands))
 
 
 def _lineage(raw, bad):

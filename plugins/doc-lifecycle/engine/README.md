@@ -350,7 +350,7 @@ changed a verdict. It is proof of examination, never authority to change anythin
     "registry_digest": "1d9176534bcc15f5fe5062503110be01ea198bb8ce65179230af4b226f56d85e",
     "ruleset_version": 1,
     "plugin_version": "0.19.0",
-    "evidence_boundary": {"sources": ["src/**"], "excluded": []}
+    "evidence_boundary": {"sources": ["src/**"], "excluded": [], "commands": ["gh"]}
   },
   "records": [
     {"id": "DRIFT-001", "digest": "aaaa…aaaa", "code": "STALE", "path": "docs/architecture.md"}
@@ -374,7 +374,7 @@ Every field below is required; omitting one is `report-missing-lineage-field`, n
 | `registry_digest` | the classification that decided the inventory | `lineage-registry-mismatch` |
 | `ruleset_version` | the audit policy applied; positive integer | `lineage-ruleset-mismatch` (vs `RULESET_VERSION`) |
 | `plugin_version` | the engine that applied it | `lineage-plugin-mismatch` (vs `PLUGIN_VERSION`) |
-| `evidence_boundary` | `{"sources": [...], "excluded": [...]}` — the declared limit of what the run could consult; `sources` non-empty | not compared |
+| `evidence_boundary` | `{"sources": [...], "excluded": [...], "commands": [...]}` — the declared limit of what the run could consult; `sources` non-empty | not compared |
 
 `schema_version` is lineage too — it pins the shape of everything above — but it lives at the
 report's top level, where every other engine artifact carries it, rather than being spelled
@@ -384,6 +384,31 @@ twice in two places that could disagree. A version this engine does not read is
 Path *authorization* for `evidence_boundary` globs — traversal, symlinks, forbidden target
 classes — is issue #67's single owner. The contract checks shape and log hygiene only; a
 boundary is lineage here, never opened.
+
+`commands` is the boundary's second half and answers a different question: not what the run
+could *open*, but what it could *run*. Documentation makes claims no file in the repository can
+settle — a document that documents another program's flags is checked against that program, and
+nowhere else — and the verification method's tier 2 has always sanctioned settling those by
+running a local read-only tool (`--help`, `--version`, a dry run). Before #115 the boundary was
+paths alone, so a verdict resting on one had no contract-legal expression and `UNVERIFIABLE`
+was the only answer available: on this repository's own corpus that produced six false findings
+and hid one genuine `STALE` (`docs/agents/issue-tracker.md`'s `gh pr list --json
+…,authorAssociation,…`, a field `gh pr list --json bogus` shows does not exist).
+
+Each entry is a **bare executable name** — `^[A-Za-z0-9][A-Za-z0-9._+-]*$`, so `gh` and
+`python3` pass and `gh pr list`, `/usr/bin/gh`, and `../gh` do not. The boundary says which
+*programs* a verdict could rest on, and a reader who cannot tell the program from its arguments
+cannot tell that. The list is **empty by default**: a run that declares no tool cannot cite one,
+so the closed world stays closed unless a consumer opens it (`--evidence-command NAME`,
+repeatable). The engine never executes anything a boundary declares or a verdict cites — a
+citation is an instruction to whoever checks the verdict, and the checks below are about what
+that instruction says.
+
+**Re-key, not a break.** `evidence_boundary` now always states `commands`, so a run's
+`audit_config_digest` differs from what the same repository and boundary produced before this
+field existed, and reports do not compare across the change. Reports persisted from before it
+still validate (an absent `commands` is the empty declaration); they are simply not the same
+configuration as anything produced since.
 
 ### Reading the repository
 
@@ -1118,9 +1143,37 @@ named; that *is* the finding). `kind` is one of `command`, `path`, `symbol`, `be
 `structure`, `value`; `tier` is 1 static, 2 shallow, 3 deep.
 
 Evidence is mandatory for every verdict, VERIFIED included, and carries the fact separately from
-the pointer: `observed` is required, and `source` is required for VERIFIED and STALE — both
-assert that a place in the repository was read. UNVERIFIABLE may omit it, because there is
-nothing to point at.
+the pointer: `observed` is required, and a **citation** — `source` or `command` — is required
+for VERIFIED and STALE, which both assert that something was actually checked. UNVERIFIABLE may
+omit it, because there is nothing to point at. Exactly one citation, never both: a verdict rests
+on one place a reader goes, and two pointers leave nobody able to say which one settled it
+(`drift-verdict-invalid-evidence`).
+
+`{"source": "src/fees.py", "line": 7, "observed": "…"}` cites a place in the repository.
+`{"command": "gh pr list --json bogus", "observed": "…"}` cites a local tool that was run,
+for a claim no file in the repository can answer. A command citation takes no `line` — a line
+number points into a file, and a tool's output is not one.
+
+A `command` is checked as a command line *before* it is matched against the boundary, and the
+order is the check, exactly as it is for a source. It must be one non-empty single line free of
+shell syntax — `;&|<>()$`, a backtick, or a backslash — because chaining, redirection,
+substitution, and escaping make it a shell program, and the report must not present one as a
+single read-only command a reader re-runs; and because the boundary matches its first token,
+which says nothing about what a shell program would run. Only then is that first token matched
+against `evidence_boundary.commands`; a command outside it is
+`drift-evidence-outside-boundary`, the same code and the same reason as a path outside it.
+Globbing characters are deliberately allowed: they change an argument, not what runs.
+
+A verdict resting on a command is a real, checkable pointer — but a weaker one than a path, and
+in a specific way worth naming. A `source` is pinned by `base_commit`: a reader gets the exact
+bytes the verdict was about. A `command` is pinned only to the environment that ran it, and
+nothing in the report says which version of the program that was — a digest of the output would
+not fix that, since it would expire on the next upgrade of a program this repository does not
+pin, while reading as though it pinned something. So the citation records the command and the
+`observed` fact, and a reader re-runs it against whatever they have. That weaker guarantee is
+exactly why the [auto-apply policy](#the-auto-apply-policy) refuses a command-cited record by
+name (`policy-external-evidence`): nobody re-deriving the change from the commit can settle it,
+and a remedy whose reason lives outside the closed world is the one a human should approve.
 
 A `source` is checked as a path *before* it is matched against the boundary, and the order is
 the check. `paths.py` — the single owner of path safety — decides what a repository-relative
@@ -1148,16 +1201,17 @@ passage it is about. The recorded class travels on the record too, as `assertion
 | `drift-unknown-verdict` | not one of the three |
 | `drift-verdict-unknown-kind` | not one of the six subject kinds |
 | `drift-verdict-invalid-tier` | not 1, 2, or 3 (and `true` is not tier 1) |
-| `drift-verdict-invalid-evidence` | missing, malformed, or unpointed where a pointer is owed |
-| `drift-evidence-outside-boundary` | the source is outside the declared evidence boundary |
+| `drift-verdict-invalid-evidence` | missing, malformed, unpointed where a pointer is owed, citing both a `source` and a `command`, or a `command` that is not one shell-free line |
+| `drift-evidence-outside-boundary` | the cited source or command is outside the declared evidence boundary |
 | `drift-verdict-invalid-fix` | STALE without a replacement line, or a fix on a verdict proposing no edit |
 
 Any of these — or any `classification-*` problem — means that document was **not validly
 examined**, so it becomes a coverage gap rather than a silently missing finding, and the run is
 partial, not clean. `incomplete[].reason` is codes only, by design — no prose drift — with one
 exception: for `drift-verdict-invalid-evidence` and `drift-evidence-outside-boundary` the
-offending `evidence.source` is folded into the reason too, because the code alone says a
-`source` broke a rule, not which one — losing that is exactly the detail an operator debugging
+offending `evidence.source` — or `evidence.command`, folded in the same way under its own label
+— is folded into the reason too, because the code alone says a citation broke a rule, not which
+one — losing that is exactly the detail an operator debugging
 the gap needs first (independent Fable review of PR #87, finding N4). The fixture's own hostile
 filenames (a leading dash, `; rm -rf ~`) are documents drift declares and examines that cannot
 ever be cited as evidence sources; before this, the gap they produced named only the code.
@@ -1274,7 +1328,7 @@ invalidates the run, since a typo that silently un-waived everything would defea
 ```bash
 python3 -m doclifecycle drift-audit --repo . --mode full \
   --verdicts verdicts.json --waivers .github/doc-sync/drift-waivers.json \
-  --evidence 'src/**' --exclude-evidence 'src/vendor/**'
+  --evidence 'src/**' --exclude-evidence 'src/vendor/**' --evidence-command gh
 ```
 
 Every flag is optional. Without `--verdicts` no living document is examined and the run is
@@ -1282,7 +1336,10 @@ partial — the narrative anchors are still checked. A `--verdicts` file that ca
 parsed is `drift-verdicts-unreadable` and invalidates the run, rather than being mistaken for
 no verdicts at all. `--evidence` and `--exclude-evidence` are
 repeatable and declare the run's evidence boundary; the default is `**`, because a boundary must
-be honest before it is narrow. Exit codes are the report states: 0 clean or findings, 1 invalid,
+be honest before it is narrow. `--evidence-command` is repeatable too and declares the local
+tools a verdict may be settled by running, named as bare executables; its default is *empty*,
+the opposite way round, because a boundary that admitted every program on the machine would say
+nothing. Exit codes are the report states: 0 clean or findings, 1 invalid,
 2 usage, 4 partial.
 
 The library calls behind them:
@@ -1786,6 +1843,7 @@ repository that enabled everything still cannot reach them:
 | `policy-class-not-enabled` | a class admits it; this consumer did not enable that class |
 | `policy-missing-preimage` | no `units`, or no `assertion` — nothing pinned to replace |
 | `policy-missing-evidence` | no `evidence.source` — a PR reviewer has nothing to follow |
+| `policy-external-evidence` | `evidence.command` — a real pointer, but outside the closed world, so nobody re-deriving the change from the commit can settle it |
 
 Deciding is `policy_eligibility(policy, report)`, which is always an `Eligibility` and never
 `Invalid`: a report of bloat findings is not a failed run but one whose answer is "a person
