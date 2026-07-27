@@ -25,6 +25,58 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PLUGIN_ROOT = ROOT / "plugins" / "doc-lifecycle"
 UPGRADE = PLUGIN_ROOT / "skills" / "scheduling-doc-sync" / "scripts" / "apply-upgrade.py"
 
+# Issue #75 disabled this install's legacy write path before enabling the new
+# apply lane, so two generations never race over the same documents. That is a
+# deliberate divergence from the shipped templates, which keep their write jobs
+# until #77 removes them — recorded here as exact substitutions so every *other*
+# byte still has to match. Re-rendering the wiring (an upgrade PR) reverts the
+# disable, and this test is what fails loudly when it does.
+LEGACY_WRITE_DISABLED = {
+    "doc-sync.yml": [(
+        "    if: always() && needs.detect.result == 'success'"
+        " && needs.fix.result != 'failure'\n",
+        "    # doc-lifecycle#75: the legacy write path is disabled in this install,\n"
+        "    # ahead of the new apply lane (doc-apply.yml) and of #77 removing this\n"
+        "    # job from the template. Original condition: always() &&\n"
+        "    # needs.detect.result == 'success' && needs.fix.result != 'failure'\n"
+        "    if: false\n",
+    )],
+    # Both anchors carry their job header: `prune` (a read-only model job, which
+    # stays live) shares `prune_land`'s condition verbatim, so the condition alone
+    # is not a unique anchor and would silently disable the wrong job.
+    "doc-bloat.yml": [
+        (
+            "  prune_land:\n"
+            "    needs: [plan, assemble, prune]\n"
+            "    if: needs.assemble.outputs.prune == 'open'\n",
+            "  prune_land:\n"
+            "    needs: [plan, assemble, prune]\n"
+            "    # doc-lifecycle#75: legacy write path disabled in this install (see\n"
+            "    # doc-sync.yml's land job). Original condition:\n"
+            "    # needs.assemble.outputs.prune == 'open'\n"
+            "    if: false\n",
+        ),
+        (
+            "    if: always() && needs.assemble.outputs.distill == 'open'\n",
+            "    # doc-lifecycle#75: legacy write path disabled in this install (see\n"
+            "    # doc-sync.yml's land job). Original condition: always() &&\n"
+            "    # needs.assemble.outputs.distill == 'open'\n"
+            "    if: false\n",
+        ),
+    ],
+}
+
+
+def disable_legacy_write(name, text):
+    """Apply this install's recorded divergence from the shipped template."""
+    for old, new in LEGACY_WRITE_DISABLED.get(name, ()):
+        if text.count(old) != 1:
+            raise AssertionError(
+                f"{name}: the template no longer carries exactly one "
+                f"{old.strip()!r} — update LEGACY_WRITE_DISABLED")
+        text = text.replace(old, new)
+    return text
+
 
 def load_apply_upgrade():
     sys.dont_write_bytecode = True
@@ -65,7 +117,7 @@ class TemplatesMatchTheDogfoodInstall(unittest.TestCase):
                             / name).read_text()
                 installed = (ROOT / ".github" / "workflows" / name).read_text()
                 self.assertEqual(
-                    installed, rendered,
+                    installed, disable_legacy_write(name, rendered),
                     f".github/workflows/{name} differs from the template it is "
                     f"installed from (skills/scheduling-doc-sync/{name}) — "
                     f"update both copies")

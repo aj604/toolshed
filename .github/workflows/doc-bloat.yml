@@ -336,7 +336,10 @@ jobs:
   # exactly the paths it named, open the draft PR.
   prune_land:
     needs: [plan, assemble, prune]
-    if: needs.assemble.outputs.prune == 'open'
+    # doc-lifecycle#75: legacy write path disabled in this install (see
+    # doc-sync.yml's land job). Original condition:
+    # needs.assemble.outputs.prune == 'open'
+    if: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -555,7 +558,10 @@ jobs:
     needs: [plan, assemble, distill_plan, distill_sweep]
     # No success guard on distill_sweep: a twice-failed group costs its own
     # records (dropped by the merge, bannered in the PR), never the lane.
-    if: always() && needs.assemble.outputs.distill == 'open'
+    # doc-lifecycle#75: legacy write path disabled in this install (see
+    # doc-sync.yml's land job). Original condition: always() &&
+    # needs.assemble.outputs.distill == 'open'
+    if: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
