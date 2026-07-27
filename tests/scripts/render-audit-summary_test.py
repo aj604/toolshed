@@ -65,6 +65,12 @@ def read_json(path):
 
 def run(*argv, env_extra=None):
     env = dict(os.environ)
+    # The suite decides whether the script has a step summary to write to, not
+    # the environment it happens to run in. Inheriting a real
+    # GITHUB_STEP_SUMMARY makes the stdout-fallback test pass on a laptop and
+    # fail on Actions — which is exactly what it did, unnoticed, for as long as
+    # this suite was not wired into CI.
+    env.pop("GITHUB_STEP_SUMMARY", None)
     if env_extra:
         env.update(env_extra)
     return subprocess.run(

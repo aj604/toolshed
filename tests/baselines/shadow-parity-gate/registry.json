@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "roots": ["README.md", "CLAUDE.md", "CONTEXT.md", "docs", "plugins"],
+  "sets": ["guides", "plans", "skills"],
+  "extensions": [".md"],
+  "rules": [
+    {"glob": "*.md", "kind": "living"},
+    {"glob": "docs/**/*.md", "kind": "living"},
+    {"glob": "docs/decisions.md", "kind": "narrative"},
+    {"glob": "docs/design-rationale.md", "kind": "narrative"},
+    {"glob": "docs/guides/*.md", "kind": "narrative", "set": "guides"},
+    {"glob": "docs/plans/*.md", "kind": "planning", "set": "plans"},
+    {"glob": "docs/superpowers/**/*.md", "kind": "planning", "set": "plans"},
+    {"glob": "plugins/**/*.md", "kind": "living", "set": "skills"}
+  ]
+}
