@@ -212,6 +212,12 @@ operation reaching a path the record never named is
 `plan-target-not-record-target`, and hand-editing it instead is the thing this whole
 flow refuses.
 
+A record carrying **no** `destination` authorizes one path, the artifact — so the whole
+residue comes back reported and only `retire-document` is plannable. **Do not land that
+plan on its own without saying so**: it deletes a planning artifact and strands
+everything the distillation extracted. Present the drafted residue with it and let the
+person decide whether to withhold the retirement until its residue has a home.
+
 Land what verified. A claim the distiller could not verify is simply not in the
 operations it returned — **surface the failure; never redraft the claim yourself** to
 force it through, and never re-edit a landed result it flagged as a collision.
