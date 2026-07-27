@@ -24,17 +24,24 @@ plus the GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`, `doc-bloat.yml`, and
 `doc-sync-upgrade.yml`), `doc-audit.yml` (the new engine's audit lane template, landed by #71
 alongside the other three), and `doc-apply.yml` (the new engine's manual apply dispatch — the one
-lane that writes, #72); neither of the last two is installed anywhere yet — their dogfood install
-is #75. The sample
+lane that writes, #72); both are installed here as of #75, and Upgrade mode installs them only
+into a repo holding `.doc-lifecycle/registry.json`. The sample
 repos under `tests/fixtures/` are the only other runnable
 code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`,
 `doc-sync/upgrade-gate.py`, `doc-sync/render-report.py`,
 `doc-sync/plan-chunks.py`, `doc-sync/plan-distill.py`, `doc-sync/authorize-paths.py`,
 `doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
+`doc-sync/render-audit-summary.py`, `doc-sync/render-apply-summary.py`,
+`doc-sync/engine/` (the `doclifecycle` package vendored wholesale from
+`plugins/doc-lifecycle/engine/`, byte-identical to it — the only copy the new lanes run, never
+edited in place),
 `doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `doc-sync/drift-waivers.json`
 (accepted-UNVERIFIABLE waivers the sync run surfaces consume), `doc-sync/installed-version`
 (the plugin-version lockfile the upgrade workflow reads), `workflows/doc-sync.yml`,
-`workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`), the ci+release workflow
+`workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`, `workflows/doc-audit.yml`,
+`workflows/doc-apply.yml`; the legacy lanes' write jobs are `if: false` here, disabled by #75
+ahead of #77 removing them from the templates), the classification registry
+(`.doc-lifecycle/registry.json` — five roots, closed-world), the ci+release workflow
 (`workflows/release.yml`), that workflow's own test-suite runner
 (`.github/scripts/run-script-suites.py`, #99 — discovery-driven, so a new
 `tests/scripts/*_test.py` suite needs no hand-wiring), and the shadow-mode parity gate's harness
@@ -96,7 +103,9 @@ the legacy lane in #77).
   wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
   token-free, write jobs model-free and staging explicit paths), `install-parity_test.py`
   (the dogfooded `.github/` install is byte-identical to what `apply-upgrade.py` would lay down
-  from the plugin with this install's knobs), and `engine-capability_test.py` (the engine's
+  from the plugin with this install's knobs, plus a whole-tree comparison of the vendored engine
+  and a recorded allowlist of this install's legacy-write divergence, `LEGACY_WRITE_DISABLED`),
+  and `engine-capability_test.py` (the engine's
   applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the new
   engine's audit lane's run-surface rendering (every report result state, plus the
   report-never-produced case, and cost/turn observability); `audit-workflow_test.py` adds
