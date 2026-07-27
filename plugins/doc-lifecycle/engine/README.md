@@ -6,8 +6,9 @@ add nothing, so an import and a command cannot disagree. The one external progra
 `git`, and only to read a repository's identity and HEAD when checking a report's freshness.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
-contract, the lineage-keyed cache, the segmenter, and finding identity. Approval sets and the
-applier land in later slices of the re-architecture (issue #57).
+contract, the lineage-keyed cache, the segmenter, finding identity, the context index, and the
+bloat lane. Approval sets and the applier land in later slices of the re-architecture (issue
+#57).
 
 ## Modules
 
@@ -18,6 +19,8 @@ applier land in later slices of the re-architecture (issue #57).
 | `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, the canonical path form and target classes |
 | `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
 | `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
+| `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index digest |
+| `doclifecycle/bloat.py` | `plan_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, the chunk cache seam |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, lineage and report digests |
 | `doclifecycle/render.py` | `render_report()` — Markdown from a validated `Report`, and nothing else |
 | `doclifecycle/repository.py` | repository identity and base commit, read from git |
@@ -329,7 +332,7 @@ changed a verdict. It is proof of examination, never authority to change anythin
     "audit_config_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "registry_digest": "1d9176534bcc15f5fe5062503110be01ea198bb8ce65179230af4b226f56d85e",
     "ruleset_version": 1,
-    "plugin_version": "0.17.0",
+    "plugin_version": "0.18.0",
     "evidence_boundary": {"sources": ["src/**"], "excluded": []}
   },
   "records": [
@@ -570,6 +573,202 @@ Every problem in one response is reported in one pass, and any problem records n
 partially trusted classification set is one nobody can tell the trustworthy half of. The result
 is keyed to the segmentation digest, and recording a class changes no unit or finding digest.
 
+## Context index
+
+A bloat verdict is a judgment about value, and value is never local: a passage is redundant
+only relative to the rest of the corpus, and content is misplaced only relative to which
+document owns the subject. So the whole repository is indexed *before* any slicing.
+`build_context_index()` walks the inventory, runs the segmenter over each document, and builds
+the reverse map from each unit's content digest to every place it occurs.
+
+```bash
+python3 -m doclifecycle context-index --repo .
+```
+
+Real output for a repository whose registry declares root `docs`, rules `docs/*.md → living`
+and `docs/plans/*.md → planning, set plans`, and whose `docs/fee-policy.md` and
+`docs/plans/p.md` each hold a heading and the same sentence
+`Every fee change ships with a migration note.` (abridged to the duplicated unit's entry;
+`documents`, `units`, and the other `occurrences` keys are omitted here, not from the output):
+
+```json
+{
+  "status": "ok",
+  "schema_version": 1,
+  "registry_digest": "3613c1c8335b019b9685af1346bf6a78c86f1bf553f70b459fb7c613fd2179dc",
+  "inventory_digest": "4720cbf9091d991c78db3f4538130d4549bc7daa6574c8733c8fa84143d26a5a",
+  "digest": "1e41b25c195eb3b2f18ad46fd46368ead7e047950a6810b90b777659988dcf40",
+  "occurrences": {
+    "3bb14dce3f2909ce16065f0777ce8f1cd40e50c7dea80b9e5a7030956c5efdd6": [
+      {"path": "docs/fee-policy.md", "ordinal": 1, "line": 3, "end_line": 3},
+      {"path": "docs/plans/p.md", "ordinal": 1, "line": 3, "end_line": 3}
+    ]
+  },
+  "unexamined": []
+}
+```
+
+- **Occurrences are the pointer a unit group cannot carry.** A unit's digest is its content, so
+  the same sentence written five times is one unit; a finding's group is a deduplicated set of
+  those digests. `occurrences_of()` is what lets a duplication finding say *which* copies it
+  means, including two copies inside one document.
+- **`owner_of()` is deterministic.** Among the documents holding one unit, the owner is decided
+  by document kind first (`context.KIND_PRECEDENCE`: living, then narrative, then planning) and
+  by path second. A living document must be currently true, so it is where a durable claim
+  belongs; a planning document ends in distillation or retirement, so nothing is moved into one.
+  No model and no prose heuristics: a destination a reviewer cannot re-derive is one nobody can
+  check.
+- **`unexamined` is the coverage gap.** An unregistered or symlinked path the inventory reported,
+  and any inventoried document that will not decode, are named here rather than skipped —
+  `bloat.BloatResult.report_payload()` turns each into an `incomplete` scope, which forces
+  `partial`.
+- The index is a pure function of the inventory, so it needs no lineage field of its own; its
+  digest covers the inventory digest, each document's ordered units, and the unexamined scopes.
+
+```python
+from doclifecycle.context import build_context_index
+
+index = build_context_index(".")            # → ContextIndex or Invalid
+index.occurrences_of(unit_digest)           # every place that content appears
+index.duplicated_units()                    # units occurring more than once
+index.owner_of(unit_digest)                 # the document it belongs in
+```
+
+## Bloat audit
+
+`doclifecycle/bloat.py` is the value lane. The model supplies judgment — is this worth keeping,
+and what should replace it — and nothing else; every fact comes from the index.
+
+| Verdict | Means | Names a destination |
+|---|---|---|
+| `CUT` | restates what is self-evident; delete | no |
+| `CONDENSE` | many lines spent on one checkable fact | no |
+| `EXTRACT-AND-MOVE` | right content, wrong document | yes |
+| `MERGE-DOC` | near-duplicate; fold into the survivor | yes |
+| `RETIRE-DOC` | carries nothing another document lacks | no |
+| `DISTILL` | planning artifact; `ready` or `pending-implementation` | no |
+
+The legacy skill's `POLICY` verdict is deliberately absent. A bulk judgment no longer rides on
+a hand-declared directory whose file list the model echoes back: it declares an enumerable
+inclusion rule and the engine expands it (see *Deterministic scopes* below).
+
+### Chunk planning
+
+```bash
+python3 -m doclifecycle bloat-plan --repo . --max-documents 1
+```
+
+Real output for the same two-document repository as above:
+
+```json
+{
+  "status": "ok",
+  "schema_version": 1,
+  "index_digest": "1e41b25c195eb3b2f18ad46fd46368ead7e047950a6810b90b777659988dcf40",
+  "digest": "bbb951e48f788577b11a086923b16bdbd86ea2d2abf0f57cbd8711a0bd89679e",
+  "chunks": [
+    {"id": "c-135e93546e086eef", "documents": ["docs/fee-policy.md"], "unit_count": 2},
+    {"id": "c-77f609c2fb738ce5", "documents": ["docs/plans/p.md"], "unit_count": 2}
+  ]
+}
+```
+
+Documents are grouped by directory and kind, then packed greedily within both budgets
+(`--max-documents`, default 8; `--max-units`, default 400). Every indexed document lands in
+exactly one chunk: a document that exceeds the unit budget on its own gets a chunk to itself
+rather than being split or dropped, because a dropped document is a silent coverage gap. A
+chunk's id is a sha256 over its members and their current contents, so an unchanged chunk keeps
+its id across re-plans and an edited document re-keys only the chunk holding it.
+
+### Destinations, and two chunks competing for one
+
+`record_verdicts(index, lineage, verdicts, chunk=None)` validates a model's answer and builds
+findings, or returns `Invalid` naming every problem in the whole response. It fails closed: any
+problem records nothing, because a half-trusted set of deletion proposals is one nobody can tell
+the trustworthy half of.
+
+Destinations are resolved, not asserted. For content the global search found elsewhere the
+destination *is* `index.owner_of()`, so a worker that proposed a different one was guessing from
+a partial view and is refused (`bloat-destination-contradicts-index`). For content occurring
+nowhere else the model names one and the index checks it: it must be an inventoried document
+(`bloat-destination-not-a-document`), not the document being judged
+(`bloat-destination-is-source`), and of a kind that accepts content
+(`bloat-destination-kind-ineligible` — `bloat.DESTINATION_KINDS` is living and narrative). The
+checks that held travel on the record, under `destination.constraints`.
+
+`chunk`, when supplied, binds the record's *own* document to the slice
+(`bloat-document-outside-chunk`). Destinations are deliberately not bound that way: a
+destination outside the slice is the normal case, and the whole reason the index exists.
+
+`merge_contention(index)` answers "who else is merging into this document?" from global data —
+every destination in the corpus with its complete claimant list, ordered by source path. Two
+workers in different chunks get the same list in the same order, including claimants from slices
+they were never shown, so their independently produced findings compose instead of colliding.
+When a destination has more than one claimant, each finding carries `contention` with the full
+claimant list and its own rank.
+
+Every finding also carries `duplicate_search`: the index digest the search ran against, how many
+documents it covered, and every occurrence found. A finding that says "this is redundant" is
+making a claim about the whole corpus, and a reader must be able to tell whether the whole corpus
+was actually consulted.
+
+### Deterministic scopes
+
+`enumerate_scope(index, rule)` expands exactly one of `{"set": …}`, `{"glob": …}`, or
+`{"kind": …}` into every document it covers, sorted, with a digest over the rule and the
+membership. A rule nobody can expand is `bloat-scope-not-enumerable`; one covering nothing is
+`bloat-scope-empty`.
+
+A verdict carrying `scope` is a bulk judgment. Only `RETIRE-DOC` is eligible
+(`bloat.SCOPE_VERDICTS`) — anything else would be a per-passage judgment nobody made — and it
+expands into **one finding per enumerated member**, each carrying the enumeration it came from.
+So a reviewer sees every affected file as its own approvable record, and an approval bound to a
+finding digest cannot silently widen when the set grows.
+
+Sampling survives only as review prioritization: a `sample` list is recorded under
+`scope.sample`, alongside `scope.sample_is_not_authority`, and never narrows the enumeration. A
+`sample` on a single-document verdict is `bloat-sampling-not-authority` — there it would stand in
+for reading the subject. So is any attempt to supply `files`, `members`, `occurrences`, or
+`contention` (`bloat.FORBIDDEN_VERDICT_FIELDS`): those are the engine's answers, and a model that
+could assert them could authorize a mutation nobody enumerated.
+
+### Chunk results and the cache
+
+A bloat verdict about a document is checked against the rest of the corpus, so the corpus *is*
+its source evidence: `chunk_cache_keys()` builds one `cache.CacheKey` per document in the chunk
+with `source_digest` set to the context index's digest. Anything that could have changed the
+judgment — the document's own bytes, any *other* document's bytes, the registry, the audit
+configuration, the ruleset, the plugin — moves one of the two digests or a lineage field, and so
+moves the key.
+
+```python
+from doclifecycle import bloat
+
+cached = bloat.load_chunk(cache_dir, ".", index, lineage, chunk)
+cached.hits      # {path: (finding records, …)} — revalidated, not merely found
+cached.misses    # paths the model must still be asked about
+bloat.store_chunk(cache_dir, index, lineage, chunk, {path: records})
+```
+
+Granularity is one document, not one chunk, because that is what the cache contract models — a
+chunk is re-judged exactly for the documents whose entries missed. An empty record list is a
+real answer ("judged, nothing found") and is stored as such, so a clean document is not
+re-judged every run. Storing a document outside the chunk raises `ValueError`: its result was
+produced under different evidence.
+
+Scope enumerations are not cached. They are derived from the index with no model in the loop, so
+recomputing one is cheaper than revalidating it.
+
+### Coverage
+
+`BloatResult.report_payload(lineage)` produces a payload for `report.validate_report()`. The
+bloat lane declares coverage in the shared contract's terms rather than inventing a second
+vocabulary: each of the index's unexamined scopes becomes an `incomplete` entry, and an
+`incomplete` entry forces `partial`. A corpus with an unregistered or symlinked path therefore
+never reports `clean` about it, and the absence of a bloat finding for a document nobody read
+cannot be mistaken for a verdict that it is lean. The state is derived from the content, for the
+same reason the contract re-derives it.
+
 ## Digests
 
 `digest.sha256_canonical` hashes the canonical JSON form (sorted keys, compact separators),
@@ -591,6 +790,12 @@ the lineage digest, the finding code, the document, and the normalized unit grou
 one deliberately leaves out is in the two sections above, and it is always the same kind of
 thing: position, prose, and judgment.
 
+A context-index digest covers the inventory digest, each document's ordered units, and the
+scopes it could not examine; a chunk id covers its members and their document digests; a chunk
+plan's digest covers the index digest and every chunk; and a scope enumeration's digest covers
+the inclusion rule and the members it expanded to. Each is a fact about the corpus, so none of
+them carries prose or a model's verdict either.
+
 ## Tests
 
 `tests/engine/*_test.py` (stdlib `unittest`), run by ordinary discovery, which is also how
@@ -603,19 +808,24 @@ python3 -m unittest discover -s tests/engine -p '*_test.py'
 Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `validate_report()`, `load_report()`, `current_lineage()`, `render_report()`, `cache.cache_key()`,
 `cache.put()`, `cache.get()`, `segment_text()`, `segment_document()`, `build_finding()`,
-`record_classifications()`), and the commands as subprocesses whose payload must equal the
-library result. Path authorization, the cache, and finding identity have no command of their own
-— they are substrate the other components (and, for the cache, the not-yet-built audit engine)
-call. `tests/engine/support.py` holds what every suite needs — the engine on `sys.path`,
-`RepoTestCase.repo()`, and `run_command()` for the subprocess seam; report fixtures live in
-`report_test.py`, which `report_cli_test.py` and `cache_test.py` both import (`GitRepoTestCase`,
-for a real repository to check freshness against). The report and cache suites build real git
-repositories, because staleness is a comparison against a repository and a mocked one would
-prove nothing.
+`record_classifications()`, `build_context_index()`, `bloat.plan_chunks()`,
+`bloat.merge_contention()`, `bloat.enumerate_scope()`, `bloat.record_verdicts()`,
+`bloat.load_chunk()`, `bloat.store_chunk()`), and the commands as subprocesses whose payload must
+equal the library result. Path authorization, the cache, finding identity, and verdict recording
+have no command of their own — they are substrate the other components (and, for the cache, the
+bloat lane) call. `tests/engine/support.py` holds what every suite needs — the engine on
+`sys.path`, `RepoTestCase.repo()`, and `run_command()` for the subprocess seam; report fixtures
+live in `report_test.py`, which `report_cli_test.py`, `cache_test.py`, and `bloat_test.py` all
+import (`GitRepoTestCase`, for a real repository to check freshness against). The report, cache,
+and bloat-cache suites build real git repositories, because staleness is a comparison against a
+repository and a mocked one would prove nothing.
 
 `tests/engine/acceptance/` is the repository-level fixture (a real `git init`, real commits,
 real symlinks, real prompt-injection content) and the scenarios built on it: scenario one is
 inventory, scenario two is the document model — segmentation, the four assertion classes, and
-finding identity bound to a lineage read from actual git — and `scenario_cache_test.py` is the
+finding identity bound to a lineage read from actual git — `scenario_cache_test.py` is the
 cache's (issue #64): changing only source evidence, or only configuration/ruleset, prevents
-reuse of a prior semantic result.
+reuse of a prior semantic result. `scenario_bloat_test.py` is the bloat lane's (issue #66), one
+class per acceptance criterion: the fixture's living `docs/fee-policy.md` owns two claims that
+two *different* planning documents copy, so a chunk plan puts each copy and its destination in
+different chunks and no answer reachable from one slice is correct.

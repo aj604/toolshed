@@ -15,6 +15,8 @@ import argparse
 import json
 import sys
 
+from .bloat import DEFAULT_MAX_DOCUMENTS, DEFAULT_MAX_UNITS, plan_chunks
+from .context import build_context_index
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .render import render_report
 from .report import Report, load_report
@@ -71,6 +73,35 @@ def _add_report_arguments(command):
         registry_path=args.registry,
         audit_config_digest=args.audit_config_digest,
     ))
+
+
+def _add_corpus_arguments(command):
+    """`--repo`/`--registry`, for the commands that read the whole corpus."""
+    command.add_argument(
+        "--repo", default=".", help="repository root (default: the current directory)"
+    )
+    command.add_argument(
+        "--registry",
+        default=DEFAULT_REGISTRY_PATH,
+        help=f"registry path, repo-relative (default: {DEFAULT_REGISTRY_PATH})",
+    )
+
+
+def _positive(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, not {value}")
+    return number
+
+
+def _run_plan(args):
+    """Plan chunks, unless the index itself is invalid — which travels through."""
+    index = build_context_index(args.repo, args.registry)
+    if isinstance(index, Invalid):
+        return index
+    return plan_chunks(
+        index, max_documents=args.max_documents, max_units=args.max_units
+    )
 
 
 def _parser():
@@ -130,6 +161,44 @@ def _parser():
         run=lambda args: segment_document(args.repo, args.path, args.registry),
         render=False,
     )
+
+    context = commands.add_parser(
+        "context-index",
+        help="index every document in the repository, and where each unit occurs",
+        description=(
+            "Emit the repository-wide context index as JSON: every inventoried "
+            "document with its units, every distinct unit, and every place each "
+            "unit occurs. This is the global view a bloat chunk worker queries "
+            "instead of guessing about duplication or ownership from its own "
+            "slice. Read-only and model-free. Exits 1 if the registry is invalid."
+        ),
+    )
+    _add_corpus_arguments(context)
+    context.set_defaults(
+        run=lambda args: build_context_index(args.repo, args.registry), render=False
+    )
+
+    plan = commands.add_parser(
+        "bloat-plan",
+        help="partition the corpus into bounded bloat-audit chunks",
+        description=(
+            "Emit the chunk plan as JSON: every indexed document assigned to "
+            "exactly one bounded chunk, each with a content-addressed id, so an "
+            "unchanged chunk keeps its id across re-plans and an edited document "
+            "re-keys only the chunk holding it. Exits 1 if the registry is "
+            "invalid."
+        ),
+    )
+    _add_corpus_arguments(plan)
+    plan.add_argument(
+        "--max-documents", type=_positive, default=DEFAULT_MAX_DOCUMENTS,
+        help=f"documents per chunk (default: {DEFAULT_MAX_DOCUMENTS})",
+    )
+    plan.add_argument(
+        "--max-units", type=_positive, default=DEFAULT_MAX_UNITS,
+        help=f"assertion units per chunk (default: {DEFAULT_MAX_UNITS})",
+    )
+    plan.set_defaults(run=_run_plan, render=False)
 
     validate = commands.add_parser(
         "validate-report",

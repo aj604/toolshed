@@ -1,0 +1,636 @@
+#!/usr/bin/env python3
+"""The bloat lane's deterministic machinery (issue #66).
+
+Seams under test: `bloat.plan_chunks()`, `bloat.merge_contention()`,
+`bloat.enumerate_scope()`, `bloat.record_verdicts()`, and the chunk cache
+seam (`bloat.load_chunk()` / `bloat.store_chunk()`) as library calls.
+
+Run: python3 tests/engine/bloat_test.py
+"""
+
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from support import RepoTestCase  # noqa: E402  (also puts the engine on sys.path)
+
+from report_test import GitRepoTestCase  # noqa: E402  (a real git repository)
+
+from doclifecycle import bloat  # noqa: E402
+from doclifecycle.context import build_context_index  # noqa: E402
+from doclifecycle.report import EvidenceBoundary, Lineage, current_lineage  # noqa: E402
+from doclifecycle.results import Invalid  # noqa: E402
+
+
+def lineage(**overrides):
+    fields = {
+        "repository": "origin:github.com/aj604/toolshed",
+        "base_commit": "0" * 40,
+        "audit_mode": "chunk",
+        "inventory_digest": "1" * 64,
+        "audit_config_digest": "2" * 64,
+        "registry_digest": "3" * 64,
+        "ruleset_version": 1,
+        "plugin_version": "0.18.0",
+        "evidence_boundary": EvidenceBoundary(("docs/**",)),
+    }
+    fields.update(overrides)
+    return Lineage(**fields)
+
+
+REGISTRY = """{
+  "schema_version": 1,
+  "roots": ["docs"],
+  "sets": ["plans"],
+  "rules": [
+    {"glob": "docs/*.md", "kind": "living"},
+    {"glob": "docs/guides/*.md", "kind": "narrative"},
+    {"glob": "docs/plans/*.md", "kind": "planning", "set": "plans"}
+  ]
+}
+"""
+
+SHARED = "Fee changes require a migration note."
+
+
+def problem_codes(result):
+    return sorted(p.code for p in result.problems)
+
+
+class ChunkPlanning(RepoTestCase):
+    def index(self, files):
+        return build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY, **files
+        }))
+
+    def test_every_indexed_document_lands_in_exactly_one_chunk(self):
+        index = self.index({
+            "docs/a.md": "# A\n\nAlpha.\n",
+            "docs/b.md": "# B\n\nBeta.\n",
+            "docs/guides/g.md": "# G\n\nGamma.\n",
+            "docs/plans/p.md": "# P\n\nDelta.\n",
+        })
+
+        plan = bloat.plan_chunks(index, max_documents=2)
+
+        placed = [path for chunk in plan.chunks for path in chunk.documents]
+        self.assertEqual(sorted(placed), [d.path for d in index.documents])
+        self.assertEqual(len(placed), len(set(placed)))
+
+    def test_a_document_budget_bounds_each_chunk(self):
+        index = self.index({
+            f"docs/{name}.md": f"# {name}\n\nText {name}.\n"
+            for name in ("a", "b", "c", "d", "e")
+        })
+
+        plan = bloat.plan_chunks(index, max_documents=2)
+
+        self.assertTrue(all(len(c.documents) <= 2 for c in plan.chunks))
+        self.assertEqual(len(plan.chunks), 3)
+
+    def test_a_document_larger_than_the_unit_budget_gets_its_own_chunk(self):
+        big = "# Big\n\n" + "\n\n".join(f"Sentence {i}." for i in range(40)) + "\n"
+        index = self.index({"docs/a.md": big, "docs/b.md": "# B\n\nBeta.\n"})
+
+        plan = bloat.plan_chunks(index, max_documents=8, max_units=5)
+
+        by_document = {c.documents: c for c in plan.chunks}
+        self.assertIn(("docs/a.md",), by_document)
+        self.assertIn(("docs/b.md",), by_document)
+
+    def test_planning_the_same_index_twice_gives_the_same_chunk_ids(self):
+        files = {
+            "docs/a.md": "# A\n\nAlpha.\n",
+            "docs/plans/p.md": "# P\n\nDelta.\n",
+        }
+
+        first = bloat.plan_chunks(self.index(files), max_documents=1)
+        second = bloat.plan_chunks(self.index(files), max_documents=1)
+
+        self.assertEqual(
+            [c.chunk_id for c in first.chunks], [c.chunk_id for c in second.chunks]
+        )
+
+    def test_editing_one_document_re_keys_only_its_chunk(self):
+        before = bloat.plan_chunks(self.index({
+            "docs/a.md": "# A\n\nAlpha.\n", "docs/b.md": "# B\n\nBeta.\n",
+        }), max_documents=1)
+        after = bloat.plan_chunks(self.index({
+            "docs/a.md": "# A\n\nAlpha changed.\n", "docs/b.md": "# B\n\nBeta.\n",
+        }), max_documents=1)
+
+        changed = {c.chunk_id for c in before.chunks} ^ {c.chunk_id for c in after.chunks}
+        self.assertEqual(len(changed), 2)
+
+
+class MergeContention(RepoTestCase):
+    def index(self, files):
+        return build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY, **files
+        }))
+
+    def test_two_copies_in_two_documents_both_claim_the_owner(self):
+        index = self.index({
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/guides/g.md": f"# G\n\n{SHARED}\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        })
+
+        contention = bloat.merge_contention(index)
+
+        self.assertEqual(
+            [(c.source, c.order) for c in contention["docs/a.md"]],
+            [("docs/guides/g.md", 0), ("docs/plans/p.md", 1)],
+        )
+
+    def test_the_owner_never_claims_against_itself(self):
+        index = self.index({
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        })
+
+        contention = bloat.merge_contention(index)
+
+        self.assertNotIn("docs/plans/p.md", contention)
+        self.assertEqual(
+            [c.source for c in contention["docs/a.md"]], ["docs/plans/p.md"]
+        )
+
+    def test_a_unit_occurring_once_produces_no_contention(self):
+        index = self.index({"docs/a.md": f"# A\n\n{SHARED}\n"})
+
+        self.assertEqual(bloat.merge_contention(index), {})
+
+
+class ScopeEnumeration(RepoTestCase):
+    def index(self, files=None):
+        files = files or {
+            "docs/a.md": "# A\n\nAlpha.\n",
+            "docs/plans/p1.md": "# P1\n\nOne.\n",
+            "docs/plans/p2.md": "# P2\n\nTwo.\n",
+            "docs/plans/p3.md": "# P3\n\nThree.\n",
+        }
+        return build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY, **files
+        }))
+
+    def test_a_document_set_enumerates_every_member(self):
+        enumeration = bloat.enumerate_scope(self.index(), {"set": "plans"})
+
+        self.assertEqual(
+            enumeration.members,
+            ("docs/plans/p1.md", "docs/plans/p2.md", "docs/plans/p3.md"),
+        )
+
+    def test_a_glob_rule_enumerates_every_match(self):
+        enumeration = bloat.enumerate_scope(self.index(), {"glob": "docs/plans/*.md"})
+
+        self.assertEqual(len(enumeration.members), 3)
+
+    def test_a_kind_rule_enumerates_every_document_of_that_kind(self):
+        enumeration = bloat.enumerate_scope(self.index(), {"kind": "planning"})
+
+        self.assertEqual(len(enumeration.members), 3)
+
+    def test_the_enumeration_digest_moves_when_membership_moves(self):
+        three = bloat.enumerate_scope(self.index(), {"set": "plans"})
+        two = bloat.enumerate_scope(self.index({
+            "docs/a.md": "# A\n\nAlpha.\n",
+            "docs/plans/p1.md": "# P1\n\nOne.\n",
+            "docs/plans/p2.md": "# P2\n\nTwo.\n",
+        }), {"set": "plans"})
+
+        self.assertNotEqual(three.digest, two.digest)
+
+    def test_an_unenumerable_rule_is_refused(self):
+        result = bloat.enumerate_scope(self.index(), {"about": "old plans"})
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(problem_codes(result), ["bloat-scope-not-enumerable"])
+
+    def test_a_rule_matching_nothing_is_refused(self):
+        result = bloat.enumerate_scope(self.index(), {"set": "adr"})
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(problem_codes(result), ["bloat-scope-empty"])
+
+
+class RecorderTestCase(RepoTestCase):
+    """Verdict recording against a small three-document corpus.
+
+    `docs/a.md` (living) states SHARED; `docs/plans/p.md` (planning) copies it;
+    `docs/guides/g.md` (narrative) says something of its own.
+    """
+
+    def setUp(self):
+        self.index = build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/guides/g.md": "# G\n\nGuide prose.\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        }))
+        self.lineage = lineage()
+
+    def unit(self, path, text):
+        by_text = {u.text: u.digest for u in self.index.units}
+        digest = by_text[text]
+        assert digest in self.index.document(path).units
+        return digest
+
+    def record(self, verdicts, chunk=None):
+        return bloat.record_verdicts(self.index, self.lineage, verdicts, chunk=chunk)
+
+    def verdict(self, **overrides):
+        entry = {
+            "id": "BLOAT-001",
+            "verdict": bloat.CUT,
+            "path": "docs/plans/p.md",
+            "units": [self.unit("docs/plans/p.md", SHARED)],
+            "evidence": "The living document already states this.",
+        }
+        entry.update(overrides)
+        return entry
+
+
+class WhatAFindingExplains(RecorderTestCase):
+    def test_it_records_the_value_judgment(self):
+        result = self.record([self.verdict()])
+
+        self.assertEqual(
+            result.records()[0]["evidence"],
+            "The living document already states this.",
+        )
+
+    def test_a_verdict_without_evidence_is_refused(self):
+        result = self.record([self.verdict(evidence="")])
+
+        self.assertIn("bloat-missing-evidence", problem_codes(result))
+
+    def test_it_records_the_global_duplicate_search_that_informed_it(self):
+        result = self.record([self.verdict()])
+
+        search = result.records()[0]["duplicate_search"]
+        self.assertEqual(search["scope"], "repository")
+        self.assertEqual(search["documents_searched"], 3)
+        self.assertEqual(search["index_digest"], self.index.digest)
+        self.assertEqual(
+            [(o["path"], o["line"]) for o in search["occurrences"]],
+            [("docs/a.md", 3), ("docs/plans/p.md", 3)],
+        )
+
+    def test_it_records_the_destination_constraints_that_were_checked(self):
+        result = self.record([self.verdict(verdict=bloat.MERGE_DOC)])
+
+        destination = result.records()[0]["destination"]
+        self.assertEqual(destination["path"], "docs/a.md")
+        self.assertEqual(destination["selected_by"], "index-owner")
+        self.assertEqual(destination["kind"], "living")
+        self.assertTrue(destination["constraints"]["kind_accepts_content"])
+
+
+class DestinationsComeFromTheIndex(RecorderTestCase):
+    def test_a_duplicate_destination_outside_the_slice_is_named(self):
+        chunk = bloat.Chunk(chunk_id="c-x", documents=("docs/plans/p.md",),
+                            unit_count=2)
+
+        result = self.record([self.verdict(verdict=bloat.MERGE_DOC)], chunk=chunk)
+
+        self.assertNotIn("docs/a.md", chunk.documents)
+        self.assertEqual(result.records()[0]["destination"]["path"], "docs/a.md")
+
+    def test_a_destination_the_index_contradicts_is_refused(self):
+        result = self.record([self.verdict(
+            verdict=bloat.MERGE_DOC, destination="docs/guides/g.md"
+        )])
+
+        self.assertEqual(
+            problem_codes(result), ["bloat-destination-contradicts-index"]
+        )
+
+    def test_a_destination_the_index_agrees_with_is_accepted(self):
+        result = self.record([self.verdict(
+            verdict=bloat.MERGE_DOC, destination="docs/a.md"
+        )])
+
+        self.assertEqual(result.records()[0]["destination"]["path"], "docs/a.md")
+
+    def test_a_planning_document_is_never_a_destination(self):
+        result = self.record([self.verdict(
+            id="BLOAT-002", verdict=bloat.EXTRACT_AND_MOVE,
+            path="docs/guides/g.md",
+            units=[self.unit("docs/guides/g.md", "Guide prose.")],
+            destination="docs/plans/p.md", proposal="Moved line.",
+        )])
+
+        self.assertEqual(
+            problem_codes(result), ["bloat-destination-kind-ineligible"]
+        )
+
+    def test_a_destination_that_is_not_a_document_is_refused(self):
+        result = self.record([self.verdict(
+            verdict=bloat.EXTRACT_AND_MOVE, path="docs/guides/g.md",
+            units=[self.unit("docs/guides/g.md", "Guide prose.")],
+            destination="docs/nowhere.md", proposal="Moved line.",
+        )])
+
+        self.assertEqual(
+            problem_codes(result), ["bloat-destination-not-a-document"]
+        )
+
+    def test_a_verdict_that_moves_nothing_may_not_name_a_destination(self):
+        result = self.record([self.verdict(destination="docs/a.md")])
+
+        self.assertEqual(problem_codes(result), ["bloat-destination-forbidden"])
+
+
+class ContentionIsResolvedByTheIndex(RepoTestCase):
+    """Two documents in two chunks, both folding into one living document."""
+
+    def setUp(self):
+        self.index = build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": f"# A\n\n{SHARED}\n\nOwnership is stated once.\n",
+            "docs/guides/g.md": "# G\n\nOwnership is stated once.\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        }))
+        self.lineage = lineage()
+
+    def merge_from(self, path, text):
+        digest = {u.text: u.digest for u in self.index.units}[text]
+        chunk = bloat.Chunk(chunk_id="c-" + path, documents=(path,), unit_count=2)
+        result = bloat.record_verdicts(self.index, self.lineage, [{
+            "id": "BLOAT-" + path,
+            "verdict": bloat.MERGE_DOC,
+            "path": path,
+            "units": [digest],
+            "evidence": "Duplicates the owning document.",
+        }], chunk=chunk)
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        return result.records()[0]
+
+    def test_both_chunks_name_the_same_destination(self):
+        guide = self.merge_from("docs/guides/g.md", "Ownership is stated once.")
+        plan = self.merge_from("docs/plans/p.md", SHARED)
+
+        self.assertEqual(guide["destination"]["path"], "docs/a.md")
+        self.assertEqual(plan["destination"]["path"], "docs/a.md")
+
+    def test_each_chunk_sees_the_whole_claimant_list_and_its_own_rank(self):
+        guide = self.merge_from("docs/guides/g.md", "Ownership is stated once.")
+        plan = self.merge_from("docs/plans/p.md", SHARED)
+
+        claimants = ["docs/guides/g.md", "docs/plans/p.md"]
+        self.assertEqual(guide["contention"]["claimants"], claimants)
+        self.assertEqual(plan["contention"]["claimants"], claimants)
+        self.assertEqual((guide["contention"]["order"], plan["contention"]["order"]),
+                         (0, 1))
+
+    def test_the_order_the_chunks_run_in_changes_nothing(self):
+        forward = (self.merge_from("docs/guides/g.md", "Ownership is stated once."),
+                   self.merge_from("docs/plans/p.md", SHARED))
+        backward = (self.merge_from("docs/plans/p.md", SHARED),
+                    self.merge_from("docs/guides/g.md", "Ownership is stated once."))
+
+        self.assertEqual(forward, tuple(reversed(backward)))
+
+
+class BulkJudgmentsAreEnumerated(RepoTestCase):
+    def setUp(self):
+        self.index = build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": "# A\n\nAlpha.\n",
+            "docs/plans/p1.md": "# P1\n\nOne.\n",
+            "docs/plans/p2.md": "# P2\n\nTwo.\n",
+            "docs/plans/p3.md": "# P3\n\nThree.\n",
+        }))
+        self.lineage = lineage()
+
+    def record(self, **overrides):
+        entry = {
+            "id": "BLOAT-BULK",
+            "verdict": bloat.RETIRE_DOC,
+            "evidence": "The tiered-fee work merged; these plans are spent.",
+            "scope": {"set": "plans"},
+        }
+        entry.update(overrides)
+        return bloat.record_verdicts(self.index, self.lineage, [entry])
+
+    def test_one_bulk_judgment_becomes_one_finding_per_affected_file(self):
+        result = self.record()
+
+        self.assertEqual(
+            [r["path"] for r in result.records()],
+            ["docs/plans/p1.md", "docs/plans/p2.md", "docs/plans/p3.md"],
+        )
+
+    def test_every_finding_carries_the_enumeration_it_came_from(self):
+        result = self.record()
+
+        scope = result.records()[0]["scope"]
+        self.assertEqual(scope["member_count"], 3)
+        self.assertEqual(scope["rule"], {"set": "plans"})
+        self.assertEqual(len(scope["members"]), 3)
+
+    def test_a_sample_never_narrows_the_enumeration(self):
+        result = self.record(sample=["docs/plans/p1.md"])
+
+        self.assertEqual(len(result.records()), 3)
+        scope = result.records()[0]["scope"]
+        self.assertEqual(scope["sample"], ["docs/plans/p1.md"])
+        self.assertTrue(scope["sample_is_not_authority"])
+
+    def test_an_asserted_file_list_is_refused_outright(self):
+        result = self.record(files=["docs/plans/p1.md", "docs/plans/p2.md"])
+
+        self.assertEqual(problem_codes(result), ["bloat-sampling-not-authority"])
+
+    def test_a_sample_on_a_single_document_verdict_is_refused(self):
+        result = bloat.record_verdicts(self.index, self.lineage, [{
+            "id": "BLOAT-1", "verdict": bloat.CUT, "path": "docs/a.md",
+            "units": list(self.index.document("docs/a.md").units[:1]),
+            "evidence": "Restates the code.", "sample": ["docs/a.md"],
+        }])
+
+        self.assertEqual(problem_codes(result), ["bloat-sampling-not-authority"])
+
+    def test_only_retirement_may_be_a_bulk_judgment(self):
+        result = self.record(verdict=bloat.CONDENSE)
+
+        self.assertEqual(problem_codes(result), ["bloat-scope-verdict-ineligible"])
+
+
+class RefusalsAreExhaustive(RecorderTestCase):
+    def test_a_unit_that_is_not_in_the_document_is_refused(self):
+        result = self.record([self.verdict(
+            path="docs/guides/g.md",
+            units=[self.unit("docs/plans/p.md", SHARED)],
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-unknown-unit"])
+
+    def test_a_document_outside_the_chunk_is_refused(self):
+        chunk = bloat.Chunk(chunk_id="c-x", documents=("docs/a.md",), unit_count=2)
+
+        result = self.record([self.verdict()], chunk=chunk)
+
+        self.assertEqual(problem_codes(result), ["bloat-document-outside-chunk"])
+
+    def test_an_unknown_verdict_is_refused(self):
+        result = self.record([self.verdict(verdict="DELETE")])
+
+        self.assertEqual(problem_codes(result), ["bloat-unknown-verdict"])
+
+    def test_a_distill_verdict_needs_a_lifecycle_status(self):
+        result = self.record([self.verdict(verdict=bloat.DISTILL)])
+
+        self.assertEqual(problem_codes(result), ["bloat-unknown-status"])
+
+    def test_a_condense_verdict_needs_its_replacement_line(self):
+        result = self.record([self.verdict(verdict=bloat.CONDENSE)])
+
+        self.assertEqual(problem_codes(result), ["bloat-proposal-required"])
+
+    def test_two_verdicts_sharing_an_id_are_refused(self):
+        result = self.record([self.verdict(), self.verdict()])
+
+        self.assertIn("bloat-duplicate-id", problem_codes(result))
+
+    def test_every_problem_in_one_response_is_reported_at_once(self):
+        result = self.record([
+            self.verdict(id="BLOAT-1", verdict="DELETE"),
+            self.verdict(id="BLOAT-2", path="docs/nowhere.md"),
+            self.verdict(id="BLOAT-3", evidence=""),
+        ])
+
+        self.assertEqual(
+            problem_codes(result),
+            ["bloat-missing-evidence", "bloat-unknown-document",
+             "bloat-unknown-verdict"],
+        )
+
+    def test_any_problem_records_nothing(self):
+        result = self.record([self.verdict(), self.verdict(id="X", verdict="DELETE")])
+
+        self.assertIsInstance(result, Invalid)
+
+
+class CoverageIsDeclared(RepoTestCase):
+    def test_an_unindexable_document_is_carried_as_an_unexamined_scope(self):
+        index = build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": "# A\n\nAlpha.\n",
+            "docs/notes/stray.md": "# Stray\n\nUnclassified.\n",
+        }))
+
+        result = bloat.record_verdicts(index, lineage(), [])
+
+        self.assertEqual(
+            [i["scope"] for i in result.incomplete], ["docs/notes/stray.md"]
+        )
+
+
+class TheChunkCache(GitRepoTestCase):
+    """Cache revalidation is a comparison against a real repository.
+
+    Reuses `report_test.GitRepoTestCase` — the same real-git base the cache's
+    own suite uses — because a mocked repository would prove nothing about
+    freshness.
+    """
+
+    def setUp(self):
+        self.root = self.git_repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": "# A\n\nAlpha.\n",
+            "docs/b.md": "# B\n\nBeta.\n",
+        })
+        self.index = build_context_index(self.root)
+        self.chunk = bloat.plan_chunks(self.index).chunks[0]
+        self.cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cache_dir, ignore_errors=True)
+
+    def load(self, state):
+        return bloat.load_chunk(
+            self.cache_dir, self.root, self.index, state, self.chunk
+        )
+
+    def current(self, **overrides):
+        state, problems = current_lineage(
+            self.root, audit_config_digest=overrides.pop("audit_config_digest", "2" * 64)
+        )
+        self.assertEqual(problems, ())
+        return dict(state, **overrides)
+
+    def test_an_unseen_chunk_is_all_misses(self):
+        cached = self.load(self.current())
+
+        self.assertEqual(cached.misses, ("docs/a.md", "docs/b.md"))
+        self.assertEqual(cached.hits, {})
+
+    def test_a_stored_chunk_result_is_reused(self):
+        state = self.current()
+        bloat.store_chunk(self.cache_dir, self.index, state, self.chunk,
+                          {"docs/a.md": [{"id": "B-1", "verdict": bloat.CUT}]})
+
+        cached = self.load(state)
+
+        self.assertEqual(cached.misses, ("docs/b.md",))
+        self.assertEqual(cached.hits["docs/a.md"][0]["verdict"], bloat.CUT)
+
+    def test_a_document_judged_clean_is_not_re_judged(self):
+        state = self.current()
+        bloat.store_chunk(self.cache_dir, self.index, state, self.chunk,
+                          {"docs/a.md": []})
+
+        self.assertEqual(self.load(state).hits["docs/a.md"], ())
+
+    def test_a_changed_audit_configuration_reruns_the_chunk(self):
+        state = self.current()
+        bloat.store_chunk(self.cache_dir, self.index, state, self.chunk,
+                          {"docs/a.md": [], "docs/b.md": []})
+        self.assertEqual(self.load(state).misses, ())
+
+        rerun = self.load(self.current(audit_config_digest="9" * 64))
+
+        self.assertEqual(rerun.misses, ("docs/a.md", "docs/b.md"))
+
+    def test_a_ruleset_bump_reruns_the_chunk(self):
+        state = self.current()
+        bloat.store_chunk(self.cache_dir, self.index, state, self.chunk,
+                          {"docs/a.md": [], "docs/b.md": []})
+
+        rerun = self.load(self.current(ruleset_version=2))
+
+        self.assertEqual(rerun.misses, ("docs/a.md", "docs/b.md"))
+
+    def test_a_change_elsewhere_in_the_corpus_reruns_the_chunk(self):
+        state = self.current()
+        bloat.store_chunk(self.cache_dir, self.index, state, self.chunk,
+                          {"docs/a.md": [], "docs/b.md": []})
+        self.assertEqual(self.load(state).misses, ())
+
+        # A third document appears. `docs/a.md`'s own bytes are untouched, but
+        # what "occurs nowhere else" means has changed, so its cached bloat
+        # verdict cannot stand.
+        with open(os.path.join(self.root, "docs/c.md"), "w", encoding="utf-8") as fh:
+            fh.write("# C\n\nGamma.\n")
+        self.index = build_context_index(self.root)
+
+        rerun = self.load(self.current())
+
+        self.assertIn("docs/a.md", rerun.misses)
+
+    def test_storing_a_document_outside_the_chunk_is_a_programming_error(self):
+        with self.assertRaises(ValueError):
+            bloat.store_chunk(
+                self.cache_dir, self.index, self.current(),
+                bloat.Chunk(chunk_id="c-x", documents=("docs/a.md",), unit_count=2),
+                {"docs/b.md": []},
+            )
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

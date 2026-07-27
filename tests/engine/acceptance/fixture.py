@@ -5,8 +5,8 @@ symlinks — containing one instance of every document kind the registry knows,
 the consumer-side state files a scheduled install carries, and the hostile
 cases the audit engine must survive without acting on them. No mocked git, no
 mocked filesystem: every scenario built on this fixture (scenario one's
-inventory, scenario two's document model, and the drift/bloat scenarios #65 and
-#66 add later) runs the real CLI and real library entrypoints against real
+inventory, scenario two's document model, the cache scenario, and the bloat
+scenario #66 added) runs the real CLI and real library entrypoints against real
 files on disk.
 
 Two commits: the first lays down the whole tree; the second changes only the
@@ -58,6 +58,39 @@ NARRATIVE_NON_ASSERTIVE = "Welcome to the team."
 
 # Planning: temporary, carries lifecycle state ("Status: ...").
 PLANNING_DOC = "docs/plans/2026-07-20-followup-plan.md"
+
+# --- Bloat scenario content (issue #66) -----------------------------------
+#
+# A bloat verdict is a judgment about value, and value is global: it depends on
+# what the rest of the corpus says. These four documents give the bloat scenario
+# a corpus where the right answers are *outside* any one worker's slice.
+#
+# `POLICY_DOC` is the living document that owns the fee policy. Two claims in it
+# are copied elsewhere:
+#
+#   DUPLICATED_CLAIM  also in FEE_TIERS_PLAN, twice (so occurrence pointers have
+#                     to distinguish copies that share one content digest)
+#   CONTENDED_CLAIM   also in FEE_ROLLOUT_PLAN
+#
+# Because the copies live in two different planning documents, a chunk plan puts
+# them in different chunks — and both must resolve to POLICY_DOC as the merge
+# target, independently and identically. The three planning documents (this
+# pair plus PLANNING_DOC) are the `plans` document set a bulk-retirement
+# enumeration expands.
+POLICY_DOC = "docs/fee-policy.md"
+FEE_TIERS_PLAN = "docs/plans/2026-07-21-fee-tiers-plan.md"
+FEE_ROLLOUT_PLAN = "docs/plans/2026-07-22-fee-rollout-plan.md"
+
+DUPLICATED_CLAIM = (
+    "Every fee change ships with a migration note in the release checklist."
+)
+CONTENDED_CLAIM = "The fee schedule is owned by the payments team."
+
+# Every member of the `plans` document set, in enumeration order — the answer a
+# bulk-retirement finding must be backed by, listed here so a scenario asserts
+# against a stated expectation rather than against whatever the walk returned.
+PLANS_SET = "plans"
+PLANS_SET_MEMBERS = (PLANNING_DOC, FEE_TIERS_PLAN, FEE_ROLLOUT_PLAN)
 
 # Excluded subtree: registered under the root but pruned by the registry's
 # `exclude` list — must be neither inventoried nor a finding.
@@ -113,11 +146,12 @@ _REGISTRY_JSON = """{
   "schema_version": 1,
   "roots": ["docs"],
   "exclude": ["docs/vendor"],
+  "sets": ["plans"],
   "extensions": [".md"],
   "rules": [
     {"glob": "docs/*.md", "kind": "living"},
     {"glob": "docs/guides/*.md", "kind": "narrative"},
-    {"glob": "docs/plans/*.md", "kind": "planning"}
+    {"glob": "docs/plans/*.md", "kind": "planning", "set": "plans"}
   ]
 }
 """
@@ -154,6 +188,33 @@ tiered-fee decision before implementation starts).
 
 The flat 2% rate in `src/payment_service.py` does not scale to enterprise
 volume; a tiered schedule has been proposed but not yet approved.
+"""
+
+_POLICY_DOC_TEXT = f"""# Fee policy
+
+{DUPLICATED_CLAIM}
+
+{CONTENDED_CLAIM}
+
+Refunds reverse the fee at the rate charged, not the rate in force today.
+"""
+
+_FEE_TIERS_PLAN_TEXT = f"""# Plan: tiered fee schedule
+
+**Date:** 2026-07-21. **Status:** in-progress.
+
+{DUPLICATED_CLAIM}
+
+## Rollout
+
+{DUPLICATED_CLAIM}
+"""
+
+_FEE_ROLLOUT_PLAN_TEXT = f"""# Plan: fee rollout sequencing
+
+**Date:** 2026-07-22. **Status:** in-progress.
+
+{CONTENDED_CLAIM}
 """
 
 _EXCLUDED_DOC_TEXT = """# Upstream vendor doc
@@ -251,6 +312,9 @@ def build():
     _write(root, LIVING_DOC, _LIVING_DOC_TEXT)
     _write(root, NARRATIVE_DOC, _NARRATIVE_DOC_TEXT)
     _write(root, PLANNING_DOC, _PLANNING_DOC_TEXT)
+    _write(root, POLICY_DOC, _POLICY_DOC_TEXT)
+    _write(root, FEE_TIERS_PLAN, _FEE_TIERS_PLAN_TEXT)
+    _write(root, FEE_ROLLOUT_PLAN, _FEE_ROLLOUT_PLAN_TEXT)
     _write(root, EXCLUDED_DOC, _EXCLUDED_DOC_TEXT)
     _write(root, STRAY_DOC, _STRAY_DOC_TEXT)
     for hostile_path in HOSTILE_DOCS:
