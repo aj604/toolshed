@@ -51,8 +51,13 @@ def _problem(repo_root, detail):
     )
 
 
-def _git(repo_root, *args):
-    """Run git in `repo_root`. Returns (stdout, error detail or None).
+def _run(repo_root, *args):
+    """Run git in `repo_root`. Returns (exit code, stdout, detail).
+
+    The exit code is `None` exactly when git could not be run at all, which is
+    a different answer from git running and saying no — `tracking` below has to
+    tell those apart, because "this is not a repository" is a fact it may act
+    on and "git is missing" is a question it must refuse to answer.
 
     The repository is the one named here and nowhere else: the environment is
     scrubbed of every variable that could point git at another tree, so the
@@ -65,13 +70,19 @@ def _git(repo_root, *args):
             capture_output=True, text=True, env=env, timeout=TIMEOUT_SECONDS,
         )
     except OSError as exc:
-        return None, f"git is not available ({exc.strerror})"
+        return None, "", f"git is not available ({exc.strerror})"
     except subprocess.TimeoutExpired:
-        return None, f"git {args[0]} did not finish in {TIMEOUT_SECONDS}s"
+        return None, "", f"git {args[0]} did not finish in {TIMEOUT_SECONDS}s"
     if result.returncode != 0:
         detail = result.stderr.strip().splitlines()
-        return None, detail[0] if detail else f"git {args[0]} failed"
-    return result.stdout.strip(), None
+        return result.returncode, "", detail[0] if detail else f"git {args[0]} failed"
+    return 0, result.stdout.strip(), None
+
+
+def _git(repo_root, *args):
+    """Run git in `repo_root`. Returns (stdout, error detail or None)."""
+    code, out, detail = _run(repo_root, *args)
+    return (out, None) if code == 0 else (None, detail)
 
 
 def normalize_remote(url):
@@ -201,6 +212,64 @@ def changed_paths(repo_root, since):
     if detail is not None:
         return None, _problem(repo_root, detail)
     return tuple(sorted(line for line in out.splitlines() if line.strip())), None
+
+
+# What git would do with a file written at a given path. Closed, because the
+# caller acts on the answer: `trackable` is the dangerous one — nothing keeps
+# the file yet, and the next `git add -A` would.
+TRACKING_OUTSIDE = "outside-repository"
+TRACKING_TRACKED = "tracked"
+TRACKING_IGNORED = "ignored"
+TRACKING_TRACKABLE = "trackable"
+
+
+def tracking(path):
+    """Whether git would keep a file written at `path`. Returns (state, problem).
+
+    The question an untracked artifact has to ask before it is written down.
+    Answered from the repository that would actually hold the file — found from
+    the path itself, not from a root a caller supplied — because an artifact
+    written two directories up is in whatever repository is there.
+
+    Fails closed: if git cannot be run, or cannot answer, the state is `None`
+    and a problem says why. An unanswered question about whether something
+    would be committed is not a licence to write it.
+    """
+    target = os.path.realpath(os.path.abspath(path))
+    parent = os.path.dirname(target)
+    if not os.path.isdir(parent):
+        return None, Problem(
+            code="path-unwritable",
+            message=(
+                f"the directory that would hold {path} does not exist, so "
+                f"whether git would track a file written there is unknown"
+            ),
+            location=path,
+        )
+
+    code, top, detail = _run(parent, "rev-parse", "--show-toplevel")
+    if code is None:
+        return None, _problem(parent, detail)
+    if code != 0:
+        # git ran and said this is not a repository: nothing here can track it.
+        return TRACKING_OUTSIDE, None
+
+    top = os.path.realpath(top)
+    relative = os.path.relpath(target, top)
+    for args, state in (
+        (("ls-files", "--error-unmatch", "--", relative), TRACKING_TRACKED),
+        (("check-ignore", "-q", "--", relative), TRACKING_IGNORED),
+    ):
+        code, _, detail = _run(top, *args)
+        if code is None:
+            return None, _problem(top, detail)
+        if code == 0:
+            return state, None
+        if code > 1:
+            # 1 is the honest "no" both commands give; anything above it is git
+            # failing to answer, and a refusal is the only safe reading.
+            return None, _problem(top, detail)
+    return TRACKING_TRACKABLE, None
 
 
 def last_change(repo_root, path):

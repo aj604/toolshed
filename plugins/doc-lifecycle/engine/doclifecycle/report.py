@@ -565,6 +565,21 @@ def _lineage(raw, bad):
     )
 
 
+def parse_lineage(raw):
+    """Parse a lineage object on its own. Returns (`Lineage` or None, problems).
+
+    Public because lineage has one owner. An approval set binds to the lineage
+    of the report that produced it and must read it back identically — a second
+    parser could only ever disagree with this one, and the disagreement would
+    be an artifact that validates in one place and not the other.
+    """
+    problems = []
+    lineage = _lineage(raw, lambda code, message, where=None: problems.append(
+        Problem(code=code, message=message, location=where)
+    ))
+    return lineage, tuple(problems)
+
+
 def _records(raw, bad):
     if not isinstance(raw, list):
         bad("report-invalid-shape", "records must be a list of record objects",

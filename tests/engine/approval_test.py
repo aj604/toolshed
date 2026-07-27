@@ -17,7 +17,10 @@ from doclifecycle.approval import (
     ARTIFACT_KIND,
     ApprovalSet,
     Minter,
+    load_approval_set,
     mint_approval_set,
+    validate_approval_set,
+    write_approval_set,
 )
 from doclifecycle.digest import sha256_canonical
 from doclifecycle.finding import build_finding
@@ -28,7 +31,12 @@ from doclifecycle.report import (
     current_lineage,
     validate_report,
 )
-from doclifecycle.results import STATE_CLEAN, STATE_FINDINGS, Invalid
+from doclifecycle.results import (
+    STATE_CLEAN,
+    STATE_FINDINGS,
+    STATE_STALE,
+    Invalid,
+)
 from doclifecycle.segment import segment_document
 
 CONFIG_DIGEST = "c" * 64
@@ -461,6 +469,318 @@ class CoverageIsNotAuthority(ApprovalTestCase):
         approval = self.mint(report, [one["digest"]])
 
         self.assertNotIn(DOC_B, approval.scope.paths)
+
+
+class ApprovedTestCase(ApprovalTestCase):
+    """Fixtures that start from a minted approval set over two documents."""
+
+    def setUp(self):
+        super().setUp()
+        self.one, self.two = self.two_findings()
+        self.source = self.report([self.one, self.two])
+        self.approval = self.mint(self.source, [self.one["digest"]])
+        self.assertIsInstance(self.approval, ApprovalSet, self.approval)
+
+    def check(self, approval=None, **kwargs):
+        kwargs.setdefault("report", self.source)
+        kwargs.setdefault("repo_root", self.repo)
+        kwargs.setdefault("audit_config_digest", CONFIG_DIGEST)
+        payload = (self.approval if approval is None else approval).to_dict()
+        return validate_approval_set(payload, **kwargs)
+
+
+class Freshness(ApprovedTestCase):
+    def test_a_freshly_minted_approval_set_validates_clean(self):
+        result = self.check()
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_CLEAN)
+        self.assertEqual(result.stale_reasons, ())
+
+    def test_it_keeps_its_digest_through_validation(self):
+        self.assertEqual(self.check().digest, self.approval.digest)
+
+    def test_a_new_commit_makes_it_stale_naming_the_base_commit(self):
+        self.write(self.repo, "unrelated.txt", "a change somewhere else")
+        self.commit(self.repo, "second")
+
+        result = self.check()
+
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(reasons(result), ["approval-base-commit-changed"])
+
+    def test_a_registry_change_makes_it_stale_naming_the_rules(self):
+        self.write(self.repo, ".doc-lifecycle/registry.json",
+                   REGISTRY.replace('"sets": ["plans"],',
+                                    '"exclude": ["docs/vendor"],\n  "sets": ["plans"],'))
+
+        result = self.check()
+
+        self.assertEqual(reasons(result), ["approval-registry-changed"])
+
+    def test_a_configuration_change_makes_it_stale_naming_it(self):
+        result = self.check(audit_config_digest="d" * 64)
+
+        self.assertEqual(reasons(result), ["approval-audit-config-changed"])
+
+    def test_a_ruleset_bump_makes_it_stale_naming_the_rules(self):
+        payload = self.approval.to_dict()
+        payload["lineage"]["ruleset_version"] = 99
+        del payload["digest"]
+
+        result = validate_approval_set(
+            payload, report=None, repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertIn("approval-ruleset-changed", reasons(result))
+
+    def test_a_different_report_makes_it_stale_naming_the_report(self):
+        other = self.report([self.two])
+
+        result = self.check(report=other)
+
+        self.assertEqual(reasons(result), ["approval-report-changed"])
+
+    def test_rewriting_the_approved_passage_names_the_preimage(self):
+        self.write(self.repo, DOC_A,
+                   "# Fees\n\nThe payment service charges a flat 3% fee.\n")
+
+        result = self.check()
+
+        self.assertEqual(reasons(result), ["approval-preimage-mismatch"])
+        self.assertIn(DOC_A, result.stale_reasons[0].message)
+
+    def test_deleting_the_approved_document_makes_it_stale(self):
+        os.remove(os.path.join(self.repo, DOC_A))
+
+        result = self.check()
+
+        self.assertEqual(reasons(result), ["approval-preimage-unreadable"])
+
+    def test_a_target_that_stopped_authorizing_makes_the_scope_stale(self):
+        target = os.path.join(self.repo, DOC_A)
+        os.remove(target)
+        os.symlink("/etc/hosts", target)
+
+        result = self.check()
+
+        self.assertIn("approval-scope-changed", reasons(result))
+
+    def test_a_second_subset_still_validates_when_its_text_is_untouched(self):
+        # Partial approval, working: subset one is minted, applied to docs/a.md,
+        # and subset two — over a document the apply never touched — is still
+        # good. The inventory digest moved; the second subset's preimage did not.
+        second = self.mint(self.source, [self.two["digest"]])
+        self.write(self.repo, DOC_A,
+                   "# Fees\n\nThe payment service charges a flat 2.5% fee.\n")
+
+        result = self.check(approval=second)
+
+        self.assertEqual(result.status, STATE_CLEAN)
+
+    def test_the_first_subset_is_refused_once_its_own_text_moved(self):
+        # The other half of the same story, and the reason the check is
+        # per-record: re-approving what was already applied is refused honestly.
+        self.write(self.repo, DOC_A,
+                   "# Fees\n\nThe payment service charges a flat 2.5% fee.\n")
+
+        result = self.check()
+
+        self.assertEqual(reasons(result), ["approval-preimage-mismatch"])
+
+    def test_every_field_that_moved_is_named_at_once(self):
+        self.write(self.repo, DOC_A, "# Fees\n\nSomething else.\n")
+        self.commit(self.repo, "second")
+
+        result = self.check(audit_config_digest="d" * 64)
+
+        self.assertEqual(reasons(result), [
+            "approval-audit-config-changed",
+            "approval-base-commit-changed",
+            "approval-preimage-mismatch",
+        ])
+
+    def test_without_a_repository_the_check_is_structural_only(self):
+        self.write(self.repo, DOC_A, "# Fees\n\nSomething else.\n")
+        self.commit(self.repo, "second")
+
+        result = validate_approval_set(self.approval.to_dict())
+
+        self.assertEqual(result.status, STATE_CLEAN)
+        self.assertEqual(result.stale_reasons, ())
+
+    def test_an_altered_approval_set_is_invalid_not_stale(self):
+        payload = self.approval.to_dict()
+        payload["scope"]["paths"].append(DOC_B)
+
+        result = validate_approval_set(payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["approval-digest-mismatch"])
+
+    def test_a_selection_the_report_no_longer_carries_is_stale(self):
+        # The report is the one the digest names, but the record is not in it:
+        # nothing the applier could look up, so the authority does not stand.
+        payload = self.approval.to_dict()
+        payload["records"][0]["digest"] = "f" * 64
+        del payload["digest"]
+
+        result = validate_approval_set(payload, report=self.source)
+
+        self.assertIn("approval-report-changed", reasons(result))
+
+
+class NotAnApprovalSet(ApprovedTestCase):
+    """AC4: whatever else a caller has in hand, it is not authority."""
+
+    def test_a_report_is_refused(self):
+        result = validate_approval_set(self.source.to_dict())
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["approval-not-an-approval-set"])
+        self.assertIn("report", result.problems[0].message)
+
+    def test_a_branch_name_is_refused(self):
+        result = validate_approval_set("doc-sync/nightly-2026-07-26")
+
+        self.assertEqual(codes(result), ["approval-not-an-approval-set"])
+
+    def test_a_workflow_run_id_is_refused(self):
+        result = validate_approval_set(1234567890)
+
+        self.assertEqual(codes(result), ["approval-not-an-approval-set"])
+
+    def test_a_dispatch_list_of_record_digests_is_refused(self):
+        result = validate_approval_set(
+            [self.one["digest"], self.two["digest"]]
+        )
+
+        self.assertEqual(codes(result), ["approval-not-an-approval-set"])
+        self.assertIn("record digests", result.problems[0].message)
+
+    def test_a_cached_report_is_refused(self):
+        entry = os.path.join(self.repo, "cache-entry.json")
+        with open(entry, "w", encoding="utf-8") as fh:
+            json.dump(self.source.to_dict(), fh)
+
+        result = load_approval_set(entry)
+
+        self.assertEqual(codes(result), ["approval-not-an-approval-set"])
+
+    def test_an_unreadable_file_is_refused(self):
+        result = load_approval_set(os.path.join(self.repo, "nothing.json"))
+
+        self.assertEqual(codes(result), ["approval-unreadable"])
+
+    def test_a_file_that_is_not_json_is_refused(self):
+        path = os.path.join(self.repo, "not.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("approved: everything")
+
+        self.assertEqual(codes(load_approval_set(path)),
+                         ["approval-unparseable"])
+
+    def test_a_minted_approval_set_round_trips_through_a_file(self):
+        path = os.path.join(self.repo, "..", "approval.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(self.approval.to_dict(), fh)
+
+        result = load_approval_set(path)
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.digest, self.approval.digest)
+
+
+class StructuralRefusals(ApprovedTestCase):
+    def payload(self, **overrides):
+        payload = self.approval.to_dict()
+        payload.update(overrides)
+        payload.pop("digest", None)
+        return payload
+
+    def test_an_unknown_minter_kind_is_refused(self):
+        result = validate_approval_set(
+            self.payload(minter={"kind": "the-workflow", "id": "doc-sync.yml"})
+        )
+
+        self.assertEqual(codes(result), ["approval-invalid-minter"])
+
+    def test_an_approval_set_selecting_nothing_is_refused(self):
+        result = validate_approval_set(self.payload(records=[]))
+
+        self.assertEqual(codes(result), ["approval-empty-selection"])
+
+    def test_a_record_outside_the_allowed_scope_is_refused(self):
+        payload = self.payload()
+        payload["scope"]["paths"] = [DOC_B]
+
+        result = validate_approval_set(payload)
+
+        self.assertEqual(codes(result), ["approval-record-outside-scope"])
+
+    def test_an_unknown_field_is_refused(self):
+        result = validate_approval_set(self.payload(expires="never"))
+
+        self.assertEqual(codes(result), ["approval-unknown-field"])
+
+    def test_a_missing_field_is_refused(self):
+        payload = self.payload()
+        del payload["scope"]
+
+        result = validate_approval_set(payload)
+
+        self.assertEqual(codes(result), ["approval-missing-field"])
+
+    def test_every_structural_problem_is_named_at_once(self):
+        payload = self.payload(minter={"kind": "nope", "id": ""})
+        del payload["reconciliation_digest"]
+
+        result = validate_approval_set(payload)
+
+        self.assertEqual(
+            codes(result),
+            ["approval-invalid-minter", "approval-missing-field"],
+        )
+
+
+class NeverTracked(ApprovedTestCase):
+    """AC5: an approval set is never written into tracked repository state."""
+
+    def test_writing_it_into_the_repository_is_refused(self):
+        target = os.path.join(self.repo, "docs", "approval.json")
+
+        result = write_approval_set(self.approval, target)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["approval-set-would-be-tracked"])
+        self.assertFalse(os.path.exists(target))
+
+    def test_overwriting_a_tracked_file_is_refused(self):
+        target = os.path.join(self.repo, DOC_B)
+
+        result = write_approval_set(self.approval, target)
+
+        self.assertEqual(codes(result), ["approval-set-tracked-path"])
+        with open(target, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), DOC_B_TEXT)
+
+    def test_writing_outside_the_repository_is_allowed(self):
+        target = os.path.join(self.repo, "..", "approval.json")
+
+        result = write_approval_set(self.approval, target)
+
+        self.assertEqual(result, target)
+        self.assertIsInstance(load_approval_set(target), ApprovalSet)
+
+    def test_an_ignored_path_inside_the_repository_is_allowed(self):
+        self.write(self.repo, ".gitignore", ".doc-lifecycle/run/\n")
+        os.makedirs(os.path.join(self.repo, ".doc-lifecycle/run"), exist_ok=True)
+        target = os.path.join(self.repo, ".doc-lifecycle/run/approval.json")
+
+        result = write_approval_set(self.approval, target)
+
+        self.assertEqual(result, target)
 
 
 if __name__ == "__main__":
