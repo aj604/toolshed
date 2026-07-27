@@ -105,8 +105,8 @@ remedied by a single `replace`:
       "path": "docs/architecture.md",
       "start_line": 7,
       "end_line": 7,
-      "preimage": "The service charges a flat 2% fee.\n",
-      "text": "The service charges a flat 2.5% fee.\n"
+      "preimage": "The service charges a flat 2% fee.",
+      "text": "The service charges a flat 2.5% fee."
     }
   ],
   "postimages": {"docs/architecture.md": "<sha256 of the file's bytes after the plan>"},
@@ -114,8 +114,12 @@ remedied by a single `replace`:
 }
 ```
 
-`preimage` is the exact current bytes of lines `start_line`..`end_line`, newlines
-included; `text` is what replaces them. Each operation's field set is exact and closed —
+**A span's `preimage` is `"\n".join` of lines `start_line`..`end_line`, with no trailing
+newline** — the applier splits the document on `\n` and compares that join, so a preimage
+carrying the line's own newline is `apply-preimage-mismatch` even when the text is right.
+`text` replaces those lines under the same rule. (`retire-document` is the exception: its
+preimage is the whole file's bytes, final newline and all.) Each field set is exact and
+closed —
 `delete` is the `replace` fields minus `text`, `insert` takes `after_line` and `text`
 with no span and no preimage, `create-document` takes `path` and `text` only,
 `retire-document` takes `path` and the whole document as `preimage`, and
