@@ -1,0 +1,1080 @@
+"""The bloat audit: value judgments, checked against global context (issue #66).
+
+Drift asks whether a document is *accurate*; bloat asks whether it is *worth
+its tokens*. That second question is never answerable from one document. A
+passage is redundant only relative to what the rest of the corpus says; content
+is misplaced only relative to which document owns the subject; a merge is safe
+only relative to what every other merge is doing. The legacy skill's chunk
+workers had none of that — a chunk's records could name only documents in its
+own slice, there was no cross-chunk channel, and a duplicate pair split across
+two chunks was invisible to both. This module is the replacement: workers keep
+their bounded slices for cost, and every cross-document question is answered by
+`context.ContextIndex`, built over the whole repository before any slicing.
+
+The division of labor is the same one `finding.record_classifications()` draws.
+The model supplies judgment — is this worth keeping, and what should replace it
+— and nothing else. The engine supplies every fact: which documents exist, where
+a unit occurs, which document owns it, who else is merging into a destination,
+and exactly which files a bulk scope covers. All of it comes from the index —
+including the two facts about a path holding no document at all, which the index
+answers from the registry and repository it was built from
+(`context.ContextIndex.registry` / `.repo_root`), because a distillation's
+residue destination is a document nobody has written yet. `record_verdicts()` is where the
+two meet, and it fails closed: a destination the index contradicts, a unit that
+is not in the document it is claimed against, or a bulk judgment backed by a
+sample rather than an enumeration is refused, exhaustively, recording nothing.
+
+Two departures from the legacy contract, both from #57's distilled decisions.
+
+**`POLICY` is gone.** A bulk judgment no longer rides on a hand-declared
+directory whose file list the model echoes back. It declares an *enumerable
+inclusion rule* — a document set, a glob, or a kind — and the engine expands it
+from the index into one finding per member. Sampling survives only as review
+prioritization, recorded as such and never as the member list, which is what
+"sampling never authorizes mutation" has to mean mechanically.
+
+**Destinations are resolved, not asserted.** The legacy validator checked only
+that a `target` was a non-empty string; it could be a nonexistent file, the
+source document itself, or prose. Here a destination is checked against the
+index, and for duplicated content it is *derived* from the index — so two chunks
+that never see each other reach the same answer.
+"""
+
+import os
+from dataclasses import dataclass, field
+from typing import Dict, Tuple
+
+from . import ARTIFACT_SCHEMA_VERSION
+from .cache import cache_key, get as cache_get, put as cache_put
+from .context import KIND_PRECEDENCE, build_context_index
+from .digest import sha256_canonical
+from .finding import Finding, build_finding
+from .inventory import DEFAULT_REGISTRY_PATH
+from .paths import DOCUMENTATION, authorize_path
+from .registry import compile_glob
+from .report import state_from_content
+from .results import STATUS_OK, Invalid, Problem
+
+# The verdicts, carried over from the skill this absorbs so a reviewer reading
+# an old report and a new one is reading the same vocabulary.
+CUT = "CUT"                            # restates what is self-evident; delete
+CONDENSE = "CONDENSE"                  # many lines, one checkable fact
+EXTRACT_AND_MOVE = "EXTRACT-AND-MOVE"  # right content, wrong document
+MERGE_DOC = "MERGE-DOC"                # near-duplicate; fold into the survivor
+RETIRE_DOC = "RETIRE-DOC"              # carries nothing another document lacks
+DISTILL = "DISTILL"                    # planning artifact; residue, then retire
+
+VERDICTS = (CUT, CONDENSE, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC, DISTILL)
+
+# Verdicts that move content somewhere, and so must name where. These are
+# exactly the ones a worker cannot decide from its slice.
+DESTINATION_VERDICTS = (EXTRACT_AND_MOVE, MERGE_DOC)
+# Verdicts whose destination is a document that does not exist yet: a
+# distillation authors the durable residue of a planning artifact, so its
+# destination is *optional* (the residue may already have a home) and is checked
+# as an unwritten path rather than looked up in the inventory, which by
+# definition does not hold it.
+RESIDUE_VERDICTS = (DISTILL,)
+# Verdicts that replace text, and so must carry the replacement.
+PROPOSAL_VERDICTS = (CONDENSE, EXTRACT_AND_MOVE)
+# Verdicts eligible for bulk expansion over a deterministic scope. Retirement
+# only: a scope-wide CUT or CONDENSE would be a per-passage judgment nobody
+# made, and a scope-wide move would need a per-document destination.
+SCOPE_VERDICTS = (RETIRE_DOC,)
+
+DISTILL_STATUSES = ("pending-implementation", "ready")
+
+# A destination must be a document content can durably live in. Planning
+# documents are temporary and end in distillation or retirement, so nothing is
+# ever moved *into* one — the move would be undone by the target's own lifecycle.
+DESTINATION_KINDS = ("living", "narrative")
+
+
+def residue_destination_ineligibility(registry, destination):
+    """Why the registry refuses `destination` as distilled residue, or None.
+
+    The single reading — closed-world classification, then kind-eligibility —
+    that the audit plans a DISTILL destination against
+    (`_residue_destination_record`) and the applier re-answers at
+    create-document time, so the two seams cannot diverge on what the registry
+    says a residue path is. Confinement (`paths.authorize_path`) and occupancy
+    (a path already there) are separate owners, re-answered separately.
+
+    Returns `(reason, rule)`: `reason` is `"unclassified"` (no rule claims the
+    path as documentation, or a rule excludes it — `rule` is then None or the
+    excluded rule and not to be trusted), `"kind-ineligible"` (classified, but
+    of a kind residue is never authored into — `rule` is that rule), or None
+    (eligible — `rule` is the classifying rule the caller records).
+    """
+    rule = registry.classify(destination)
+    if (rule is None or not registry.is_document(destination)
+            or registry.excludes(destination)):
+        return "unclassified", rule
+    if rule.kind not in DESTINATION_KINDS:
+        return "kind-ineligible", rule
+    return None, rule
+
+VERDICT_FIELDS = (
+    "id", "verdict", "path", "units", "evidence",
+    "destination", "proposal", "status", "scope", "sample",
+)
+
+# Keys a model may not supply at all. `files` is the one that matters: it is
+# how the legacy contract let a bulk record assert its own membership, and
+# asserted membership is precisely what an enumeration replaces.
+FORBIDDEN_VERDICT_FIELDS = ("files", "members", "occurrences", "contention")
+
+SCOPE_SELECTORS = ("set", "glob", "kind")
+
+DEFAULT_MAX_DOCUMENTS = 8
+DEFAULT_MAX_UNITS = 400
+
+
+# --------------------------------------------------------------------------
+# Chunk planning
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Chunk:
+    """One bounded slice of the corpus, and the documents in it."""
+
+    chunk_id: str
+    documents: Tuple[str, ...]
+    unit_count: int
+
+    def to_dict(self):
+        return {
+            "id": self.chunk_id,
+            "documents": list(self.documents),
+            "unit_count": self.unit_count,
+        }
+
+
+@dataclass(frozen=True)
+class ChunkPlan:
+    """Every indexed document, partitioned into chunks exactly once."""
+
+    chunks: Tuple[Chunk, ...]
+    index_digest: str
+    digest: str
+    status: str = STATUS_OK
+
+    def to_dict(self):
+        return {
+            "status": self.status,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "index_digest": self.index_digest,
+            "digest": self.digest,
+            "chunks": [c.to_dict() for c in self.chunks],
+        }
+
+    def chunk(self, chunk_id):
+        return next((c for c in self.chunks if c.chunk_id == chunk_id), None)
+
+
+def _chunk_id(index, paths):
+    """A chunk's identity: its members and their current contents.
+
+    Content-addressed, so an unchanged chunk keeps its id across re-plans (a
+    resumed run can tell what it already did) and an edited document re-keys
+    only the chunk holding it.
+    """
+    members = [
+        {"path": path, "document_digest": index.document(path).document_digest}
+        for path in paths
+    ]
+    return "c-" + sha256_canonical({"members": members})[:16]
+
+
+def plan_chunks(index, max_documents=DEFAULT_MAX_DOCUMENTS,
+                max_units=DEFAULT_MAX_UNITS):
+    """Partition the index into bounded chunks. Deterministic and total.
+
+    Documents are grouped by directory and kind — neighbors are the documents
+    most likely to duplicate each other, so a worker sees related prose — then
+    packed greedily within both budgets. Every indexed document lands in
+    exactly one chunk: a document dropped for being oversized would be a silent
+    coverage gap, so one that exceeds the unit budget alone gets a chunk to
+    itself rather than being split or skipped.
+    """
+    groups = {}
+    for document in index.documents:
+        directory = document.path.rsplit("/", 1)[0] if "/" in document.path else ""
+        groups.setdefault((directory, document.kind), []).append(document)
+
+    chunks, current, current_units = [], [], 0
+
+    def flush():
+        nonlocal current, current_units
+        if current:
+            chunks.append((tuple(d.path for d in current), current_units))
+            current, current_units = [], 0
+
+    for key in sorted(groups):
+        for document in sorted(groups[key], key=lambda d: d.path):
+            size = len(document.units)
+            over_documents = len(current) + 1 > max_documents
+            over_units = current_units + size > max_units
+            if current and (over_documents or over_units):
+                flush()
+            current.append(document)
+            current_units += size
+        flush()
+
+    built = tuple(
+        Chunk(chunk_id=_chunk_id(index, paths), documents=paths, unit_count=units)
+        for paths, units in chunks
+    )
+    return ChunkPlan(
+        chunks=built,
+        index_digest=index.digest,
+        digest=sha256_canonical({
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "index_digest": index.digest,
+            "chunks": [c.to_dict() for c in built],
+        }),
+    )
+
+
+def plan_repository_chunks(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
+                           max_documents=DEFAULT_MAX_DOCUMENTS,
+                           max_units=DEFAULT_MAX_UNITS):
+    """Index `repo_root` and plan its chunks. A `ChunkPlan`, or `Invalid`.
+
+    The repository-level entrypoint, on `segment.segment_document()`'s pattern:
+    the index-then-plan composition lives here rather than in the command, so
+    the command stays a call to one library function and an import cannot
+    disagree with a CI invocation. An invalid registry invalidates the run, as
+    it does everywhere else.
+    """
+    index = build_context_index(repo_root, registry_path)
+    if isinstance(index, Invalid):
+        return index
+    return plan_chunks(index, max_documents=max_documents, max_units=max_units)
+
+
+# --------------------------------------------------------------------------
+# Destinations and contention
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Claimant:
+    """One document whose duplicated content would fold into a destination."""
+
+    source: str
+    destination: str
+    units: Tuple[str, ...]
+    order: int
+
+    def to_dict(self):
+        return {
+            "source": self.source,
+            "destination": self.destination,
+            "units": list(self.units),
+            "order": self.order,
+        }
+
+
+def merge_contention(index):
+    """Every destination in the corpus, with its complete claimant list.
+
+    The answer to "who else is merging into this document?", computed once from
+    global data. Two workers in different chunks each get the same list, in the
+    same order, including claimants from slices they were never shown — which
+    is what makes their independently produced findings compose instead of
+    collide. Order is by source path, a property of the corpus rather than of
+    which chunk ran first.
+    """
+    pairs = {}
+    for unit in index.duplicated_units():
+        owner = index.owner_of(unit)
+        for place in index.occurrences_of(unit):
+            if place.path != owner:
+                pairs.setdefault((owner, place.path), set()).add(unit)
+
+    contention = {}
+    for destination in sorted({owner for owner, _ in pairs}):
+        sources = sorted(source for owner, source in pairs if owner == destination)
+        contention[destination] = tuple(
+            Claimant(
+                source=source,
+                destination=destination,
+                units=tuple(sorted(pairs[(destination, source)])),
+                order=order,
+            )
+            for order, source in enumerate(sources)
+        )
+    return contention
+
+
+# --------------------------------------------------------------------------
+# Deterministic scopes
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ScopeEnumeration:
+    """Exactly which documents an inclusion rule covers, and nothing else."""
+
+    rule: dict
+    members: Tuple[str, ...]
+    digest: str
+
+    def to_dict(self):
+        return {
+            "rule": dict(self.rule),
+            "members": list(self.members),
+            "member_count": len(self.members),
+            "digest": self.digest,
+        }
+
+
+def enumerate_scope(index, rule):
+    """Expand an inclusion rule into every document it covers.
+
+    The rule is declarative (`{"set": ...}`, `{"glob": ...}`, or
+    `{"kind": ...}`) and the membership comes from the index, so a reviewer can
+    re-derive the list and an approval bound to the enumeration's digest cannot
+    silently widen. A rule nobody can enumerate, and a rule that covers nothing,
+    are both refused: a bulk judgment over an unknown or empty set is
+    unfalsifiable.
+    """
+    if not isinstance(rule, dict) or len(rule) != 1 or not set(rule) <= set(SCOPE_SELECTORS):
+        return Invalid((Problem(
+            code="bloat-scope-not-enumerable",
+            message=(
+                f"a bulk scope must be exactly one of "
+                f"{list(SCOPE_SELECTORS)}, not {rule!r} — a scope nobody can "
+                f"expand into a file list cannot be reviewed or applied"
+            ),
+            location="scope",
+        ),))
+
+    selector, value = next(iter(rule.items()))
+    if selector == "set":
+        members = [d.path for d in index.documents if d.doc_set == value]
+    elif selector == "kind":
+        members = [d.path for d in index.documents if d.kind == value]
+    else:
+        matcher = compile_glob(value)
+        members = [d.path for d in index.documents if matcher.match(d.path)]
+
+    if not members:
+        return Invalid((Problem(
+            code="bloat-scope-empty",
+            message=(
+                f"scope {rule!r} covers no document in this repository — a bulk "
+                f"judgment over nothing is not a finding"
+            ),
+            location="scope",
+        ),))
+
+    members = tuple(sorted(members))
+    return ScopeEnumeration(
+        rule=dict(rule),
+        members=members,
+        digest=sha256_canonical({
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "rule": dict(rule),
+            "members": list(members),
+        }),
+    )
+
+
+# --------------------------------------------------------------------------
+# Recording a model's verdicts
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class BloatResult:
+    """Validated findings, plus the coverage gaps the run must declare."""
+
+    findings: Tuple[Finding, ...]
+    incomplete: Tuple[dict, ...]
+    index_digest: str
+    status: str = STATUS_OK
+
+    def records(self):
+        return tuple(f.to_record() for f in self.findings)
+
+    def report_payload(self, lineage):
+        """This result as a report payload, for `report.validate_report`.
+
+        The bloat lane declares coverage in the shared contract's own terms
+        rather than inventing a second vocabulary for it: a scope the index
+        could not examine is an `incomplete` entry, and an `incomplete` entry
+        forces `partial`. So a corpus with an unregistered or symlinked path
+        never reports `clean` about it, and the absence of a bloat finding for
+        a document nobody read cannot be mistaken for a verdict that it is
+        lean. The state comes from `report.state_from_content()` — the rule's
+        one owner, the same call the validator re-derives with — because a run
+        does not get to declare a coverage it did not achieve, and a second copy
+        of the rule could only ever disagree with the first.
+        """
+        records = [f.to_record() for f in self.findings]
+        incomplete = [dict(i) for i in self.incomplete]
+        return {
+            "status": state_from_content(records, incomplete),
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "lineage": lineage.to_dict(),
+            "records": records,
+            "incomplete": incomplete,
+        }
+
+    def to_dict(self):
+        return {
+            "status": self.status,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "index_digest": self.index_digest,
+            "records": [f.to_record() for f in self.findings],
+            "incomplete": [dict(i) for i in self.incomplete],
+        }
+
+
+@dataclass
+class _Recorder:
+    """One pass over a model's verdicts, collecting every problem.
+
+    Holds the two things every check needs — the index it checks against and
+    the problem list it appends to — so the checks are methods rather than
+    functions passing the same four arguments around.
+    """
+
+    index: object
+    lineage: object
+    contention: dict
+    in_chunk: object = None
+    problems: list = field(default_factory=list)
+    seen_ids: set = field(default_factory=set)
+
+    # -- problem bookkeeping ------------------------------------------------
+
+    def bad(self, code, message, where=None):
+        self.problems.append(Problem(code=code, message=message, location=where))
+
+    def clean_since(self, mark):
+        """Whether *this* verdict is problem-free.
+
+        Scoped to one verdict rather than to the whole response, so an earlier
+        verdict's problem never silently stops a later one from being built and
+        reported on. The response as a whole still fails closed — any problem
+        anywhere discards every finding — but the pass keeps collecting, which
+        is what makes one re-prompt able to address all of it.
+        """
+        return len(self.problems) == mark
+
+    # -- one verdict --------------------------------------------------------
+
+    def record(self, raw, where):
+        """Validate one verdict and expand it into findings, or note problems."""
+        mark = len(self.problems)
+
+        if not isinstance(raw, dict):
+            self.bad("bloat-invalid-shape", f"{where} must be an object", where)
+            return ()
+
+        self._check_fields(raw, where)
+        self._check_id(raw, where)
+
+        verdict = raw.get("verdict")
+        if verdict not in VERDICTS:
+            self.bad("bloat-unknown-verdict",
+                     f"{verdict!r} is not a bloat verdict — expected one of "
+                     f"{list(VERDICTS)}", where)
+            return ()
+
+        if not _nonempty(raw.get("evidence")):
+            self.bad("bloat-missing-evidence",
+                     f"{where} states no evidence — a bloat verdict is a value "
+                     f"judgment, and one that does not say why is not "
+                     f"reviewable", where)
+
+        if raw.get("scope") is not None:
+            return self._bulk(raw, where, verdict, mark)
+        return self._one_document(raw, where, verdict, mark)
+
+    def _check_fields(self, raw, where):
+        for name in sorted(set(raw) - set(VERDICT_FIELDS)):
+            if name in FORBIDDEN_VERDICT_FIELDS:
+                self.bad("bloat-sampling-not-authority",
+                         f"{name!r} is not a field a verdict may carry — a bulk "
+                         f"finding's members are enumerated from the index, "
+                         f"never asserted by the model, so a list of files "
+                         f"supplied here could authorize a mutation nobody "
+                         f"enumerated", where)
+            else:
+                self.bad("bloat-invalid-shape",
+                         f"{name!r} is not a verdict field; expected "
+                         f"{list(VERDICT_FIELDS)}", where)
+
+    def _check_id(self, raw, where):
+        record_id = raw.get("id")
+        if not _nonempty(record_id):
+            self.bad("bloat-invalid-shape", f"{where} needs a non-empty id", where)
+        elif record_id in self.seen_ids:
+            self.bad("bloat-duplicate-id",
+                     f"id {record_id!r} is used by more than one verdict — two "
+                     f"records a reviewer cannot tell apart cannot be approved "
+                     f"apart", where)
+        else:
+            self.seen_ids.add(record_id)
+
+    # -- a verdict about one document ---------------------------------------
+
+    def _one_document(self, raw, where, verdict, mark):
+        path = raw.get("path")
+        document = self.index.document(path) if _nonempty(path) else None
+
+        if document is None:
+            self.bad("bloat-unknown-document",
+                     f"{path!r} is not a document in this repository's index — "
+                     f"a verdict about a path the registry does not claim cannot "
+                     f"be checked or applied", where)
+            return ()
+        if self.in_chunk is not None and path not in self.in_chunk:
+            self.bad("bloat-document-outside-chunk",
+                     f"{path} is outside this chunk's slice — a worker judges "
+                     f"the documents it was given, and the index answers "
+                     f"everything else", where)
+            return ()
+
+        units = raw.get("units")
+        if not isinstance(units, list) or not units:
+            self.bad("bloat-invalid-shape",
+                     f"{where} must name at least one assertion unit", where)
+            return ()
+        for unit in units:
+            if unit not in document.units:
+                self.bad("bloat-unknown-unit",
+                         f"unit {unit!r} does not occur in {path} — a verdict is "
+                         f"about content that is actually there", where)
+
+        destination = self._destination(raw, where, verdict, path, units)
+        extra = {
+            "verdict": verdict,
+            "evidence": raw.get("evidence"),
+            "duplicate_search": self._duplicate_search(path, units),
+            "destination": destination,
+            "proposal": self._proposal(raw, where, verdict),
+            "status": self._status(raw, where, verdict),
+        }
+        self._reject_sample(raw, where, scoped=False)
+        if destination is not None:
+            self._note_contention(extra, destination["path"], path)
+
+        if not self.clean_since(mark):
+            return ()
+        return self._build(raw["id"], verdict, path, units, extra)
+
+    # -- a bulk judgment over a deterministic scope --------------------------
+
+    def _bulk(self, raw, where, verdict, mark):
+        """Expand a bulk judgment into one finding per enumerated member."""
+        scope = raw["scope"]
+        if verdict not in SCOPE_VERDICTS:
+            self.bad("bloat-scope-verdict-ineligible",
+                     f"{verdict} cannot be a bulk judgment — only "
+                     f"{list(SCOPE_VERDICTS)} applies uniformly to every member "
+                     f"of a scope; anything else needs a per-document judgment "
+                     f"nobody made", where)
+            return ()
+        for name in ("path", "units", "destination", "proposal", "status"):
+            if raw.get(name) is not None:
+                self.bad("bloat-invalid-shape",
+                         f"{name!r} does not apply to a bulk {verdict} — its "
+                         f"subject is the scope, and its members come from the "
+                         f"enumeration", where)
+
+        enumeration = enumerate_scope(self.index, scope)
+        if isinstance(enumeration, Invalid):
+            self.problems.extend(enumeration.problems)
+            return ()
+        self._reject_sample(raw, where, scoped=True, enumeration=enumeration)
+
+        empty = [m for m in enumeration.members if not self.index.document(m).units]
+        for member in empty:
+            self.bad("bloat-scope-member-empty",
+                     f"{member} is in scope {scope!r} but holds no assertion "
+                     f"unit, so no finding can bind to it — exclude it from the "
+                     f"scope or give it content, rather than retiring a set one "
+                     f"of whose members no record could name", where)
+
+        if not self.clean_since(mark):
+            return ()
+
+        findings = []
+        for position, member in enumerate(enumeration.members):
+            extra = {
+                "verdict": verdict,
+                "evidence": raw["evidence"],
+                "destination": None,
+                "proposal": None,
+                "status": None,
+                "scope": {
+                    **enumeration.to_dict(),
+                    "member_index": position,
+                    # Recorded so a reviewer can see what was actually read, and
+                    # positioned as what it is: the review order, not the mandate.
+                    "sample": sorted(raw.get("sample") or ()),
+                    "sample_is_not_authority": True,
+                },
+            }
+            findings.extend(self._build(
+                f"{raw['id']}.{position}", verdict, member,
+                list(self.index.document(member).units), extra,
+            ))
+        return findings
+
+    # -- destinations -------------------------------------------------------
+
+    def _destination(self, raw, where, verdict, path, units):
+        """Where content goes — decided by the index, never by the slice.
+
+        For content the global search found elsewhere, the destination *is* the
+        index's owner: a worker that proposed a different one was guessing from
+        a partial view, so a mismatch is refused rather than preferred. For
+        content that occurs nowhere else there is nothing to derive, so the
+        model names a destination and the index checks it against the
+        constraints a destination has to satisfy.
+        """
+        proposed = raw.get("destination")
+
+        if verdict in RESIDUE_VERDICTS:
+            if proposed is None:
+                # Retire-only distillation: nothing is authored, so nothing is
+                # named. Legal, and lossy only if residue was never landed
+                # under its own record — a judgment for the person approving.
+                return None
+            if not _nonempty(proposed):
+                self.bad("bloat-invalid-shape",
+                         f"{verdict}'s destination must be the path of the "
+                         f"residue document, or absent", where)
+                return None
+            return self._residue_destination_record(proposed, path, where)
+
+        if verdict not in DESTINATION_VERDICTS:
+            if proposed is not None:
+                self.bad("bloat-destination-forbidden",
+                         f"{verdict} moves nothing, so it names no destination — "
+                         f"only {list(DESTINATION_VERDICTS + RESIDUE_VERDICTS)} "
+                         f"do", where)
+            return None
+
+        owners = {
+            self.index.owner_of(unit) for unit in units
+            if len(self.index.occurrences_of(unit)) > 1
+        } - {path}
+
+        if len(owners) > 1:
+            # The group's content is owned in more than one place, so no single
+            # destination is right for it. Falling back to whatever the worker
+            # proposed would be exactly the slice-local guess the index exists
+            # to prevent, so the grouping is refused instead.
+            self.bad("bloat-destination-ambiguous",
+                     f"this group's units are owned by {sorted(owners)} — one "
+                     f"destination cannot be right for all of them; split the "
+                     f"verdict so each group has one owner", where)
+            return None
+
+        if owners:
+            derived = owners.pop()
+            if proposed is not None and proposed != derived:
+                self.bad("bloat-destination-contradicts-index",
+                         f"the index owns this content at {derived}, not "
+                         f"{proposed!r} — a destination for duplicated content "
+                         f"is derived from the whole corpus, so a slice-local "
+                         f"answer that disagrees is a guess", where)
+                return None
+            return self._destination_record(derived, "index-owner", path, where)
+
+        if not _nonempty(proposed):
+            self.bad("bloat-destination-required",
+                     f"{verdict} must name a destination, and the index found no "
+                     f"other occurrence of this content to derive one from",
+                     where)
+            return None
+        return self._destination_record(proposed, "model-proposed", path, where)
+
+    def _residue_destination_record(self, destination, source, where):
+        """Check a destination that must name a document nobody has written yet.
+
+        A residue destination is create-only, and that is a *bound on authority*,
+        not a limitation. `RECORD_REMEDIES[DISTILL]` includes the span edits — an
+        approved distillation legitimately rewrites the artifact it retires — and
+        the applier bounds a positioned edit to the hull of the record's approved
+        units only on the record's *own* document. A record's units segment that
+        document alone, so a destination that already existed would take
+        `replace`/`insert`/`delete` at any line of it, with no passage anyone
+        reviewed: naming a decision log as the destination would authorize
+        deleting an unrelated sentence from it. An unwritten path cannot: its
+        whole content is the `create-document` text the approval covers, and the
+        applier refuses a creation over a document that is there
+        (`apply-create-exists`).
+
+        So the inventory not vouching for this path is the requirement, not an
+        obstacle to work around — and residue belonging in a document that does
+        exist stays what it was before this route existed: unplaceable under this
+        record, needing its own record and its own approval.
+
+        Confinement is not re-derived here: `paths.authorize_path` is the single
+        owner of path safety, and it already reasons about unwritten
+        create-document targets (canonical spelling, containment in a declared
+        root, no symlinked component, no case-folded collision, documentation
+        class). The approval set authorizes the same path through the same
+        function before an applier ever sees it; this is the audit-time half, so
+        a record that could never be applied is never minted in the first place.
+
+        The rest are the registry's and the repository's: the registry
+        classifies the path — closed-world, so a path no rule claims is refused
+        rather than assumed living — the kind it assigns must be one content
+        durably lives in, and the path must be free both in the index and *on
+        disk*, since a file the inventory does not claim is still a file a
+        creation would land on and the index may predate it.
+        """
+        repo_root, registry = self.index.repo_root, self.index.registry
+        if repo_root is None or registry is None:
+            self.bad("bloat-destination-uncheckable",
+                     f"this index is missing the repository it was built from "
+                     f"or its registry, so whether {destination!r} could hold a "
+                     f"new document is unanswerable — and an unanswered safety "
+                     f"question is a refusal", where)
+            return None
+
+        if destination == source:
+            self.bad("bloat-destination-is-source",
+                     f"{destination} is the planning artifact being distilled — "
+                     f"its residue cannot be the document the same record "
+                     f"retires", where)
+            return None
+
+        authorization = authorize_path(
+            destination, repo_root=repo_root, roots=registry.roots,
+            target_class=DOCUMENTATION,
+        )
+        if not authorization.authorized:
+            self.bad("bloat-destination-unauthorized",
+                     f"{destination!r} cannot be a residue document: "
+                     f"{authorization.problem.message}", where)
+            return None
+
+        reason, rule = residue_destination_ineligibility(registry, destination)
+        if reason == "unclassified":
+            self.bad("bloat-destination-unclassified",
+                     f"no registry rule claims {destination!r} as documentation "
+                     f"— classification is closed-world, so a residue document "
+                     f"at an unclassified path would be born outside the corpus "
+                     f"every later audit reads", where)
+            return None
+        if reason == "kind-ineligible":
+            self.bad("bloat-destination-kind-ineligible",
+                     f"the registry classifies {destination} as a {rule.kind} "
+                     f"document — residue is never authored into one, because "
+                     f"its own lifecycle ends in distillation or retirement and "
+                     f"would take the residue with it", where)
+            return None
+
+        if (self.index.document(destination) is not None
+                or os.path.lexists(os.path.join(repo_root, destination))):
+            self.bad("bloat-destination-occupied",
+                     f"{destination} already exists — a residue destination is "
+                     f"a document this distillation *authors*, so an occupied "
+                     f"path would either be overwritten or take span edits "
+                     f"nobody reviewed a passage of; land the residue there "
+                     f"under its own record instead", where)
+            return None
+
+        return {
+            "path": destination,
+            "kind": rule.kind,
+            "set": rule.doc_set,
+            "selected_by": "model-proposed-residue",
+            "constraints": {
+                "is_inventoried_document": False,
+                "is_authorized_new_document": True,
+                "differs_from_source": True,
+                "kind_accepts_content": True,
+                "eligible_kinds": list(DESTINATION_KINDS),
+                "registry_rule": rule.glob,
+            },
+        }
+
+    def _destination_record(self, destination, selected_by, source, where):
+        """Check a destination against every constraint, and record which held."""
+        document = self.index.document(destination)
+        if document is None:
+            self.bad("bloat-destination-not-a-document",
+                     f"{destination!r} is not a document in this repository's "
+                     f"index — content cannot be moved somewhere the registry "
+                     f"does not claim", where)
+            return None
+        if destination == source:
+            self.bad("bloat-destination-is-source",
+                     f"{destination} is the document being judged — a move to "
+                     f"itself changes nothing and would read as an approved "
+                     f"edit", where)
+            return None
+        if document.kind not in DESTINATION_KINDS:
+            self.bad("bloat-destination-kind-ineligible",
+                     f"{destination} is a {document.kind} document — content is "
+                     f"never moved into one, because its own lifecycle ends in "
+                     f"distillation or retirement and would take the moved "
+                     f"content with it", where)
+            return None
+        return {
+            "path": destination,
+            "kind": document.kind,
+            "set": document.doc_set,
+            "selected_by": selected_by,
+            "constraints": {
+                "is_inventoried_document": True,
+                "differs_from_source": True,
+                "kind_accepts_content": True,
+                "eligible_kinds": list(DESTINATION_KINDS),
+            },
+        }
+
+    def _note_contention(self, extra, destination, source):
+        """Record the arbitration when more than one document folds into one.
+
+        The claimant list comes from the index, so every chunk records the same
+        arbitration and the same order rather than each inventing one.
+        """
+        claimants = self.contention.get(destination, ())
+        claim = next((c for c in claimants if c.source == source), None)
+        if claim is not None and len(claimants) > 1:
+            extra["contention"] = {
+                "destination": destination,
+                "order": claim.order,
+                "claimants": [c.source for c in claimants],
+            }
+
+    # -- the rest of the record ----------------------------------------------
+
+    def _duplicate_search(self, path, units):
+        """The record data saying a global search happened and what it saw.
+
+        A finding that says "this is redundant" is making a claim about the
+        whole corpus, and a reader must be able to tell whether the whole corpus
+        was actually consulted. The occurrences are split by side, because that
+        is the question the unit group cannot answer: the group is a
+        deduplicated set of content digests, so `here` is what a reviewer needs
+        to know which copies in *this* document the finding is about, and
+        `elsewhere` is what makes the redundancy claim checkable.
+        """
+        here, elsewhere = [], []
+        for unit in sorted(set(units)):
+            for place in self.index.occurrences_of(unit):
+                (here if place.path == path else elsewhere).append(place.to_dict())
+        return {
+            "scope": "repository",
+            "index_digest": self.index.digest,
+            "documents_searched": len(self.index.documents),
+            "here": here,
+            "elsewhere": elsewhere,
+            "occurrence_count": len(here) + len(elsewhere),
+        }
+
+    def _proposal(self, raw, where, verdict):
+        proposal = raw.get("proposal")
+        if verdict in PROPOSAL_VERDICTS:
+            if not _nonempty(proposal):
+                self.bad("bloat-proposal-required",
+                         f"{verdict} replaces text, so it must carry the "
+                         f"replacement", where)
+                return None
+            return proposal
+        if proposal is not None:
+            self.bad("bloat-proposal-forbidden",
+                     f"{verdict} writes no replacement text, so it carries no "
+                     f"proposal", where)
+        return None
+
+    def _status(self, raw, where, verdict):
+        status = raw.get("status")
+        if verdict == DISTILL:
+            if status not in DISTILL_STATUSES:
+                self.bad("bloat-unknown-status",
+                         f"a {DISTILL} verdict's status must be one of "
+                         f"{list(DISTILL_STATUSES)}, not {status!r} — whether the "
+                         f"work landed decides whether anything may be applied "
+                         f"at all", where)
+                return None
+            return status
+        if status is not None:
+            self.bad("bloat-status-forbidden",
+                     f"only {DISTILL} carries a lifecycle status", where)
+        return None
+
+    def _reject_sample(self, raw, where, scoped, enumeration=None):
+        """A sample is review order. On anything but a bulk scope it is nothing."""
+        sample = raw.get("sample")
+        if sample is None:
+            return
+        if not scoped:
+            self.bad("bloat-sampling-not-authority",
+                     f"{where} is a judgment about one document, so a sample "
+                     f"says nothing — sampling prioritizes review of a bulk "
+                     f"scope and never stands in for reading the subject", where)
+            return
+        if not (isinstance(sample, list) and all(_nonempty(s) for s in sample)):
+            self.bad("bloat-invalid-shape",
+                     f"{where}: sample must be a list of paths", where)
+            return
+        outside = sorted(set(sample) - set(enumeration.members))
+        if outside:
+            self.bad("bloat-sample-outside-scope",
+                     f"{outside} are not in scope {enumeration.rule!r} — a sample "
+                     f"is the part of the scope that was read, so a path outside "
+                     f"it describes review of something this judgment does not "
+                     f"cover", where)
+
+    def _build(self, record_id, verdict, path, units, extra):
+        finding = build_finding(
+            lineage=self.lineage, code=verdict, path=path,
+            units=units, record_id=record_id, extra=extra,
+        )
+        if isinstance(finding, Invalid):
+            self.problems.extend(finding.problems)
+            return ()
+        return (finding,)
+
+
+def record_verdicts(index, lineage, verdicts, chunk=None):
+    """Validate a model's bloat verdicts against the index; build findings.
+
+    Returns a `BloatResult`, or `Invalid` naming every problem in the whole
+    response so one re-prompt can address all of it. Fails closed: any problem
+    records nothing, because a half-trusted set of deletion proposals is one
+    nobody can tell the trustworthy half of.
+
+    `chunk`, when supplied, is the slice the verdicts came from; a verdict about
+    a document outside it is refused. Destinations are deliberately *not* bound
+    that way — a destination outside the slice is the normal case, and the whole
+    reason the index exists.
+    """
+    if not isinstance(verdicts, list):
+        return Invalid((Problem(
+            code="bloat-invalid-shape",
+            message=(
+                f"bloat verdicts must be a list of objects, not "
+                f"{type(verdicts).__name__}"
+            ),
+            location="verdicts",
+        ),))
+
+    recorder = _Recorder(
+        index=index,
+        lineage=lineage,
+        contention=merge_contention(index),
+        in_chunk=set(chunk.documents) if chunk is not None else None,
+    )
+
+    findings = []
+    for position, raw in enumerate(verdicts):
+        findings.extend(recorder.record(raw, f"verdicts[{position}]"))
+
+    if recorder.problems:
+        return Invalid(tuple(recorder.problems))
+
+    return BloatResult(
+        findings=tuple(findings),
+        incomplete=tuple(
+            {"scope": u.scope, "reason": u.reason} for u in index.unexamined
+        ),
+        index_digest=index.digest,
+    )
+
+
+def _nonempty(value):
+    return isinstance(value, str) and value.strip() != ""
+
+
+# --------------------------------------------------------------------------
+# The chunk cache seam
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ChunkCache:
+    """What a chunk can reuse, and what it must still be asked about."""
+
+    hits: Dict[str, tuple]
+    misses: Tuple[str, ...]
+    reasons: Dict[str, str]
+
+    def to_dict(self):
+        return {
+            "hits": {path: list(records) for path, records in sorted(self.hits.items())},
+            "misses": list(self.misses),
+            "reasons": dict(sorted(self.reasons.items())),
+        }
+
+
+def chunk_cache_keys(index, lineage, chunk):
+    """One cache key per document in the chunk.
+
+    A bloat verdict about a document is checked against the rest of the corpus,
+    so the corpus *is* its source evidence: `source_digest` is
+    `index.context_digest(path)` — the part of the corpus that bears on this
+    document, rather than the whole index. Anything that could have changed the
+    judgment moves it or a lineage field, and so moves the key.
+
+    Note that #64's lineage already carries `inventory_digest`, which moves on
+    any corpus edit at all, so today the narrower digest buys no extra hits. It
+    is still the honest description of what a cached bloat verdict was judged
+    against — a cache entry that names a different context slice is
+    `MISS_IDENTITY` rather than a false hit — and it is what a later slice would
+    need in order to narrow the lineage without re-deriving this rule.
+    """
+    return {
+        path: cache_key(
+            index.document(path).document_digest, index.context_digest(path), lineage
+        )
+        for path in chunk.documents
+    }
+
+
+def load_chunk(cache_dir, repo_root, index, lineage, chunk,
+               registry_path=DEFAULT_REGISTRY_PATH):
+    """Split a chunk into what is already known and what must be re-judged."""
+    hits, misses, reasons = {}, [], {}
+    for path, key in chunk_cache_keys(index, lineage, chunk).items():
+        result = cache_get(cache_dir, key, repo_root=repo_root,
+                           registry_path=registry_path)
+        if result.hit:
+            hits[path] = tuple(result.record.get("records", ()))
+        else:
+            misses.append(path)
+            reasons[path] = result.reason
+    return ChunkCache(hits=hits, misses=tuple(sorted(misses)), reasons=reasons)
+
+
+def store_chunk(cache_dir, index, lineage, chunk, results):
+    """Store one chunk's per-document results.
+
+    `results` maps each document in the chunk to the finding records produced
+    for it — an empty list is a real answer ("judged, nothing found") and is
+    stored as such, so a clean document is not re-judged on every run. A
+    document outside the chunk is refused: its result was produced under a
+    different slice, and storing it here would key it to the wrong evidence.
+    """
+    keys = chunk_cache_keys(index, lineage, chunk)
+    outside = sorted(set(results) - set(keys))
+    if outside:
+        raise ValueError(
+            f"{outside} are not in chunk {chunk.chunk_id} — a chunk stores only "
+            f"the documents it was given"
+        )
+    written = {}
+    for path, records in sorted(results.items()):
+        records = list(records)
+        written[path] = cache_put(cache_dir, keys[path], {
+            "id": f"BLOAT-CHUNK:{path}",
+            "digest": sha256_canonical({
+                "schema_version": ARTIFACT_SCHEMA_VERSION,
+                "path": path,
+                "records": records,
+            }),
+            "code": "bloat-chunk-result",
+            "path": path,
+            "records": records,
+        }, evidence_sources=("context-index",))
+    return written

@@ -1,0 +1,257 @@
+# doc-audit — read-only scheduled audit, rebuilt on the new engine (aj604/toolshed#71).
+# Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill, alongside (not instead
+# of) doc-sync.yml: this is the new engine's audit lane, landed while the legacy drift/bloat
+# lanes stay live (aj604/toolshed#57's shadow-mode gate, #76, decides when they retire — #77).
+#
+# Two jobs, split strictly by trust, per the re-architecture's scheduler-adapter contract:
+# `audit` executes the model with `contents: read` and no credential at all (checkout drops
+# persist-credentials, no GH_TOKEN reaches it) and calls the engine's own public CLI —
+# `drift-plan` (deterministic scope), then `drift-audit` (the validated report) — never owning
+# a lifecycle rule of its own. `publish` runs no model and holds no write scope at all today
+# (`contents: read` only) — it consumes only the validated report artifact `audit` produced and
+# renders the run's job summary. It is still its own job, never folded into `audit`: the
+# moment this lane needs any GitHub write to publish more than a job summary, that write lands
+# here, never in the model's job — never `contents: write`, never a PR, never a commit. A run
+# that produced no report at all, or one whose lineage no longer matches the repository, is
+# rendered as its own typed outcome — never a misleading empty result
+# (render-audit-summary.py owns every one of those strings; see its docstring for the full
+# state table). Cost/turn/duration figures ride along as observability only: they never narrow
+# the declared scope `drift-plan` already committed to before the model ran a single turn.
+#
+# Design: the distilled-decisions comment on aj604/toolshed#57 (2026-07-26); this workflow's
+# ticket is aj604/toolshed#71.
+name: doc-audit
+
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch: {}
+
+# Least privilege by default; each job widens only what it needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: doc-audit
+  cancel-in-progress: false
+
+jobs:
+  # Read-only model job: it emits a validated drift report as an artifact and nothing else. No
+  # write-capable credential reaches this job at all — not a token, not a persisted checkout
+  # credential.
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # claude-code-action OAuth exchange only — not repo write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # anchor/evidence checks read file history
+          persist-credentials: false   # no write-capable credential in a model job
+
+      # Pin the plugin marketplace to the installed release, exactly as doc-sync.yml does — the
+      # skills a model step executes must be frozen at the vendored wiring's version. See that
+      # file's Pin step for the full rationale (claude-code-action rejects a `…#v<version>`
+      # ref-pinned URL; the durable pin is a local checkout of the release tag).
+      - name: Pin plugin marketplace
+        run: |
+          set -euo pipefail
+          VERSION=$(cat .github/doc-sync/installed-version)
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch "v${VERSION}" \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
+
+      # Deterministic — no model. The engine (vendored at .github/doc-sync/engine/, same as
+      # every other engine call this lane makes) derives the scope from the registry alone, so
+      # a reader can re-derive what this run examined instead of trusting it.
+      # `continue-on-error` + `steps.plan.outcome` (not a hand-rolled exit-code capture) gates
+      # the model step below: an invalid registry is itself the typed outcome the audit step
+      # further down reports, never a silent stop, and never a branch decision hidden in shell.
+      - name: Plan the audit scope (deterministic — no model)
+        id: plan
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/engine/doc-lifecycle.py drift-plan --repo . --mode full \
+            > drift-plan.json
+
+      # Model step run via the official runner (anthropics/claude-code-action) — it owns Claude
+      # Code install, plugin setup, and auth. Auth prefers the OAuth token (created by
+      # /install-github-app); an unset secret renders empty and the action treats empty as
+      # absent, so ANTHROPIC_API_KEY alone also works. The allowedTools list is ergonomics, not
+      # the boundary — the job's read-only permissions and credential-free checkout are.
+      #
+      # The output contract here is the *new* engine's per-unit verdicts shape
+      # (doclifecycle/drift.py's `load_verdicts`), not the legacy detecting-doc-drift skill's
+      # wrapped claim/location/fix records — the skill has not been migrated to the new
+      # document model yet (issue #57's tree has no ticket for that), so the shape is spelled
+      # out here in full rather than left to a skill whose stated contract would be wrong for
+      # this lane. The skill is still useful for verification method (tiers, escalation), which
+      # is why it is invoked for procedure and overridden for output shape.
+      - name: Audit documentation drift (headless, full corpus)
+        if: steps.plan.outcome == 'success'
+        id: model
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
+          plugins: doc-lifecycle@toolshed
+          prompt: >-
+            Use the doc-lifecycle:detecting-doc-drift skill's verification method (tiers,
+            escalation, "verified means you ran the command") to audit this repository's
+            documentation, but write your answer in the *engine's* verdicts shape, not that
+            skill's — this run validates through `python3 .github/doc-sync/engine/doc-lifecycle.py
+            drift-audit`, whose --verdicts contract is:
+            {"documents": [{"path": <doc path from drift-plan.json>, "status": "ok",
+            "verdicts": [{"unit": <unit digest>, "assertion_class":
+            "factual"|"normative"|"rationale"|"non-assertive", "verdict":
+            "VERIFIED"|"STALE"|"UNVERIFIABLE" (omit for non-assertive), "kind":
+            "command"|"path"|"symbol"|"behavior"|"structure"|"value", "tier": 1|2|3,
+            "evidence": {"source": <repo path, required for VERIFIED/STALE>, "line": <int>,
+            "observed": <what you read>}, "fix": <complete replacement line, STALE only>}]}]}.
+            For every document drift-plan.json lists under "documents" with obligation
+            "assertions": run `python3 .github/doc-sync/engine/doc-lifecycle.py segment --repo .
+            --path <path>` to get its assertion units and their digests — use exactly those
+            digests, never invented ones. Classify every unit, and for every "factual" unit reach
+            a verdict with evidence per the shapes above. Documents with obligation "anchor" need
+            no verdicts from you — the engine checks those deterministically. Write the result to
+            verdicts.json in the repository root. A document you could not examine still needs an
+            entry with "status": "failed" and a "reason" — never silently omitted.
+          claude_args: --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
+
+      - name: Extract cost/turn observability (best-effort — never gates the run)
+        if: always()
+        run: |
+          python3 .github/doc-sync/render-audit-summary.py cost \
+            --execution-log "${{ steps.model.outputs.execution_file || '/home/runner/work/_temp/claude-execution-output.json' }}" \
+            --out audit-cost.json
+
+      # The engine's own audit command — the same contract interactive use calls. It
+      # re-derives the plan itself, so a missing verdicts.json (skipped model step, or one that
+      # answered nothing) still yields a validated report: partial about the living documents,
+      # examined about the narrative ones. Captured regardless of exit code — 1 (invalid), 4
+      # (partial), and 0 (clean/findings) are each a legitimate typed report, never a crash.
+      - name: Run the drift audit (engine's public CLI)
+        if: always()
+        run: |
+          set -uo pipefail
+          # No -e: the runner's shell is `bash -e`, and `set -uo pipefail`
+          # does not clear it, so a bare `$?` read after this command would
+          # never run on the very exits that matter — 1 (invalid) and 4
+          # (partial) are each a legitimate typed report drift-audit can
+          # emit (see EXIT_CODES in doclifecycle/cli.py), not a crash to
+          # abort the step on. `|| code=$?` survives `-e`; reading $?
+          # afterward would not.
+          code=0
+          python3 .github/doc-sync/engine/doc-lifecycle.py drift-audit --repo . --mode full \
+            $( [ -f verdicts.json ] && echo "--verdicts verdicts.json" ) \
+            > drift-report.json || code=$?
+          case "$code" in
+            0) echo "drift-audit exit code: 0 (ok/clean/findings — typed report)" ;;
+            1) echo "drift-audit exit code: 1 (invalid — typed report)" ;;
+            4) echo "drift-audit exit code: 4 (partial — typed report)" ;;
+            *)
+              echo "drift-audit exit code: $code (unexpected — not a typed report state)"
+              exit "$code"
+              ;;
+          esac
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: audit-report
+          path: drift-report.json
+          if-no-files-found: ignore
+
+      - name: Upload cost artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: audit-cost
+          path: audit-cost.json
+          if-no-files-found: ignore
+
+  # No model runs in this job, and it holds no write scope at all today. It consumes only the
+  # validated report artifact `audit` produced and renders it as the run's job summary — never
+  # authors a finding, never touches repository content. Kept as its own job (rather than a
+  # final step of `audit`) so any future write this lane needs to publish more than a job
+  # summary lands here, never beside the model.
+  publish:
+    needs: audit
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download report artifact
+        continue-on-error: true   # a hard-failed audit job may have uploaded nothing at all
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: audit-report
+
+      - name: Download cost artifact
+        continue-on-error: true
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: audit-cost
+
+      # Re-check freshness against the live repository: a report is only as good as the state
+      # it still describes, and a rerun of this job alone (long after `audit` ran) must not
+      # present a report the repository has since moved past as if it were current. Skipped
+      # when the artifact is already an `invalid` payload — that shape carries no lineage to
+      # re-check (it is a different contract entirely, `problems` rather than `records`), and
+      # validate-report rejects "status": "invalid" as a report shape it was never meant to
+      # persist (report-invalid-status) rather than re-confirming the original problem.
+      - name: Re-validate freshness before publishing
+        if: hashFiles('drift-report.json') != ''
+        run: |
+          set -uo pipefail
+          # Two independent traps here, both #107: (1) the runner's shell is
+          # `bash -e`, and `set -uo pipefail` does not clear it, so a bare
+          # validate-report call would abort before its typed non-zero exits
+          # (1 invalid, 3 stale, 4 partial) ever reached the `mv` below —
+          # laundering a stale/partial verdict as the original report's
+          # unchanged (and possibly clean-looking) status. `code=0; cmd ||
+          # code=$?` survives -e and the payload is captured regardless.
+          # (2) a step's own exit status is its *last* command's, with or
+          # without -e — `[ -s revalidated.json ] && mv ...` as the last
+          # command would fail the whole step whenever revalidated.json is
+          # empty or absent (validate-report wrote nothing), even though
+          # that is itself a legitimate outcome. A full `if`/`fi` (not a
+          # `&&` short-circuit list) exits 0 when its condition is false.
+          if grep -q '"status":[[:space:]]*"invalid"' drift-report.json; then
+            echo "report is already invalid — nothing to re-validate freshness against"
+          else
+            code=0
+            python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
+              --report drift-report.json --repo . > revalidated.json || code=$?
+            case "$code" in
+              0|1|3|4)
+                echo "validate-report exit code: $code (typed report)"
+                ;;
+              *)
+                echo "validate-report exit code: $code (unexpected — not a typed report state)"
+                exit "$code"
+                ;;
+            esac
+            if [ -s revalidated.json ]; then
+              mv revalidated.json drift-report.json
+            fi
+          fi
+
+      - name: Render job summary
+        if: always()
+        run: |
+          python3 .github/doc-sync/render-audit-summary.py summary \
+            --report drift-report.json \
+            $( [ -f audit-cost.json ] && echo "--cost audit-cost.json" )

@@ -34,6 +34,14 @@ Ownership (total on wiring, idempotent on state):
     .github/doc-sync/drift-waivers.json                          never touched
     (drift-waivers.json is seeded empty when absent — pre-0.11 installs)
 
+    An install that has been through the migration door — one holding a landed
+    .doc-lifecycle/registry.json — also owns the new engine's lanes:
+    .github/workflows/doc-audit.yml                              regenerate, knobs preserved
+    .github/doc-sync/render-audit-summary.py                     overwrite
+    .github/doc-sync/engine/                                     replaced wholesale
+    .doc-lifecycle/registry.json is consumer judgment and is never touched here;
+    the migration door (scheduling-doc-sync's Migration mode) is what produces it.
+
 Exit status: 0 on success; 1 on any error (missing source/installed file, a knob
 that can't be extracted, or a template placeholder the script doesn't know) —
 fail red, never default-guess a consumer's knob.
@@ -81,6 +89,29 @@ SCRIPTS = {
     "validate-drift-output.py": "detecting-doc-drift/scripts",
 }
 
+# The new engine's lanes. Held apart from the legacy wiring above because they are
+# not installable everywhere: both are closed-world over `.doc-lifecycle/registry.json`
+# and would fail on every run in a repository that has not been through the
+# migration door. A landed registry is the one signal that the door was walked, so
+# it is what switches these on — never a flag a caller can assert.
+NEW_LANE_PLACEHOLDERS = {
+    "doc-audit.yml": ["{{AUDIT_CRON}}"],
+}
+
+NEW_LANE_SCRIPTS = {
+    "render-audit-summary.py": "scheduling-doc-sync/scripts",
+}
+
+# Before doc-sync's 03:00 daily, so a nightly reader sees the new lane's report
+# alongside the legacy one's rather than a day behind it.
+DEFAULT_AUDIT_CRON = "0 1 * * *"
+
+# The engine is vendored wholesale rather than script-by-script: it is one package
+# whose modules import each other, so a partially-refreshed tree is a version that
+# was never tested. Copied from the plugin's `engine/` to `.github/doc-sync/engine/`,
+# whose `doc-lifecycle.py` is what both new lanes invoke.
+ENGINE_DIR = "engine"
+
 
 class UpgradeError(Exception):
     """A precondition the upgrade can't proceed past — reported, never guessed around."""
@@ -97,6 +128,32 @@ def _extract(text, regex, what, path):
     if not m:
         raise UpgradeError(f"could not extract {what} from installed {path}")
     return m.group(1)
+
+
+def adopted_registry(repo):
+    """Has this install been through the migration door?
+
+    `.doc-lifecycle/registry.json` is the artifact that door produces and a human
+    lands. The new engine's lanes are closed-world over it, so its presence — not a
+    caller's assertion — is what makes them installable here.
+    """
+    return (repo / ".doc-lifecycle" / "registry.json").is_file()
+
+
+def scripts_for(repo):
+    """The vendored scripts this install owns, legacy plus whatever it has adopted."""
+    scripts = dict(SCRIPTS)
+    if adopted_registry(repo):
+        scripts.update(NEW_LANE_SCRIPTS)
+    return scripts
+
+
+def templates_for(repo):
+    """The workflow templates this install owns, legacy plus whatever it has adopted."""
+    templates = dict(TEMPLATE_PLACEHOLDERS)
+    if adopted_registry(repo):
+        templates.update(NEW_LANE_PLACEHOLDERS)
+    return templates
 
 
 def read_knobs(repo):
@@ -130,14 +187,32 @@ def read_knobs(repo):
         )
         knobs["{{UPGRADE_CRON}}"] = DEFAULT_UPGRADE_CRON
 
+    # Same shape for the new engine's audit lane: an install that adopted the
+    # registry contract before this lane existed has no doc-audit.yml to read a
+    # schedule out of, so it is seeded rather than refused.
+    if adopted_registry(repo):
+        da = wf / "doc-audit.yml"
+        if da.is_file():
+            knobs["{{AUDIT_CRON}}"] = _extract(da.read_text(), CRON_RE, "audit cron", da)
+        else:
+            print(
+                f"warning: {da} absent (install predates the new engine's audit "
+                f"lane); using default audit cron {DEFAULT_AUDIT_CRON!r}",
+                file=sys.stderr,
+            )
+            knobs["{{AUDIT_CRON}}"] = DEFAULT_AUDIT_CRON
+
     return knobs
 
 
-def render_workflows(plugin_root, repo, knobs):
+def render_workflows(plugin_root, repo, knobs, new_lane=False):
     src_dir = plugin_root / "skills" / "scheduling-doc-sync"
     dest_dir = repo / ".github" / "workflows"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    for name, placeholders in TEMPLATE_PLACEHOLDERS.items():
+    templates = dict(TEMPLATE_PLACEHOLDERS)
+    if new_lane:
+        templates.update(NEW_LANE_PLACEHOLDERS)
+    for name, placeholders in templates.items():
         text = _read(src_dir / name)
         for ph in placeholders:
             text = text.replace(ph, knobs[ph])
@@ -150,14 +225,40 @@ def render_workflows(plugin_root, repo, knobs):
         (dest_dir / name).write_text(text)
 
 
-def copy_scripts(plugin_root, repo):
+def copy_scripts(plugin_root, repo, new_lane=False):
     dest = repo / ".github" / "doc-sync"
     dest.mkdir(parents=True, exist_ok=True)
-    for name, subdir in SCRIPTS.items():
+    scripts = dict(SCRIPTS)
+    if new_lane:
+        scripts.update(NEW_LANE_SCRIPTS)
+    for name, subdir in scripts.items():
         src = plugin_root / "skills" / pathlib.PurePosixPath(subdir) / name
         if not src.is_file():
             raise UpgradeError(f"required source script missing: {src}")
         shutil.copyfile(src, dest / name)
+
+
+def copy_engine(plugin_root, repo):
+    """Replace the vendored engine wholesale with the plugin's own tree.
+
+    Wholesale, not file-by-file: the package's modules import each other, so a tree
+    holding this release's `applier.py` beside last release's `approval.py` is a
+    version nobody tested. The destination is emptied first, so a module deleted
+    upstream stops being importable here too — a leftover would shadow nothing and
+    execute anything.
+
+    Byte-for-byte, and never edited in place: `tests/scripts/install-parity_test.py`
+    compares the two trees, which is what makes "the lanes run the engine this repo
+    tests" a checked claim rather than a convention.
+    """
+    src = plugin_root / ENGINE_DIR
+    if not src.is_dir():
+        raise UpgradeError(f"required source engine missing: {src}")
+    dest = repo / ".github" / "doc-sync" / ENGINE_DIR
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__"))
 
 
 def seed_waivers(repo):
@@ -179,14 +280,20 @@ def write_version(repo, target):
 
 
 def apply_upgrade(plugin_root, repo, target):
+    new_lane = adopted_registry(repo)
     knobs = read_knobs(repo)
-    render_workflows(plugin_root, repo, knobs)
-    copy_scripts(plugin_root, repo)
+    render_workflows(plugin_root, repo, knobs, new_lane=new_lane)
+    copy_scripts(plugin_root, repo, new_lane=new_lane)
+    if new_lane:
+        copy_engine(plugin_root, repo)
     seed_waivers(repo)
     write_version(repo, target)
+    workflows = len(templates_for(repo))
+    scripts = len(scripts_for(repo))
+    engine = ", engine (vendored wholesale)" if new_lane else ""
     print(
-        f"regenerated wiring at v{target}: 3 workflows (knobs preserved), "
-        f"{len(SCRIPTS)} scripts, installed-version"
+        f"regenerated wiring at v{target}: {workflows} workflows (knobs "
+        f"preserved), {scripts} scripts{engine}, installed-version"
     )
 
 
