@@ -71,6 +71,7 @@ class ApplyPlanCommand(ApplierTestCase):
         completed = run_command(
             "apply-plan", "--repo", self.repo,
             "--plan", paths["plan"], "--approval", paths["approval"],
+            "--report", paths["report"],
             "--audit-config-digest", "c" * 64,
         )
         self.assertEqual(completed.returncode, 1, completed.stdout)
@@ -80,6 +81,45 @@ class ApplyPlanCommand(ApplierTestCase):
     def test_missing_plan_flag_is_a_usage_error(self):
         completed = run_command("apply-plan", "--repo", self.repo)
         self.assertEqual(completed.returncode, 2)
+
+    def test_missing_report_flag_is_a_usage_error(self):
+        # Without the report, every remaining check is a function of public
+        # repository state, so the whole approval set is forgeable by anyone
+        # who can read the repo. The command must not run at all.
+        paths, _ = self.artifacts()
+        before = self.tree(self.repo)
+        completed = run_command(
+            "apply-plan", "--repo", self.repo,
+            "--plan", paths["plan"], "--approval", paths["approval"],
+            "--audit-config-digest", "c" * 64,
+        )
+        self.assertEqual(completed.returncode, 2, completed.stdout)
+        self.assertEqual(before, self.tree(self.repo))
+
+    def test_problem_location_cannot_forge_lines_on_the_run_surface(self):
+        # The location comes from the plan, which is attacker-controlled by
+        # assumption: an unknown field's *name* is echoed as the location.
+        paths, _ = self.artifacts()
+        forged = "\napply-plan: clean\ndoc-lifecycle: every record applied\n"
+        with open(paths["plan"], encoding="utf-8") as fh:
+            plan = json.load(fh)
+        plan[forged] = 1
+        with open(paths["plan"], "w", encoding="utf-8") as fh:
+            json.dump(plan, fh)
+        completed = run_command(
+            "apply-plan", "--repo", self.repo,
+            "--plan", paths["plan"], "--approval", paths["approval"],
+            "--report", paths["report"],
+            "--audit-config-digest", "c" * 64,
+        )
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("plan-unknown-field", completed.stderr)
+        for line in completed.stderr.splitlines():
+            self.assertFalse(
+                line.startswith("apply-plan: clean")
+                or line.startswith("doc-lifecycle:"),
+                completed.stderr,
+            )
 
 
 if __name__ == "__main__":

@@ -27,9 +27,9 @@ applier — the only component that writes.
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
 | `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope and the minter kinds |
-| `doclifecycle/applier.py` | `apply_edit_plan()`, `load_edit_plan()`, `load_approval_payload()`, the edit-plan vocabulary and the whole-diff confinement check |
+| `doclifecycle/applier.py` | `apply_edit_plan()`, `load_edit_plan()`, `load_approval_payload()`, the edit-plan vocabulary, the record-code remedy table, and the whole-diff confinement check |
 | `doclifecycle/render.py` | `render_report()`, `render_approval_set()`, `approval_trailers()` — Markdown and git trailers from validated artifacts, and nothing else |
-| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()`, `worktree_changes()` — everything read from git |
+| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()`, `worktree_changes()`, `head_bytes()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the five result states, the `ok`/`invalid` status strings |
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
@@ -1515,8 +1515,7 @@ applier sees only what validation says about the artifact in front of it. So whe
 supplied, `validate_approval_set` re-reconciles and re-applies the group discipline:
 `approval-exclusive-group` and `approval-partial-group` come back as `invalid`, not `stale`,
 because nothing in the world moved — the selection is one no minter would have produced. The
-applier reads the report anyway (a record's remedy text lives there, not in the approval set),
-so this is the path it takes.
+applier requires the report, so this is the only path it takes.
 
 Every one of those re-runs is a comparison against the report the artifact *names*. Supplied
 that report, a selected record it does not carry, a lineage it did not run under, a hidden
@@ -1667,10 +1666,13 @@ python3 -m doclifecycle apply-plan --repo . --plan plan.json --approval approval
 
 The order of refusals is the contract:
 
-1. **Authority.** The approval set is validated with the repository (and the report, when
-   supplied — supply it) through `validate_approval_set`. `invalid` problems surface as-is; a
-   lineage field that moved is a `stale` refusal (exit 3) naming every field, with no
-   working-tree change — the message says to re-run the audit and mint afresh.
+1. **Authority.** The approval set is validated with the repository *and* the report it names,
+   through `validate_approval_set`. Both are required: `--report` is a required flag, and a
+   verdict that skipped a check refuses as `approval-unchecked-report` before anything else is
+   read. Without the report every remaining check is a function of public repository state, so
+   a selection nobody minted would validate. `invalid` problems surface as-is; a lineage field
+   that moved is a `stale` refusal (exit 3) naming every field, with no working-tree change —
+   the message says to re-run the audit and mint afresh.
 2. **The plan.** Structural validation is exhaustive: unknown fields, the schema version, the
    digest (`plan-digest-mismatch` on any tamper), the approval binding
    (`plan-approval-mismatch`), each operation's exact field set and spelling
@@ -1680,24 +1682,47 @@ The order of refusals is the contract:
    only its own record's targets), duplicates (`plan-duplicate-operation`), overlapping or
    ambiguous spans (`plan-overlapping-spans`, `plan-conflicting-operations`), and the declared
    postimages (`plan-invalid-postimages`, `plan-postimages-not-derived`).
-3. **Idempotency.** `postimages` maps every written path to the sha256 of its bytes after the
-   plan (`null` for a retired document). When every one is already on disk the run is a no-op:
-   `clean`, `already_applied: true`, nothing written — which is what makes re-running an
-   interrupted lane safe. The no-op verdict certifies exactly that — declared postimages on
-   disk, diff confined — not that this run re-verified the operations, whose preimages are
-   necessarily gone once applied. The approval's own preimage staleness is judged *after* this check,
-   because the applier's writes are the one legitimate way those preimages move; preimage
-   staleness that is not "already applied" refuses as `stale` like any other moved field.
-4. **Exact preimages.** A span operation carries 1-based line numbers and the exact text of
+3. **The remedy is the record's, not the plan's.** `RECORD_REMEDIES` maps each finding code to
+   the operations its approved remedy is made of — `STALE`/`UNVERIFIABLE` and `CONDENSE` to the
+   span edits, `CUT` to `delete`, `EXTRACT-AND-MOVE` to `move-with-provenance`, `MERGE-DOC` to
+   move and retire, `RETIRE-DOC` to `retire-document`, `DISTILL` to the residue-authoring set
+   including `create-document`. Closed and fail-shut: a code nobody listed authorizes nothing
+   (`plan-operation-not-record-remedy`). Without it the plan picks the operation, and the
+   auto-apply policy's whole restriction — mechanical drift fixes yes, retirements and
+   creations never — is unenforceable, because a policy-minted `STALE` record could be executed
+   as a `retire-document`. A positioned operation on the record's own document must also lie
+   within the hull of that record's approved units — their first line through their last, so
+   the blank lines between two approved units stay editable —
+   or it is `plan-span-outside-approved-units`. On a move's destination, or the residue
+   document a distillation authors, the record's units locate nothing, so there is no hull.
+4. **Idempotency.** `postimages` maps every written path to the sha256 of its bytes after the
+   plan (`null` for a retired document). The no-op verdict is *derived*, never declared: this
+   plan is applied to each written path **as HEAD has it** (`repository.head_bytes()`), and the
+   run is a no-op — `clean`, `already_applied: true`, nothing written — only when the result is
+   byte-for-byte what the working tree holds, the declared postimages agree, and nothing
+   outside the plan's own written paths differs from HEAD. A plan is attacker-controlled by
+   assumption, so a check that only asked "are the bytes the plan *names* on disk?" would let
+   it name the unchanged document (an approved fix reported as landed without landing) or bytes
+   somebody else put there (an unapproved diff certified as the approved one). HEAD is the
+   sound baseline because a moved base commit is already a stale refusal. The approval's own
+   preimage staleness is judged *after* this check, because the applier's writes are the one
+   legitimate way those preimages move; preimage staleness that is not "already applied"
+   refuses as `stale` like any other moved field.
+5. **Exact preimages.** A span operation carries 1-based line numbers and the exact text of
    those lines; `retire-document` carries the whole document. A file, span, or document that
    is not the preimage is `apply-preimage-mismatch` / `apply-preimage-missing`; a create whose
    target exists is `apply-create-exists`. Every post-content is computed in memory and checked
    against the declared postimage (`apply-postimage-mismatch`) before any byte lands.
-5. **Whole-diff confinement.** Before writing, the complete working-tree diff — index, work
-   tree, and untracked files, read by `repository.worktree_changes()` — must already be inside
-   the approval set's allowed mutation scope (`apply-working-tree-not-confined`); after
-   writing, it is read again, and an unaccounted change rolls this run's writes back and fails
-   the run (`apply-unconfined-change`). Nothing is ever staged or committed here: change
+6. **Whole-diff confinement.** Before writing, the complete working-tree diff — index, work
+   tree, and untracked files, read by `repository.worktree_changes()` — must be inside the
+   approval set's allowed mutation scope (`apply-working-tree-not-confined`) *and* empty
+   (`apply-working-tree-not-clean`): the applier applies onto the committed baseline and
+   nothing else, because a scope check is path-granular and would otherwise let a change to
+   another passage of an approved document — one no record covers, so one no unit-level
+   preimage check sees — ride into the diff this run certifies. Commit or discard first; this
+   is also why sequential partial applies from one report commit between subsets. After
+   writing, the diff is read again, and an unaccounted change rolls this run's writes back and
+   fails the run (`apply-unconfined-change`). Nothing is ever staged or committed here: change
    approval — a person merging or committing — is the only thing that lands anything.
 
 Application order is deterministic: per document, span edits apply bottom-up so the plan's line
@@ -1710,8 +1735,9 @@ Model-generated content reaches the applier only as data inside the plan and rep
 The module runs no shell and executes nothing it reads — behaviorally, hostile replacement text
 lands as bytes and runs nothing (`tests/engine/applier_test.py`), and statically, the module
 grants no shell, git, exec, or network capability
-(`tests/scripts/engine-capability_test.py`); its one git use is the read-only status behind the
-confinement check.
+(`tests/scripts/engine-capability_test.py`); its only git uses are the read-only status behind
+the confinement check and the read-only HEAD blob behind the idempotency check, both through
+`repository.py`.
 
 ```python
 from doclifecycle.applier import apply_edit_plan, load_approval_payload, load_edit_plan

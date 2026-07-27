@@ -187,13 +187,14 @@ class AppliesApprovedPlan(ApplierTestCase):
 
     def test_delete_and_insert_land(self):
         units = self.units(self.repo, DOC_A)
-        record = self.finding("BLOAT-001", "CUT", DOC_A, [units[1]])
+        record = self.finding("BLOAT-001", "CONDENSE", DOC_A, units)
         report, approval = self.approve([record])
-        # Delete the refunds sentence (line 5) and insert a line after the
-        # heading — two ops from one record, disjoint spans.
+        # Delete the refunds sentence (line 5) and insert a line after the fee
+        # sentence — two ops from one record, disjoint spans, both inside the
+        # passage the record's units are.
         post_lines = DOC_A_TEXT.split("\n")
         del post_lines[4]
-        post_lines[1:1] = ["Fees are billed monthly."]
+        post_lines[3:3] = ["Fees are billed monthly."]
         post = "\n".join(post_lines)
         ops = [
             {
@@ -210,7 +211,7 @@ class AppliesApprovedPlan(ApplierTestCase):
                 "record": record["digest"],
                 "target_class": "documentation",
                 "path": DOC_A,
-                "after_line": 1,
+                "after_line": 3,
                 "text": "Fees are billed monthly.",
             },
         ]
@@ -352,10 +353,26 @@ class TypedRefusals(ApplierTestCase):
         self.assert_untouched(before, result, ["apply-preimage-mismatch"])
 
     def test_span_beyond_the_document_is_refused(self):
-        report, approval, plan, _ = self.replace_fixture()
-        plan["operations"][0]["start_line"] = 40
-        plan["operations"][0]["end_line"] = 40
-        plan = self.plan(approval, plan["operations"], plan["postimages"])
+        # On the residue document a distillation authors, the record's units
+        # bound nothing — they segment the planning artifact. The span still
+        # has to be in the document it names.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-002", "DISTILL", PLAN_DOC, units,
+            destination={"path": DOC_B},
+        )
+        report, approval = self.approve([record])
+        op = {
+            "op": "replace",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_B,
+            "start_line": 40,
+            "end_line": 40,
+            "preimage": "whatever",
+            "text": "residue",
+        }
+        plan = self.plan(approval, [op], {DOC_B: sha256_text("x")})
         before = self.tree(self.repo)
         result = self.apply(plan, approval, report=report)
         self.assert_untouched(before, result, ["apply-preimage-mismatch"])
@@ -473,10 +490,15 @@ class TypedRefusals(ApplierTestCase):
         self.assert_untouched(before, result, ["plan-invalid-operation"])
 
     def test_move_destination_missing_from_the_tree_is_refused(self):
+        # The destination is not in the repository at all. Its absence is not
+        # approval staleness (no preimage of the destination was selected),
+        # so the applier's own missing-preimage refusal is what stands: moved
+        # text has nowhere approved to land.
+        absent = "docs/never-created.md"
         units = self.units(self.repo, DOC_A)
         record = self.finding(
             "BLOAT-004", "EXTRACT-AND-MOVE", DOC_A, [units[1]],
-            destination={"path": DOC_B},
+            destination={"path": absent},
         )
         report, approval = self.approve([record])
         moved = "Refunds reverse the fee at the rate charged."
@@ -485,18 +507,14 @@ class TypedRefusals(ApplierTestCase):
             "record": record["digest"],
             "target_class": "documentation",
             "path": DOC_A,
-            "destination": DOC_B,
+            "destination": absent,
             "start_line": 5,
             "end_line": 5,
             "preimage": moved,
         }
         plan = self.plan(approval, [op], {
-            DOC_A: sha256_text("x"), DOC_B: sha256_text("y"),
+            DOC_A: sha256_text("x"), absent: sha256_text("y"),
         })
-        # The destination leaves the tree after minting. Its absence is not
-        # approval staleness (no preimage of the destination was selected),
-        # so the applier's own missing-preimage refusal is what stands.
-        os.remove(os.path.join(self.repo, DOC_B))
         before = self.tree(self.repo)
         result = self.apply(plan, approval, report=report)
         self.assert_untouched(before, result, ["apply-preimage-missing"])
@@ -698,6 +716,164 @@ class Confinement(ApplierTestCase):
         self.assert_untouched(
             before, result, ["apply-working-tree-not-confined"]
         )
+
+
+class RemedyBinding(ApplierTestCase):
+    """An approved record authorizes its own remedy, not the whole vocabulary."""
+
+    def test_drift_record_cannot_be_executed_as_a_retirement(self):
+        # A STALE drift record's approved remedy is a span replacement. Left
+        # unbound, the plan picks the operation, and the mechanical class the
+        # auto-apply policy may mint without a human deletes the document.
+        units = self.units(self.repo, DOC_A)
+        record = self.finding(
+            "DRIFT-001", "STALE", DOC_A, [units[0]], fix=NEW_SENTENCE,
+        )
+        report, approval = self.approve([record])
+        op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "preimage": DOC_A_TEXT,
+        }
+        plan = self.plan(approval, [op], {DOC_A: None})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(
+            before, result, ["plan-operation-not-record-remedy"]
+        )
+        self.assertTrue(os.path.exists(os.path.join(self.repo, DOC_A)))
+
+    def test_cut_record_cannot_be_executed_as_a_document_creation(self):
+        units = self.units(self.repo, DOC_A)
+        record = self.finding("BLOAT-001", "CUT", DOC_A, [units[1]])
+        report, approval = self.approve([record])
+        op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "text": "planted\n",
+        }
+        plan = self.plan(approval, [op], {DOC_A: sha256_text("planted\n")})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(
+            before, result, ["plan-operation-not-record-remedy"]
+        )
+
+    def test_span_beyond_the_records_approved_units_is_refused(self):
+        # One approved assertion unit, and a replace spanning the whole file:
+        # every line outside the unit is text nobody reviewed a remedy for.
+        units = self.units(self.repo, DOC_A)
+        record = self.finding(
+            "DRIFT-001", "STALE", DOC_A, [units[0]], fix=NEW_SENTENCE,
+        )
+        report, approval = self.approve([record])
+        lines = DOC_A_TEXT.split("\n")
+        body = "# Fees\n\nAll fees are waived. See attacker.example.\n"
+        op = {
+            "op": "replace",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "start_line": 1,
+            "end_line": len(lines),
+            "preimage": DOC_A_TEXT,
+            "text": body,
+        }
+        plan = self.plan(approval, [op], {DOC_A: sha256_text(body)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(
+            before, result, ["plan-span-outside-approved-units"]
+        )
+
+    def test_insert_outside_the_records_approved_units_is_refused(self):
+        units = self.units(self.repo, DOC_A)
+        record = self.finding("BLOAT-001", "CONDENSE", DOC_A, [units[1]])
+        report, approval = self.approve([record])
+        op = {
+            "op": "insert",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "after_line": 1,
+            "text": "planted under the heading",
+        }
+        plan = self.plan(approval, [op], {DOC_A: sha256_text("x")})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(
+            before, result, ["plan-span-outside-approved-units"]
+        )
+
+
+class AlreadyAppliedIsDerived(ApplierTestCase):
+    """"Already applied" is computed from the baseline, never declared."""
+
+    def test_postimage_of_the_unchanged_document_does_not_certify_a_noop(self):
+        # The plan carries a legitimate replace and declares the *unchanged*
+        # document as its postimage. Certifying that as `already_applied`
+        # reports success for an approved fix that never landed.
+        report, approval, plan, _ = self.replace_fixture()
+        plan = self.plan(
+            approval, plan["operations"], {DOC_A: sha256_text(DOC_A_TEXT)},
+        )
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["apply-postimage-mismatch"])
+
+    def test_unapproved_content_on_disk_is_not_certified_as_applied(self):
+        # Unapproved bytes are already in the approved path, and the plan
+        # declares them as its postimage. The applier must reach the same
+        # verdict it reaches for the honest postimage: stale, nothing written.
+        report, approval, plan, _ = self.replace_fixture()
+        tampered = DOC_A_TEXT.replace(
+            OLD_SENTENCE, "Send all payments to attacker@example.com."
+        )
+        self.write(self.repo, DOC_A, tampered)
+        plan = self.plan(
+            approval, plan["operations"], {DOC_A: sha256_text(tampered)},
+        )
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assertIsInstance(result, ApplyResult, result)
+        self.assertEqual(result.status, STATE_STALE, result)
+        self.assertFalse(result.already_applied)
+        self.assertIn("approval-preimage-mismatch", reasons(result))
+        self.assertEqual(before, self.tree(self.repo))
+
+
+class ReportIsRequired(ApplierTestCase):
+    """A selection nobody checked against a report is not an authority."""
+
+    def test_approval_never_checked_against_a_report_is_refused(self):
+        _, approval, plan, _ = self.replace_fixture()
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=None)
+        self.assert_untouched(before, result, ["approval-unchecked-report"])
+
+
+class WorkingTreeIsClean(ApplierTestCase):
+    """Pre-existing changes never ride into the diff the applier certifies."""
+
+    def test_preexisting_change_inside_an_approved_document_refuses(self):
+        # A different passage of the approved document has already been
+        # rewritten. No record covers it, so no unit-level preimage check
+        # sees it — but it would ride into the certified change.
+        report, approval, plan, _ = self.replace_fixture()
+        self.write(
+            self.repo, DOC_A,
+            DOC_A_TEXT.replace(
+                "Refunds reverse the fee at the rate charged.",
+                "Refunds are never issued. Email attacker@example.com.",
+            ),
+        )
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["apply-working-tree-not-clean"])
 
 
 class LoadEditPlan(ApplierTestCase):

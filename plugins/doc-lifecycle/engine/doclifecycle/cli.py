@@ -629,10 +629,11 @@ def _parser():
         help="repository root (default: the current directory)",
     )
     apply_plan.add_argument(
-        "--report", default=None,
+        "--report", required=True,
         help=(
-            "the report the approval set was minted from; supply it so the "
-            "selection is checked against the records it names"
+            "the report the approval set was minted from — required, so the "
+            "selection is checked against the records it names rather than "
+            "against public repository state anyone could re-derive"
         ),
     )
     apply_plan.add_argument(
@@ -677,10 +678,15 @@ def _explain(result):
 
     A CI log or terminal reader must not have to parse the payload to learn why
     a run is invalid, stale, or partial.
+
+    A location is quoted, exactly as the messages quote what they echo: it can
+    be a field name off an artifact this engine did not write, and a raw one
+    carrying newlines would let that artifact write its own lines onto the run
+    surface — where a forged "clean" is read as a verdict.
     """
     if isinstance(result, Invalid):
         for problem in result.problems:
-            where = f" [{problem.location}]" if problem.location else ""
+            where = f" [{problem.location!r}]" if problem.location else ""
             print(f"{problem.code}: {problem.message}{where}", file=sys.stderr)
     else:
         # Every artifact that can go stale says which field moved — a report

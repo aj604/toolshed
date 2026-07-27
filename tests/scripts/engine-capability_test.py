@@ -45,8 +45,13 @@ class ApplierGrantsNoCapability(unittest.TestCase):
             self.assertNotIn(needle, self.source, needle)
 
     def test_git_reads_come_from_the_repository_module(self):
-        # The one git touchpoint is the imported read-only status listing.
-        self.assertIn("from .repository import worktree_changes", self.source)
+        # The git touchpoints are imported read-only reads and nothing else:
+        # the status listing behind the confinement check, and the committed
+        # bytes the idempotency check derives its answer from.
+        self.assertIn(
+            "from .repository import head_bytes, worktree_changes",
+            self.source,
+        )
 
 
 if __name__ == "__main__":

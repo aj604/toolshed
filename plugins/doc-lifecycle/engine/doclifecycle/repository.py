@@ -51,7 +51,7 @@ def _problem(repo_root, detail):
     )
 
 
-def _run(repo_root, *args, raw=False):
+def _run(repo_root, *args, raw=False, binary=False):
     """Run git in `repo_root`. Returns (exit code, stdout, detail).
 
     The exit code is `None` exactly when git could not be run at all, which is
@@ -66,22 +66,33 @@ def _run(repo_root, *args, raw=False):
     Output is trimmed, because a one-value read wants the value and not the
     newline git ends it with. `raw` is for a *listing*, where the whole listing
     arrives as one string and trimming it would eat leading whitespace from the
-    first path in it — a path git is perfectly willing to track.
+    first path in it — a path git is perfectly willing to track. `binary` is
+    for *file content*, which must arrive as the bytes git stored: decoding it
+    or translating its line endings would make a byte comparison answer about
+    a rendering rather than about the file.
     """
     env = {k: v for k, v in os.environ.items() if k not in REDIRECTING_VARS}
+    empty = b"" if binary else ""
     try:
         result = subprocess.run(
             ["git", "-C", repo_root, *args],
-            capture_output=True, text=True, env=env, timeout=TIMEOUT_SECONDS,
+            capture_output=True, text=not binary, env=env,
+            timeout=TIMEOUT_SECONDS,
         )
     except OSError as exc:
-        return None, "", f"git is not available ({exc.strerror})"
+        return None, empty, f"git is not available ({exc.strerror})"
     except subprocess.TimeoutExpired:
-        return None, "", f"git {args[0]} did not finish in {TIMEOUT_SECONDS}s"
+        return None, empty, f"git {args[0]} did not finish in {TIMEOUT_SECONDS}s"
     if result.returncode != 0:
-        detail = result.stderr.strip().splitlines()
-        return result.returncode, "", detail[0] if detail else f"git {args[0]} failed"
-    return 0, (result.stdout if raw else result.stdout.strip()), None
+        stderr = (
+            result.stderr.decode("utf-8", "replace") if binary
+            else result.stderr
+        )
+        detail = stderr.strip().splitlines()
+        return result.returncode, empty, (
+            detail[0] if detail else f"git {args[0]} failed"
+        )
+    return 0, (result.stdout if (raw or binary) else result.stdout.strip()), None
 
 
 def _git(repo_root, *args, raw=False):
@@ -330,6 +341,39 @@ def worktree_changes(repo_root):
     if detail is not None:
         return None, _problem(repo_root, detail)
     return tuple(sorted({e[3:] for e in out.split("\0") if len(e) > 3})), None
+
+
+def head_bytes(repo_root, path):
+    """(the committed bytes of `path` at HEAD, None), or (None, problem).
+
+    `(None, None)` when HEAD carries nothing at that path — a document that
+    does not exist yet is a fact, and a different one from a failure to look.
+
+    The committed baseline, deliberately: an applier deciding whether a change
+    is already in the working tree has to compare against something the working
+    tree cannot have moved. `ls-tree` first, so "absent" is read off git's own
+    listing rather than guessed from the wording of an error, and so a path
+    that names a directory at HEAD is not fed to `cat-file blob`.
+    """
+    listed, detail = _git(
+        repo_root, "ls-tree", "-z", "--full-name", "HEAD", "--", path, raw=True
+    )
+    if detail is not None:
+        return None, _problem(repo_root, detail)
+    entries = [e for e in listed.split("\0") if e]
+    if not entries:
+        return None, None
+    info, _, name = entries[0].partition("\t")
+    fields = info.split()
+    if name != path or len(fields) < 3 or fields[1] != "blob":
+        # A tree, a submodule, or a spelling git resolved to something else:
+        # none of them is this document's committed content.
+        return None, None
+    code, out, detail = _run(repo_root, "cat-file", "blob", fields[2],
+                             binary=True)
+    if code != 0:
+        return None, _problem(repo_root, detail or "cannot read the blob")
+    return out, None
 
 
 def last_change(repo_root, path):

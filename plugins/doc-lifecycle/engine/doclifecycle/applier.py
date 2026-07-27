@@ -9,31 +9,39 @@ by digest, and the approval set is the sole authority the applier accepts.
 The applier's whole job is refusal discipline around one small write:
 
 - **Authority first.** The approval set is validated against the report it
-  names and the repository it authorizes changes to. A lineage field that moved
-  is a stale refusal naming the field, with no working-tree change; a selection
-  no minter would have produced is invalid.
+  names and the repository it authorizes changes to — both, always: a
+  validation run that skipped a check is refused before anything is read, since
+  every check that does not need the report is a function of public repository
+  state anyone could re-derive. A lineage field that moved is a stale refusal
+  naming the field, with no working-tree change; a selection no minter would
+  have produced is invalid.
 - **Operations are checked, not trusted.** Every operation must come from an
-  approved record, write only that record's own targets, declare a declarable
-  target class, spell its paths canonically (`paths.write_target_problem`, the
-  same owner the approval set uses), carry an exact preimage, and overlap or
-  repeat nothing.
+  approved record, be one of the operations *that record's finding code
+  approves* (`RECORD_REMEDIES`), stay inside the passage that record's units
+  are, write only that record's own targets, declare a declarable target class,
+  spell its paths canonically (`paths.write_target_problem`, the same owner the
+  approval set uses), carry an exact preimage, and overlap or repeat nothing.
 - **The write is total or absent.** Every post-content is computed and checked
   against the plan's declared postimages before any byte lands; any problem
   leaves the tree byte-identical.
-- **The whole diff is confined.** Before and after writing, the complete
-  working-tree diff (index, work tree, and untracked files) is read from git
-  and compared against the approval set's allowed mutation scope. An
-  unaccounted change fails the run — and rolls the applier's own writes back —
-  rather than riding into a commit nobody approved.
-- **Reapplying is idempotent.** A plan whose every postimage is already on disk
-  is a no-op, so re-running an interrupted lane is safe; the applier never
-  stages and never commits — change approval (a person merging or committing)
-  is the only thing that lands anything.
+- **The whole diff is confined.** Before writing, the complete working-tree
+  diff (index, work tree, and untracked files) is read from git and must be
+  both inside the approval set's allowed mutation scope and empty: the applier
+  applies onto the committed baseline, so nothing it did not make can ride into
+  the diff it certifies. After writing it is read again, and an unaccounted
+  change fails the run — rolling the applier's own writes back — rather than
+  riding into a commit nobody approved.
+- **Reapplying is idempotent, and that verdict is derived.** A plan is a no-op
+  when applying it to HEAD reproduces exactly what is on disk, so re-running an
+  interrupted lane is safe and a plan cannot declare its own way out of doing
+  the work; the applier never stages and never commits — change approval (a
+  person merging or committing) is the only thing that lands anything.
 
 Model-generated content reaches this module only as data inside the plan and
 report artifacts: the applier runs no shell, executes nothing it reads, and the
 one external program in the whole flow is git — run read-only, behind
-`repository.worktree_changes`, never from this module.
+`repository.worktree_changes` and `repository.head_bytes`, never from this
+module.
 """
 
 import hashlib
@@ -43,12 +51,13 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
-from .approval import validate_approval_set
+from .approval import UNCHECKED_MEANING, validate_approval_set
 from .digest import sha256_canonical
 from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import DECLARABLE_TARGET_CLASSES, write_target_problem
 from .report import DIGEST, StaleReason
-from .repository import worktree_changes
+from .repository import head_bytes, worktree_changes
+from .segment import segment_document
 from .results import STATE_CLEAN, STATE_STALE, Invalid, Problem
 
 # What the artifact says it is, for the same reason an approval set says so:
@@ -78,8 +87,34 @@ OPERATION_FIELDS = {
               "start_line", "end_line", "preimage"),
 }
 
+# Which operations each finding code's approved remedy is made of. Closed, and
+# closed the fail-shut way: a code nobody listed authorizes nothing, because an
+# approval is approval of a *remedy*, and letting the plan pick the operation
+# would put the choice back with the model. The whole point of the auto-apply
+# policy — mechanical drift fixes yes, retirements and creations never — is
+# unenforceable without this table, since the policy mints records and the plan
+# would otherwise attach any operation to one.
+RECORD_REMEDIES = {
+    # Drift. Both verdicts are about a passage that no longer holds; the
+    # remedy rewrites, removes, or completes that passage, and nothing else.
+    "STALE": (OP_REPLACE, OP_DELETE, OP_INSERT),
+    "UNVERIFIABLE": (OP_REPLACE, OP_DELETE, OP_INSERT),
+    # Bloat.
+    "CUT": (OP_DELETE,),
+    "CONDENSE": (OP_REPLACE, OP_DELETE, OP_INSERT),
+    "EXTRACT-AND-MOVE": (OP_MOVE,),
+    "MERGE-DOC": (OP_MOVE, OP_RETIRE),
+    "RETIRE-DOC": (OP_RETIRE,),
+    # Distillation authors the durable residue and then retires the planning
+    # artifact — the one remedy that legitimately brings a document into being.
+    "DISTILL": (OP_CREATE, OP_REPLACE, OP_INSERT, OP_DELETE, OP_RETIRE),
+}
+
 # The operations that name a line span in an existing document.
 SPAN_OPS = (OP_REPLACE, OP_DELETE, OP_MOVE)
+# Every operation whose position in an existing document is stated, and so can
+# be checked against the passage the record was approved about.
+POSITIONED_OPS = SPAN_OPS + (OP_INSERT,)
 # The operations that claim a whole document, and so tolerate no other
 # operation touching the same path.
 WHOLE_DOCUMENT_OPS = (OP_CREATE, OP_RETIRE)
@@ -122,10 +157,11 @@ class ApplyResult:
     `clean` means the plan's postimages are on disk and the complete
     working-tree diff is inside the approval set's allowed mutation scope —
     whether this run wrote them (`applied` names each operation) or found them
-    already there (`already_applied`, the idempotent re-run — a narrower
-    claim: the declared bytes are present and confined, but the operations
-    that were to produce them were not re-verified, their preimages being
-    necessarily gone once applied). `stale` means the
+    already there (`already_applied`, the idempotent re-run — a narrower claim
+    in that this run wrote nothing, but not a weaker one: the bytes on disk
+    were re-derived by applying the plan to the committed baseline, so they
+    are the operations' own result and not something the plan declared them to
+    be). `stale` means the
     approval expired and nothing was touched; the reasons name every field that
     moved and say to re-run the audit and mint afresh. Anything else about the
     run is `Invalid`, never a weaker success.
@@ -332,7 +368,17 @@ def _binding_problems(i, operation, by_digest, bad):
             f"minted",
             where)
         return
-    if operation["op"] == OP_MOVE:
+    op = operation["op"]
+    allowed = RECORD_REMEDIES.get(record.code, ())
+    if op not in allowed:
+        bad("plan-operation-not-record-remedy",
+            f"operations[{i}] is a {op!r} and record {record.record_id} was "
+            f"approved as {record.code!r}, whose remedy is {list(allowed)} — "
+            f"an approval approves a remedy, so a plan that picks the "
+            f"operation is choosing what was approved after the fact",
+            where)
+        return
+    if op == OP_MOVE:
         if (operation["path"] != record.path
                 or operation["destination"] != record.destination):
             bad("plan-target-not-record-target",
@@ -342,13 +388,102 @@ def _binding_problems(i, operation, by_digest, bad):
                 f"{record.destination!r} — a move writes exactly the two "
                 f"documents its record was approved for",
                 where)
-    elif operation["path"] not in record.targets():
+        return
+    # A retirement retires the document the record is about, and a creation
+    # brings the document the record names as its destination into being.
+    # Neither is a path the other end of the record can stand in for.
+    expected = {
+        OP_RETIRE: (record.path,),
+        OP_CREATE: (record.destination,) if record.destination else (),
+    }.get(op, record.targets())
+    if operation["path"] not in expected:
         bad("plan-target-not-record-target",
             f"operations[{i}] writes {operation['path']!r}, and record "
-            f"{record.record_id} was approved for {list(record.targets())} — "
+            f"{record.record_id} approves a {op!r} of {list(expected)} — "
             f"an operation writes only its own record's targets, so a "
             f"borrowed path is a document nobody approved this edit for",
             where)
+
+
+def _approved_hull(repo_root, record, registry_path):
+    """((first line, last line), None) of a record's approved units, or
+    (None, why not) — the passage a remedy for this record may edit."""
+    segmentation = segment_document(repo_root, record.path, registry_path)
+    if isinstance(segmentation, Invalid):
+        return None, segmentation.problems[0].message
+    approved = set(record.units)
+    lines = [
+        (unit.line, unit.end_line)
+        for unit in segmentation.units if unit.digest in approved
+    ]
+    if not lines:
+        return None, f"none of its units is in {record.path} now"
+    return (min(s for s, _ in lines), max(e for _, e in lines)), None
+
+
+def _approved_span_problems(repo_root, operations, by_digest, registry_path):
+    """Positioned operations, checked against the passage that was approved.
+
+    A record names its target by assertion-unit digest, and those units are a
+    *passage* of the document — so an edit that reaches outside them is an edit
+    to text no reviewer read under this record. The bound is the hull of the
+    approved units (their first line through their last), not each unit
+    exactly: the blank lines and list markers between two approved units are
+    part of the passage, and a remedy that removes two sentences legitimately
+    removes what separated them.
+
+    Only operations on the record's *own* document are bounded this way. A
+    record's units segment that document alone, so on a move's destination —
+    or the residue document a distillation authors — they locate nothing; the
+    path is approved, the postimage is declared, and there is no passage to
+    measure against.
+    """
+    problems = []
+    hulls = {}
+
+    def bad(message, where):
+        problems.append(Problem(
+            code="plan-span-outside-approved-units", message=message,
+            location=where,
+        ))
+
+    for i, operation in enumerate(operations):
+        if operation["op"] not in POSITIONED_OPS:
+            continue
+        record = by_digest[operation["record"]]
+        if operation["path"] != record.path:
+            continue
+        if record.digest not in hulls:
+            hulls[record.digest] = _approved_hull(
+                repo_root, record, registry_path
+            )
+        hull, why = hulls[record.digest]
+        if hull is None:
+            bad(f"operations[{i}] edits {record.path}, and where record "
+                f"{record.record_id}'s approved units are cannot be "
+                f"established: {why} — an unanswered question about the "
+                f"target is a refusal",
+                f"operations[{i}]")
+            continue
+        first, last = hull
+        if operation["op"] == OP_INSERT:
+            point = operation["after_line"]
+            if not first - 1 <= point <= last:
+                bad(f"operations[{i}] inserts after line {point} of "
+                    f"{record.path}, and record {record.record_id} was "
+                    f"approved about lines {first}..{last} — an edit outside "
+                    f"the approved passage is an edit nobody reviewed",
+                    f"operations[{i}]")
+            continue
+        start, end = operation["start_line"], operation["end_line"]
+        if start < first or end > last:
+            bad(f"operations[{i}] edits lines {start}..{end} of "
+                f"{record.path}, and record {record.record_id} was approved "
+                f"about lines {first}..{last} — an approval binds to the "
+                f"passage its units are, so a wider span is text nobody "
+                f"approved a remedy for",
+                f"operations[{i}]")
+    return tuple(problems)
 
 
 def _conflict_problems(operations, bad):
@@ -581,34 +716,58 @@ def _current_bytes(repo_root, path):
         return None, f"cannot be read ({exc.strerror})"
 
 
-def _already_applied(repo_root, postimages):
-    """True when every declared postimage is already on disk.
+def _already_applied(repo_root, operations, postimages):
+    """True when this plan, applied to the committed baseline, is what is on disk.
 
-    A path that is present but not plainly readable is not "already applied":
-    the question is whether the plan's exact bytes are there, and an
-    unanswerable question is a no.
+    Derived, never declared. The plan is attacker-controlled by assumption, so
+    a check that only asks "are the bytes the plan *names* on disk?" lets the
+    plan choose what "already applied" means — it can name the unchanged
+    document (an approved fix reported as landed without landing) or bytes
+    somebody else put there (an unapproved diff certified as the approved one).
+
+    So the question asked here is the one an idempotent re-run actually poses:
+    take each written path as HEAD has it, apply these operations, and see
+    whether the result is byte-for-byte what the working tree holds. HEAD is
+    the right baseline because a moved base commit is already a stale refusal
+    before this runs. The declared postimages are checked too — they are what
+    a reviewer read — but they are the weaker half of the answer.
+
+    Any question that cannot be answered — an unreadable path, a preimage that
+    does not match the baseline — is a no, and the normal path then produces
+    the honest refusal.
     """
+    baseline = {}
+    for path in sorted(_written_paths(operations)):
+        data, problem = head_bytes(repo_root, path)
+        if problem is not None:
+            return False
+        try:
+            baseline[path] = None if data is None else data.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+
+    derived = _compute_postimages(baseline, operations, [])
+    if derived is None:
+        return False
+
     for path, digest in postimages.items():
         data, unreadable = _current_bytes(repo_root, path)
         if unreadable is not None:
             return False
-        if digest is None:
-            if data is not None:
+        expected = derived.get(path)
+        if expected is None or digest is None:
+            if expected is not None or digest is not None or data is not None:
                 return False
-        elif data is None or _sha256(data) != digest:
+            continue
+        if data is None or data.decode("utf-8", "replace") != expected:
+            return False
+        if _sha256(data) != digest:
             return False
     return True
 
 
-def _compute_postimages(repo_root, operations, problems):
-    """{path: new text or None} after every operation, or None with problems.
-
-    Deterministic order: per document, span edits apply bottom-up (so line
-    numbers stay what the plan named), inserts at a boundary apply before a
-    span starting on the same line, and moved text is appended to its
-    destination in (source path, span) order after the destination's own span
-    edits. Every preimage is compared exactly before anything is computed.
-    """
+def _read_texts(repo_root, operations, problems):
+    """{path: current text or None} for every path the plan writes."""
     def bad(code, message, where=None):
         problems.append(Problem(code=code, message=message, location=where))
 
@@ -631,6 +790,24 @@ def _compute_postimages(repo_root, operations, problems):
                 f"{path} is not valid UTF-8 ({exc.reason} at byte "
                 f"{exc.start}), so no preimage can match it",
                 path)
+    return texts
+
+
+def _compute_postimages(texts, operations, problems):
+    """{path: new text or None} after every operation, or None with problems.
+
+    `texts` is the pre-state the operations are computed against — the working
+    tree on the write path, the committed baseline when deciding whether the
+    plan is already applied. Deterministic order: per document, span edits
+    apply bottom-up (so line numbers stay what the plan named), inserts at a
+    boundary apply before a span starting on the same line, and moved text is
+    appended to its destination in (source path, span) order after the
+    destination's own span edits. Every preimage is compared exactly before
+    anything is computed.
+    """
+    def bad(code, message, where=None):
+        problems.append(Problem(code=code, message=message, location=where))
+
     if problems:
         return None
 
@@ -858,9 +1035,10 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
 
     `plan` and `approval_payload` are data — payload dicts, exactly as read
     off disk. Validation is internal so it cannot be skipped, and so the
-    approval set is always checked against the repository (and the `report`,
-    when supplied — supply it: a record's remedy text lives there, and without
-    it the selection is not checked against the records it names).
+    approval set is always checked against the repository *and* the `report`
+    it names. The report is not optional: without it, every remaining check is
+    a function of public repository state, so anyone who can read the repo
+    could hand over a selection nobody ever minted and have it validate.
     """
     approval = validate_approval_set(
         approval_payload, report=report, repo_root=repo_root,
@@ -869,6 +1047,21 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
     )
     if isinstance(approval, Invalid):
         return approval
+
+    if approval.unchecked:
+        return Invalid(tuple(
+            Problem(
+                code=f"approval-unchecked-{check}",
+                message=(
+                    f"the approval set was validated without its {check}: "
+                    f"{UNCHECKED_MEANING[check]} — the applier's whole "
+                    f"authority is this artifact, so a verdict that skipped a "
+                    f"check is not one it may write from"
+                ),
+                location=check,
+            )
+            for check in approval.unchecked
+        ))
 
     invalid = _validate_plan(plan, approval)
     if invalid is not None:
@@ -888,14 +1081,29 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
             stale_reasons=approval.stale_reasons,
         )
 
-    if _already_applied(repo_root, plan["postimages"]):
-        # A verified fact, but a narrower one than an apply: the plan's
-        # declared postimages are byte-for-byte on disk and the diff is
-        # confined — this run did not re-verify the operations that were to
-        # produce them, because their preimages are necessarily gone.
+    operations = plan["operations"]
+    if _already_applied(repo_root, operations, plan["postimages"]):
+        # This plan applied to the committed baseline is exactly what is on
+        # disk, and the diff is confined to the paths the plan writes. A
+        # narrower fact than an apply — this run wrote nothing — but a derived
+        # one: nothing here rests on what the plan declared about itself.
         changed, problem = _confinement_problem(
             repo_root, approval.scope, "apply-working-tree-not-confined"
         )
+        if problem is None:
+            unaccounted = sorted(set(changed) - _written_paths(operations))
+            if unaccounted:
+                problem = Problem(
+                    code="apply-working-tree-not-clean",
+                    message=(
+                        f"the working tree differs from HEAD at "
+                        f"{unaccounted}, which this plan does not write — an "
+                        f"already-applied run certifies the diff as the change "
+                        f"the approval authorized, so a change it did not make "
+                        f"must not ride into it"
+                    ),
+                    location=unaccounted[0],
+                )
         if problem is not None:
             return Invalid((problem,))
         return ApplyResult(
@@ -917,9 +1125,39 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
             stale_reasons=approval.stale_reasons,
         )
 
+    by_digest = {record.digest: record for record in approval.records}
+    spans = _approved_span_problems(
+        repo_root, operations, by_digest, registry_path
+    )
+    if spans:
+        return Invalid(spans)
+
+    # Nothing may already differ from HEAD. The whole-diff confinement check
+    # below is path-granular, so without this a change to another passage of
+    # an approved document — one no record covers, and so one no unit-level
+    # preimage check sees — would ride into the diff this run certifies.
+    changed, problem = _confinement_problem(
+        repo_root, approval.scope, "apply-working-tree-not-confined"
+    )
+    if problem is not None:
+        return Invalid((problem,))
+    if changed:
+        return Invalid((Problem(
+            code="apply-working-tree-not-clean",
+            message=(
+                f"the working tree already differs from HEAD at "
+                f"{list(changed)} — inside the approval set's scope, but "
+                f"produced by something other than this plan. The applier "
+                f"certifies its whole diff as the approved change, so it "
+                f"applies onto the committed baseline and nothing else: "
+                f"commit or discard what is there first"
+            ),
+            location=changed[0],
+        ),))
+
     problems = []
-    operations = plan["operations"]
-    new_texts = _compute_postimages(repo_root, operations, problems)
+    texts = _read_texts(repo_root, operations, problems)
+    new_texts = _compute_postimages(texts, operations, problems)
     if problems:
         return Invalid(tuple(problems))
 
@@ -939,12 +1177,6 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
             ))
     if problems:
         return Invalid(tuple(problems))
-
-    _, problem = _confinement_problem(
-        repo_root, approval.scope, "apply-working-tree-not-confined"
-    )
-    if problem is not None:
-        return Invalid((problem,))
 
     snapshots, created_dirs, failed = _write(repo_root, new_texts)
     if failed is not None:
