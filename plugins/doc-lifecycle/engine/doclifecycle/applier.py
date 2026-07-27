@@ -122,7 +122,10 @@ class ApplyResult:
     `clean` means the plan's postimages are on disk and the complete
     working-tree diff is inside the approval set's allowed mutation scope —
     whether this run wrote them (`applied` names each operation) or found them
-    already there (`already_applied`, the idempotent re-run). `stale` means the
+    already there (`already_applied`, the idempotent re-run — a narrower
+    claim: the declared bytes are present and confined, but the operations
+    that were to produce them were not re-verified, their preimages being
+    necessarily gone once applied). `stale` means the
     approval expired and nothing was touched; the reasons name every field that
     moved and say to re-run the audit and mint afresh. Anything else about the
     run is `Invalid`, never a weaker success.
@@ -555,28 +558,40 @@ def _validate_plan(payload, approval):
 
 
 def _current_bytes(repo_root, path):
-    """The file's bytes, or None when nothing is there.
+    """(the file's bytes or None when nothing is there, problem reason or None).
 
     `lexists` first, so a symlink — even a broken one — is never read through:
-    what it points at is not this repository's document. The caller treats
-    "present but not a plain readable file" as a preimage that cannot match.
+    what it points at is not this repository's document. Present-but-not-a-
+    plain-readable-file is a named refusal, never an empty read: an empty
+    byte string is a value a preimage could legitimately equal, so returning
+    one here would let a retire-document with an empty preimage remove a path
+    nothing ever read.
     """
     full = os.path.join(repo_root, path)
     if not os.path.lexists(full):
-        return None
-    if os.path.islink(full) or not os.path.isfile(full):
-        return b""
+        return None, None
+    if os.path.islink(full):
+        return None, "is a symlink, which is never read through or written"
+    if not os.path.isfile(full):
+        return None, "is not a regular file"
     try:
         with open(full, "rb") as fh:
-            return fh.read()
-    except OSError:
-        return b""
+            return fh.read(), None
+    except OSError as exc:
+        return None, f"cannot be read ({exc.strerror})"
 
 
 def _already_applied(repo_root, postimages):
-    """True when every declared postimage is already on disk."""
+    """True when every declared postimage is already on disk.
+
+    A path that is present but not plainly readable is not "already applied":
+    the question is whether the plan's exact bytes are there, and an
+    unanswerable question is a no.
+    """
     for path, digest in postimages.items():
-        data = _current_bytes(repo_root, path)
+        data, unreadable = _current_bytes(repo_root, path)
+        if unreadable is not None:
+            return False
         if digest is None:
             if data is not None:
                 return False
@@ -599,7 +614,13 @@ def _compute_postimages(repo_root, operations, problems):
 
     texts = {}
     for path in sorted(_written_paths(operations)):
-        data = _current_bytes(repo_root, path)
+        data, unreadable = _current_bytes(repo_root, path)
+        if unreadable is not None:
+            bad("apply-preimage-mismatch",
+                f"{path} {unreadable}, so no preimage can match it and "
+                f"nothing here may write it",
+                path)
+            continue
         if data is None:
             texts[path] = None
             continue
@@ -725,42 +746,53 @@ def _compute_postimages(repo_root, operations, problems):
 
 
 def _write(repo_root, new_texts):
-    """Write every computed post-content. Returns (snapshots, Invalid|None).
+    """Write every computed post-content.
 
-    Snapshots are the pre-write bytes (None for a path that was absent), taken
-    path by path as each is written, so any failure — mid-write or the
-    post-apply confinement check — can put back exactly what was there.
+    Returns (snapshots, created dirs, Invalid|None). Snapshots are the
+    pre-write bytes (None for a path that was absent), taken path by path as
+    each is written, so any failure — mid-write or the post-apply confinement
+    check — can put back exactly what was there; the created directories are
+    recorded so a rolled-back create leaves no empty tree behind.
     """
-    snapshots = {}
+    snapshots, created_dirs = {}, []
     path = None
     try:
         for path in sorted(new_texts):
             full = os.path.join(repo_root, path)
-            snapshots[path] = _current_bytes(repo_root, path)
+            data, unreadable = _current_bytes(repo_root, path)
+            if unreadable is not None:
+                # Checked before anything was computed; only a race gets here.
+                raise OSError(f"{path} {unreadable}")
+            snapshots[path] = data
             text = new_texts[path]
             if text is None:
                 os.remove(full)
                 continue
             parent = os.path.dirname(full)
             if parent:
+                probe = parent
+                while probe != repo_root and not os.path.exists(probe):
+                    created_dirs.append(probe)
+                    probe = os.path.dirname(probe)
                 os.makedirs(parent, exist_ok=True)
             with open(full, "wb") as fh:
                 fh.write(text.encode("utf-8"))
     except OSError as exc:
-        _rollback(repo_root, snapshots)
-        return snapshots, Invalid((Problem(
+        unrestored = _rollback(repo_root, snapshots, created_dirs)
+        return snapshots, created_dirs, Invalid((Problem(
             code="apply-write-failed",
             message=(
-                f"writing the plan failed at {path}: {exc.strerror} — every "
-                f"write this run made has been rolled back"
+                f"writing the plan failed at {path}: {exc} — "
+                + _rollback_outcome(unrestored)
             ),
             location=path,
         ),))
-    return snapshots, None
+    return snapshots, created_dirs, None
 
 
-def _rollback(repo_root, snapshots):
-    """Best-effort restore of every path this run touched."""
+def _rollback(repo_root, snapshots, created_dirs=()):
+    """Restore every path this run touched. Returns the paths it could not."""
+    unrestored = []
     for path, data in snapshots.items():
         full = os.path.join(repo_root, path)
         try:
@@ -771,10 +803,27 @@ def _rollback(repo_root, snapshots):
                 with open(full, "wb") as fh:
                     fh.write(data)
         except OSError:
+            unrestored.append(path)
+    for full in sorted(created_dirs, key=len, reverse=True):
+        try:
+            os.rmdir(full)
+        except OSError:
+            # Not empty, or already gone — either way not this run's to force.
             continue
+    return tuple(sorted(unrestored))
 
 
-def _confinement_problem(repo_root, scope, when):
+def _rollback_outcome(unrestored):
+    """The honest sentence about what the rollback achieved."""
+    if not unrestored:
+        return "every write this run made has been rolled back"
+    return (
+        f"rolling back failed for {list(unrestored)}, so the working tree is "
+        f"NOT restored there — inspect it before trusting any diff"
+    )
+
+
+def _confinement_problem(repo_root, scope, code):
     """Every changed path in the whole tree, checked against the scope."""
     changed, problem = worktree_changes(repo_root)
     if problem is not None:
@@ -783,10 +832,7 @@ def _confinement_problem(repo_root, scope, when):
     outside = sorted(set(changed) - set(scope.paths))
     if outside:
         return None, Problem(
-            code=(
-                "apply-working-tree-not-confined" if when == "before"
-                else "apply-unconfined-change"
-            ),
+            code=code,
             message=(
                 f"the working tree differs from HEAD at {outside}, outside "
                 f"the approval set's allowed mutation scope "
@@ -794,8 +840,6 @@ def _confinement_problem(repo_root, scope, when):
                 f"approval authorizes must be inside its scope, so an "
                 f"unaccounted change fails the run rather than riding into a "
                 f"commit"
-                + (" (every write this run made has been rolled back)"
-                   if when == "after" else "")
             ),
             location=outside[0],
         )
@@ -845,7 +889,13 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
         )
 
     if _already_applied(repo_root, plan["postimages"]):
-        changed, problem = _confinement_problem(repo_root, approval.scope, "before")
+        # A verified fact, but a narrower one than an apply: the plan's
+        # declared postimages are byte-for-byte on disk and the diff is
+        # confined — this run did not re-verify the operations that were to
+        # produce them, because their preimages are necessarily gone.
+        changed, problem = _confinement_problem(
+            repo_root, approval.scope, "apply-working-tree-not-confined"
+        )
         if problem is not None:
             return Invalid((problem,))
         return ApplyResult(
@@ -890,21 +940,29 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
     if problems:
         return Invalid(tuple(problems))
 
-    _, problem = _confinement_problem(repo_root, approval.scope, "before")
+    _, problem = _confinement_problem(
+        repo_root, approval.scope, "apply-working-tree-not-confined"
+    )
     if problem is not None:
         return Invalid((problem,))
 
-    snapshots, failed = _write(repo_root, new_texts)
+    snapshots, created_dirs, failed = _write(repo_root, new_texts)
     if failed is not None:
         return failed
 
-    changed, problem = _confinement_problem(repo_root, approval.scope, "after")
+    changed, problem = _confinement_problem(
+        repo_root, approval.scope, "apply-unconfined-change"
+    )
     if problem is not None:
         # An unaccounted change surfaced after the write — roll this run's own
         # writes back to the snapshotted bytes and refuse; whatever else moved
         # the tree is left exactly as found, for a human to look at.
-        _rollback(repo_root, snapshots)
-        return Invalid((problem,))
+        unrestored = _rollback(repo_root, snapshots, created_dirs)
+        return Invalid((Problem(
+            code=problem.code,
+            message=problem.message + " (" + _rollback_outcome(unrestored) + ")",
+            location=problem.location,
+        ),))
 
     applied = tuple(
         AppliedOperation(

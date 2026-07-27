@@ -1683,7 +1683,9 @@ The order of refusals is the contract:
 3. **Idempotency.** `postimages` maps every written path to the sha256 of its bytes after the
    plan (`null` for a retired document). When every one is already on disk the run is a no-op:
    `clean`, `already_applied: true`, nothing written — which is what makes re-running an
-   interrupted lane safe. The approval's own preimage staleness is judged *after* this check,
+   interrupted lane safe. The no-op verdict certifies exactly that — declared postimages on
+   disk, diff confined — not that this run re-verified the operations, whose preimages are
+   necessarily gone once applied. The approval's own preimage staleness is judged *after* this check,
    because the applier's writes are the one legitimate way those preimages move; preimage
    staleness that is not "already applied" refuses as `stale` like any other moved field.
 4. **Exact preimages.** A span operation carries 1-based line numbers and the exact text of
@@ -1705,8 +1707,11 @@ applied `move-with-provenance` entry in the result names its record, source, and
 and the approval trailers name the authority.
 
 Model-generated content reaches the applier only as data inside the plan and report payloads.
-The module runs no shell and executes nothing it reads (`tests/engine/applier_test.py` holds it
-to that); its one git use is the read-only status behind the confinement check.
+The module runs no shell and executes nothing it reads — behaviorally, hostile replacement text
+lands as bytes and runs nothing (`tests/engine/applier_test.py`), and statically, the module
+grants no shell, git, exec, or network capability
+(`tests/scripts/engine-capability_test.py`); its one git use is the read-only status behind the
+confinement check.
 
 ```python
 from doclifecycle.applier import apply_edit_plan, load_approval_payload, load_edit_plan

@@ -326,16 +326,10 @@ class ModelContentIsData(ApplierTestCase):
         self.assertEqual(self.read(self.repo, DOC_A), post)
         self.assertEqual(self.status_paths(self.repo), [DOC_A])
 
-    def test_applier_module_grants_no_shell_or_git_capability(self):
-        """The applier itself runs no subprocess: its one git read goes
-        through `repository.py`, and nothing upstream reaches a shell."""
-        path = os.path.join(ENGINE, "doclifecycle", "applier.py")
-        with open(path, encoding="utf-8") as fh:
-            source = fh.read()
-        self.assertNotIn("subprocess", source)
-        self.assertNotIn("os.system", source)
-        self.assertNotIn("eval(", source)
-        self.assertNotIn("exec(", source)
+    # The static counterpart — the applier module grants no shell, git, or
+    # exec capability — is a source-level wiring check, not a behavior at
+    # either public seam, so it lives with the other wiring suites:
+    # tests/scripts/engine-capability_test.py.
 
 
 class TypedRefusals(ApplierTestCase):
@@ -477,6 +471,35 @@ class TypedRefusals(ApplierTestCase):
         before = self.tree(self.repo)
         result = self.apply(plan, approval, report=report)
         self.assert_untouched(before, result, ["plan-invalid-operation"])
+
+    def test_move_destination_missing_from_the_tree_is_refused(self):
+        units = self.units(self.repo, DOC_A)
+        record = self.finding(
+            "BLOAT-004", "EXTRACT-AND-MOVE", DOC_A, [units[1]],
+            destination={"path": DOC_B},
+        )
+        report, approval = self.approve([record])
+        moved = "Refunds reverse the fee at the rate charged."
+        op = {
+            "op": "move-with-provenance",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "destination": DOC_B,
+            "start_line": 5,
+            "end_line": 5,
+            "preimage": moved,
+        }
+        plan = self.plan(approval, [op], {
+            DOC_A: sha256_text("x"), DOC_B: sha256_text("y"),
+        })
+        # The destination leaves the tree after minting. Its absence is not
+        # approval staleness (no preimage of the destination was selected),
+        # so the applier's own missing-preimage refusal is what stands.
+        os.remove(os.path.join(self.repo, DOC_B))
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["apply-preimage-missing"])
 
     def test_postimage_disagreeing_with_the_operations_is_refused(self):
         report, approval, plan, _ = self.replace_fixture()
@@ -626,6 +649,37 @@ class HostilePlans(ApplierTestCase):
 
 class Confinement(ApplierTestCase):
     """The whole working-tree diff is checked against the allowed scope."""
+
+    def test_unaccounted_change_after_the_write_fails_and_rolls_back(self):
+        # The post-apply half of the confinement check guards against a
+        # concurrent writer, which no honest single-process fixture can
+        # produce — so the second status read is patched to report a stray
+        # path appearing during the write. The seam under test is still
+        # `apply_edit_plan`.
+        from unittest import mock
+        from doclifecycle.repository import worktree_changes as real
+
+        report, approval, plan, _ = self.replace_fixture()
+        before = self.tree(self.repo)
+        calls = []
+
+        def racing(repo_root):
+            changed, problem = real(repo_root)
+            calls.append(changed)
+            if len(calls) < 2 or problem is not None:
+                return changed, problem
+            return tuple(sorted(set(changed) | {"stray-concurrent.md"})), None
+
+        with mock.patch(
+            "doclifecycle.applier.worktree_changes", side_effect=racing
+        ):
+            result = self.apply(plan, approval, report=report)
+        self.assertIsInstance(result, Invalid, result)
+        self.assertIn("apply-unconfined-change", codes(result))
+        # This run's own write was rolled back: the tree is as it was found.
+        self.assertEqual(before, self.tree(self.repo))
+        self.assertEqual(self.staged_paths(self.repo), [])
+        self.assertIn("rolled back", result.problems[0].message)
 
     def test_preexisting_change_outside_the_scope_refuses_the_run(self):
         report, approval, plan, _ = self.replace_fixture()

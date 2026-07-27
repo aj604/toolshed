@@ -85,11 +85,12 @@ the legacy lane in #77).
   deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
   unextractable knobs). `plan-distill_test.py` covers the distill lane's grouping, dispatch
   rendering, sidecar seam, and patch-merge engine; `authorize-paths_test.py` covers the per-lane
-  path authority the credentialed jobs enforce over a model's edit set. Two suites cover the
+  path authority the credentialed jobs enforce over a model's edit set. Three suites cover the
   wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
-  token-free, write jobs model-free and staging explicit paths) and `install-parity_test.py`
+  token-free, write jobs model-free and staging explicit paths), `install-parity_test.py`
   (the dogfooded `.github/` install is byte-identical to what `apply-upgrade.py` would lay down
-  from the plugin with this install's knobs). `render-audit-summary_test.py` covers the new
+  from the plugin with this install's knobs), and `engine-capability_test.py` (the engine's
+  applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the new
   engine's audit lane's run-surface rendering (every report result state, plus the
   report-never-produced case, and cost/turn observability); `audit-workflow_test.py` adds
   `doc-audit.yml`-specific static checks (SHA-pinned third-party actions, no direct branch
