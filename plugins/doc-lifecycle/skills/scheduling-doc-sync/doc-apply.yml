@@ -106,23 +106,34 @@ jobs:
       - name: Derive the current audit configuration digest (no model)
         run: |
           set -uo pipefail
+          # `|| true`, not a bare call: the runner's shell is `bash -e`, and a
+          # verdict-carrying exit (a model-free run is `partial`, exit 4) would
+          # abort the step before the digest is read. The payload is the answer
+          # here, not the exit code — and a payload without one refuses below.
           python3 .github/doc-sync/engine/doc-lifecycle.py drift-audit --repo . --mode full \
-            > "${RUNNER_TEMP}/current-lineage.json"
+            > "${RUNNER_TEMP}/current-lineage.json" || true
           python3 .github/doc-sync/render-apply-summary.py config-digest \
             --report "${RUNNER_TEMP}/current-lineage.json" \
             --out "${RUNNER_TEMP}/config-digest.txt"
 
       - name: Revalidate the report against the requested base
         run: |
-          set -uo pipefail   # validate-report's stale/partial/invalid exits are typed
-                             # outcomes to capture, not crashes to abort on
+          set -uo pipefail
+          # validate-report's stale/partial/invalid exits are typed outcomes to
+          # capture, not crashes to abort on — and the runner's shell is
+          # `bash -e`, so the code is captured with `||` rather than read from
+          # `$?` after a command that would already have ended the step.
+          code=0
           python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" --repo . \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
-            > "${RUNNER_TEMP}/revalidated.json"
-          code=$?
+            > "${RUNNER_TEMP}/revalidated.json" || code=$?
+          # 4 is `partial`: a report that did not examine everything it declared
+          # still carries records an approval set can be minted from, and its
+          # coverage gaps travel into the pull-request body.
           python3 .github/doc-sync/render-apply-summary.py gate --stage revalidation \
-            --payload "${RUNNER_TEMP}/revalidated.json" --exit-code "$code"
+            --payload "${RUNNER_TEMP}/revalidated.json" --exit-code "$code" \
+            --accept-exit-code 4
 
       - name: Turn the dispatched record subset into argv
         env:
@@ -141,14 +152,14 @@ jobs:
         run: |
           set -uo pipefail
           mapfile -t RECORD_ARGS < "${RUNNER_TEMP}/record-args.txt"
+          code=0
           python3 .github/doc-sync/engine/doc-lifecycle.py mint-approval \
             "${RECORD_ARGS[@]}" \
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" --repo . \
             --minter "$MINTER" --minter-kind human \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
             --out "${RUNNER_TEMP}/approval.json" \
-            > "${RUNNER_TEMP}/mint-result.json"
-          code=$?
+            > "${RUNNER_TEMP}/mint-result.json" || code=$?
           python3 .github/doc-sync/render-apply-summary.py gate --stage minting \
             --payload "${RUNNER_TEMP}/mint-result.json" --exit-code "$code"
 
@@ -165,19 +176,25 @@ jobs:
       - name: Render the approval summary and trailers
         run: |
           set -uo pipefail
+          code=0
           python3 .github/doc-sync/engine/doc-lifecycle.py render-approval \
             --approval "${RUNNER_TEMP}/approval.json" --repo . \
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
-            > "${RUNNER_TEMP}/approval-summary.md"
-          code=$?
+            > "${RUNNER_TEMP}/approval-summary.md" || code=$?
           python3 .github/doc-sync/render-apply-summary.py gate --stage rendering \
             --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code"
+          # Gated too, and not as an afterthought: an approval set this command
+          # refuses prints nothing at all, and an empty trailers block is what a
+          # change would land looking authorized without.
+          code=0
           python3 .github/doc-sync/engine/doc-lifecycle.py render-approval \
             --approval "${RUNNER_TEMP}/approval.json" --repo . \
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
-            --trailers > "${RUNNER_TEMP}/trailers.txt"
+            --trailers > "${RUNNER_TEMP}/trailers.txt" || code=$?
+          python3 .github/doc-sync/render-apply-summary.py gate --stage rendering \
+            --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code"
 
       - name: Derive the branch name from the approval digest
         run: |
@@ -332,14 +349,14 @@ jobs:
           EXPECTED_APPROVAL: ${{ needs.revalidate.outputs.approval_digest }}
         run: |
           set -uo pipefail
+          code=0
           python3 .github/doc-sync/engine/doc-lifecycle.py apply-plan --repo . \
             --plan "${RUNNER_TEMP}/apply/edit-plan.json" \
             --approval "${RUNNER_TEMP}/apply/approval.json" \
             --report "${RUNNER_TEMP}/apply/drift-report.json" \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/apply/config-digest.txt")" \
             --expected-digest "$EXPECTED_APPROVAL" \
-            > "${RUNNER_TEMP}/apply-result.json"
-          code=$?
+            > "${RUNNER_TEMP}/apply-result.json" || code=$?
           python3 .github/doc-sync/render-apply-summary.py gate --stage apply \
             --payload "${RUNNER_TEMP}/apply-result.json" --exit-code "$code"
 

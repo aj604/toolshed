@@ -48,10 +48,11 @@ import sys
 import unicodedata
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+DRIVE_LETTER = re.compile(r"^[A-Za-z]:")
 # The report states an approval set can be minted from, per the engine's
-# `approval-report-not-approvable`. Re-stated rather than imported because this
-# script runs from a vendored install with no engine on its import path; the
-# engine re-checks it at mint time, so this is an early, clearer refusal.
+# `approval-report-not-approvable`. `mint-approval` re-checks this and owns the
+# verdict; naming it here only turns a dispatch against the wrong report into a
+# refusal that says so, before a fresh audit has been run to compare against.
 APPROVABLE_REPORT_STATES = ("findings", "partial")
 
 
@@ -185,10 +186,14 @@ def gate(args):
 
     The exit code is the verdict — `stale` (3) and `invalid` (1) are the
     engine's own, and a payload that declares otherwise never talks the lane
-    past them.
+    past them. A stage may name further codes it accepts: `partial` (4) is a
+    legitimate typed report an approval set can be minted from, and its
+    coverage gaps travel into the pull-request body rather than stopping the
+    lane. Accepting one is stated on the run surface, never silent.
     """
     payload, reason = read_json(args.payload)
-    if args.exit_code != 0:
+    accepted = set(args.accept_exit_code or ()) | {0}
+    if args.exit_code not in accepted:
         details = _reason_lines(payload) if payload else []
         if not details and reason:
             details = [reason]
@@ -196,6 +201,11 @@ def gate(args):
             args.stage, "apply-stage-failed",
             f"the engine refused at {code_span(args.stage)} "
             f"(exit {args.exit_code})", details)
+    if args.exit_code != 0:
+        state = payload.get("status") if payload else None
+        write_surface(
+            f"\n**{args.stage}:** accepted exit {args.exit_code} — the engine "
+            f"returned {code_span(state)}, a state this stage proceeds from.\n")
     if payload is None:
         return refuse(
             args.stage, "apply-stage-produced-nothing",
@@ -310,7 +320,7 @@ def _unsafe_path_reason(path):
         return "holds a control character"
     if path.startswith("-"):
         return "starts with a dash, which git reads as an option"
-    if path.startswith("/") or path.startswith("~") or ":" in path:
+    if path.startswith("/") or path.startswith("~") or DRIVE_LETTER.match(path):
         return "is not repository-relative"
     if "\\" in path:
         return "uses a backslash separator"
@@ -356,20 +366,25 @@ def staged_paths(args):
             "apply", "apply-nothing-changed",
             "the apply wrote nothing, so there is no diff to review")
 
+    # Exhaustively, as the engine reports its own problems: a reader fixing one
+    # path at a time learns nothing about the second.
     scope = set((app.get("scope") or {}).get("paths") or [])
-    for path in paths:
-        why = _unsafe_path_reason(path)
-        if why is not None:
-            return refuse(
-                "apply", "apply-path-unsafe",
-                f"{code_span(path)} {why} — refusing to hand it to git")
-        if path not in scope:
-            return refuse(
-                "apply", "apply-path-outside-approved-scope",
-                f"the apply result names {code_span(path)}, which the "
-                f"approval set's allowed mutation scope does not cover",
-                [f"approved scope: "
-                 + (", ".join(code_span(p) for p in sorted(scope)) or "none")])
+    unsafe = [(p, why) for p, why in
+              ((p, _unsafe_path_reason(p)) for p in paths) if why]
+    if unsafe:
+        return refuse(
+            "apply", "apply-path-unsafe",
+            "the apply result names path(s) this lane refuses to hand to git",
+            [f"{code_span(p)} {why}" for p, why in unsafe])
+    outside = [p for p in paths if p not in scope]
+    if outside:
+        return refuse(
+            "apply", "apply-path-outside-approved-scope",
+            "the apply result names path(s) the approval set's allowed "
+            "mutation scope does not cover",
+            [code_span(p) for p in outside]
+            + ["approved scope: "
+               + (", ".join(code_span(p) for p in sorted(scope)) or "none")])
 
     write_file(args.out, "".join(f"{p}\0" for p in paths))
     return 0
@@ -516,9 +531,13 @@ def pr_body(args):
         "- Nothing outside this list was staged: the credentialed job stages "
         "exactly the paths this result emitted.",
         "",
-        "### Skipped records",
+        "### Approved records",
         "",
     ]
+    lines += ([_record_line(e) for e in app.get("records") or []]
+              or ["None — the approval set selected nothing."])
+
+    lines += ["", "### Skipped records", ""]
     if app.get("skipped"):
         lines += [_record_line(e) for e in app["skipped"]]
         lines += ["",
@@ -589,6 +608,17 @@ def commit_message(args):
         except (OSError, UnicodeDecodeError) as exc:
             return refuse("apply", "apply-trailers-unreadable",
                           f"cannot read {args.trailers}: {exc}")
+        if not trailers.strip():
+            # Never fall back here. The engine's block carries
+            # `Doc-Lifecycle-Approval-State`, which is what tells a block
+            # copied from a stale approval set from a live one; a hand-built
+            # pair of trailers would land the change looking authorized
+            # without it.
+            return refuse(
+                "apply", "apply-trailers-empty",
+                f"{code_span(args.trailers)} is empty — `render-approval "
+                f"--trailers` printed nothing, which it does only for an "
+                f"approval set it refused")
     if not trailers:
         # The engine renders these; without its file the digest still travels,
         # because it is the only part of an approval set that reaches the
@@ -614,6 +644,9 @@ def _parser():
     gate_cmd.add_argument("--stage", required=True)
     gate_cmd.add_argument("--payload", required=True)
     gate_cmd.add_argument("--exit-code", required=True, type=int)
+    gate_cmd.add_argument(
+        "--accept-exit-code", action="append", type=int, default=None,
+        help="a further engine exit code this stage proceeds from (repeatable)")
     gate_cmd.set_defaults(run=gate)
 
     records = sub.add_parser("record-args")

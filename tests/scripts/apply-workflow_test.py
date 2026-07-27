@@ -254,6 +254,33 @@ class RefusalsReachTheRunSurface(unittest.TestCase):
             self.assertIn(f"gate --stage {stage}", text,
                           f"the {stage} stage's exit code is not gated")
 
+    def test_no_gated_command_relies_on_a_bare_exit_status_read(self):
+        # The runner's shell is `bash -e`: a command whose non-zero exit is a
+        # typed verdict must be captured with `|| code=$?`, or the step is
+        # already over by the time the gate would have rendered it.
+        offenders = [f"{n}: {l.strip()}" for n, l in run_block_lines(lines())
+                     if l.strip() == "code=$?"]
+        self.assertEqual(
+            offenders, [],
+            "an exit code is read after a command bash -e would have aborted "
+            "on:\n  " + "\n  ".join(offenders))
+
+    def test_every_gate_reads_a_captured_exit_code(self):
+        captures = sum(1 for _, l in run_block_lines(lines())
+                       if "|| code=$?" in l)
+        gates = sum(1 for _, l in run_block_lines(lines())
+                    if "gate --stage" in l)
+        self.assertGreaterEqual(
+            captures, gates,
+            "there are more gates than captured exit codes — one of them is "
+            "gating something it did not capture")
+
+    def test_a_partial_report_is_not_refused_at_revalidation(self):
+        # `partial` (exit 4) carries records an approval set can be minted
+        # from; its coverage gaps travel into the PR body.
+        body = "\n".join(jobs()["revalidate"])
+        self.assertIn("--accept-exit-code 4", body)
+
     def test_the_report_artifact_is_bound_to_the_dispatched_digest(self):
         self.assertIn("verify-report", "\n".join(jobs()["revalidate"]))
 

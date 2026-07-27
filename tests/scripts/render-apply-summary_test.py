@@ -268,6 +268,25 @@ class Gate(ScriptTestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("approval-preimage-mismatch", self.summary())
 
+    def test_an_exit_code_the_stage_accepts_passes_the_gate(self):
+        # A `partial` report (exit 4) is a legitimate typed report an approval
+        # set can be minted from — the coverage gaps travel into the PR body.
+        path = self.write("revalidated.json", report(
+            status="partial",
+            incomplete=[{"scope": "docs/plans/next.md", "reason": "worker failed"}]))
+        proc = self.run_script("gate", "--stage", "revalidation",
+                               "--payload", path, "--exit-code", "4",
+                               "--accept-exit-code", "4")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("partial", self.summary())
+
+    def test_an_exit_code_the_stage_does_not_accept_still_refuses(self):
+        path = self.write("revalidated.json", report(status="partial"))
+        proc = self.run_script("gate", "--stage", "apply",
+                               "--payload", path, "--exit-code", "4")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-stage-failed", self.summary())
+
     def test_a_declared_clean_status_with_a_nonzero_exit_still_refuses(self):
         # The exit code is the engine's verdict; a payload that says otherwise
         # never talks the lane past it.
@@ -394,6 +413,16 @@ class StagedPaths(ScriptTestCase):
         self.assertIn("apply-result-not-clean", self.summary())
         self.assertFalse(os.path.exists(out))
 
+    def test_every_offending_path_is_named_not_only_the_first(self):
+        res = self.write("result.json", result(changed_paths=[
+            "docs/architecture.md", "docs/one.md", "docs/two.md"]))
+        app = self.write("approval.json", approval())
+        proc = self.run_script("staged-paths", "--result", res,
+                               "--approval", app, "--out", self.path("p.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("docs/one.md", self.summary())
+        self.assertIn("docs/two.md", self.summary())
+
     def test_a_path_outside_the_approved_mutation_scope_stages_nothing(self):
         res = self.write("result.json", result(
             changed_paths=["docs/architecture.md", "docs/guides/onboarding.md"]))
@@ -410,6 +439,26 @@ class StagedPaths(ScriptTestCase):
         res = self.write("result.json", result(changed_paths=["--output=x"]))
         app = self.write("approval.json", approval(
             scope={"roots": ["docs"], "paths": ["--output=x"]}))
+        proc = self.run_script("staged-paths", "--result", res,
+                               "--approval", app, "--out", self.path("p.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-path-unsafe", self.summary())
+
+    def test_a_path_holding_a_colon_is_not_refused(self):
+        # A colon is legal in a repository-relative path; only the spellings
+        # git would read as something other than a file name are refused.
+        res = self.write("result.json", result(
+            changed_paths=["docs/a:b.md"]))
+        app = self.write("approval.json", approval(
+            scope={"roots": ["docs"], "paths": ["docs/a:b.md"]}))
+        proc = self.run_script("staged-paths", "--result", res,
+                               "--approval", app, "--out", self.path("p.txt"))
+        self.assertEqual(proc.returncode, 0, self.summary())
+
+    def test_a_windows_drive_letter_stages_nothing(self):
+        res = self.write("result.json", result(changed_paths=["C:/docs/a.md"]))
+        app = self.write("approval.json", approval(
+            scope={"roots": ["docs"], "paths": ["C:/docs/a.md"]}))
         proc = self.run_script("staged-paths", "--result", res,
                                "--approval", app, "--out", self.path("p.txt"))
         self.assertEqual(proc.returncode, 1)
@@ -511,6 +560,12 @@ class PullRequestBody(ScriptTestCase):
         body = self.body(approval_summary="## Approved\n\n- `DRIFT-001`\n")
         self.assertIn("- `DRIFT-001`", body)
 
+    def test_approved_records_are_listed(self):
+        body = self.body()
+        self.assertIn("DRIFT-001", body)
+        self.assertIn(RECORD_DIGEST, body)
+        self.assertIn("docs/architecture.md", body)
+
     def test_skipped_records_are_listed(self):
         body = self.body()
         self.assertIn("DRIFT-002", body)
@@ -597,6 +652,18 @@ class CommitMessage(ScriptTestCase):
                     "Doc-Lifecycle-Records: 1 approved, 1 skipped\n")
         message = self.message(trailers=trailers)
         self.assertTrue(message.endswith(trailers), message)
+
+    def test_an_empty_trailers_file_refuses_rather_than_downgrading(self):
+        # Doc-Lifecycle-Approval-State is what tells a stale approval set from
+        # a live one; falling back to a hand-built block would drop it.
+        app = self.write("approval.json", approval())
+        res = self.write("result.json", result())
+        proc = self.run_script(
+            "commit-message", "--result", res, "--approval", app,
+            "--trailers", self.write_text("trailers.txt", "  \n"),
+            "--out", self.path("commit.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-trailers-empty", self.summary())
 
     def test_the_approval_digest_travels_even_without_a_trailers_file(self):
         self.assertIn(APPROVAL_DIGEST, self.message())
