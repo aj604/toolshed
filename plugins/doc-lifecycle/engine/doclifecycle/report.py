@@ -565,6 +565,21 @@ def _lineage(raw, bad):
     )
 
 
+def parse_lineage(raw):
+    """Parse a lineage object on its own. Returns (`Lineage` or None, problems).
+
+    Public because lineage has one owner. An approval set binds to the lineage
+    of the report that produced it and must read it back identically — a second
+    parser could only ever disagree with this one, and the disagreement would
+    be an artifact that validates in one place and not the other.
+    """
+    problems = []
+    lineage = _lineage(raw, lambda code, message, where=None: problems.append(
+        Problem(code=code, message=message, location=where)
+    ))
+    return lineage, tuple(problems)
+
+
 def _records(raw, bad):
     if not isinstance(raw, list):
         bad("report-invalid-shape", "records must be a list of record objects",
@@ -992,38 +1007,75 @@ def _scope_reasons(scope, kind_by_path, audit_mode):
     return tuple(reasons)
 
 
-def _carried_stale_reasons(raw, bad, status):
-    """The stale reasons a report payload carries from a prior verdict.
+STALE_REASON_FIELDS_SHAPE = ("code", "message", "reported", "current")
 
-    A validator emits them, so they must read back in: a pipeline that persists
-    `validate-report`'s output and re-checks the file it wrote must get the same
-    verdict, not a parse failure. They are never part of the report digest, so
-    carrying one does not change the report's identity.
+
+def parse_stale_reasons(raw, bad, problem_code):
+    """The stale reasons an artifact carries from a prior verdict, or None.
+
+    Public because every artifact that can go stale carries them in this one
+    shape, and each reads its own back in: a pipeline that persists a verdict
+    and re-checks the file it wrote must get the same verdict, not a parse
+    failure. `problem_code` is the caller's, so a refusal names the artifact
+    the reader has in hand rather than always saying "report".
+
+    The *state* rule stays with the caller: what a stale reason means about an
+    artifact's declared status is that artifact's contract, and this is only
+    the shape they share. Stale reasons are never part of any digest, so
+    carrying one does not change what an artifact is.
     """
     if not isinstance(raw, list):
-        bad("report-invalid-stale-reason",
-            "stale_reasons must be a list of drift reasons", "stale_reasons")
+        bad(problem_code,
+            "stale_reasons must be a list of the fields that moved",
+            "stale_reasons")
         return None
     reasons, ok = [], True
+    fields = set(STALE_REASON_FIELDS_SHAPE)
     for i, entry in enumerate(raw):
         where = f"stale_reasons[{i}]"
-        fields = {"code", "message", "reported", "current"}
         if not isinstance(entry, dict) or set(entry) != fields:
-            bad("report-invalid-stale-reason",
+            bad(problem_code,
                 f"stale_reasons[{i}] must be an object with exactly "
                 f"{sorted(fields)}",
                 where)
             ok = False
             continue
         if not all(_printable(entry[f]) for f in fields):
-            bad("report-invalid-stale-reason",
+            bad(problem_code,
                 f"stale_reasons[{i}] fields must each be a non-empty "
                 f"single-line string",
                 where)
             ok = False
             continue
         reasons.append(StaleReason(**entry))
-    if not ok:
+    return reasons if ok else None
+
+
+def compare_lineage(lineage, current, comparable):
+    """Every comparable field that no longer matches, not just the first.
+
+    Yields `(code, label, reported, current)` — the comparison, never the
+    prose. Public and shared because the loop is the part that must not be
+    written twice: a report and an approval set pin the same lineage and both
+    have to notice the same drift in it, while what each *says* about a
+    mismatch is its own (one tells you to re-run the audit, the other that the
+    approval was for a state that no longer exists).
+
+    A field absent from `current` is not compared, so a caller that did not
+    look cannot report — or clear — a verdict about it.
+    """
+    for field, code, label in comparable:
+        if field not in current:
+            continue
+        reported, actual = getattr(lineage, field), current[field]
+        if reported != actual:
+            yield code, label, str(reported), str(actual)
+
+
+def _carried_stale_reasons(raw, bad, status):
+    """The stale reasons a report payload carries, plus the report's own rule."""
+    reasons = parse_stale_reasons(raw, bad, "report-invalid-stale-reason")
+    if reasons is None:
         return None
     if status == STATE_STALE and not reasons:
         bad("report-state-inconsistent",
@@ -1138,24 +1190,20 @@ def _still_standing(carried, current, rechecked=()):
 
 def _stale_reasons(lineage, current):
     """Every lineage field that no longer matches, not just the first."""
-    reasons = []
-    for field, code, label in COMPARABLE:
-        if field not in current:
-            continue
-        reported, actual = getattr(lineage, field), current[field]
-        if reported == actual:
-            continue
-        reasons.append(StaleReason(
+    return tuple(
+        StaleReason(
             code=code,
             message=(
                 f"the report's {label} ({reported}) is not the repository's "
                 f"current {label} ({actual}) — re-run the audit rather than "
                 f"acting on findings about a state that no longer exists"
             ),
-            reported=str(reported),
-            current=str(actual),
-        ))
-    return tuple(reasons)
+            reported=reported,
+            current=actual,
+        )
+        for code, label, reported, actual
+        in compare_lineage(lineage, current, COMPARABLE)
+    )
 
 
 def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH,

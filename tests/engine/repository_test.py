@@ -193,6 +193,83 @@ class LastChange(RepositoryTestCase):
         self.assertEqual(self.tree(root), before)
 
 
+class Tracking(RepositoryTestCase):
+    """Whether git would keep a file written at a path.
+
+    The question an untracked artifact asks before it is written down (issue
+    #68). Answered from the repository that would actually hold the file, so
+    every case here is a real repository with a real index.
+    """
+
+    def test_a_tracked_file_is_tracked(self):
+        root, _ = self.history()
+
+        self.assertEqual(
+            repository.tracking(os.path.join(root, "a.txt")),
+            (repository.TRACKING_TRACKED, None),
+        )
+
+    def test_a_path_nothing_has_written_yet_is_trackable(self):
+        root, _ = self.history()
+
+        state, problem = repository.tracking(os.path.join(root, "new.json"))
+
+        self.assertEqual(state, repository.TRACKING_TRACKABLE)
+        self.assertIsNone(problem)
+
+    def test_an_ignored_path_is_not_trackable(self):
+        root, _ = self.history()
+        with open(os.path.join(root, ".gitignore"), "w", encoding="utf-8") as fh:
+            fh.write("run/\n")
+        os.makedirs(os.path.join(root, "run"))
+
+        state, _ = repository.tracking(os.path.join(root, "run", "out.json"))
+
+        self.assertEqual(state, repository.TRACKING_IGNORED)
+
+    def test_a_path_in_no_repository_at_all_is_outside(self):
+        plain = self.repo({"a.txt": "one\n"})
+
+        state, problem = repository.tracking(os.path.join(plain, "out.json"))
+
+        self.assertEqual(state, repository.TRACKING_OUTSIDE)
+        self.assertIsNone(problem)
+
+    def test_the_innermost_repository_is_the_one_that_answers(self):
+        # A nested checkout is a different repository, and it is the one that
+        # would keep the file — the enclosing one never sees it.
+        outer, _ = self.history()
+        inner = os.path.join(outer, "vendor")
+        os.makedirs(inner)
+        self.git(inner, "init", "-q", "-b", "main")
+        with open(os.path.join(inner, ".gitignore"), "w", encoding="utf-8") as fh:
+            fh.write("out.json\n")
+
+        state, _ = repository.tracking(os.path.join(inner, "out.json"))
+
+        self.assertEqual(state, repository.TRACKING_IGNORED)
+
+    def test_a_directory_that_does_not_exist_is_a_refusal(self):
+        root, _ = self.history()
+
+        state, problem = repository.tracking(
+            os.path.join(root, "nowhere", "out.json")
+        )
+
+        self.assertIsNone(state)
+        self.assertEqual(problem.code, "path-unwritable")
+
+    def test_a_deleted_but_still_indexed_file_is_tracked(self):
+        # The index is what decides, not the work tree: writing here would
+        # restore a file the repository still keeps.
+        root, _ = self.history()
+        os.remove(os.path.join(root, "a.txt"))
+
+        state, _ = repository.tracking(os.path.join(root, "a.txt"))
+
+        self.assertEqual(state, repository.TRACKING_TRACKED)
+
+
 class TrackedFiles(RepositoryTestCase):
     def test_reports_every_path_the_repository_tracks(self):
         root, _ = self.history()

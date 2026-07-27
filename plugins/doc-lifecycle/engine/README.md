@@ -8,15 +8,15 @@ and when a path last changed. Nothing here writes to a repository.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
 contract, the lineage-keyed cache, the segmenter, finding identity, the context index, the
-bloat lane, the drift audit, and the migration door. Approval sets and the applier land in later
-slices of the re-architecture (issue #57).
+bloat lane, the drift audit, the migration door, reconciliation, and approval sets. The applier
+lands in a later slice of the re-architecture (issue #57).
 
 ## Modules
 
 | Module | Owns |
 |---|---|
 | `doclifecycle/registry.py` | registry parsing, validation, classification, glob matching, `without_rules()`, registry digest |
-| `doclifecycle/inventory.py` | `build_inventory()`, the closed-world walk, document/inventory digests |
+| `doclifecycle/inventory.py` | `build_inventory()`, `load_registry()`, the closed-world walk, document/inventory digests |
 | `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, `repository_relative_problem()`, the canonical path form and target classes |
 | `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
 | `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
@@ -24,9 +24,11 @@ slices of the re-architecture (issue #57).
 | `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, the chunk cache seam |
 | `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, `load_verdicts()`, the verdicts and anchor checks |
 | `doclifecycle/migrate.py` | `draft_registry()`, `dry_run_migration()`, the legacy-install inference and the migration contract |
-| `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
-| `doclifecycle/render.py` | `render_report()` — Markdown from a validated `Report`, and nothing else |
-| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracked_files()` — everything read from git |
+| `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
+| `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
+| `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope and the minter kinds |
+| `doclifecycle/render.py` | `render_report()`, `render_approval_set()`, `approval_trailers()` — Markdown and git trailers from validated artifacts, and nothing else |
+| `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the five result states, the `ok`/`invalid` status strings |
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
@@ -1358,6 +1360,296 @@ draft = draft_registry(".")          # → Draft (has .registry_text) or Invalid
 dry_run_migration(".")               # → DryRun or Invalid
 ```
 
+## Reconciliation
+
+`reconcile(report)` groups a validated report's records by what they would change, so an
+approval selection is answerable to the relationships between records rather than to a flat
+list. Deterministic and model-free; a `Report` is the only accepted input (anything else is a
+`TypeError`).
+
+Two definitions do the work. A **target** is `(document, unit digests)` — a unit digest is
+content, so the same sentence in two documents is two targets. A **remedy** is what the record
+writes and where: the replacement text (`fix` or `proposal`, read as one slot) and the
+destination document. Not the finding code: two lanes proposing the same replacement for one
+passage are one edit described twice, and a `STALE` fix and a `CONDENSE` proposal that write
+the same string reconcile as duplicates.
+
+Two refinements keep those definitions honest against real lane output. The document is
+compared as a *canonical* repository-relative spelling (`paths.repository_relative_problem`),
+because `./docs/a.md` and `docs/a.md` are one document and a report that spelled one leg of a
+contradictory pair the other way would split the pair into two independent groups —
+`reconcile-record-path-not-canonical`. And a record that records no replacement text has an
+*unknown* remedy rather than an empty one: bloat's `CUT`, `RETIRE-DOC`, and `DISTILL` all carry
+no proposal and drift emits a fix only for `STALE`, so collapsing them onto one signature made
+a `CUT` and a `DISTILL` over one passage read as one edit described twice. Unknown remedies are
+distinguished by finding code, which makes that pair `exclusive` — the fail-closed answer —
+while two unknowns under one code stay comparable.
+
+`WRITTEN_FIELDS` is the whole vocabulary for replacement text, and that is an assumption about
+the producers rather than something the report contract enforces: `report.py` deliberately does
+not police `extra`, so a new lane carrying its replacement under a third key must add its slot
+there. Both shipped lanes have closed verdict field sets (`drift.VERDICT_FIELDS`,
+`bloat.VERDICT_FIELDS`), and the unknown-remedy rule is what keeps the failure fail-closed
+until a third one lands.
+
+Every pair whose targets intersect gets one of four relation kinds, and every group gets the
+selection rule that follows from them:
+
+| Targets | Remedy | Relation | Group disposition |
+|---|---|---|---|
+| equal | same | `duplicate` | `atomic` |
+| equal | different | `same-target` | `exclusive` |
+| overlap | same | `overlapping` | `atomic` |
+| overlap | different | `mutually-exclusive` | `exclusive` |
+
+A record related to nothing is a singleton group with disposition `independent`. Groups are
+connected components, so a conflict anywhere in a chain makes the whole group `exclusive`.
+`atomic` means the group is selected whole or not at all — applying part of it would leave the
+rest describing text that is no longer there. `exclusive` means no member may be selected at
+all: approving one leg silently decides against the other, and approving both cannot be
+applied.
+
+A duplicate within one report is always cross-code, because one code, document, and unit set is
+one finding — the finding digest says so, and `report.validate_report` refuses a report
+carrying it twice. Reconciliation therefore checks identity before it groups: a record that is
+not a finding (no `code`, `path`, `units`), whose document is not a canonical
+repository-relative spelling, or whose digest does not equal
+`finding_digest(lineage, code, path, units)`, makes the whole reconciliation `invalid`. The
+guarantee is over every pair, so a record it cannot read is not a group left out.
+
+Group ids are the sha256 of their sorted members, so a group keeps its id when unrelated
+records are added to the report. The reconciliation digest covers the report digest and every
+group.
+
+```bash
+python3 -m doclifecycle reconcile-report --report report.json --repo .
+```
+
+Reconciliation is a property of the records, so it is answered for any report that validates;
+whether the report is still fresh enough to act on is `validate-report`'s question, and
+minting's gate.
+
+## Approval sets
+
+A report authorizes nothing. An **approval set** is the artifact that does: a selection of
+record digests from one report, bound to that report's lineage and to an enumerated allowed
+mutation scope, minted by a named minter. The applier (issue #69) accepts nothing else.
+
+```json
+{
+  "artifact": "approval-set",
+  "schema_version": 1,
+  "status": "clean",
+  "minter": {"kind": "human", "id": "avery@example.com"},
+  "report_digest": "<sha256 of the report this selects from>",
+  "report_state": "findings",
+  "lineage": {"...": "the report's lineage, verbatim"},
+  "reconciliation_digest": "<sha256 of the grouping the selection satisfied>",
+  "records": [
+    {"digest": "<record digest>", "id": "DRIFT-001", "code": "STALE",
+     "path": "docs/architecture.md", "destination": null,
+     "units": ["<unit digest>"]}
+  ],
+  "skipped": [{"digest": "<record digest>", "id": "DRIFT-002"}],
+  "scope": {"roots": ["docs"], "paths": ["docs/architecture.md"]},
+  "digest": "<sha256 of everything above except status and stale reasons>"
+}
+```
+
+`minter.kind` is `human` (semantic approval — a person selecting digests) or `policy` (a
+standing auto-apply policy, named so PR review knows what it is reviewing). **`--minter-kind
+policy` currently mints for any record class: the eligibility gate that restricts a policy to
+mechanical remedies lands with a later stage, so do not wire the flag into CI yet.** `status`
+is `clean` or `stale`; a stale one carries `stale_reasons` in the shape a report's do.
+
+`digest` is **required** on the way in, unlike a report's — an approval set is authority, and
+its digest is the only part of it that reaches the repository, so a file that declines to say
+what it hashes to makes every tamper "delete one field". It is `approval-digest-mismatch` if it
+disagrees with the content, and `approval-missing-field` if it is absent. Pass
+`expected_digest=` (CLI `--expected-digest`) to bind the file to the
+`Doc-Lifecycle-Approval` trailer of the change claiming it: a different file is
+`approval-digest-unexpected`, however well-formed it is.
+
+`report_state` is the report's own state when the set was minted, inside the digest. It is
+there because a `partial` report's absent records are the *unexamined* ones and reconciliation
+only groups records that were present — so a coverage gap can hide a finding that would have
+grouped exclusively with something approved here, and the change reviewer has to be able to see
+that. A `report_state` outside `findings`/`partial` is `approval-report-not-approvable` on
+read-back, re-running the minter's refusal.
+
+`records` and `skipped` are listed in ascending digest order, and read back only in that order
+(`approval-records-not-sorted`, `approval-skipped-not-sorted`). Both arrays are inside the
+digest, so an order that may vary would give one selection two identities.
+
+**Minting.** `mint_approval_set(report, digests, repo_root=…, minter=…)` refuses before it
+mints, in this order, because each phase rests on the one before:
+
+- the report must be `findings` or `partial` — `clean` has nothing to approve and `stale`
+  describes a state that no longer exists (`approval-report-not-approvable`);
+- the selection must be non-empty, repeat nothing, and name only records the report carries
+  (`approval-empty-selection`, `approval-duplicate-selection`, `approval-unknown-record`);
+- it must respect the reconciliation groups (`approval-exclusive-group`,
+  `approval-partial-group`), which is why the refusal is structural rather than advisory;
+- every target — each record's document, plus the destination of a move — must authorize as
+  `documentation` inside a declared root, through `paths.authorize_path` (the refusal is that
+  module's own code: `path-outside-root`, `symlinked-path`, `path-forbidden-class`, …);
+- every target's text must still be what the record was written about
+  (`approval-preimage-mismatch`, `approval-preimage-unreadable`).
+
+**Nothing rides along.** The allowed mutation scope is a *derivation* of the selection —
+`derived_scope_paths()`: each selected record's document, plus the `destination` a move writes
+to, and nothing else. A report's coverage claim contributes nothing: `whole-inventory` means
+every document is accounted for, which says nothing about what may be changed, so the
+strongest coverage claim a report can make authorizes exactly what the weakest one does.
+
+Because it is a derivation, validation recomputes it rather than believing it, and a scope
+naming one document more than the selection justifies is `approval-scope-not-derived` — an
+approval set is a file, and a hand-widened `scope.paths` would otherwise make an unselected
+finding's document writable. `skipped` is derived the same way and checked the same way
+against the report (`approval-skipped-not-derived`): it is every record not taken, and a short
+one hides what the approver declined.
+
+**The minter's refusals are re-run on read-back.** `mint_approval_set` is not the gate — the
+applier sees only what validation says about the artifact in front of it. So when `report` is
+supplied, `validate_approval_set` re-reconciles and re-applies the group discipline:
+`approval-exclusive-group` and `approval-partial-group` come back as `invalid`, not `stale`,
+because nothing in the world moved — the selection is one no minter would have produced. The
+applier reads the report anyway (a record's remedy text lives there, not in the approval set),
+so this is the path it takes.
+
+Every one of those re-runs is a comparison against the report the artifact *names*. Supplied
+that report, a selected record it does not carry, a lineage it did not run under, a hidden
+`skipped` entry, or an invented `destination` is `invalid`
+(`approval-record-not-reported`, `approval-lineage-not-reported`,
+`approval-skipped-not-derived`, `approval-destination-not-reported`) — the report digest pins
+all four, so none of them can be the world moving. Supplied a *different* report — the
+ordinary result of an honest re-run — none of them can be derived truthfully, so every check
+stands down behind the one fact a reader can act on: `stale` `approval-report-changed`, re-run
+the audit and mint afresh. Standing down is safe because `stale` authorizes nothing and cannot
+heal: no report digests to a corrupted claim, so corrupting `report_digest` buys a forger a
+verdict that only a fresh mint replaces.
+
+**A record's target is re-derived, not believed.** A finding's digest *is* its lineage, code,
+document, and units, so `validate_approval_set` recomputes `finding_digest()` over every
+approved record and refuses `approval-record-digest-mismatch` on any mismatch — the same check
+`reconcile.py` runs over a report's records, and like that one it needs neither the report nor
+the repository. Without it, keeping an approved digest while rewriting `path` and `units` and
+repairing `scope.paths` produced an artifact whose every derivation faithfully computed the
+wrong document.
+
+`destination` is the one part of the write set that check cannot reach: where a move puts
+content is the lane's proposal, not the finding's identity, so it is outside the finding
+digest. It is compared against the report instead (`approval-destination-not-reported`), which
+is why an applier must supply one.
+
+Record `path`, record `destination`, and every `scope` path are checked as canonical
+repository-relative spellings in the structural layer, through the one owner
+`paths.repository_relative_problem` — `..`, a leading `/`, a backslash, whitespace, and a
+non-NFC spelling are `approval-invalid-record`/`approval-invalid-scope`. They are `invalid`
+rather than `stale` on purpose: `../../../tmp/evil.md` is a forgery, not a repository that
+moved, and the refusal must not need a repository to reach.
+
+**A verdict says what it was in a position to check.** `report` and `repo_root` are both
+optional, so the returned `ApprovalSet` carries `unchecked` — the named checks that did not
+run, each with what it leaves unverified — and the payload, the rendered summary ("Not
+checked"), and the trailers all show it. `clean` from a structural read and `clean` from a full
+one are different claims, and an applier supplies both. `observed_report_state` reports the
+supplied report's state now, beside the `report_state` the set was minted with; it is reported
+rather than judged, because a report goes stale the moment any document changes — including by
+the applier's own writes — and turning that into a verdict would make the second subset of one
+report unapplyable.
+
+**Expiry.** `validate_approval_set(payload, report=…, repo_root=…)` is structural first and
+exhaustive; `invalid` always beats `stale`. With `report` it compares the report digest and,
+when that matches, that the report still reconciles the same way — selection membership is the
+`invalid` re-derivation above, not expiry. With `repo_root` it names every field that moved:
+
+| Stale reason | What moved |
+|---|---|
+| `approval-repository-changed` | the repository identity |
+| `approval-base-commit-changed` | HEAD |
+| `approval-registry-changed` | the registry digest |
+| `approval-ruleset-changed` | `RULESET_VERSION` |
+| `approval-plugin-changed` | `PLUGIN_VERSION` |
+| `approval-audit-config-changed` | the consumer's audit configuration digest |
+| `approval-scope-changed` | a scope path no longer authorizes, or the declared roots moved |
+| `approval-preimage-mismatch` | a selected record's units are no longer in its document |
+| `approval-preimage-unreadable` | a selected record's document cannot be read as one |
+| `approval-report-changed` | the report supplied is not the one this binds to |
+| `approval-reconciliation-changed` | the report's records no longer group the same way |
+
+The inventory digest is deliberately **not** compared, and it is the one exception. It covers
+document content, so the applier's own writes move it — and a second subset of one report could
+then never be applied, which is exactly the partial-approval case this contract exists to
+support. The precise question is per-record and is asked directly by the preimage check: a
+subset whose targets were untouched validates, one whose targets were rewritten is stale and
+says which record and which document, and a deleted document fails the same check. Committing
+an apply still expires every approval set minted against the previous commit, via
+`approval-base-commit-changed`.
+
+A carried stale reason this run did not re-check still stands, as a report's does: clearing a
+verdict is at least as thorough as setting it. Two consequences worth stating. Without
+`--audit-config-digest` the configuration is never compared, so a live approval set stays
+`clean` and a config-stale one stays stale rather than being laundered clean by the weaker
+check — supply it in any lane where configuration can move. And the lineage comparison itself
+is `report.compare_lineage()`, shared with `validate-report`: an approval set and the report it
+came from cannot notice different drift in the same lineage.
+
+**Not an approval set.** Anything else handed in where one is required is
+`approval-not-an-approval-set`, and the message says what it actually is: a report ("proof of
+what was examined, and deliberately not authority"), a list of digests ("a dispatch list …
+which is how an approval set is minted, never a substitute for one"), a string (a branch name
+or run id), or an object that does not declare `artifact: approval-set`. A cache entry is a
+report payload, so it is refused as one.
+
+**Never repository state.** `write_approval_set(approval, path)` refuses any path git would
+keep: `approval-set-tracked-path` for a tracked file, and `approval-set-would-be-tracked` for
+one inside the work tree that is not ignored — a `git add -A` in the run it authorizes would
+otherwise commit it. Outside the repository, or in a git-ignored path, is where it goes. What
+travels in the change is the digest and the rendered summary: `render_approval_set()` for a PR
+body (same code-span escaping as `render_report()`, since a record's code and path are content
+a model wrote), and `approval_trailers()` for a commit message:
+
+```
+Doc-Lifecycle-Approval: <approval digest>
+Doc-Lifecycle-Report: <report digest>
+Doc-Lifecycle-Approval-State: clean
+Doc-Lifecycle-Records: 1 approved, 1 skipped
+```
+
+`Doc-Lifecycle-Approval-State` carries the verdict, and names any `unchecked` checks, because
+the trailers are the only part of an approval set that lands in the repository: without it a
+block copied from a stale set reads exactly like a live one, and the artifact it points at is
+untracked and gone.
+
+### Commands
+
+```bash
+python3 -m doclifecycle mint-approval --report report.json --repo . \
+  --record <record digest> --minter avery@example.com [--minter-kind policy] \
+  [--out /tmp/approval.json]
+python3 -m doclifecycle validate-approval --approval approval.json --repo . \
+  [--report report.json] [--audit-config-digest <sha256>] \
+  [--expected-digest <approval digest from the change's trailer>]
+python3 -m doclifecycle render-approval --approval approval.json [--trailers]
+```
+
+`--record` is repeatable and required; naming none is a usage error (exit 2). Exit codes are
+the shared ones: 0 clean, 1 invalid, 2 usage, 3 stale. `render-approval` prints nothing when
+the approval set is invalid, exactly as `render-report` does.
+
+```python
+from doclifecycle.approval import Minter, mint_approval_set, validate_approval_set
+from doclifecycle.reconcile import reconcile
+
+groups = reconcile(report)                      # → Reconciliation or Invalid
+approval = mint_approval_set(                   # → ApprovalSet or Invalid
+    report, [record_digest], repo_root=".",
+    minter=Minter(kind="human", id="avery@example.com"),
+)
+validate_approval_set(approval.to_dict(), report=report, repo_root=".")
+```
+
 ## Digests
 
 `digest.sha256_canonical` hashes the canonical JSON form (sorted keys, compact separators),
@@ -1401,11 +1693,14 @@ Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `bloat.merge_contention()`, `bloat.enumerate_scope()`, `bloat.record_verdicts()`,
 `bloat.load_chunk()`, `bloat.store_chunk()`, `plan_drift_audit()`, `audit_drift()`,
 `load_verdicts()`, `draft_registry()`, `dry_run_migration()`, `repository.lineage()`,
-`repository.resolve_commit()`,
-`repository.changed_paths()`, `repository.last_change()`, `repository.tracked_files()`), and the commands as subprocesses
-whose payload must equal the library result. Path authorization, the git reads, the cache,
-finding identity, and verdict recording have no command of their own — they are substrate the other components (and, for the cache, the bloat lane)
-call. `tests/engine/support.py` holds what every suite needs — the engine on `sys.path`,
+`repository.resolve_commit()`, `repository.changed_paths()`, `repository.last_change()`,
+`repository.tracking()`, `repository.tracked_files()`, `reconcile()`, `mint_approval_set()`,
+`validate_approval_set()`, `load_approval_set()`, `write_approval_set()`,
+`render_approval_set()`, `approval_trailers()`), and the commands as subprocesses whose payload
+must equal the library result. Path authorization, the git reads, the cache, finding identity,
+and verdict recording have no command of their own — they are substrate the other components
+(and, for the cache, the bloat lane) call. `tests/engine/support.py` holds what every suite
+needs — the engine on `sys.path`,
 `RepoTestCase.repo()`, and `run_command()` for the subprocess seam; report fixtures live in
 `report_test.py`, which `report_cli_test.py`, `cache_test.py`, and `bloat_test.py` all import
 (`GitRepoTestCase`, for a real repository to check freshness against). The report, cache,
@@ -1432,4 +1727,16 @@ the drift audit's (issue #65): a diff-scoped and a full-corpus run over the same
 declaring different truthful scopes, a simulated failed chunk that no rendering can read as
 clean, the narrative anchor going stale against the module the second commit changed, the
 install's own waiver surfacing on a finding without erasing it, and the whole tree unchanged
-after every run, refusal paths included.
+after every run, refusal paths included. `scenario_approval_test.py` is the approval set's
+(issue #68), one class per acceptance criterion: a strict subset of the findings the drift
+audit really produced, an apply performed by hand between two subsets so the untouched one
+still validates and the applied one is refused by its own preimage, a rival remedy for the
+same passage that neither leg can be approved from, and the fixture repository refusing to
+hold the artifact anywhere git would keep it.
+
+`approval_test.py` and `approval_cli_test.py` build real git repositories for the same reason
+the report suite does — an approval set's freshness, its allowed scope, and the refusal to
+write it into tracked state are all comparisons against a real index and a real work tree.
+`approval_cli_test.py` imports `approval_test.py`'s fixture rather than rebuilding it, and
+`scenario_approval_test.py` imports `scenario_drift_test.py`'s, so the findings it approves are
+the ones that suite already holds the audit to.

@@ -1,9 +1,9 @@
-"""Human-readable rendering of a validated report.
+"""Human-readable rendering of a validated report or approval set.
 
-Takes a `Report` and nothing else. A dict, a JSON string, or an `Invalid` is a
-`TypeError`, not a best effort: rendering is where a report reaches a PR body
-or a CI summary, and unvalidated content must not be able to get that far
-wearing the appearance of a verdict.
+Takes a `Report` or an `ApprovalSet` and nothing else. A dict, a JSON string,
+or an `Invalid` is a `TypeError`, not a best effort: rendering is where an
+artifact reaches a PR body or a CI summary, and unvalidated content must not be
+able to get that far wearing the appearance of a verdict.
 
 Type-checking the input is not enough on its own, because the contract
 deliberately does not police record internals — those belong to the segmenter
@@ -25,6 +25,7 @@ rendered summary can itself be compared or digested.
 
 import re
 
+from .approval import UNCHECKED_MEANING, ApprovalSet
 from .digest import canonical, sha256_canonical
 from .report import Report
 from .results import (
@@ -234,3 +235,143 @@ def render_report(report):
         lines.append("- none")
 
     return "\n".join(lines)
+
+
+APPROVAL_HEADLINES = {
+    STATE_CLEAN: "this approval set is live",
+    STATE_STALE: (
+        "this approval set no longer describes the repository — it authorizes "
+        "nothing; re-run the audit and approve again"
+    ),
+}
+
+
+def render_approval_set(approval):
+    """Render a validated `ApprovalSet` as Markdown.
+
+    This is the summary that travels in the change the approval authorizes: a
+    PR body quotes it, and the reviewer doing the *change* approval reads it to
+    see what the semantic approval actually covered. So it shows all three
+    parts of that — what was approved, what was deliberately skipped, and the
+    outer bound on what may be written — rather than only the selection, which
+    on its own reads as though the report held nothing else.
+
+    Every interpolated value goes through `_code()`, exactly as a report's
+    does: a record's code and path are content a model wrote about repository
+    documents, and a digest binding that content does not stop it from adding a
+    heading to a page it is not supposed to be able to restructure.
+    """
+    if not isinstance(approval, ApprovalSet):
+        raise TypeError(
+            f"render_approval_set takes a validated ApprovalSet, not "
+            f"{type(approval).__name__} — validate it first; an unvalidated "
+            f"selection must not reach a PR body looking like authority"
+        )
+
+    lineage = approval.lineage
+    lines = [
+        f"# Documentation approval set — {approval.status}",
+        "",
+        f"**{APPROVAL_HEADLINES[approval.status]}.** "
+        f"{len(approval.records)} record(s) approved, "
+        f"{len(approval.skipped)} skipped.",
+        "",
+        "## Binding",
+        "",
+        f"- Approval digest: {_code(approval.digest)}",
+        f"- Report digest: {_code(approval.report_digest)}",
+        # The report's state, because a `partial` one changes what the change
+        # reviewer is looking at: reconciliation groups only the records that
+        # were present, so a coverage gap can hide a finding that would have
+        # grouped exclusively with something approved here.
+        f"- Report state when approved: {_code(approval.report_state)}"
+        + (
+            "" if approval.observed_report_state is None
+            else f", now {_code(approval.observed_report_state)}"
+        ),
+        f"- Reconciliation digest: {_code(approval.reconciliation_digest)}",
+        f"- Minter: {_code(approval.minter.kind)} {_code(approval.minter.id)}",
+        f"- Repository: {_code(lineage.repository)}",
+        f"- Base commit: {_code(lineage.base_commit)}",
+        f"- Registry digest: {_code(lineage.registry_digest)}",
+        f"- Audit configuration digest: {_code(lineage.audit_config_digest)}",
+        f"- Ruleset version: {_code(str(lineage.ruleset_version))}",
+        f"- Plugin version: {_code(lineage.plugin_version)}",
+        "",
+        "## Allowed mutation scope",
+        "",
+        "- Documentation roots: "
+        + (", ".join(_code(r) for r in approval.scope.roots) or "none"),
+        f"- Writable paths ({len(approval.scope.paths)}): "
+        + (", ".join(_code(p) for p in approval.scope.paths) or "none"),
+        "",
+        "## Approved",
+        "",
+    ]
+    lines += [
+        f"- {_code(record.record_id)} {_code(record.code)} "
+        f"{_code(record.path)} — {len(record.units)} unit(s), digest "
+        f"{_code(record.digest)}"
+        for record in approval.records
+    ]
+
+    lines += ["", "## Skipped", ""]
+    lines += [
+        f"- {_code(record.record_id)} {_code(record.digest)}"
+        for record in approval.skipped
+    ] or ["- none — the whole report was approved"]
+
+    if approval.stale_reasons:
+        lines += ["", "## Why it no longer stands", ""]
+        lines += [
+            f"- {_code(reason.code)} — reported {_code(reason.reported)}, "
+            f"current {_code(reason.current)}"
+            for reason in approval.stale_reasons
+        ]
+
+    if approval.unchecked:
+        # A verdict reached without the report or without the repository is not
+        # the verdict this summary otherwise looks like, and the reader deciding
+        # whether to merge cannot be left to infer that from an absence.
+        lines += ["", "## Not checked", ""]
+        lines += [
+            f"- {_code(name)} — {UNCHECKED_MEANING[name]}"
+            for name in approval.unchecked
+        ]
+
+    return "\n".join(lines)
+
+
+def approval_trailers(approval):
+    """The git trailers that carry an approval set into the change it authorizes.
+
+    An approval set is never committed, so what has to survive in the
+    repository is the answer to "what authorized this?" — the approval digest,
+    the report it came from, and how much of that report it covered. Trailers,
+    because `git log` and every forge can read them, and because one
+    `Key: value` line per fact cannot be mistaken for prose.
+
+    The values are digests and counts this module computes, never record
+    content, so there is nothing here that could turn one trailer block into
+    two.
+    """
+    if not isinstance(approval, ApprovalSet):
+        raise TypeError(
+            f"approval_trailers takes a validated ApprovalSet, not "
+            f"{type(approval).__name__}"
+        )
+    return "\n".join([
+        f"Doc-Lifecycle-Approval: {approval.digest}",
+        f"Doc-Lifecycle-Report: {approval.report_digest}",
+        # The verdict, because the trailers are the *only* part of an approval
+        # set that lands in the repository. Without it a block copied from a
+        # stale set into a commit message reads exactly like a live one — and
+        # the artifact it points at is untracked and gone.
+        f"Doc-Lifecycle-Approval-State: {approval.status}"
+        + (
+            "" if not approval.unchecked
+            else f" (not checked: {', '.join(approval.unchecked)})"
+        ),
+        f"Doc-Lifecycle-Records: {len(approval.records)} approved, "
+        f"{len(approval.skipped)} skipped",
+    ])
