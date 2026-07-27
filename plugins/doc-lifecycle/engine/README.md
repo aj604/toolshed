@@ -329,7 +329,7 @@ changed a verdict. It is proof of examination, never authority to change anythin
     "audit_config_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "registry_digest": "1d9176534bcc15f5fe5062503110be01ea198bb8ce65179230af4b226f56d85e",
     "ruleset_version": 1,
-    "plugin_version": "0.16.0",
+    "plugin_version": "0.17.0",
     "evidence_boundary": {"sources": ["src/**"], "excluded": []}
   },
   "records": [
