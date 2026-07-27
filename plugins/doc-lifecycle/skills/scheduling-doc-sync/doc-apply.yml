@@ -304,6 +304,12 @@ jobs:
               "move-with-provenance" carries "destination"; "retire-document" carries the whole
               document as "preimage"; "create-document" carries "text".
 
+            A span's "preimage" and "text" carry **no trailing newline**: the applier compares
+            them against the lines joined by "\n", so a preimage ending in the line's own
+            newline is refused as apply-preimage-mismatch even when every character before it
+            is right. "retire-document" is the exception — its preimage is the whole file's
+            bytes, trailing newline included.
+
             Rules the applier enforces, so get them right or it refuses the plan. An operation
             may only
             be one of the operations that record's finding code authorizes; a positioned
