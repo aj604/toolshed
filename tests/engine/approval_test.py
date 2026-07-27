@@ -575,22 +575,66 @@ class ApprovedTestCase(ApprovalTestCase):
             "destination": destination, "units": sorted(record["units"]),
         }
 
-    def rebuilt(self, record, *, lineage=None, scope=None, skipped=()):
+    def rebuilt(self, record, *, lineage=None, scope=None, skipped=None):
         """An approval set for `record`, assembled by hand and re-digested.
 
-        Every derivation the contract can recompute on its own is repaired, so
-        each test that uses this is asking about the one thing it changed —
-        which is also the attacker's position: whoever can edit the file can
-        re-hash it and fix up the arithmetic.
+        Every derivation the contract can recompute on its own is repaired —
+        including `skipped`, which is every record of the source report this
+        selection does not take — so each test that uses this is asking about
+        the one thing it changed. That is also the attacker's position: whoever
+        can edit the file can re-hash it and fix up the arithmetic. Pass
+        `skipped` to leave that derivation wrong on purpose.
         """
         payload = self.approval.to_dict()
         if lineage is not None:
             payload["lineage"] = lineage.to_dict()
         payload["records"] = [self.approved_entry(record)]
+        if skipped is None:
+            skipped = [
+                {"digest": r.digest, "id": r.id} for r in self.source.records
+                if r.digest != record["digest"]
+            ]
         payload["skipped"] = sorted(skipped, key=lambda r: r["digest"])
         payload["scope"]["paths"] = (
             [record["path"]] if scope is None else scope
         )
+        return resigned(payload)
+
+    def contested(self):
+        """A report whose two records propose different remedies for one unit."""
+        unit = self.units(self.repo, DOC_A)[0]
+        cut = self.finding("R-1", "CUT", DOC_A, [unit])
+        condense = self.finding("R-2", "CONDENSE", DOC_A, [unit],
+                                proposal="Fees: 2%.")
+        return self.report([cut, condense]), cut, condense
+
+    def forged(self, report, record):
+        """An approval set naming `record`, assembled by hand around the report.
+
+        Everything the contract can check on its own is honest: the artifact
+        declares the report's real digest, the report's real reconciliation
+        digest, and a scope derived from the record it selects. A report that
+        cannot be reconciled has no digest to declare, so one is invented —
+        which is the only spelling available to an honest minter too.
+        """
+        reconciliation = reconcile(report)
+        payload = self.approval.to_dict()
+        payload["report_digest"] = report.digest
+        payload["reconciliation_digest"] = (
+            "0" * 64 if isinstance(reconciliation, Invalid)
+            else reconciliation.digest
+        )
+        payload["records"] = [{
+            "digest": record["digest"], "id": record["id"],
+            "code": record["code"], "path": record["path"],
+            "destination": None, "units": sorted(record["units"]),
+        }]
+        payload["skipped"] = sorted(
+            ({"digest": r.digest, "id": r.id} for r in report.records
+             if r.digest != record["digest"]),
+            key=lambda r: r["digest"],
+        )
+        payload["scope"]["paths"] = [record["path"]]
         return resigned(payload)
 
     def check(self, approval=None, **kwargs):
@@ -761,36 +805,6 @@ class ReconciledOnReadBack(ApprovedTestCase):
     structural.
     """
 
-    def contested(self):
-        unit = self.units(self.repo, DOC_A)[0]
-        cut = self.finding("R-1", "CUT", DOC_A, [unit])
-        condense = self.finding("R-2", "CONDENSE", DOC_A, [unit],
-                                proposal="Fees: 2%.")
-        return self.report([cut, condense]), cut, condense
-
-    def forged(self, report, record):
-        """An approval set naming `record`, assembled by hand around the report.
-
-        Everything the contract can check on its own is honest: the artifact
-        declares the report's real digest, the report's real reconciliation
-        digest, and a scope derived from the record it selects.
-        """
-        payload = self.approval.to_dict()
-        payload["report_digest"] = report.digest
-        payload["reconciliation_digest"] = reconcile(report).digest
-        payload["records"] = [{
-            "digest": record["digest"], "id": record["id"],
-            "code": record["code"], "path": record["path"],
-            "destination": None, "units": sorted(record["units"]),
-        }]
-        payload["skipped"] = sorted(
-            ({"digest": r.digest, "id": r.id} for r in report.records
-             if r.digest != record["digest"]),
-            key=lambda r: r["digest"],
-        )
-        payload["scope"]["paths"] = [record["path"]]
-        return resigned(payload)
-
     def test_one_leg_of_an_exclusive_pair_is_refused_on_read_back(self):
         report, cut, _ = self.contested()
 
@@ -831,6 +845,123 @@ class ReconciledOnReadBack(ApprovedTestCase):
 
         self.assertIsInstance(result, ApprovalSet, result)
         self.assertEqual(result.status, STATE_CLEAN)
+
+
+class InvalidBeatsStale(ApprovedTestCase):
+    """No field an attacker sets can relabel a forgery as `stale`.
+
+    `stale` says the world moved out from under an approval that was
+    legitimate when it was made — an operational hiccup, re-mint and carry on.
+    `invalid` says the artifact was never authority. Three of the fields the
+    report check reads are *compared* rather than derived — `report_digest`,
+    `lineage`, and `reconciliation_digest` — so whoever writes the file
+    chooses them. If any of them ends the check early, corrupting one costs an
+    attacker nothing and downgrades every forgery below it to `stale`.
+    """
+
+    def full(self, payload):
+        """The check with everything supplied: report, repository, config."""
+        return validate_approval_set(
+            payload, report=self.source, repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+    def test_a_corrupted_reconciliation_digest_still_refuses_an_exclusive_leg(self):
+        report, cut, _ = self.contested()
+        payload = self.forged(report, cut)
+        payload["reconciliation_digest"] = "9" * 64
+        resigned(payload)
+
+        result = validate_approval_set(payload, report=report)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-exclusive-group"])
+
+    def test_a_corrupted_reconciliation_digest_still_refuses_a_hidden_record(self):
+        payload = self.approval.to_dict()
+        payload["reconciliation_digest"] = "9" * 64
+        payload["skipped"] = []
+        resigned(payload)
+
+        result = self.full(payload)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-skipped-not-derived"])
+
+    def test_a_corrupted_reconciliation_digest_still_refuses_a_destination(self):
+        payload = self.approval.to_dict()
+        payload["records"][0]["destination"] = DOC_B
+        payload["scope"]["paths"] = sorted([DOC_A, DOC_B])
+        payload["reconciliation_digest"] = "9" * 64
+        resigned(payload)
+
+        result = self.full(payload)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-destination-not-reported"])
+
+    def test_a_corrupted_report_digest_still_refuses_a_hidden_record(self):
+        payload = self.approval.to_dict()
+        payload["report_digest"] = "9" * 64
+        payload["skipped"] = []
+        resigned(payload)
+
+        result = self.full(payload)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-skipped-not-derived"])
+
+    def test_a_forged_lineage_still_refuses_a_hidden_record(self):
+        # The record digests are re-derived under the forged lineage, so the
+        # artifact's own arithmetic is repaired and only the report can tell.
+        # Without the lineage forgery the same shortened `skipped` is refused
+        # outright; the forgery must not buy the attacker a softer verdict.
+        other = self.lineage_for(self.repo, audit_mode="incremental")
+        record = self.finding("R-1", "STALE", DOC_A,
+                              self.units(self.repo, DOC_A)[:1],
+                              lineage=other, fix="Fees: 2.5%.")
+
+        result = self.full(self.rebuilt(record, lineage=other, skipped=[]))
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-skipped-not-derived"])
+
+    def test_a_report_that_cannot_be_reconciled_still_refuses_a_hidden_record(self):
+        # The one case with no reconciliation to check groups against. The
+        # group checks stand down; the derivations that need nothing but the
+        # report's records do not.
+        unit = self.units(self.repo, DOC_A)[0]
+        condense = self.finding("R-2", "CONDENSE", DOC_A, [unit],
+                                proposal="Fees: 2%.")
+        cut = self.finding("R-1", "CUT", "./" + DOC_A, [unit])
+        report = self.report([cut, condense])
+        payload = self.forged(report, condense)
+        payload["skipped"] = []
+        resigned(payload)
+
+        result = validate_approval_set(payload, report=report)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-skipped-not-derived"])
+
+    def test_no_combination_of_the_three_softens_a_forged_selection(self):
+        report, cut, _ = self.contested()
+        fields = ("report_digest", "reconciliation_digest")
+
+        for corrupted in ((fields[0],), (fields[1],), fields):
+            with self.subTest(corrupted=corrupted):
+                payload = self.forged(report, cut)
+                for field in corrupted:
+                    payload[field] = "9" * 64
+                resigned(payload)
+
+                result = validate_approval_set(
+                    payload, report=report, repo_root=self.repo,
+                    audit_config_digest=CONFIG_DIGEST,
+                )
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertIn("approval-exclusive-group", codes(result))
 
 
 class NotAnApprovalSet(ApprovedTestCase):
@@ -1192,6 +1323,58 @@ class ReadBackBindsTheTarget(ApprovedTestCase):
             ["approval-invalid-record", "approval-invalid-scope"],
         )
 
+    def test_a_record_path_inside_the_git_directory_is_refused(self):
+        # An approval set's paths are write targets, and `.git/hooks/*` is
+        # executed by the next commit. Structural, because the refusal must
+        # not wait for a repository to be supplied — a scope enumerating a
+        # hook is forged authority whatever the filesystem says.
+        payload = self.approval.to_dict()
+        payload["records"][0]["path"] = ".git/hooks/post-commit"
+        payload["scope"]["paths"] = [".git/hooks/post-commit"]
+        resigned(payload)
+
+        result = validate_approval_set(payload)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(
+            codes(result),
+            ["approval-invalid-record", "approval-invalid-scope"],
+        )
+
+    def test_a_destination_inside_the_git_directory_is_refused(self):
+        payload = self.approval.to_dict()
+        payload["records"][0]["destination"] = ".git/config"
+        payload["scope"]["paths"] = sorted([DOC_A, ".git/config"])
+        resigned(payload)
+
+        result = validate_approval_set(payload)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(
+            codes(result),
+            ["approval-invalid-record", "approval-invalid-scope"],
+        )
+
+    def test_a_scope_path_inside_the_git_directory_is_refused(self):
+        payload = self.approval.to_dict()
+        payload["scope"]["paths"] = sorted([DOC_A, ".git/hooks/pre-commit"])
+        resigned(payload)
+
+        self.assertIn("approval-invalid-scope",
+                      codes(validate_approval_set(payload)))
+
+    def test_the_git_directory_is_refused_however_it_is_spelled(self):
+        # A nested repository's git directory is the same hazard, and a
+        # case-insensitive filesystem makes `.GIT` the same directory.
+        for spelling in (".git", ".GIT/hooks/post-commit", "docs/.git/config"):
+            with self.subTest(spelling=spelling):
+                payload = self.approval.to_dict()
+                payload["scope"]["paths"] = sorted([DOC_A, spelling])
+                resigned(payload)
+
+                self.assertIn("approval-invalid-scope",
+                              codes(validate_approval_set(payload)))
+
     def test_an_absolute_scope_path_is_refused_without_a_repository(self):
         payload = self.approval.to_dict()
         payload["scope"]["paths"] = ["/etc/passwd", DOC_A]
@@ -1296,6 +1479,17 @@ class TamperEvidence(ApprovedTestCase):
 
         self.assertIsInstance(result, Invalid)
         self.assertEqual(codes(result), ["approval-digest-unexpected"])
+
+    def test_the_refusal_speaks_of_an_approval_and_not_of_a_file(self):
+        # A record's `units` are normalized before the content digest, so two
+        # byte-distinct files can carry one digest. What the trailer pins is
+        # the approval, and claiming it pins the file overstates the check.
+        result = validate_approval_set(
+            self.approval.to_dict(), expected_digest="b" * 64
+        )
+
+        self.assertNotIn("a different file", result.problems[0].message)
+        self.assertIn("a different approval", result.problems[0].message)
 
     def test_the_trailer_it_does_name_validates(self):
         result = validate_approval_set(

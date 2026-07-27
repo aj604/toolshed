@@ -663,9 +663,23 @@ def _path_problem(value):
     rather than a repository that moved — and a forgery is `invalid`, not
     `stale`. One owner decides (`paths.repository_relative_problem`), so an
     edit target cannot mean one thing here and another to the applier.
+
+    On top of that owner's spelling rules, one location: a git directory is
+    inside the repository and is spelled canonically, so nothing above refuses
+    it — and a single write to `.git/hooks/post-commit` or `.git/config` is
+    arbitrary code execution on the next commit. No document lives there, at
+    any depth (a nested repository's is the same hazard), under any casing (a
+    case-insensitive filesystem makes `.GIT` the same directory).
     """
     problem = repository_relative_problem(value)
-    return None if problem is None else problem[1]
+    if problem is not None:
+        return problem[1]
+    if any(c.casefold() == ".git" for c in value.split("/")):
+        return (
+            "is inside a git directory — the repository's own state is not "
+            "documentation, and a write there executes on the next commit"
+        )
+    return None
 
 
 def _unsorted(digests, field, bad):
@@ -1132,7 +1146,7 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
                 f"this change was authorized by approval set {expected_digest} "
                 f"and the file supplied is {approval.digest} — an approval set "
                 f"is untracked, so the trailer is the only record of which one "
-                f"authorized the change, and a different file is a different "
+                f"authorized the change, and a different digest is a different "
                 f"approval however well-formed it is"
             ),
             location="digest",
@@ -1202,9 +1216,27 @@ def _report_reasons(payload, records, skipped, report, approval_lineage):
     half of a group that is one edit or none, or hides a record the report
     carries. An approval set is an untracked file, so the minter's refusals
     have to be re-run here: this is the check the applier actually reaches.
+
+    Nothing here returns early. `report_digest`, `lineage`, and
+    `reconciliation_digest` are all *compared* against the report rather than
+    derived from the artifact, so whoever writes the file chooses them for
+    free; ending the function at any of them would let one corrupted field
+    relabel every forgery below it as `stale`, which the applier reads as an
+    operational hiccup rather than as an artifact that was never authority. So
+    each check records what it found and the run continues, and a check only
+    stands down when it has nothing to run against.
     """
-    if payload["report_digest"] != report.digest:
-        return [StaleReason(
+    reasons = []
+    carried = {record.digest for record in report.records}
+    selected = {record.digest for record in records}
+    same_report = payload["report_digest"] == report.digest
+
+    if not same_report:
+        # The root cause, and the only stale reason worth reporting when it
+        # fires: against some other report the lineage, the record lookups and
+        # the grouping all differ *as a consequence*, so naming them too would
+        # bury the one fact a reader can act on.
+        reasons.append(StaleReason(
             code="approval-report-changed",
             message=(
                 f"the approval set was minted from report "
@@ -1214,49 +1246,44 @@ def _report_reasons(payload, records, skipped, report, approval_lineage):
             ),
             reported=payload["report_digest"],
             current=report.digest,
-        )], []
-
-    reasons = []
-    if approval_lineage != report.lineage:
-        # The report digest binds the report's *records*; the lineage travels
-        # beside it, and two of its fields — the audit mode and the evidence
-        # boundary — describe how the run was conducted rather than anything
-        # the world can be re-read for. Nothing else could ever catch a
-        # divergence there, and "binds the report's lineage verbatim" has to be
-        # true of the file, not just of what minting wrote.
-        #
-        # Recorded and carried on, never returned early: the checks below are
-        # the minter's refusals, and a forged selection that also diverges here
-        # must still come back `invalid` rather than being softened to `stale`.
-        reasons.append(StaleReason(
-            code="approval-report-changed",
-            message=(
-                "the approval set carries a lineage the report it names does "
-                "not — an approval set binds one report's lineage verbatim, so "
-                "a copy that differs describes a run that did not happen"
-            ),
-            reported=lineage_digest(approval_lineage),
-            current=lineage_digest(report.lineage),
         ))
+    else:
+        if approval_lineage != report.lineage:
+            # The report digest binds the report's *records*; the lineage
+            # travels beside it, and two of its fields — the audit mode and the
+            # evidence boundary — describe how the run was conducted rather
+            # than anything the world can be re-read for. Nothing else could
+            # ever catch a divergence there, and "binds the report's lineage
+            # verbatim" has to be true of the file, not just of what minting
+            # wrote.
+            reasons.append(StaleReason(
+                code="approval-report-changed",
+                message=(
+                    "the approval set carries a lineage the report it names "
+                    "does not — an approval set binds one report's lineage "
+                    "verbatim, so a copy that differs describes a run that did "
+                    "not happen"
+                ),
+                reported=lineage_digest(approval_lineage),
+                current=lineage_digest(report.lineage),
+            ))
 
-    carried = {record.digest for record in report.records}
-    missing = sorted(r.digest for r in records if r.digest not in carried)
-    if missing:
-        reasons.append(StaleReason(
-            code="approval-report-changed",
-            message=(
-                f"the approval set selects {len(missing)} record(s) the report "
-                f"does not carry — there is nothing for the applier to look up, "
-                f"so the selection authorizes nothing"
-            ),
-            reported=missing[0],
-            current=f"{len(carried)} record(s) in the report",
-        ))
-        return reasons, []
+        missing = sorted(r.digest for r in records if r.digest not in carried)
+        if missing:
+            reasons.append(StaleReason(
+                code="approval-report-changed",
+                message=(
+                    f"the approval set selects {len(missing)} record(s) the "
+                    f"report does not carry — there is nothing for the applier "
+                    f"to look up, so the selection authorizes nothing"
+                ),
+                reported=missing[0],
+                current=f"{len(carried)} record(s) in the report",
+            ))
 
     reconciliation = reconcile(report)
     if isinstance(reconciliation, Invalid):
-        return reasons + [StaleReason(
+        reasons.append(StaleReason(
             code="approval-reconciliation-changed",
             message=(
                 f"the report can no longer be reconciled, so whether this "
@@ -1265,30 +1292,46 @@ def _report_reasons(payload, records, skipped, report, approval_lineage):
             ),
             reported=payload["reconciliation_digest"],
             current="the report cannot be reconciled",
-        )], []
-    if reconciliation.digest != payload["reconciliation_digest"]:
-        return reasons + [StaleReason(
-            code="approval-reconciliation-changed",
-            message=(
-                "the report's records no longer group the way they did when "
-                "this selection was checked against them, so the selection is "
-                "not known to respect the groups"
-            ),
-            reported=payload["reconciliation_digest"],
-            current=reconciliation.digest,
-        )], []
+        ))
+        reconciliation = None
+    elif reconciliation.digest != payload["reconciliation_digest"]:
+        # Against some other report the grouping differs by construction, so
+        # this too is a consequence of the root cause rather than a fact of
+        # its own.
+        if same_report:
+            reasons.append(StaleReason(
+                code="approval-reconciliation-changed",
+                message=(
+                    "the report's records no longer group the way they did "
+                    "when this selection was checked against them, so the "
+                    "selection is not known to respect the groups"
+                ),
+                reported=payload["reconciliation_digest"],
+                current=reconciliation.digest,
+            ))
 
-    selected = {record.digest for record in records}
-    problems = _group_problems(selected, reconciliation)
+    # The group discipline is checked against the grouping that holds *now*.
+    # Only an unreconcilable report leaves nothing to check it against — a
+    # reconciliation whose digest the artifact misstates is still the truth
+    # about how these records group, and a selection that takes one leg of a
+    # contradictory pair is a forgery whichever digest the file claims.
+    problems = (
+        [] if reconciliation is None
+        else _group_problems(selected, reconciliation)
+    )
 
     # A record's code, document, and units re-derive to its digest without a
     # report — but `destination` does not: it is not in the finding digest,
     # because where a move puts content is the lane's proposal and not the
     # finding's identity. So it is the one part of the write set that only the
     # report can confirm, and inventing one adds an arbitrary writable document
-    # that every other derivation would faithfully accept.
+    # that every other derivation would faithfully accept. A record the report
+    # does not carry has no reported destination to compare against — that is
+    # the `missing` reason above, not a second finding here.
     by_digest = {record.digest: record for record in report.records}
     for record in records:
+        if record.digest not in by_digest:
+            continue
         reported = _destination(by_digest[record.digest])
         if record.destination != reported:
             problems.append(Problem(
