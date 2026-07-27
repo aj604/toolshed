@@ -40,7 +40,7 @@ document. A deleted document fails the same check.
 import json
 import os
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .digest import sha256_canonical

@@ -14,7 +14,6 @@ from support import ENGINE, RepoTestCase  # noqa: F401 (engine onto sys.path)
 
 from doclifecycle import ARTIFACT_SCHEMA_VERSION
 from doclifecycle.approval import (
-    ARTIFACT_KIND,
     ApprovalSet,
     Minter,
     load_approval_set,

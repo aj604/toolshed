@@ -20,7 +20,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from approval_test import (  # noqa: E402
     CONFIG_DIGEST,
     DOC_A,
-    DOC_B,
     ApprovalTestCase,
 )
 from support import run_command  # noqa: E402
