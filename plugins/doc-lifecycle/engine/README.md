@@ -997,7 +997,9 @@ python3 -m doclifecycle drift-audit --repo . --mode full \
 ```
 
 Every flag is optional. Without `--verdicts` no living document is examined and the run is
-partial — the narrative anchors are still checked. `--evidence` and `--exclude-evidence` are
+partial — the narrative anchors are still checked. A `--verdicts` file that cannot be read or
+parsed is `drift-verdicts-unreadable` and invalidates the run, rather than being mistaken for
+no verdicts at all. `--evidence` and `--exclude-evidence` are
 repeatable and declare the run's evidence boundary; the default is `**`, because a boundary must
 be honest before it is narrow. Exit codes are the report states: 0 clean or findings, 1 invalid,
 2 usage, 4 partial.
