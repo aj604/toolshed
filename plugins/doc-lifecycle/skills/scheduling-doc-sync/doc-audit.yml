@@ -138,10 +138,26 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
+          # No -e: the runner's shell is `bash -e`, and `set -uo pipefail`
+          # does not clear it, so a bare `$?` read after this command would
+          # never run on the very exits that matter — 1 (invalid) and 4
+          # (partial) are each a legitimate typed report drift-audit can
+          # emit (see EXIT_CODES in doclifecycle/cli.py), not a crash to
+          # abort the step on. `|| code=$?` survives `-e`; reading $?
+          # afterward would not.
+          code=0
           python3 .github/doc-sync/engine/doc-lifecycle.py drift-audit --repo . --mode full \
             $( [ -f verdicts.json ] && echo "--verdicts verdicts.json" ) \
-            > drift-report.json
-          echo "exit code: $?"
+            > drift-report.json || code=$?
+          case "$code" in
+            0) echo "drift-audit exit code: 0 (ok/clean/findings — typed report)" ;;
+            1) echo "drift-audit exit code: 1 (invalid — typed report)" ;;
+            4) echo "drift-audit exit code: 4 (partial — typed report)" ;;
+            *)
+              echo "drift-audit exit code: $code (unexpected — not a typed report state)"
+              exit "$code"
+              ;;
+          esac
 
       - name: Upload report artifact
         if: always()
@@ -199,13 +215,16 @@ jobs:
       - name: Re-validate freshness before publishing
         if: hashFiles('drift-report.json') != ''
         run: |
-          set -uo pipefail   # no -e: validate-report's non-zero (stale/partial/invalid)
-                              # exit codes are typed outcomes to capture, not crashes to abort on
+          set -uo pipefail
+          # `|| true`, not a bare call: the runner's shell is `bash -e`, and
+          # `set -uo pipefail` does not clear it — validate-report's
+          # non-zero (stale/partial) exits are typed outcomes to capture via
+          # the written payload, not crashes to abort this step on (#107).
           if grep -q '"status":[[:space:]]*"invalid"' drift-report.json; then
             echo "report is already invalid — nothing to re-validate freshness against"
           else
             python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
-              --report drift-report.json --repo . > revalidated.json
+              --report drift-report.json --repo . > revalidated.json || true
             [ -s revalidated.json ] && mv revalidated.json drift-report.json
           fi
 

@@ -181,5 +181,36 @@ class RenderScriptWired(unittest.TestCase):
         self.assertNotIn("GITHUB_STEP_SUMMARY\" <<", text)  # no inline heredoc templating
 
 
+# GitHub Actions invokes `run:` steps under `bash -e` (or `bash -eo pipefail`
+# once a step declares a bash shell); `set -uo pipefail` does not clear that
+# inherited `-e`. A bare `$?` read on its own line therefore only ever runs
+# after the *previous* command already succeeded — any nonzero exit, expected
+# typed state or not, aborts the step first and leaves the `$?` read
+# unreachable dead code (issue #107). The only shape that survives `-e` is
+# capturing the code inline with `||`, e.g. `cmd || code=$?`.
+CAPTURED_EXIT_CODE = re.compile(r"\|\|\s*[A-Za-z_][A-Za-z0-9_]*=\$\?")
+BARE_EXIT_CODE_READ = re.compile(r"\$\?")
+
+
+class NoDeadExitCodeReads(unittest.TestCase):
+    def test_no_bare_dollar_question_after_a_command_dash_e_would_abort_on(self):
+        offenders = []
+        for lineno, line in enumerate(lines(), 1):
+            if line.strip().startswith("#"):
+                continue  # commentary, not a shell statement
+            if not BARE_EXIT_CODE_READ.search(line):
+                continue
+            if CAPTURED_EXIT_CODE.search(line):
+                continue  # `cmd || code=$?` — survives -e, not dead code
+            offenders.append(f"{lineno}: {line.strip()}")
+        self.assertEqual(
+            offenders, [],
+            "doc-audit.yml reads $? somewhere other than a `|| var=$?` "
+            "capture — under the runner's inherited `bash -e`, a nonzero "
+            "exit from the preceding command aborts the step before this "
+            "line runs, making the read unreachable dead code:\n  "
+            + "\n  ".join(offenders))
+
+
 if __name__ == "__main__":
     unittest.main()
