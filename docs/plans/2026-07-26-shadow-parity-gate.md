@@ -365,7 +365,37 @@ DRIFT-035 and DRIFT-036 rest entirely on this and are wrong. DRIFT-034 and DRIFT
 same bogus reason but survive as true positives because their fully-qualified references
 independently fail the last-changed-after-as-of test. So the bug produced 2 false findings and
 2 misleading evidence strings out of 4 anchor records — a 50% defect rate on that code path.
-Fixing it is small and belongs in the engine, before the new lane is anyone's only lane.
+
+**The two spellings are disjoint defects sharing a line, not one bug with two symptoms**, and
+anyone fixing this needs to know that before they start. Running `_anchor_references` over
+every anchored document in this repository (measured by #74):
+
+| Reference | `isfile` | `exists` | |
+|---|---|---|---|
+| `plugins/doc-lifecycle/skills/` | False | **True** | directory |
+| `doc-sync.yml` | False | False | abbreviated |
+| `doc-bloat.yml` | False | False | abbreviated |
+| `fixing-doc-bloat/SKILL.md` | False | False | abbreviated |
+| `growing-docs/SKILL.md` | False | False | abbreviated |
+
+Changing `isfile` to `exists` fixes **one of five**. For the other four the predicate is
+correct and the *path* is incomplete: `_anchor_references` admits a bare token carrying a file
+extension, and any token containing `/`, so these are accepted and then resolved against the
+repository root where they genuinely are not. The real locations are
+`.github/workflows/doc-sync.yml` and `plugins/doc-lifecycle/skills/growing-docs/SKILL.md`. A
+fix that lands the directory case will pass its own test while the other four keep emitting
+false STALE, and will look finished. **Do not close this finding when the directory fix
+lands.**
+
+The second half is a design call, not a patch. Either resolve an abbreviated reference against
+the directory of an already-resolved reference in the same anchor, or rule abbreviated
+references illegal and give them their own code. This record recommends the second: resolution
+would make an anchor's meaning depend on the order its tokens appear in, and a bare
+`doc-sync.yml` is genuinely ambiguous in a repository that has two of them. Either way the
+`exists=False` branch must stop saying "is no longer in the repository" when the truth is that
+the token never named anything resolvable — those are different facts, and the report contract
+refuses that conflation everywhere else. Ruling them illegal turns the four anchors in this
+repository into honest findings whose fix is to spell the paths in full.
 
 **Cause B — a contract gap: the evidence boundary cannot name non-repository evidence
 (6 records).** `docs/agents/issue-tracker.md`'s claims about `gh` flags were all returned
@@ -480,8 +510,9 @@ behave the same on a corpus nobody wrote the engine against.
 
 ## What #77 needs before this gate can be re-run and pass
 
-1. Fix `drift._anchor_findings`'s reference resolution — directories and shorthand
-   continuations (Cause A).
+1. Fix `drift._anchor_findings`'s reference resolution — **two disjoint fixes**, the directory
+   predicate and the abbreviated-reference path, of which the first cures 1 of 5 cases (Cause
+   A). Do not close the finding when the directory half lands.
 2. Settle how the report contract records non-path evidence, or narrow the method that
    sanctions it (Cause B). This one is a contract decision, not a patch.
 3. Remove the digest-transcription failure mode — ordinal-keyed answers are the cheapest fix —
