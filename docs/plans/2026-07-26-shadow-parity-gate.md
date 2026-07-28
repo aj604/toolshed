@@ -3,7 +3,11 @@
 **Status:** criteria pre-registered 2026-07-26 in their own commit; cycle run and verdict
 recorded the same day, in later commits. **Verdict: FAIL** — G1b (write proof, on its
 instrument), G4 (false positives), G5 (cost). See Verdict.
-**Blocks:** #77 (remove legacy mutation paths) cites this file's Verdict section.
+**Superseded by:** `docs/plans/2026-07-27-shadow-parity-gate-rerun.md` (#117), which re-registers
+G1b and G5 and records a second cycle's verdict. This file stays as the first cycle's record and
+is the only place the 2026-07-26 measurements live; #77 cites the rerun.
+**Blocks:** #77 (remove legacy mutation paths) cited this file's Verdict section until the rerun
+landed.
 **Spec:** #57's distilled-decisions comment (2026-07-26), which promotes its shadow-mode note
 to a blocking gate; issue #76's acceptance criteria.
 

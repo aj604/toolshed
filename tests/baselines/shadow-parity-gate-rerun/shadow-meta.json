@@ -1,0 +1,61 @@
+{
+  "lane": "new engine audit (doclifecycle drift-audit --mode full)",
+  "base_commit": "983837b53ba88358b270a9ba6cd4192669772161",
+  "registry": ".doc-lifecycle/registry.json (the landed dogfood registry)",
+  "plugin_version": "0.36.0",
+  "model": "claude-sonnet-5 (claude -p --model sonnet, the same runner shape doc-audit.yml uses)",
+  "rounds": [
+    {
+      "round": "pilot",
+      "sessions": 2,
+      "cost_usd": 1.433282,
+      "errored_sessions": 0
+    },
+    {
+      "round": "1",
+      "sessions": 50,
+      "cost_usd": 85.504304,
+      "errored_sessions": 0
+    },
+    {
+      "round": "repair-1",
+      "sessions": 5,
+      "cost_usd": 8.113795,
+      "errored_sessions": 0
+    },
+    {
+      "round": "repair-2",
+      "sessions": 1,
+      "cost_usd": 2.031793,
+      "errored_sessions": 0
+    }
+  ],
+  "tasks": 58,
+  "cost_usd": 97.083175,
+  "assertions_judged": 1103,
+  "cost_usd_per_assertion_judged": 0.088017,
+  "per_session": {
+    "cost_usd": {
+      "n": 58,
+      "min": 0.44856809999999997,
+      "median": 1.6046236499999997,
+      "max": 4.5046758,
+      "total": 97.083175
+    },
+    "turns": {
+      "n": 58,
+      "min": 7,
+      "median": 28.5,
+      "max": 88,
+      "total": 1829
+    },
+    "duration_ms": {
+      "n": 58,
+      "min": 76312,
+      "median": 321827.0,
+      "max": 672609,
+      "total": 17840099
+    }
+  },
+  "note": "cost is the sum of total_cost_usd over every headless worker session in every round, the pilot session included. Per-session distributions replace the first cycle's null turns/duration: a fan-out of this many sessions has no single turn count or wall-clock, so the distribution is what is comparable (aj604/toolshed#117, G5)."
+}

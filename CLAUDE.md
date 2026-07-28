@@ -51,9 +51,12 @@ disabled by #75 ahead of #77 removing them from the templates), the classificati
 (`.doc-lifecycle/registry.json` — five roots, closed-world), the ci+release workflow
 (`workflows/release.yml`), that workflow's own test-suite runner
 (`.github/scripts/run-script-suites.py`, #99 — discovery-driven, so a new
-`tests/scripts/*_test.py` suite needs no hand-wiring), and the shadow-mode parity gate's harness
+`tests/scripts/*_test.py` suite needs no hand-wiring), the shadow-mode parity gate's harness
 (`tests/baselines/shadow-parity-gate/shadow-cycle.py`, #76 — recorded scaffolding, retired with
-the legacy lane in #77).
+the legacy lane in #77; its `digest` and `merge` subcommands are the gate's own instruments and
+are pinned by `tests/scripts/shadow-cycle_test.py`), and that gate's second-cycle worker
+orchestrator (`tests/baselines/shadow-parity-gate-rerun/fanout.py`, #117 — kept because it
+carries the worker prompt the verdict makes claims about).
 
 ## Layout (pointers, not descriptions)
 
@@ -65,7 +68,9 @@ the legacy lane in #77).
   document-model terms, each with an _Avoid_ list). Use its vocabulary in engine code and tests.
 - `docs/` — `plans/` (design docs + `HANDOFF.md`), `guides/` (narrative user guides). Not published.
 - `tests/` — `fixtures/` (runnable sample repos), `baselines/` (RED/GREEN skill-test records,
-  plus `shadow-parity-gate/`, the #76 gate's run evidence and its harness),
+  plus `shadow-parity-gate/`, the #76 gate's first-cycle run evidence and its harness, and
+  `shadow-parity-gate-rerun/`, #117's second cycle — the FAIL both cycles reached is recorded in
+  `docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, which #77 cites),
   `scripts/` (helper-script suites), `engine/` (engine suites). Not published.
 
 ## Working on the plugin

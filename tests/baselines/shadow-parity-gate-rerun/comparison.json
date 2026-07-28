@@ -1,0 +1,526 @@
+{
+  "schema_version": 1,
+  "lanes": {
+    "legacy": {
+      "run": "28847329392",
+      "base_commit": "6d525c9dfa92e995631398ff877927b459f95d0f",
+      "records": 31,
+      "verdicts": {
+        "VERIFIED": 31
+      },
+      "documents": [
+        ".github/workflows/doc-bloat.yml",
+        ".github/workflows/doc-sync.yml",
+        "CLAUDE.md",
+        "README.md",
+        "docs/decisions.md",
+        "docs/design-rationale.md",
+        "plugins/doc-lifecycle/.claude-plugin/plugin.json",
+        "plugins/doc-lifecycle/agents/doc-distiller.md",
+        "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md",
+        "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+        "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+        "plugins/doc-lifecycle/skills/fixing-doc-drift/SKILL.md",
+        "plugins/doc-lifecycle/skills/growing-docs/SKILL.md",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml"
+      ]
+    },
+    "shadow": {
+      "status": "findings",
+      "base_commit": "983837b53ba88358b270a9ba6cd4192669772161",
+      "audit_mode": "full",
+      "plugin_version": "0.36.0",
+      "records": 24,
+      "codes": {
+        "ANCHOR-MALFORMED": 1,
+        "ANCHOR-STALE": 2,
+        "STALE": 10,
+        "UNVERIFIABLE": 11
+      },
+      "declared": [
+        "CLAUDE.md",
+        "CONTEXT.md",
+        "README.md",
+        "docs/agents/domain.md",
+        "docs/agents/issue-tracker.md",
+        "docs/agents/triage-labels.md",
+        "docs/decisions.md",
+        "docs/design-rationale.md",
+        "docs/doc-scope.md",
+        "docs/guides/auditing-doc-bloat.md",
+        "docs/guides/principles.md",
+        "docs/guides/scheduling-doc-sync.md",
+        "docs/guides/starting-docs-from-scratch.md",
+        "plugins/doc-lifecycle/agents/doc-distiller.md",
+        "plugins/doc-lifecycle/agents/llm-doc-writer.md",
+        "plugins/doc-lifecycle/engine/README.md",
+        "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+        "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md",
+        "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+        "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+        "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/planning-artifacts.md",
+        "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/verdict-lenses.md",
+        "plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md",
+        "plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md",
+        "plugins/doc-lifecycle/skills/fixing-docs/SKILL.md",
+        "plugins/doc-lifecycle/skills/growing-docs/SKILL.md",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+        "plugins/doc-lifecycle/skills/writing-docs/SKILL.md",
+        "plugins/doc-lifecycle/skills/writing-docs/agent-context.md",
+        "plugins/doc-lifecycle/skills/writing-docs/readme.md",
+        "plugins/doc-lifecycle/skills/writing-docs/runbooks.md"
+      ],
+      "excluded": [
+        "docs/plans/2026-07-05-marketing-overhaul-design.md",
+        "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md",
+        "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-plan.md",
+        "docs/plans/2026-07-07-bloat-scale-hardening-design.md",
+        "docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md",
+        "docs/plans/2026-07-11-docs-ab-experiment.md",
+        "docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md",
+        "docs/plans/2026-07-26-shadow-parity-gate.md",
+        "docs/plans/2026-07-27-shadow-parity-gate-rerun.md",
+        "docs/plans/HANDOFF.md",
+        "docs/superpowers/specs/2026-07-07-doc-sync-self-upgrade-design.md"
+      ],
+      "incomplete": [],
+      "verified_units": 1082
+    }
+  },
+  "coverage": {
+    "both": [
+      "CLAUDE.md",
+      "README.md",
+      "docs/decisions.md",
+      "docs/design-rationale.md",
+      "plugins/doc-lifecycle/agents/doc-distiller.md",
+      "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+      "plugins/doc-lifecycle/skills/growing-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md"
+    ],
+    "legacy_only": [
+      ".github/workflows/doc-bloat.yml",
+      ".github/workflows/doc-sync.yml",
+      "plugins/doc-lifecycle/.claude-plugin/plugin.json",
+      "plugins/doc-lifecycle/skills/fixing-doc-drift/SKILL.md",
+      "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml"
+    ],
+    "legacy_only_reasons": {
+      ".github/workflows/doc-bloat.yml": {
+        "code": "outside-inventory",
+        "reason": "not in the shadow registry's inventory — neither declared nor excluded by the audit's scope"
+      },
+      ".github/workflows/doc-sync.yml": {
+        "code": "outside-inventory",
+        "reason": "not in the shadow registry's inventory — neither declared nor excluded by the audit's scope"
+      },
+      "plugins/doc-lifecycle/.claude-plugin/plugin.json": {
+        "code": "outside-inventory",
+        "reason": "not in the shadow registry's inventory — neither declared nor excluded by the audit's scope"
+      },
+      "plugins/doc-lifecycle/skills/fixing-doc-drift/SKILL.md": {
+        "code": "outside-inventory",
+        "reason": "not in the shadow registry's inventory — neither declared nor excluded by the audit's scope"
+      },
+      "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml": {
+        "code": "outside-inventory",
+        "reason": "not in the shadow registry's inventory — neither declared nor excluded by the audit's scope"
+      }
+    },
+    "shadow_only": [
+      "CONTEXT.md",
+      "docs/agents/domain.md",
+      "docs/agents/issue-tracker.md",
+      "docs/agents/triage-labels.md",
+      "docs/doc-scope.md",
+      "docs/guides/auditing-doc-bloat.md",
+      "docs/guides/principles.md",
+      "docs/guides/scheduling-doc-sync.md",
+      "docs/guides/starting-docs-from-scratch.md",
+      "plugins/doc-lifecycle/agents/llm-doc-writer.md",
+      "plugins/doc-lifecycle/engine/README.md",
+      "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/planning-artifacts.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/verdict-lenses.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md",
+      "plugins/doc-lifecycle/skills/fixing-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/writing-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/writing-docs/agent-context.md",
+      "plugins/doc-lifecycle/skills/writing-docs/readme.md",
+      "plugins/doc-lifecycle/skills/writing-docs/runbooks.md"
+    ]
+  },
+  "assertions": {
+    "agreed": [
+      {
+        "path": "README.md",
+        "line": 58,
+        "location": "README.md:58",
+        "unit": "7956c0a2e71cef54ca70e04e9fbdf004a5827d78faa84d67df21cb9836b988a7",
+        "verdict": "VERIFIED"
+      },
+      {
+        "path": "README.md",
+        "line": 84,
+        "location": "README.md:84",
+        "unit": "49cc3529b58375e50591c8d397939ab013ce18bc9b239ceb99b56fcf53bcddad",
+        "verdict": "VERIFIED"
+      },
+      {
+        "path": "README.md",
+        "line": 96,
+        "location": "README.md:96",
+        "unit": "de1c968edf01b5abdb7ffc35832b4183b868cecde2020f35987b58221ce5bad5",
+        "verdict": "VERIFIED"
+      },
+      {
+        "path": "README.md",
+        "line": 97,
+        "location": "README.md:97",
+        "unit": "951086cea5f9cea7dff3bdc98dc01ee94fba6d04217de0bb206f5fe0fc45fb36",
+        "verdict": "VERIFIED"
+      },
+      {
+        "path": "README.md",
+        "line": 99,
+        "location": "README.md:99",
+        "unit": "cfc4c15ae6c5a58f0aefbece3df595d70669eede1ba27e53c2633fc68b43c3da",
+        "verdict": "VERIFIED"
+      },
+      {
+        "path": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+        "line": 88,
+        "location": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md:88",
+        "unit": "d7527c0543ac5b885e57e513502ea6719d6fae1c948c42c27ba894930233c94a",
+        "verdict": "VERIFIED"
+      }
+    ],
+    "disagreed": [],
+    "legacy_unresolved": [
+      {
+        "path": "CLAUDE.md",
+        "line": 23,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "CLAUDE.md",
+        "line": 45,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "CLAUDE.md",
+        "line": 48,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "CLAUDE.md",
+        "line": 51,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "CLAUDE.md",
+        "line": 54,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "CLAUDE.md",
+        "line": 59,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "README.md",
+        "line": 45,
+        "reason": "the shadow run recorded no verdict for the unit at that line"
+      },
+      {
+        "path": "README.md",
+        "line": 49,
+        "reason": "the shadow run recorded no verdict for the unit at that line"
+      },
+      {
+        "path": "README.md",
+        "line": 90,
+        "reason": "the shadow run recorded no verdict for the unit at that line"
+      },
+      {
+        "path": "README.md",
+        "line": 91,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "README.md",
+        "line": 114,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": ".github/workflows/doc-bloat.yml",
+        "line": 6,
+        "reason": "the document was not segmented by the shadow run"
+      },
+      {
+        "path": ".github/workflows/doc-sync.yml",
+        "line": 4,
+        "reason": "the document was not segmented by the shadow run"
+      },
+      {
+        "path": "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml",
+        "line": 9,
+        "reason": "the document was not segmented by the shadow run"
+      },
+      {
+        "path": "docs/design-rationale.md",
+        "line": 20,
+        "reason": "the document was not segmented by the shadow run"
+      },
+      {
+        "path": "docs/design-rationale.md",
+        "line": 38,
+        "reason": "the document was not segmented by the shadow run"
+      },
+      {
+        "path": "docs/decisions.md",
+        "line": 133,
+        "reason": "the document was not segmented by the shadow run"
+      },
+      {
+        "path": "docs/decisions.md",
+        "line": 150,
+        "reason": "the document was not segmented by the shadow run"
+      },
+      {
+        "path": "plugins/doc-lifecycle/skills/growing-docs/SKILL.md",
+        "line": 98,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md",
+        "line": 67,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "plugins/doc-lifecycle/skills/fixing-doc-drift/SKILL.md",
+        "line": 45,
+        "reason": "the document was not segmented by the shadow run"
+      },
+      {
+        "path": "plugins/doc-lifecycle/agents/doc-distiller.md",
+        "line": 3,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "plugins/doc-lifecycle/.claude-plugin/plugin.json",
+        "line": 3,
+        "reason": "the document was not segmented by the shadow run"
+      },
+      {
+        "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+        "line": 202,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      },
+      {
+        "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+        "line": 82,
+        "reason": "no assertion unit at that line in the shadow commit's segmentation"
+      }
+    ],
+    "shadow_only": [
+      {
+        "id": "DRIFT-001",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/domain.md",
+        "location": "docs/agents/domain.md:12"
+      },
+      {
+        "id": "DRIFT-002",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/issue-tracker.md",
+        "location": "docs/agents/issue-tracker.md:26"
+      },
+      {
+        "id": "DRIFT-003",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/issue-tracker.md",
+        "location": "docs/agents/issue-tracker.md:43"
+      },
+      {
+        "id": "DRIFT-004",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/issue-tracker.md",
+        "location": "docs/agents/issue-tracker.md:42"
+      },
+      {
+        "id": "DRIFT-005",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/issue-tracker.md",
+        "location": "docs/agents/issue-tracker.md:38"
+      },
+      {
+        "id": "DRIFT-006",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/triage-labels.md",
+        "location": "docs/agents/triage-labels.md:9"
+      },
+      {
+        "id": "DRIFT-007",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/triage-labels.md",
+        "location": "docs/agents/triage-labels.md:10"
+      },
+      {
+        "id": "DRIFT-008",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/triage-labels.md",
+        "location": "docs/agents/triage-labels.md:8"
+      },
+      {
+        "id": "DRIFT-009",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/triage-labels.md",
+        "location": "docs/agents/triage-labels.md:11"
+      },
+      {
+        "id": "DRIFT-010",
+        "code": "UNVERIFIABLE",
+        "path": "docs/agents/triage-labels.md",
+        "location": "docs/agents/triage-labels.md:7"
+      },
+      {
+        "id": "DRIFT-011",
+        "code": "ANCHOR-MALFORMED",
+        "path": "docs/decisions.md",
+        "location": "docs/decisions.md:3"
+      },
+      {
+        "id": "DRIFT-012",
+        "code": "ANCHOR-STALE",
+        "path": "docs/guides/scheduling-doc-sync.md",
+        "location": "docs/guides/scheduling-doc-sync.md:3"
+      },
+      {
+        "id": "DRIFT-013",
+        "code": "ANCHOR-STALE",
+        "path": "docs/guides/starting-docs-from-scratch.md",
+        "location": "docs/guides/starting-docs-from-scratch.md:3"
+      },
+      {
+        "id": "DRIFT-014",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/agents/doc-distiller.md",
+        "location": "plugins/doc-lifecycle/agents/doc-distiller.md:21"
+      },
+      {
+        "id": "DRIFT-015",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/engine/README.md",
+        "location": "plugins/doc-lifecycle/engine/README.md:956"
+      },
+      {
+        "id": "DRIFT-016",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/engine/README.md",
+        "location": "plugins/doc-lifecycle/engine/README.md:666"
+      },
+      {
+        "id": "DRIFT-017",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+        "location": "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md:17"
+      },
+      {
+        "id": "DRIFT-018",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+        "location": "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md:12"
+      },
+      {
+        "id": "DRIFT-019",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md",
+        "location": "plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md:80"
+      },
+      {
+        "id": "DRIFT-020",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md",
+        "location": "plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md:52"
+      },
+      {
+        "id": "DRIFT-021",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+        "location": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md:380"
+      },
+      {
+        "id": "DRIFT-022",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+        "location": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md:392"
+      },
+      {
+        "id": "DRIFT-023",
+        "code": "STALE",
+        "path": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+        "location": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md:149"
+      },
+      {
+        "id": "DRIFT-024",
+        "code": "UNVERIFIABLE",
+        "path": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+        "location": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md:165"
+      }
+    ]
+  },
+  "false_positive_candidates": [],
+  "adjudication": {
+    "records_to_adjudicate": 24,
+    "auto_apply_eligible": [
+      "DRIFT-014",
+      "DRIFT-015",
+      "DRIFT-016",
+      "DRIFT-017",
+      "DRIFT-018",
+      "DRIFT-019",
+      "DRIFT-020",
+      "DRIFT-021",
+      "DRIFT-022",
+      "DRIFT-023"
+    ],
+    "human_approval_required": [
+      "DRIFT-001",
+      "DRIFT-002",
+      "DRIFT-003",
+      "DRIFT-004",
+      "DRIFT-005",
+      "DRIFT-006",
+      "DRIFT-007",
+      "DRIFT-008",
+      "DRIFT-009",
+      "DRIFT-010",
+      "DRIFT-011",
+      "DRIFT-012",
+      "DRIFT-013",
+      "DRIFT-024"
+    ]
+  },
+  "cost": {
+    "legacy": {
+      "usd": 2.7202237,
+      "turns": 60,
+      "duration_ms": 480741,
+      "documents": 15,
+      "usd_per_document": 0.181348
+    },
+    "shadow": {
+      "usd": 97.083175,
+      "turns": null,
+      "duration_ms": null,
+      "documents": 31,
+      "usd_per_document": 3.131715
+    },
+    "ratio_per_document": 17.26909
+  }
+}
