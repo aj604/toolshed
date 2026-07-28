@@ -83,8 +83,8 @@ jobs:
       # (templates + scripts) to copy from, and runs its own target-version upgrade
       # logic. Clone the *target* (steps.versions.latest), not installed-version —
       # the lockfile still holds the old version until this run advances it. Clone
-      # under RUNNER_TEMP, outside the work tree, so the PR steps' `git add -A` can't
-      # capture it.
+      # under RUNNER_TEMP, outside the work tree, so it is neither stageable nor
+      # visible to the confinement check below.
       - name: Check out target marketplace at v${{ steps.versions.outputs.latest }}
         if: steps.gate.outputs.decision == 'upgrade'
         run: |
@@ -95,13 +95,16 @@ jobs:
 
       # Regenerate the wiring deterministically at the new version. Now that the
       # workflow YAML is version-agnostic (the Pin steps read installed-version at
-      # runtime), an upgrade is pure mechanics — re-copy the seven scripts, re-render the
-      # three templates with the consumer's preserved knobs, bump the lockfile — so a
+      # runtime), an upgrade is pure mechanics — re-copy the vendored scripts, re-render
+      # the owned templates with the consumer's preserved knobs, bump the lockfile — so a
       # tested script does it, no model call (hence no model auth in this workflow).
       # Run it FROM the pinned checkout so the target version's own upgrade logic
       # applies. The script writes files only; the steps below own git/PR. apply-upgrade.py
       # owns which files to lay down and how to preserve state/knobs — never re-implement
       # that as a cp/sed here.
+      #
+      # --report-written makes the script declare the paths it wrote, so the commit
+      # below stages that set by name instead of sweeping the work tree.
       - name: Regenerate wiring (deterministic)
         if: steps.gate.outputs.decision == 'upgrade'
         run: |
@@ -109,7 +112,8 @@ jobs:
           python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py" \
             --plugin-root "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle" \
             --repo "${GITHUB_WORKSPACE}" \
-            --target "${{ steps.versions.outputs.latest }}"
+            --target "${{ steps.versions.outputs.latest }}" \
+            --report-written "${RUNNER_TEMP}/upgrade-written.txt"
 
       - name: Open upgrade PR
         if: steps.gate.outputs.decision == 'upgrade'
@@ -143,7 +147,19 @@ jobs:
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
           git checkout -b doc-sync/upgrade
-          git add -A
+          # Stage the set apply-upgrade.py declared it wrote — never the work tree.
+          git add --pathspec-from-file="${RUNNER_TEMP}/upgrade-written.txt"
+          # Whatever is left unstaged after that is a path the regeneration
+          # touched without declaring — tracked-but-unstaged, or untracked.
+          # (Plain `git status --porcelain` would also list what we just staged.)
+          # Refuse rather than commit it.
+          LEFTOVER=$( { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | paste -sd, -)
+          if [ -n "${LEFTOVER}" ]; then
+            python3 .github/doc-sync/render-report.py upgrade-summary \
+              --status undeclared-paths --current "${{ steps.versions.outputs.current }}" \
+              --latest "${{ steps.versions.outputs.latest }}" --files "${LEFTOVER}"
+            exit 1
+          fi
           git commit -m "docs: upgrade doc-sync wiring to plugin v${{ steps.versions.outputs.latest }}"
           # Push via an explicit token URL for parity with the other lanes' pushes (and to
           # not depend on checkout's persisted credential surviving). --force: a closed-unmerged

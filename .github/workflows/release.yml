@@ -20,15 +20,21 @@ jobs:
         with:
           fetch-depth: 0   # the version guard diffs against the PR base
       # Installed plugin content must ship under a new version — an unbumped change
-      # means installers keep getting the old release. The unattended doc pipelines
-      # (doc-sync/*, doc-bloat/*) are exempt: their doc fixes may touch skill text
-      # without warranting a release, and they can't bump the version themselves.
-      # A human cuts the release deliberately by bumping plugin.json in a later PR.
+      # means installers keep getting the old release. The unattended lanes are
+      # exempt: their doc fixes may touch skill text without warranting a release,
+      # and they can't bump the version themselves. A human cuts the release
+      # deliberately by bumping plugin.json in a later PR.
+      #   doc-sync/        — the upgrade lane's branch (doc-sync-upgrade.yml).
+      #   doc-lifecycle/apply-  — the apply lane's branches, derived from the
+      #     approval digest (doc-apply.yml via render-apply-summary.py). `plugins`
+      #     is a declared documentation root in .doc-lifecycle/registry.json, so an
+      #     approved fix does reach plugin content.
+      # doc-bloat/ is gone with the legacy lane that produced it (aj604/toolshed#77).
       - name: Require version bump when plugin content changes
         if: >-
           github.event_name == 'pull_request'
           && !startsWith(github.head_ref, 'doc-sync/')
-          && !startsWith(github.head_ref, 'doc-bloat/')
+          && !startsWith(github.head_ref, 'doc-lifecycle/apply-')
         run: |
           set -euo pipefail
           BASE="origin/${{ github.base_ref }}"
@@ -54,6 +60,14 @@ jobs:
       # wired the moment its file lands — no enumeration to forget.
       - name: Engine tests
         run: python3 -m unittest discover -s tests/engine -p '*_test.py' --verbose
+      # The guard on the two steps above (aj604/toolshed#77): it reads this file
+      # for the discovery commands, computes what they would really run, and fails
+      # when a suite in the tree is not among them — a tests/engine subdirectory
+      # missing __init__.py, a name the pattern misses, a directory nothing
+      # discovers, or a glob narrowed here. It runs as its own step because it is
+      # otherwise discovered by the mechanism it guards.
+      - name: Release manifest guard
+        run: python3 .github/scripts/release-manifest.py
       - name: Validate plugin manifests
         run: |
           set -euo pipefail

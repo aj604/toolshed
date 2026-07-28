@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Run-surface rendering for the doc-sync nightly pipeline.
+"""Run-surface rendering for the doc-sync pipeline.
 
-The workflow (doc-sync.yml) gathers facts and performs side effects; sync-gate.py
-owns the decisions; this script owns every user-facing string — step summaries,
-::notice:: annotations, and issue/PR bodies — so the pipeline's self-explaining
-exits are unit-testable instead of living as jq/heredoc templates in YAML.
+This script owns user-facing strings — step summaries, ::notice:: annotations,
+and issue/PR bodies — so a caller's self-explaining exits are unit-testable
+instead of living as jq/heredoc templates in YAML. Its live callers are
+doc-sync-upgrade.yml (`upgrade-summary`, `upgrade-pr-body`) and the
+detecting-doc-bloat skill's in-session triage render (`bloat-triage`).
+
+The remaining subcommands were the run surface of the legacy doc-sync.yml and
+doc-bloat.yml write lanes, removed in aj604/toolshed#77; they are retained
+here, still tested, pending a decision on whether the new engine's lanes adopt
+any of them.
 
 Usage:
     render-report.py pre-summary --decision D --marker M --head H --commits N --open-prs N --open-issues N
@@ -149,7 +155,11 @@ def split_waived(records, waivers):
 
 
 def load_merge(path):
-    """plan-distill.py --merge summary: {'applied': [ids], 'unapplied': [...]}."""
+    """Distill-merge summary: {'applied': [ids], 'unapplied': [ids]}.
+
+    Its producer was the legacy distill lane's planner, removed in
+    aj604/toolshed#77; the shape is what this reader accepts, not a live seam.
+    """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     if not (isinstance(data, dict) and isinstance(data.get("applied"), list)
@@ -534,6 +544,16 @@ def render_upgrade_summary(status, current, latest, pr_url, files=""):
         return (f"⏭️ **Upgrade skipped — a `doc-sync/upgrade` PR is already open.** "
                 f"Review {pr_url}; the next check resumes after it merges/closes. "
                 f"(Installed `{current}`, latest `{latest}`.)")
+    if status == "undeclared-paths":
+        left = ", ".join(f"`{f}`" for f in files.split(",") if f) or "paths"
+        return (
+            f"🛑 **Upgrade `{current}` → `{latest}` refused — the regeneration touched "
+            f"{left}, which apply-upgrade.py did not declare it wrote.** The lane stages "
+            "the declared set by name and commits nothing else, so an undeclared change "
+            "is either a bug in apply-upgrade.py's reporting or something else writing "
+            "into the work tree. Nothing was committed or pushed. Reproduce locally with "
+            "`apply-upgrade.py --report-written` and compare that list against "
+            "`git status`.")
     raise ValueError(f"unknown upgrade status: {status!r}")
 
 
@@ -544,9 +564,9 @@ def render_upgrade_pr_body(current, latest, files):
         "re-pinned every workflow's marketplace checkout to it.",
         "",
         "**Preserved unchanged:** the `.github/doc-sync-marker` (sync state), "
-        "`.github/doc-sync/audit-scope.json` (tuned config), and every install-time knob "
-        "(cron / blast-radius cap / bloat & upgrade crons). Only the wiring and "
-        "`.github/doc-sync/installed-version` change.",
+        "`.github/doc-sync/audit-scope.json` and `drift-waivers.json` (tuned config and "
+        "accepted waivers), and every install-time knob (the upgrade and audit crons). "
+        "Only the wiring and `.github/doc-sync/installed-version` change.",
     ]
     if files:
         changed = [f for f in files.split(",") if f]
@@ -616,7 +636,10 @@ def main():
 
     bbody = sub.add_parser("bloat-pr-body")
     bbody.add_argument("--report", required=True)
-    bbody.add_argument("--merge", help="plan-distill.py --merge summary JSON")
+    bbody.add_argument(
+        "--merge",
+        help="distill-merge summary JSON {'applied': [...], 'unapplied': [...]}; "
+             "its producer was removed in aj604/toolshed#77")
 
     dmerge = sub.add_parser("distill-merge-summary")
     dmerge.add_argument("--merge", required=True)

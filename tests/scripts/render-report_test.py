@@ -560,94 +560,6 @@ class BloatRender(unittest.TestCase):
             self.assertEqual(out.returncode, 0)
 
 
-class DocSyncWaiverWiring(unittest.TestCase):
-    """Pins doc-sync.yml's waiver wiring: every UNVERIFIABLE surface renders
-    waiver-aware, and the quiet-night (advance-marker) path renders its
-    disposition line BEFORE the report file is deleted."""
-
-    WAIVERS = "--waivers .github/doc-sync/drift-waivers.json"
-
-    @classmethod
-    def setUpClass(cls):
-        cls.ymls = {}
-        for label, parts in {
-            "template": ("plugins", "doc-lifecycle", "skills",
-                         "scheduling-doc-sync", "doc-sync.yml"),
-            "dogfood": (".github", "workflows", "doc-sync.yml"),
-        }.items():
-            path = os.path.join(os.path.dirname(__file__), "..", "..", *parts)
-            with open(path, encoding="utf-8") as f:
-                cls.ymls[label] = f.read()
-
-    def test_pr_body_and_title_are_waiver_aware(self):
-        for label, yml in self.ymls.items():
-            body = yml[yml.index("render-report.py pr-body"):]
-            self.assertIn(self.WAIVERS, body[:body.index("pr-title")], label)
-            title = yml[yml.index("render-report.py pr-title"):]
-            self.assertIn(self.WAIVERS, title[:title.index("git config")], label)
-
-    def test_no_drift_summary_carries_report_and_waivers(self):
-        for label, yml in self.ymls.items():
-            # Both branches (push ok / push rejected) must surface the count.
-            self.assertEqual(yml.count("no-drift-summary"), 2, label)
-            for chunk in yml.split("no-drift-summary")[1:]:
-                head = chunk[:300]
-                self.assertIn("--report drift-report.json", head, label)
-                self.assertIn(self.WAIVERS, head, label)
-
-    def test_report_deleted_only_after_quiet_night_render(self):
-        for label, yml in self.ymls.items():
-            step = yml[yml.index("Advance marker"):yml.index("blast-radius issue")]
-            self.assertIn("rm -f drift-report.json", step, label)
-            self.assertLess(step.index("no-drift-summary"),
-                            step.index("rm -f drift-report.json"), label)
-
-    def test_pr_body_compares_against_prior_stale_state(self):
-        for label, yml in self.ymls.items():
-            body = yml[yml.index("render-report.py pr-body"):]
-            self.assertIn("--prev-stales .github/doc-sync/last-stales.json",
-                          body[:body.index("pr-title")], label)
-
-    def test_new_stale_state_rides_the_sync_pr(self):
-        for label, yml in self.ymls.items():
-            step = yml[yml.index("Open sync PR"):]
-            self.assertIn("sync-gate.py stale-state", step, label)
-            self.assertIn("--out .github/doc-sync/last-stales.json", step, label)
-            # State must be staged before the PR commit, so it advances only
-            # when the fix merges. The credentialed job stages by name — the
-            # model's own edits arrive as an authorized path list, never a
-            # broad add (tests/scripts/workflow-permissions_test.py).
-            staged = step.index("git add .github/doc-sync-marker "
-                                ".github/doc-sync/last-stales.json")
-            self.assertLess(step.index("stale-state"), staged, label)
-            self.assertLess(staged, step.index("git commit -m"), label)
-
-
-class DocBloatGrowthWiring(unittest.TestCase):
-    """Pins the weekly grow-loop surface: every doc-bloat run renders the
-    doc-scope.md growth backlog, skip paths included."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.ymls = {}
-        for label, parts in {
-            "template": ("plugins", "doc-lifecycle", "skills",
-                         "scheduling-doc-sync", "doc-bloat.yml"),
-            "dogfood": (".github", "workflows", "doc-bloat.yml"),
-        }.items():
-            path = os.path.join(os.path.dirname(__file__), "..", "..", *parts)
-            with open(path, encoding="utf-8") as f:
-                cls.ymls[label] = f.read()
-
-    def test_growth_backlog_rendered_every_run(self):
-        for label, yml in self.ymls.items():
-            self.assertIn("growth-backlog --scope-file docs/doc-scope.md",
-                          yml, label)
-            # Before the pre-gate branch: it must render on skip paths too.
-            self.assertLess(yml.index("growth-backlog"),
-                            yml.index("bloat-pre-summary"), label)
-
-
 class RecurrenceRender(unittest.TestCase):
     """pr-body --prev-stales: a location STALE in consecutive proceed runs is a
     shape problem, not a fix problem — the PR body says so once, per record."""
@@ -766,103 +678,58 @@ class GrowthBacklog(unittest.TestCase):
         self.assertIn("Growth backlog: empty", self.summary())
 
 
-class WorkflowWiring(unittest.TestCase):
-    """Pins doc-bloat.yml's harness wiring: the deterministic resume-aware
-    plan job, script-rendered dispatch payloads under planner-computed turn
-    budgets, per-chunk seam validation with a classified retry, and
-    gap-tolerant assembly. The YAML stays an allowlist-thin shell; these
-    strings are its contract with the unit-tested scripts."""
+class UpgradeLaneStagingWiring(unittest.TestCase):
+    """Pins doc-sync-upgrade.yml's staging contract with apply-upgrade.py.
+
+    The lane's write job holds `contents: write`, so what it stages is the whole
+    of its blast radius. It stages the path set apply-upgrade.py declared it
+    wrote and refuses anything left over — these strings are the seam between
+    the YAML and the two unit-tested scripts, in both the shipped template and
+    this repo's install."""
 
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(
-            os.path.dirname(__file__), "..", "..",
-            "plugins", "doc-lifecycle", "skills", "scheduling-doc-sync",
-            "doc-bloat.yml")
-        with open(path, encoding="utf-8") as f:
-            cls.yml = f.read()
+        cls.ymls = {}
+        for label, parts in {
+            "template": ("plugins", "doc-lifecycle", "skills",
+                         "scheduling-doc-sync", "doc-sync-upgrade.yml"),
+            "dogfood": (".github", "workflows", "doc-sync-upgrade.yml"),
+        }.items():
+            path = os.path.join(os.path.dirname(__file__), "..", "..", *parts)
+            with open(path, encoding="utf-8") as f:
+                cls.ymls[label] = f.read()
 
-    def test_plan_job_resumes_prior_results(self):
-        self.assertIn("plan-chunks.py --out manifest.json --results-dir chunks",
-                      self.yml)
-        self.assertIn("--pattern 'bloat-chunk*'", self.yml)
+    def test_regeneration_asks_for_the_written_set(self):
+        for label, yml in self.ymls.items():
+            self.assertIn('--report-written "${RUNNER_TEMP}/upgrade-written.txt"',
+                          yml, label)
 
-    def test_chunks_seam_validated_in_job(self):
-        self.assertIn('--chunk "chunks/${CHUNK_ID}.json" --manifest manifest.json',
-                      self.yml)
+    def test_staging_is_the_declared_set_and_never_broad(self):
+        for label, yml in self.ymls.items():
+            self.assertIn(
+                'git add --pathspec-from-file="${RUNNER_TEMP}/upgrade-written.txt"',
+                yml, label)
+            self.assertNotIn("git add -A", yml, label)
+            self.assertNotIn("git add --all", yml, label)
 
-    def test_assembly_tolerates_gaps_and_surfaces_them(self):
-        self.assertIn("--assemble chunks --manifest manifest.json", self.yml)
-        self.assertIn("--allow-partial", self.yml)
-        self.assertIn("bloat-unswept-summary", self.yml)
-
-    def test_dispatch_is_script_rendered_with_planner_budget(self):
-        self.assertIn("--emit-prompt", self.yml)
-        self.assertIn("--emit-turns", self.yml)
-        self.assertIn("--max-turns ${{ steps.slice.outputs.turns }}", self.yml)
-        self.assertNotIn("--max-turns 15", self.yml)
-
-    def test_executor_can_invoke_its_skill(self):
-        self.assertIn('"Skill,Read', self.yml)
-
-    def test_retry_is_classified_and_uses_escalated_budget(self):
-        self.assertIn("sync-gate.py bloat-retry", self.yml)
-        self.assertIn("--max-turns ${{ steps.retry.outputs.turns }}", self.yml)
-
-    def test_double_failure_discards_invalid_result_before_exit(self):
-        # A leftover invalid result would fail gap-tolerant assembly (which
-        # tolerates only MISSING chunks) and mask the chunk as done on resume.
-        self.assertIn('|| { rm -f "chunks/${CHUNK_ID}.json"; echo "::error::chunk',
-                      self.yml)
-
-    def test_hard_failed_retry_cannot_strand_an_invalid_chunk(self):
-        # If the retry action itself dies hard, the final seam-validate must
-        # still run (an implicit success() would skip it) or the always()
-        # upload ships the dead attempt's partially-written chunk file — and
-        # one invalid chunk fails the whole gap-tolerant assembly.
-        retry_block = self.yml.split("Detect chunk (retry")[1].split("- name:")[0]
-        self.assertIn("continue-on-error: true", retry_block)
-        final_block = self.yml.split("Seam-validate (final)")[1].split("- name:")[0]
-        self.assertIn("!cancelled() && steps.seam1.outcome == 'failure'",
-                      final_block)
-
-    def test_fully_resumed_run_still_assembles(self):
-        # assemble must NOT carry sweep's pending-empty guard, or an
-        # all-carried run silently produces nothing forever.
-        sweep_if = "needs.plan.outputs.decision == 'detect' && needs.plan.outputs.pending != '[]'"
-        self.assertIn(sweep_if, self.yml)          # sweep keeps the guard
-        assemble_if = "always() && needs.plan.outputs.decision == 'detect'"
-        self.assertIn(assemble_if, self.yml)
-        self.assertNotIn("always() && needs.plan.outputs.decision == 'detect' "
-                         "&& needs.plan.outputs.pending", self.yml)
-
-    def test_matrix_does_not_fail_fast(self):
-        self.assertIn("fail-fast: false", self.yml)
-
-    def test_distill_lane_is_planned_dispatched_and_merged_by_scripts(self):
-        # plan -> matrix -> merge: every distill-lane decision is script-borne.
-        self.assertIn("plan-distill.py --report bloat-report.json --out distill-manifest.json",
-                      self.yml)
-        self.assertIn('plan-distill.py --emit-prompt "${GROUP_ID}"', self.yml)
-        self.assertIn('--validate-result "distill-results/${GROUP_ID}.json"',
-                      self.yml)
-        self.assertIn("plan-distill.py --merge", self.yml)
-        self.assertIn("distill-merge-summary", self.yml)
-        self.assertIn('--merge "$RUNNER_TEMP/distill-merge.json"', self.yml)
-
-    def test_distill_executor_keeps_skill_and_task_without_turn_cap(self):
-        # The apply side is never truncated mid-judgment: no --max-turns on
-        # its invocations (owner decision); the kill-switch is wall-clock.
-        self.assertIn('"Skill,Task,Read', self.yml)
-        self.assertIn("timeout-minutes: 60", self.yml)
-        distill = self.yml[self.yml.index("distill_sweep:"):]
-        for line in distill.splitlines():
-            if "claude_args" in line:
-                self.assertNotIn("--max-turns", line)
-
-    def test_distill_merge_runs_even_when_a_group_fails(self):
-        self.assertIn("always() && needs.assemble.outputs.distill == 'open'",
-                      self.yml)
+    def test_leftover_paths_refuse_before_the_commit(self):
+        for label, yml in self.ymls.items():
+            step = yml[yml.index("Open upgrade PR"):]
+            # Unstaged-tracked + untracked. NOT `git status --porcelain`, which
+            # also lists the paths just staged and would refuse every run —
+            # asserted over executable lines, since the YAML comment explains
+            # exactly that trap by name.
+            self.assertIn("git diff --name-only; git ls-files --others "
+                          "--exclude-standard", step, label)
+            code = [ln for ln in step.splitlines()
+                    if not ln.strip().startswith("#")]
+            self.assertEqual(
+                [ln.strip() for ln in code if "git status --porcelain" in ln],
+                [], label)
+            self.assertIn("--status undeclared-paths", step, label)
+            # The refusal must precede the commit, or it refuses too late.
+            self.assertLess(step.index("undeclared-paths"),
+                            step.index("git commit -m"), label)
 
 
 class UpgradeRender(unittest.TestCase):
@@ -929,14 +796,36 @@ class UpgradeRender(unittest.TestCase):
         r = self.run_script(
             "upgrade-summary", "--status", "blocked-workflows",
             "--current", "0.9.2", "--latest", "0.9.3",
-            "--files", ".github/workflows/doc-bloat.yml,.github/doc-sync/render-report.py")
+            "--files", ".github/workflows/doc-audit.yml,.github/doc-sync/render-report.py")
         self.assertEqual(r.returncode, 0, r.stderr)
         s = self.summary()
         # Names the offending workflow file, the artifact to apply, and git apply steps.
-        self.assertIn(".github/workflows/doc-bloat.yml", s)
+        self.assertIn(".github/workflows/doc-audit.yml", s)
         self.assertIn("doc-sync-upgrade-patch", s)
         self.assertIn("git apply", s)
         self.assertIn("0.9.3", s)
+
+    def test_undeclared_paths_names_them_and_says_nothing_landed(self):
+        # The upgrade lane stages apply-upgrade.py's declared set and refuses
+        # anything left over; that refusal has to name what was left and be
+        # unambiguous that no commit or push happened.
+        r = self.run_script(
+            "upgrade-summary", "--status", "undeclared-paths",
+            "--current", "0.36.0", "--latest", "0.37.0",
+            "--files", "docs/stray.md,.github/doc-sync/surprise.json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn("docs/stray.md", s)
+        self.assertIn(".github/doc-sync/surprise.json", s)
+        self.assertIn("0.37.0", s)
+        self.assertIn("nothing was committed or pushed", s.lower())
+
+    def test_undeclared_paths_renders_without_a_file_list(self):
+        r = self.run_script(
+            "upgrade-summary", "--status", "undeclared-paths",
+            "--current", "0.36.0", "--latest", "0.37.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("refused", self.summary().lower())
 
     def test_unknown_status_exits_2(self):
         r = self.run_script("upgrade-summary", "--status", "bogus",
@@ -959,10 +848,11 @@ class UpgradeRender(unittest.TestCase):
     def test_pr_body_lists_changed_files_when_given(self):
         r = self.run_script("upgrade-pr-body", "--current", "0.7.0",
                             "--latest", "0.8.0",
-                            "--files", ".github/workflows/doc-sync.yml,.github/doc-sync/sync-gate.py")
+                            "--files", ".github/workflows/doc-sync-upgrade.yml,"
+                                       ".github/doc-sync/upgrade-gate.py")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("`.github/workflows/doc-sync.yml`", r.stdout)
-        self.assertIn("`.github/doc-sync/sync-gate.py`", r.stdout)
+        self.assertIn("`.github/workflows/doc-sync-upgrade.yml`", r.stdout)
+        self.assertIn("`.github/doc-sync/upgrade-gate.py`", r.stdout)
 
 
 class DistillMergeRender(unittest.TestCase):

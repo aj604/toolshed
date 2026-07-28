@@ -4,6 +4,216 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-27 — the release gate is discovery, plus a guard on discovery (#77)
+- Evidence: issue #57's distilled-decisions comment (2026-07-26): "Release gate is deterministic:
+  all script suites + the repository-level acceptance fixture (extended with a registry case incl.
+  closed-world finding, and auto-apply cases: policy mints for an eligible drift finding, and
+  provably cannot mint for a bloat finding). RED/GREEN skill baselines remain the methodology for
+  skill edits but never gate a release."
+- Decided (nothing new was wired for any criterion but the last, and that is the finding): the
+  acceptance seam, the adversarial corpus, the auto-apply can-mint/cannot-mint cases, the workflow
+  permission checks, the template/dogfood equivalence test, and the migration dry run were already
+  in the gate — each rides `release.yml`'s two discovery steps by virtue of matching a glob, which
+  is what #99's discovery-driven design bought. Adding a second, hand-enumerated path to run them
+  would have reintroduced exactly the list #99 removed.
+- Decided (what was genuinely missing is a guard on discovery itself): discovery wires a suite the
+  moment its file lands, but only if the file lands where the discovery step can see it. Verified
+  empirically rather than reasoned about: `unittest discover` skips a subdirectory with no
+  `__init__.py` without a word and reports OK, so a new engine suite in a new subdirectory is
+  silently absent while CI stays green. A name the pattern misses, a directory no step reaches,
+  and a glob narrowed in `release.yml` all fail the same way. `release-manifest.py` reads
+  `release.yml` for the discovery steps CI actually runs, computes the set those steps really
+  execute, and requires it to cover every suite in the tree. It derives the commands rather than
+  restating them, so narrowing a glob moves the guard's own baseline and is caught, not obeyed.
+- Decided (suite detection is structural, not name-based): a file is a suite when it declares a
+  TestCase subclass carrying test methods. A rename is one of the ways a suite goes unwired, so a
+  name-based guard would be blind to the case it exists for; the same rule correctly leaves
+  `support.py` and `fixture.py`, which declare TestCase bases with no test methods, out.
+- Decided (the manifest half): discovery cannot notice a suite that was deleted rather than
+  unwired — a shrinking set is green. So each gate criterion #77 names is mapped to the suites
+  that discharge it, and each must exist and be in the discovered set.
+- Still binds: RED/GREEN skill baselines remain the methodology for skill edits and are
+  demonstrably not part of the release gate. `tests/baselines/` and `tests/fixtures/` are declared
+  non-gate roots, asserted in both directions — a suite under either is not required to be wired,
+  and nothing under either may appear in the gate.
+- Decided (a discovered suite is not yet a run suite), after an independent review of this guard
+  found four more ways a suite goes quiet: `run-script-suites.py` runs each suite as `python3
+  <path>`, so one without an `if __name__ == "__main__"` guard runs zero tests and reports PASS —
+  discovered, counted, and inert, and invisible to both the runner and the first version of this
+  guard. Demonstrated: a suite whose only test calls `self.fail()` was reported `PASS`. So the
+  guard now also refuses an inert by-path suite, a file that does not parse (treating a
+  SyntaxError as "not a suite" hides a file exactly when it is most broken), a suite anywhere in
+  the repository rather than only under `tests/`, and a discovery step still present but gated
+  `if: false`.
+- Named limits, all three past what this shape can settle: the guard is itself discovered by the
+  mechanism it guards, so `release.yml` runs it as its own step as well — that step, and the two
+  discovery steps it reads, are the part no guard inside the tree can vouch for. It reads command
+  *text*, so an indirection this scanner does not recognise reads as absent and a no-op wrapper
+  reads as present. And suite detection is a single-module AST walk, so a TestCase reached through
+  an imported base class not named `*TestCase`, or defined inside a conditional, is not
+  recognised. Convention bounds those, not this file.
+- Code: `.github/scripts/release-manifest.py`, `tests/scripts/release-manifest_test.py`,
+  `.github/workflows/release.yml`
+
+## 2026-07-27 — a dispatched record list is how an approval set is minted, never one (#77)
+- Evidence: issue #57's distilled-decisions comment (2026-07-26), "Approval sets are untracked
+  artifacts": "The applier refuses to run without a validated approval-set file; record-ID
+  CLI/dispatch inputs are how one is minted, never a substitute." The superseded mechanism is
+  `plan-distill.py`'s `--emit-prompt`, removed in this change: it selected every eligible record
+  from the bloat report by lane filter, content-addressed the group, and rendered the record ids
+  into a headless prompt that the legacy `fixing-doc-bloat` skill's group-executor mode read as
+  "the human approval and your entire mandate". The prune lane did the same with a wildcard
+  instead of a list — "apply EVERY record whose verdict is CUT, CONDENSE, or EXTRACT-AND-MOVE".
+- Decided: the removal is not a tightening of that mechanism but a statement that it had no
+  authority to tighten. An approval set is the sole authority the applier accepts, and it is an
+  artifact — selected record digests bound to one report's lineage and to a mutation scope
+  derived from the selection, with a digest that is required on the way in. A list of ids is
+  refused by name (`approval-not-an-approval-set`, whose message for a list of digests reads
+  "which is how an approval set is minted, never a substitute for one").
+- Still binds, and this is the trust assumption the old shape lacked: no human appeared anywhere
+  in the superseded loop. The audit engine's report produced the candidate set, a deterministic
+  planner turned every eligible record in it into a "mandate", and a model applied it — the word
+  "approved" appeared at every step and named no one. Nothing bound the list to the report it
+  came from: no report digest, no lineage, no preimage, so a report moving under the dispatch was
+  undetectable, and a mistaken or injected `RETIRE-DOC` record landed as a deletion whose
+  authorization was its own id. Now a selection names record digests, `mint_approval_set` refuses
+  before it mints, and every one of those refusals is re-run on read-back against the report the
+  artifact names. Where no person selects, the minter is a named auto-apply policy whose
+  selection derives from its own decisions and can never reach a bloat verdict, and change
+  approval still lands everything.
+- Superseded: the 2026-07-09 entry below (doc-bloat distill lane fan-out), whose "Still binds"
+  recorded that `fixing-doc-bloat`'s group-executor mode treats the dispatch's record-id list as
+  the human approval and the entire mandate. It stands as a record of what was true then.
+- Code: `plugins/doc-lifecycle/engine/doclifecycle/approval.py`,
+  `plugins/doc-lifecycle/engine/doclifecycle/policy.py`,
+  `plugins/doc-lifecycle/engine/README.md`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
+  `.github/workflows/doc-apply.yml`; removed: `plan-distill.py`, `doc-bloat.yml`
+
+## 2026-07-27 — semantic approval and change approval are two acts, and a merge is only the second (#77)
+- Evidence: issue #57's distilled-decisions comment (2026-07-26), "Two approvals": "semantic
+  approval mints an approval set from selected record digests; change approval is accepting the
+  actual diff (PR merge, or committing the staged interactive change). Only change approval lands
+  anything." The superseded mechanism is both legacy lanes, removed in this change: `doc-bloat.yml`
+  declared in its own header that each lane "edits directly and opens a DRAFT PR whose merge is
+  the approval", and `doc-sync.yml` applied the model's patch and opened a pull request whose
+  merge advanced the marker.
+- Decided: one act was being asked to carry two different judgments, and they are now separate.
+  Semantic approval — a person selecting record digests from one report — authorizes planning and
+  application. Change approval — a person accepting the produced diff — is the only thing that
+  lands anything. The applier never stages and never commits, so there is no path on which the
+  second silently stands in for the first.
+- Decided (the draft pull request goes with it): a draft was the legacy lane's way of saying "this
+  is a proposal", which was needed precisely because nothing upstream had approved. The apply lane
+  opens a real pull request, never a draft, because what it carries was already approved
+  semantically — by a person, or by a named auto-apply policy for which pull-request review is the
+  designated semantic review.
+- Still binds, and this is the trust assumption the old shape lacked: nothing *bound* a legacy
+  lane's landed diff to the report that justified it. The pull-request body did enumerate every
+  record, and the report was uploaded as a run artifact, so a reviewer could read the record list —
+  but the list travelled beside the diff, not in it. No report digest, no lineage, no approval-set
+  identity rode in the change, so a reviewer could not verify that the diff in front of them was
+  the one those records authorized, or that the list was complete. So a record that was wrong, a
+  record nobody read, and a record somebody would have declined all landed identically, and an edit
+  no record called for landed the same way. Now the approval set's digest and rendered summary
+  travel in the change itself (`Doc-Lifecycle-Approval`, `Doc-Lifecycle-Report`,
+  `Doc-Lifecycle-Approval-State`, `Doc-Lifecycle-Records`), the skipped records are listed and
+  derived-checked so a short list hides nothing, and the artifact is never repository state.
+- Superseded: the 2026-07-03 entry below (doc bloat nightly design), both halves — "the merge
+  itself is the human approval gate", and "bloat output is always a draft PR". Also narrowed: the
+  2026-07-02 entry's marker advancing on a merged sync pull request, whose lane is removed here.
+  The 2026-07-26 Stage 0 entry (#59) is the partial predecessor: it bounded the blast radius with
+  report-derived path authorization and no `git add -A` in a model lane, and left this semantic
+  gap explicitly open.
+- Code: `CONTEXT.md`, `plugins/doc-lifecycle/engine/doclifecycle/approval.py`,
+  `plugins/doc-lifecycle/engine/doclifecycle/applier.py`, `.github/workflows/doc-apply.yml`;
+  removed: `doc-sync.yml`, `doc-bloat.yml`, `authorize-paths.py`, `sync-gate.py`
+
+## 2026-07-27 — a cached judgment is keyed by its whole lineage, not by content alone (#77)
+- Evidence: issue #57's distilled-decisions comment (2026-07-26): segmentation is deterministic
+  and "unit identity = content digest", so "finding digests, cache keys, and approval binding rest
+  on reproducible identity" — content digests are the *unit's* identity, and lineage is what wraps
+  them into a cache key. The superseded mechanism is `plan-chunks.py`'s `chunk_id()`, which
+  content-addressed a chunk by sha256 over its members' `(path, content-sha256)` pairs and nothing
+  else, and `doc-bloat.yml`'s resume step, which carried prior runs' chunk results forward on that
+  identity ("content-addressed ids drop any whose docs changed"). What is removed here is the
+  cross-run reuse, not the planner: `plan-chunks.py` survives as `detecting-doc-bloat`'s own
+  bounded-chunk planner, where a content-addressed id is an id within one run and nothing carries
+  a judgment across runs on it.
+- Decided: a cached semantic result cannot outlive any input that could have changed the judgment
+  it records, so the key folds all of them — document bytes, source-evidence bytes, the document
+  inventory, the consumer's audit configuration, the registry, the ruleset version, the artifact
+  schema version, the plugin version, and the repository and base-commit identity. Two keys
+  differing in exactly one field hash to different slots, so changing any one is a miss and never
+  a stale hit. A key match is not sufficient either: the stored entry is re-run through the landed
+  report validator, not a parallel one, and there is no path that returns a stale or unverified
+  payload.
+- Still binds, and this is what the old key could not see: the chunk id omitted every input except
+  the bytes. Upgrading the plugin left yesterday's verdicts — produced by the previous detection
+  policy — served as today's findings, because the policy version was not in the key. The audit
+  configuration that bounded and grouped the corpus was not an input to the digest at all — it
+  reached an id only by way of which files ended up in a chunk and, for a policy scope, the id's
+  one-letter prefix — so nothing in the key recorded which audit had planned that chunk, and any
+  configuration change those two did not register left the id, and the result cached under it,
+  standing. A chunk's
+  verdicts depend on the corpus around it, and no inventory digest was in the key. And a carried
+  result was pinned to no commit. The shape-only validation the legacy lane ran over a carried
+  result could confirm the file parsed and named its chunk; it could not know the world had moved.
+- Superseded: the 2026-07-07 entry below (bloat scale hardening), whose claim that content
+  addressing means "cross-run resume never reuses a stale result" was true only for the single
+  input the key carried. Consistent with the 2026-07-26 entry (#60): digests are taken over
+  canonical JSON of meaning, so reformatting is not a change and changing a rule is.
+- Also settled here: `.github/doc-sync/last-stales.json` is removed. The 2026-07-27 entry below
+  (#75) already recorded that its recurrence keys are a location identity — a record's file, line
+  number, and kind — which the new contract replaces with content digests, so it cannot be
+  re-keyed. It retires with the lanes that read it.
+- Code: `plugins/doc-lifecycle/engine/doclifecycle/cache.py`,
+  `plugins/doc-lifecycle/engine/doclifecycle/report.py`,
+  `plugins/doc-lifecycle/engine/README.md`, `tests/engine/acceptance/scenario_cache_test.py`;
+  removed: `doc-bloat.yml`'s resume step, `last-stales.json`
+
+## 2026-07-27 — a version comparison is not a review (#77)
+- Evidence: issue #57's distilled-decisions comment (2026-07-26), "Still CI-driven": "Upgrade
+  stays a reviewed version-bump PR." The mechanism this entry supersedes is the upgrade lane's
+  authorization model: `upgrade-gate.py compare` is a semver comparison, and "a strictly newer
+  release exists" was the entire authorization for cloning that release and running its own
+  `apply-upgrade.py` against the consumer's workspace, in a job holding `contents: write` and a
+  push token, before any human in that repository had read a line of it.
+- Decided: the trust assumption is named rather than left implicit. Publishing a tag on this
+  marketplace is not a consumer's decision to run new code, and a version number is not a
+  reviewable artifact. What makes the upgrade safe is what the apply lane makes structural and
+  the upgrade lane does not: refuse before anything exists, and execute nothing that was read.
+- Rejected: retiring the upgrade lane with the legacy lanes. The distilled decisions keep it, and
+  a consumer with no upgrade path is worse off — the vendored engine is distributed by exactly
+  this route. What is superseded is the claim that a version gate is sufficient authority, not
+  the lane.
+- Also decided, and closed here: the lane stages an explicit path set. `apply-upgrade.py` reports
+  the paths it wrote, and the credentialed step stages exactly those and refuses to commit when
+  anything else in the working tree moved. This was the last `git add -A` in the repository, so
+  `workflow-permissions_test.py`'s assertion that a write-scoped job never stages broadly now
+  holds with no exemption — deleting that exemption is what proves it. Nothing here is a judgment
+  about the diff; it is the same discipline the applier's whole-diff confinement enforces, which
+  is that a write scope is not a licence to commit whatever happens to be on disk.
+- Known gap, tracked as #127 and wired as blocking #77 — stated plainly, and near the top rather
+  than as a footnote, because this entry would otherwise read as a guarantee it does not carry:
+  the lane still runs on a schedule, and still executes the target release's own upgrade logic
+  from the freshly cloned checkout, in a job holding `contents: write` and a push token, before
+  any human in the consumer's repository has read a line of it. So a reviewer sees a pull request
+  describing an execution that already happened. It runs no model, so it carries no injection
+  surface — which is why Stage 0 (#59) left it alone, and the exposure is supply-chain rather
+  than prompt-borne. The fix is a trust split of the kind `doc-audit.yml`/`doc-apply.yml` already
+  demonstrate, and it is real design work rather than a patch, which is why it is its own issue
+  and not folded into a change that already removes two lanes.
+- Superseded: the 2026-07-07 entry below (deterministic doc-sync upgrade), whose decision to run
+  `apply-upgrade.py` "from the pinned target checkout … so the target version's own upgrade logic
+  applies" stands as the mechanism and no longer stands as sufficient authorization. Its real win
+  is untouched and still binds: the lane runs no model, so its write scopes never sit behind a
+  model process. Also narrowed: the 2026-07-07 self-upgrade entry's "detection == regeneration",
+  which is pre-review execution stated as a virtue.
+- Code: `.github/workflows/doc-sync-upgrade.yml`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/upgrade-gate.py`,
+  `tests/scripts/workflow-permissions_test.py`, `.github/workflows/doc-apply.yml`
+
 ## 2026-07-27 — a fix that speaks for another document is a person's to approve (#123)
 - Evidence: `docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, G4 — DRIFT-023, the second
   shadow cycle's one false positive and #77's only blocker. A true sentence was called `STALE`
@@ -168,8 +378,9 @@
   run reports `rekeyed: []` and `needs_rewaiving: []`. Nothing was dropped because nothing was
   there; a future waiver re-keys through the same door.
 - Decided (`last-stales.json` is kept, against the dry run's disposition): the dry run
-  classifies it as a `cache` artifact, `carried: false` — its recurrence keys are file-and-line,
-  which the new contract replaces with content digests, so it cannot be re-keyed. It is
+  classifies it as a `cache` artifact, `carried: false` — its recurrence keys are a location
+  identity (a record's file, line number, and kind), which the new contract replaces with content
+  digests, so it cannot be re-keyed. It is
   nonetheless left in place rather than deleted, because the legacy read lanes still consume it
   and are still running. It retires with them (#77). Recorded here so the drop is stated, not
   silent.

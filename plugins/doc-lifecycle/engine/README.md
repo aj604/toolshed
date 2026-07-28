@@ -607,9 +607,9 @@ python3 -m doclifecycle render-report --report report.json
 with the verdict's code from the table above (2 is a usage error), and repeat the reason —
 problems, stale reasons, or unexamined scopes — on stderr.
 
-These codes are the engine's own. The scripts it is absorbing (`scheduling-doc-sync`'s
-`sync-gate.py` and friends) use `2` for "cannot read the report" where the engine uses `1` and
-reserves `2` for a usage error; the two conventions coexist until #57 finishes absorbing them.
+These codes are the engine's own. The rival convention — `2` for "cannot read the report", where
+the engine uses `1` and reserves `2` for a usage error — belonged to the legacy lanes' gate
+script, removed with those lanes in #77, so no second convention is in play any more.
 
 `render-report` prints Markdown, and prints **nothing** when the report is invalid: rendering
 takes a validated `Report` and raises `TypeError` on anything else.
@@ -1401,9 +1401,10 @@ checked before anything is walked: `migration-unsafe-root` for a spelling outsid
 
 **The draft states what its roots leave behind.** Every source they are inferred from describes
 the legacy *bloat* corpus or narrower; the legacy *drift* lane had no root concept at all — it
-was diff-scoped over the whole repository, and `audit-scope.json` reached it only through
-`authorize-paths.py`, as a write-authorization filter. So a drafted registry all but always
-narrows drift coverage, and one that said nothing would be ratified as if it changed nothing.
+was diff-scoped over the whole repository, and the only thing `audit-scope.json` bounded there
+was which paths that lane was allowed to *write*, never which it read — through the path-authority
+script both were removed with, in #77. So a drafted registry all but always narrows drift
+coverage, and one that said nothing would be ratified as if it changed nothing.
 `migration-coverage-narrowed` counts the tracked files carrying a drafted extension that no root
 claims, and names up to `COVERAGE_SAMPLE` (10) of them, sorted: the count is exact and the paths
 are an example, so five thousand unclaimed files are not five thousand lines. A note, never a

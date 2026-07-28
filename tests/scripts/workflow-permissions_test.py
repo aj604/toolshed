@@ -20,9 +20,6 @@ install:
    `python3` — those patterns are prefix-matched, so naming a program grants
    all of it (aj604/toolshed#118).
 
-The exception in (4) is `doc-sync-upgrade.yml`, whose write job stages the
-output of a deterministic script (apply-upgrade.py) and runs no model at all.
-
 Parsed with a line scanner rather than a YAML library: the test suite is
 stdlib-only, and the shipped workflows are uniformly 2-space indented.
 
@@ -46,9 +43,6 @@ WORKFLOW_GLOBS = [
 MODEL_ACTION = "anthropics/claude-code-action"
 # `git add -A` / `git add --all`, in any surrounding shell.
 BROAD_ADD = re.compile(r"git add\s+(-A|--all)\b")
-# Deterministic, model-free wiring regeneration — the one write job that stages
-# a script's output wholesale.
-BROAD_ADD_EXEMPT = {"doc-sync-upgrade.yml"}
 
 
 def workflow_files():
@@ -195,8 +189,6 @@ class WriteJobsRunNoModel(unittest.TestCase):
 
     def test_write_jobs_stage_explicit_paths(self):
         for path, name, body in self.write_jobs():
-            if os.path.basename(path) in BROAD_ADD_EXEMPT:
-                continue
             offenders = [line.strip() for line in body
                          if BROAD_ADD.search(line)
                          and not line.strip().startswith("#")]

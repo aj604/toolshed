@@ -12,12 +12,11 @@ criteria (issue #71):
 
 1. Every third-party action `doc-audit.yml` invokes is pinned to an immutable
    40-hex-character commit SHA, not a floating tag or branch — a stricter bar
-   than the legacy templates (doc-sync.yml, doc-bloat.yml,
-   doc-sync-upgrade.yml) currently meet; this suite is scoped to the new file
-   on purpose; retrofitting the legacy templates is a separate concern.
-2. No job in this workflow ever runs `git commit` or `git push` — unlike
-   doc-sync.yml's marker-only commit, this lane makes no direct commit to any
-   branch at all, default or otherwise.
+   than doc-sync-upgrade.yml, the one surviving pre-engine template, currently
+   meets; this suite is scoped to the new file on purpose, and retrofitting
+   that template is a separate concern.
+2. No job in this workflow ever runs `git commit` or `git push` — this lane
+   makes no direct commit to any branch at all, default or otherwise.
 3. The job shape the acceptance criteria describe: exactly `audit` (the
    model, read-only) and `publish` (no model, and — today — no write scope at
    all: `contents: read` only, since a job summary needs none; it stays its
@@ -27,12 +26,9 @@ criteria (issue #71):
    (`if: always()`) — a failed audit still leaves an artifact to publish
    against, per the report contract's own "never a misleading empty report".
 
-There is deliberately no template/dogfood equivalence test for this file yet:
-this ticket lands the template only (no `.doc-lifecycle/registry.json` exists
-in this repository to run it against), and the dogfood install — including
-its equivalence test, alongside doc-sync.yml/doc-bloat.yml's existing ones in
-install-parity_test.py — is aj604/toolshed#75's job, which is blocked on this
-one.
+Template/dogfood equivalence for this file is not asserted here: aj604/toolshed#75
+landed the dogfood install, so `install-parity_test.py` regenerates it through
+apply-upgrade.py and compares bytes.
 
 Parsed with the same line-scanner approach as workflow-permissions_test.py
 (stdlib only, 2-space indented YAML); its helpers are reused here rather than
