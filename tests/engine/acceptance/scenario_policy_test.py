@@ -41,6 +41,7 @@ from doclifecycle.approval import (  # noqa: E402
     mint_approval_set,
 )
 from doclifecycle.digest import sha256_bytes, sha256_canonical  # noqa: E402
+from doclifecycle.drift import MODE_FULL, audit_drift, plan_drift_audit  # noqa: E402
 from doclifecycle.finding import build_finding  # noqa: E402
 from doclifecycle.policy import (  # noqa: E402
     CLASS_ANCHOR_REFRESH,
@@ -60,7 +61,7 @@ ENGINE = os.path.abspath(os.path.join(
     "plugins", "doc-lifecycle", "engine",
 ))
 
-# The two raw lines the fixture's living document soft-wraps its stale claim
+# The two raw lines the fixture's living document soft-wraps its stale assertion
 # across, and the two physical lines the audit's own `fix` preserves.
 STALE_PREIMAGE = (
     "The payment service lives at `src/payment_service.py` and calculates fees "
@@ -68,6 +69,26 @@ STALE_PREIMAGE = (
 )
 STALE_POSTIMAGE = fixture.LIVING_FACTUAL_FIX
 STALE_FIRST_LINE, STALE_LAST_LINE = 3, 4
+
+# DRIFT-021 from the second shadow-parity cycle (#126), replayed end to end.
+DRIFT_021_ASSERTION = (
+    "**Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
+    "upgrade-cron knobs.** Real changes belong upstream in the plugin "
+    "(aj604/toolshed) so every install gets them on next upgrade."
+)
+DRIFT_021_PREIMAGE = (
+    "- **Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
+    "upgrade-cron knobs.** Real\n"
+    "  changes belong upstream in the plugin (aj604/toolshed) so every install "
+    "gets them on next upgrade."
+)
+DRIFT_021_FIX = (
+    "- **Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
+    "upgrade-cron/audit-cron\n"
+    "  knobs.** Real changes belong upstream in the plugin (aj604/toolshed) so "
+    "every install gets them on\n"
+    "  next upgrade."
+)
 
 # The narrative document's `> As of` line, and the refresh a remedy writes over
 # it. One line, and it is the whole of the record's approved units.
@@ -276,6 +297,58 @@ class ThePolicyMintedSetGoesThroughTheSameApplier(PolicyScenarioTestCase):
         self.assertNotIsInstance(result, Invalid, result)
         self.assertEqual(result.status, STATE_CLEAN)
         self.assertEqual(self.read(repo, fixture.LIVING_DOC), post)
+
+    def test_drift_021s_wrapped_fix_reaches_the_applier_byte_verbatim(self):
+        repo = self.build_fixture()
+        fixture._write(
+            repo, fixture.LIVING_DOC,
+            f"# Architecture\n\n{DRIFT_021_PREIMAGE}\n",
+        )
+        fixture._commit(repo, "Install the DRIFT-021 replay passage")
+        audit_plan = plan_drift_audit(repo, mode=MODE_FULL)
+        verdicts = self.verdicts(
+            repo, audit_plan, stale=(DRIFT_021_ASSERTION,),
+            fixes={DRIFT_021_ASSERTION: DRIFT_021_FIX},
+        )
+        report = audit_drift(repo, mode=MODE_FULL, verdicts=verdicts)
+        record = next(
+            r for r in report.records
+            if r.extra.get("assertion") == DRIFT_021_ASSERTION
+        )
+        approval = self.mint_by_policy(report, repo, self.drift_only(repo))
+        self.assertIsInstance(approval, ApprovalSet, approval)
+
+        before = self.read(repo, fixture.LIVING_DOC)
+        post = before.replace(DRIFT_021_PREIMAGE, record.extra["fix"])
+        content = {
+            "artifact": "edit-plan",
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "approval_digest": approval.digest,
+            "operations": [{
+                "op": "replace",
+                "record": record.digest,
+                "target_class": "documentation",
+                "path": fixture.LIVING_DOC,
+                "start_line": 3,
+                "end_line": 4,
+                "preimage": DRIFT_021_PREIMAGE,
+                "text": record.extra["fix"],
+            }],
+            "postimages": {
+                fixture.LIVING_DOC: sha256_bytes(post.encode("utf-8")),
+            },
+        }
+        edit_plan = dict(content, digest=sha256_canonical(content))
+
+        result = apply_edit_plan(
+            repo, edit_plan, approval.to_dict(), report=report,
+            registry_path=fixture.REGISTRY_PATH,
+        )
+
+        self.assertNotIsInstance(result, Invalid, result)
+        self.assertEqual(result.status, STATE_CLEAN)
+        self.assertEqual(self.read(repo, fixture.LIVING_DOC), post)
+        self.assertIn(DRIFT_021_FIX, post)
 
     def test_it_writes_nothing_the_approval_did_not_cover(self):
         repo = self.build_fixture()

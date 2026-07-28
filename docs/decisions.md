@@ -26,16 +26,18 @@
   column conventions make line breaking an authoring judgment. Giving that judgment to the
   applier would contradict its deterministic, refusal-based role and make applied bytes differ
   from the approved record.
-- Verified: the drift suite replays DRIFT-021's actual two-line preimage with a three-line corrected
-  fix; the repository acceptance fixture carries a real two-line STALE fix through audit, policy
-  minting, edit-plan validation, and `apply_edit_plan()`. Tests also refuse CR, NUL, blank physical
-  lines, and a multiline fix over a single-line unit.
+- Verified: `tests/baselines/multiline-fix-red/` records the production RED failure and identical
+  pre-/post-change pressure runs by fresh subagents. The drift suite replays DRIFT-021's actual
+  two-line preimage with a three-line corrected fix, and the repository acceptance suite carries
+  that same passage through audit, policy minting, edit-plan validation, and `apply_edit_plan()`.
+  Tests also refuse CR, NUL, blank physical lines, and a multiline fix over a single-line unit.
 - Code: `plugins/doc-lifecycle/engine/doclifecycle/drift.py`,
   `plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md`,
   `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
   `plugins/doc-lifecycle/engine/README.md`, `tests/engine/drift_test.py`,
   `tests/engine/acceptance/scenario_drift_test.py`,
-  `tests/engine/acceptance/scenario_policy_test.py`
+  `tests/engine/acceptance/scenario_policy_test.py`,
+  `tests/baselines/multiline-fix-red/`
 
 ## 2026-07-27 — a vendored copy needs a reader, or it doesn't get vendored (#77 follow-up)
 - Evidence: `apply-upgrade.py`'s `SCRIPTS` table kept vendoring `plan-chunks.py`,

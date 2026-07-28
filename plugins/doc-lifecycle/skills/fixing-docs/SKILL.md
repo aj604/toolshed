@@ -97,8 +97,7 @@ A STALE `fix` may itself contain LF when its approved assertion unit was soft-wr
 the list marker, and continuation indentation are part of the approved replacement: copy the
 whole string byte-verbatim into the operation's `text`, including every embedded line break.
 Never collapse or re-wrap it while planning. The audit method already made the authoring judgment;
-the applier deterministically replaces `start_line..end_line` with however many physical lines the
-approved `text` contains.
+the engine README's **The applier** section owns the replacement mechanics.
 
 This is the one artifact you author, so here is the whole shape — a `STALE` record
 remedied by a single `replace`:

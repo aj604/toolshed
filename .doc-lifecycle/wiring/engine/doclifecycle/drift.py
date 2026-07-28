@@ -203,7 +203,7 @@ def _one_line(value):
     )
 
 
-def _replacement_text(value, unit):
+def _is_valid_replacement_text(value, unit):
     """Complete physical replacement text for one assertion unit.
 
     A soft-wrapped unit may keep that shape with LF-separated physical lines.
@@ -858,7 +858,7 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         fix = entry.get("fix")
         if verdict == VERDICT_STALE:
             unit_data = known.get(unit)
-            if unit_data is None or not _replacement_text(fix, unit_data):
+            if unit_data is None or not _is_valid_replacement_text(fix, unit_data):
                 bad("drift-verdict-invalid-fix",
                     f"a {VERDICT_STALE} verdict must carry 'fix': complete, "
                     f"non-empty replacement text with non-empty physical "

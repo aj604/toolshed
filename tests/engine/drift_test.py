@@ -72,7 +72,7 @@ UNRELATED_CLAIM = "Support answers within one business day."
 # audited two-line preimage and the corrected replacement wrapped to the
 # document's physical-line convention. The assertion unit is normalized prose;
 # the fix is the complete physical span fixing-docs places byte-verbatim.
-DRIFT_021_CLAIM = (
+DRIFT_021_ASSERTION = (
     "**Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
     "upgrade-cron knobs.** Real changes belong upstream in the plugin "
     "(aj604/toolshed) so every install gets them on next upgrade."
@@ -573,7 +573,7 @@ class VerdictDiscipline(DriftRepoTestCase):
 
         report = self.audit(root, verdicts=self.verdicts_for(
             root,
-            self.verdict(root, text=DRIFT_021_CLAIM, fix=DRIFT_021_FIX),
+            self.verdict(root, text=DRIFT_021_ASSERTION, fix=DRIFT_021_FIX),
         ))
 
         self.assertEqual(report.status, STATE_FINDINGS, report.to_dict())
@@ -601,7 +601,7 @@ class VerdictDiscipline(DriftRepoTestCase):
             with self.subTest(fix=repr(fix)):
                 self.assertIn(
                     "drift-verdict-invalid-fix",
-                    self.gap_reason(root, text=DRIFT_021_CLAIM, fix=fix),
+                    self.gap_reason(root, text=DRIFT_021_ASSERTION, fix=fix),
                 )
 
     def test_a_non_stale_verdict_carrying_a_fix_is_refused(self):
