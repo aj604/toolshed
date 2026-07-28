@@ -8,7 +8,7 @@ pass criteria, pre-registered before the cycle, and its verdict — is
 | File | What it is |
 |---|---|
 | `registry.json` | the classification the shadow run used; derivation rules are declared in the gate record |
-| `shadow-cycle.py` | the harness: worktree digest, per-document slices, and the two-round verdict merge |
+| `shadow-cycle.py` | the harness: worktree digest, per-document slices, and the two-round verdict merge — **removed** by aj604/toolshed#77 along with the legacy lane it compared against; read it at the recorded commit below, or `git show 939458f:tests/baselines/shadow-parity-gate/shadow-cycle.py` |
 | `verdicts.json` | what the model workers returned, merged across all three rounds — the run's one irreproducible input |
 | `shadow-report.json` | the validated report `drift-audit` produced from it |
 | `shadow-meta.json` | the shadow run's cost, rounds, and model |
@@ -31,7 +31,10 @@ gate record's adjudications quote the file and the fact they rest on, not just a
 for that reason: line numbers moved, the facts did not. Re-deriving the report at a later
 commit produces a different report, and should.
 
-Reproducing the derived half, from a checkout at that commit:
+Reproducing the derived half, from a checkout at that commit — which is where the two scripts
+below still live. Both were removed from the tip by aj604/toolshed#77: `shadow-cycle.py` and
+`compare-shadow-lanes.py` compared this lane against the legacy one, and retired with it. The
+recipe is preserved as run, not as something to run here.
 
 ```bash
 D=tests/baselines/shadow-parity-gate
