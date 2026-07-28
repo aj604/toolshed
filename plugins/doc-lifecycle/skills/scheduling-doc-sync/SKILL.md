@@ -428,8 +428,9 @@ landing a file, never the door.
    the waivers that re-keyed, and the ones that need re-waiving. **Exit 1 means blocked** — most
    often a document under a declared root that no rule claims, named in the output. Add a rule or
    an exclude *to the registry file* and re-run this step; the loop is edit → dry-run, never back
-   through step 1, which would overwrite your edits with the inference again. There is no
-   unclassified bucket.
+   through step 1, which would overwrite your edits with the inference again — step 2's plain
+   draft says so itself once a registry is landed, in `migration-registry-already-landed`. There
+   is no unclassified bucket.
 4. **Re-waive.** Rewrite each `needs_rewaiving` entry against what the document says now. Its
    `message` states which of the five reasons applies.
 5. **Delete the rejected artifacts.** The dry run's `artifacts` names every old report, cache, or
@@ -442,9 +443,15 @@ landing a file, never the door.
   is what makes the review a diff instead of a per-file slog.
 - **Never bypass a block.** A blocked dry run is the closed-world rule doing its job.
 - **This mode moves no consumer state.** `audit-scope.json`, `drift-waivers.json`, and the
-  legacy marker stay untouched; `installed-version` is advanced by `apply-upgrade.py` in Upgrade
+  sync marker stay untouched; `installed-version` is advanced by `apply-upgrade.py` in Upgrade
   mode, not here. The dry run's `preserved` states each of those files' digest and disposition,
   so nothing about consumer state is left to memory.
+- **Both commands find that state wherever this install keeps it** — `.doc-lifecycle/`, or
+  `.github/doc-sync/` on an install that has not run the relocating upgrade. Each payload's
+  `install.layout` says which it read, and `install.registry` says whether a registry is already
+  landed; don't pass the dry run's `--waivers` or `--installed-version` to "help" it. State
+  standing under *both* layouts exits 1 with `migration-split-install` — keep whichever copy
+  holds your decisions, remove the other, and re-run. Never merge the two by hand into one.
 - Fresh installs run steps 1–3 too (the door is also **bootstrapping-docs**' registry step) —
   with no prior state it infers from markers and directory conventions alone, and reports
   `from_version: null`.

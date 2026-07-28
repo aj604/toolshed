@@ -95,6 +95,26 @@ def legacy_consumer(extra=None):
     return files
 
 
+def relocated_consumer(extra=None):
+    """The same install after aj604/toolshed#133 moved it to `.doc-lifecycle/`.
+
+    Same four inputs, same bytes, four different addresses — which is the whole
+    of the difference the door has to see.
+    """
+    files = legacy_consumer()
+    for legacy, centralized in (
+        (".github/doc-sync-marker", ".doc-lifecycle/state/sync-marker"),
+        (".github/doc-sync/audit-scope.json", ".doc-lifecycle/audit-scope.json"),
+        (".github/doc-sync/drift-waivers.json",
+         ".doc-lifecycle/drift-waivers.json"),
+        (".github/doc-sync/installed-version",
+         ".doc-lifecycle/installed-version"),
+    ):
+        files[centralized] = files.pop(legacy)
+    files.update(extra or {})
+    return files
+
+
 def tree_digest(root):
     """Every file under `root`, with its bytes — the preservation oracle."""
     seen = {}
@@ -618,6 +638,219 @@ class DryRunTest(RepoTestCase):
         )
 
     def test_writes_nothing_to_the_consumer(self):
+        root = self.migrated()
+        before = tree_digest(root)
+        dry_run_migration(root)
+        self.assertEqual(tree_digest(root), before)
+
+
+class InstallLayoutTest(RepoTestCase):
+    """Where the door reads an install's state from, and what it says it found.
+
+    aj604/toolshed#137. #133 moved every install artifact to `.doc-lifecycle/`,
+    so the four inputs this door infers from have two addresses. It reads both,
+    and reports which one it read — because "this install is pre-registry" and
+    "this install has relocated" stopped being the same answer.
+    """
+
+    def draft(self, files):
+        result = draft_registry(self.repo(files))
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        return result.to_dict()
+
+    def test_reads_the_audit_scope_of_an_install_that_has_relocated(self):
+        payload = self.draft(relocated_consumer())
+        self.assertEqual(payload["registry"]["exclude"], ["docs/vendor/**"])
+
+    def test_reads_the_waivers_of_an_install_that_has_relocated(self):
+        payload = self.draft(relocated_consumer({
+            ".doc-lifecycle/drift-waivers.json": json.dumps({"waivers": [
+                {"file": "handbook/pay.md", "claim": "Rates are set per tenant"},
+            ]}),
+            "handbook/pay.md": "# Pay\n\nRates are set per tenant.\n",
+        }))
+        self.assertIn("handbook", payload["registry"]["roots"])
+
+    def test_names_the_layout_it_found_a_relocated_installs_state_at(self):
+        self.assertEqual(
+            self.draft(relocated_consumer())["install"]["layout"], "centralized"
+        )
+
+    def test_names_the_layout_it_found_a_pre_relocation_installs_state_at(self):
+        self.assertEqual(
+            self.draft(legacy_consumer())["install"]["layout"], "legacy"
+        )
+
+    def test_claims_no_layout_for_a_repository_carrying_no_install_state(self):
+        payload = self.draft({"README.md": README, "docs/architecture.md": ARCHITECTURE})
+        self.assertIsNone(payload["install"]["layout"])
+
+    def test_lists_the_addresses_of_both_layouts_among_its_sources(self):
+        sources = {s["path"]: s for s in self.draft(relocated_consumer())["sources"]}
+        self.assertTrue(sources[".doc-lifecycle/audit-scope.json"]["present"])
+        self.assertFalse(sources[".github/doc-sync/audit-scope.json"]["present"])
+
+    def test_refuses_an_install_whose_state_is_split_across_both_layouts(self):
+        root = self.repo(relocated_consumer({
+            ".github/doc-sync/audit-scope.json": AUDIT_SCOPE,
+        }))
+        del_path = os.path.join(root, ".doc-lifecycle/audit-scope.json")
+        os.remove(del_path)
+        result = draft_registry(root)
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems],
+                         ["migration-split-install"])
+        self.assertIn(".github/doc-sync/audit-scope.json", result.problems[0].message)
+        self.assertIn(".doc-lifecycle/drift-waivers.json", result.problems[0].message)
+
+    def test_refuses_when_one_input_stands_at_both_addresses(self):
+        result = draft_registry(self.repo(relocated_consumer({
+            ".github/doc-sync/drift-waivers.json": WAIVERS,
+        })))
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems],
+                         ["migration-split-install"])
+
+    def test_a_landed_registry_is_a_separate_fact_from_the_layout(self):
+        """The third state: relocated *and* already through the door. Nothing
+        about where the state lives says whether a registry was ever landed."""
+        pre_door = self.draft(relocated_consumer())
+        self.assertEqual(pre_door["install"],
+                         {"layout": "centralized", "registry": "absent"})
+
+        post_door = self.draft(relocated_consumer({
+            ".doc-lifecycle/registry.json": '{"schema_version": 1}\n',
+        }))
+        self.assertEqual(post_door["install"],
+                         {"layout": "centralized", "registry": "present"})
+
+    def test_a_legacy_install_that_landed_a_registry_is_neither_of_those(self):
+        """The state the door's own instructions produce between drafting and
+        the dry run: state still at the old address, registry already there."""
+        payload = self.draft(legacy_consumer({
+            ".doc-lifecycle/registry.json": '{"schema_version": 1}\n',
+        }))
+        self.assertEqual(payload["install"],
+                         {"layout": "legacy", "registry": "present"})
+
+    def test_notes_that_re_drafting_would_overwrite_the_landed_registry(self):
+        payload = self.draft(relocated_consumer({
+            ".doc-lifecycle/registry.json": '{"schema_version": 1}\n',
+        }))
+        notes = {n["code"]: n for n in payload["notes"]}
+        self.assertIn("migration-registry-already-landed", notes)
+        self.assertEqual(notes["migration-registry-already-landed"]["location"],
+                         ".doc-lifecycle/registry.json")
+
+    def test_says_nothing_about_a_registry_that_is_not_there(self):
+        notes = [n["code"] for n in self.draft(relocated_consumer())["notes"]]
+        self.assertNotIn("migration-registry-already-landed", notes)
+
+    def test_writes_nothing_to_a_relocated_consumer(self):
+        root = self.repo(relocated_consumer())
+        before = tree_digest(root)
+        draft_registry(root)
+        self.assertEqual(tree_digest(root), before)
+
+
+class DryRunLayoutTest(RepoTestCase):
+    """The dry run of an install that has relocated (aj604/toolshed#137)."""
+
+    def migrated(self, files=None):
+        root = self.repo(files or relocated_consumer())
+        draft = draft_registry(root)
+        self.assertNotIsInstance(draft, Invalid, getattr(draft, "problems", None))
+        path = os.path.join(root, draft.registry_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(draft.registry_text)
+        return root
+
+    def run_dry(self, root):
+        result = dry_run_migration(root)
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        return result.to_dict()
+
+    def test_reads_the_from_version_out_of_the_relocated_lockfile(self):
+        payload = self.run_dry(self.migrated())
+        self.assertEqual(payload["migration"]["from_version"], "0.12.0")
+
+    def test_re_keys_the_waivers_a_relocated_install_carries(self):
+        rekeyed = self.run_dry(self.migrated())["waivers"]["rekeyed"]
+        self.assertEqual([r["file"] for r in rekeyed], ["docs/architecture.md"])
+
+    def test_names_the_layout_it_read_the_install_at(self):
+        self.assertEqual(self.run_dry(self.migrated())["install"],
+                         {"layout": "centralized", "registry": "present"})
+
+    def test_preserves_the_consumer_files_at_the_addresses_they_occupy(self):
+        preserved = {p["path"]: p for p in self.run_dry(self.migrated())["preserved"]}
+        self.assertEqual(
+            sorted(preserved),
+            [".doc-lifecycle/audit-scope.json",
+             ".doc-lifecycle/drift-waivers.json",
+             ".doc-lifecycle/installed-version",
+             ".doc-lifecycle/state/sync-marker"],
+        )
+        self.assertTrue(all(p["present"] for p in preserved.values()))
+        self.assertEqual(
+            preserved[".doc-lifecycle/installed-version"]["disposition"],
+            "set-to-target",
+        )
+
+    def test_the_new_layouts_own_files_are_not_uncarried_artifacts(self):
+        """`registry.json` and `evidence-tools.json` are the contract's, so a
+        closed-world scan of the new root must not report them as old-world
+        leftovers to be deleted."""
+        root = self.migrated(relocated_consumer({
+            ".doc-lifecycle/evidence-tools.json": '{"commands": []}\n',
+        }))
+        found = [p for a in self.run_dry(root)["artifacts"] for p in a["found"]]
+        self.assertEqual(found, [])
+
+    def test_rejects_an_old_world_artifact_the_relocation_left_behind(self):
+        """The relocation carries a closed set and leaves everything else where
+        it is, so the old directory survives a relocation holding exactly the
+        artifacts this table exists to name. Scanning only the layout the state
+        was read at would stop naming them the moment an install relocated."""
+        root = self.migrated()
+        os.makedirs(os.path.join(root, ".github/doc-sync"))
+        with open(os.path.join(root, ".github/doc-sync/last-stales.json"),
+                  "w", encoding="utf-8") as fh:
+            fh.write('{"stales": []}\n')
+        classes = {a["class"]: a for a in self.run_dry(root)["artifacts"]}
+        self.assertEqual(classes["cache"]["found"],
+                         [".github/doc-sync/last-stales.json"])
+
+    def test_rejects_an_uncarried_file_in_the_new_root(self):
+        root = self.migrated(relocated_consumer({
+            ".doc-lifecycle/last-stales.json": '{"stales": []}\n',
+        }))
+        classes = {a["class"]: a for a in self.run_dry(root)["artifacts"]}
+        self.assertEqual(classes["cache"]["found"],
+                         [".doc-lifecycle/last-stales.json"])
+
+    def test_refuses_a_relocated_install_ahead_of_this_engine(self):
+        root = self.migrated(relocated_consumer({
+            ".doc-lifecycle/installed-version": "99.0.0\n",
+        }))
+        result = dry_run_migration(root)
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems],
+                         ["migration-version-ahead"])
+
+    def test_refuses_an_install_whose_state_is_split_across_both_layouts(self):
+        root = self.migrated()
+        os.makedirs(os.path.join(root, ".github/doc-sync"))
+        with open(os.path.join(root, ".github/doc-sync/installed-version"),
+                  "w", encoding="utf-8") as fh:
+            fh.write("0.12.0\n")
+        result = dry_run_migration(root)
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual([p.code for p in result.problems],
+                         ["migration-split-install"])
+
+    def test_writes_nothing_to_a_relocated_consumer(self):
         root = self.migrated()
         before = tree_digest(root)
         dry_run_migration(root)

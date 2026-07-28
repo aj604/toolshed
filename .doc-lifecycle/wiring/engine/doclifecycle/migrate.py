@@ -29,6 +29,12 @@ shape: a report with no lineage cannot be given one after the fact.
 Migration is version-to-version. The contract names the versions it spans, and
 the door refuses an install whose version it cannot read or that is already
 ahead of this engine, rather than guessing what state it is looking at.
+
+An install keeps that state at one of two addresses — the pre-registry
+`.github/doc-sync/`, or `.doc-lifecycle/`, where aj604/toolshed#133 centralized
+it. The door looks at both (`_resolve_layout`) and reports which one it read.
+That is a fact about the install, not about the migration: the contract is the
+same either way, because neither layout had a registry.
 """
 
 import json
@@ -62,39 +68,91 @@ from .segment import segment_document
 # them had a registry.
 MIGRATION_CONTRACT = "legacy-doc-sync-to-registry"
 
-# Where a legacy install keeps the things this door reads. All optional: a
-# fresh install (the bootstrapping path) has none of them, and the door infers
-# from directory conventions and markers alone.
-LEGACY_ROOT = ".github/doc-sync"
-AUDIT_SCOPE_PATH = f"{LEGACY_ROOT}/audit-scope.json"
-WAIVERS_PATH = f"{LEGACY_ROOT}/drift-waivers.json"
-INSTALLED_VERSION_PATH = f"{LEGACY_ROOT}/installed-version"
-MARKER_PATH = ".github/doc-sync-marker"
 SCOPE_RECORD_PATH = "docs/doc-scope.md"
-LEGACY_SOURCES = (
-    AUDIT_SCOPE_PATH, WAIVERS_PATH, INSTALLED_VERSION_PATH, MARKER_PATH,
-    SCOPE_RECORD_PATH,
-)
 
 # What happens to each consumer file the contract carries across. Everything
-# else the legacy state directory holds is an artifact of the old contract, and
-# the door says so rather than leaving a reader to guess which files still mean
-# anything. `installed-version` is here too — it is not left alone, but it is
-# not discarded either, and a table that showed neither would hide the one
-# consumer file the migration does move.
+# else the install's state directory holds is an artifact of the old contract,
+# and the door says so rather than leaving a reader to guess which files still
+# mean anything. `installed-version` is accounted for too — it is not left
+# alone, but it is not discarded either, and a table that showed neither would
+# hide the one consumer file the migration does move.
 UNCHANGED = "unchanged"
 SET_TO_TARGET = "set-to-target"
-PRESERVED = (
-    (AUDIT_SCOPE_PATH, UNCHANGED),
-    (WAIVERS_PATH, UNCHANGED),
-    (MARKER_PATH, UNCHANGED),
-    (INSTALLED_VERSION_PATH, SET_TO_TARGET),
+
+
+@dataclass(frozen=True)
+class Layout:
+    """One set of addresses for the four things this door infers from.
+
+    There are two, because aj604/toolshed#133 moved an install's artifacts out
+    of `.github/` into `.doc-lifecycle/`. The inputs did not change — same
+    files, same bytes, same meaning — so the layout is an address book and
+    nothing else, and the door reads whichever one an install presents.
+    """
+
+    name: str
+    audit_scope: str
+    waivers: str
+    installed_version: str
+    marker: str
+    # The directory whose contents the dry run scans closed-world, and the
+    # names in it the contract accounts for. Everything else there is an
+    # artifact of the old world.
+    state_root: str
+    accounted: Tuple[str, ...]
+
+    @property
+    def inputs(self):
+        """The four addresses whose presence says an install lives here."""
+        return (self.audit_scope, self.waivers, self.installed_version,
+                self.marker)
+
+    @property
+    def preserved(self):
+        return (
+            (self.audit_scope, UNCHANGED),
+            (self.waivers, UNCHANGED),
+            (self.marker, UNCHANGED),
+            (self.installed_version, SET_TO_TARGET),
+        )
+
+
+# The current addresses (aj604/toolshed#133). `registry.json` and
+# `evidence-tools.json` are accounted for without being carried by this
+# contract: they belong to the new layout rather than to the old world
+# `_artifacts` scans for.
+CENTRALIZED_LAYOUT = Layout(
+    name="centralized",
+    audit_scope=".doc-lifecycle/audit-scope.json",
+    waivers=".doc-lifecycle/drift-waivers.json",
+    installed_version=".doc-lifecycle/installed-version",
+    marker=".doc-lifecycle/state/sync-marker",
+    state_root=".doc-lifecycle",
+    accounted=("audit-scope.json", "drift-waivers.json", "evidence-tools.json",
+               "installed-version", "registry.json"),
 )
-# The files inside the legacy state directory the contract accounts for; the
-# rest of that directory is old-world artifact by the closed-world rule below.
-CARRIED_IN_LEGACY_ROOT = frozenset(
-    path for path, _ in PRESERVED if path.startswith(f"{LEGACY_ROOT}/")
+
+# The pre-#133 addresses. Kept beside the current ones rather than replaced:
+# this door exists for consumers arriving from a genuinely pre-registry
+# install, and most of those have never run the relocating upgrade. The marker
+# sits outside the state root here, which is exactly the scattering #133 ended.
+LEGACY_LAYOUT = Layout(
+    name="legacy",
+    audit_scope=".github/doc-sync/audit-scope.json",
+    waivers=".github/doc-sync/drift-waivers.json",
+    installed_version=".github/doc-sync/installed-version",
+    marker=".github/doc-sync-marker",
+    state_root=".github/doc-sync",
+    accounted=("audit-scope.json", "drift-waivers.json", "installed-version"),
 )
+
+# Current spelling first, so a payload that lists both reads newest-first.
+LAYOUTS = (CENTRALIZED_LAYOUT, LEGACY_LAYOUT)
+
+# Whether a registry file stands at the registry path — see `Install` for why
+# it is a fact of its own rather than a value of the layout.
+REGISTRY_PRESENT = "present"
+REGISTRY_ABSENT = "absent"
 
 # Working files the legacy workflows write into the repository root. Named
 # rather than swept, because the root is not a directory this contract owns —
@@ -173,6 +231,29 @@ class Source:
 
 
 @dataclass(frozen=True)
+class Install:
+    """What the door is looking at, as two facts that do not imply each other.
+
+    `layout` is where this install keeps its state — `legacy` for the pre-#133
+    addresses, `centralized` for the current ones, and `null` when there is no
+    install state at either (a repository that never ran doc-sync at all, which
+    the door still drafts for, from conventions and markers alone).
+
+    `registry` is whether a file stands at the registry path. That is the fact
+    that separates an install still waiting to go through this door from one
+    that has already been through it — and it is orthogonal to the layout, so
+    "relocated, pre-door" and "relocated, post-door" are told apart here rather
+    than guessed at from where the state sits.
+    """
+
+    layout: Optional[str]
+    registry: str
+
+    def to_dict(self):
+        return {"layout": self.layout, "registry": self.registry}
+
+
+@dataclass(frozen=True)
 class DraftRule:
     """One proposed glob rule, and the evidence behind it."""
 
@@ -212,6 +293,7 @@ class Draft:
     """An inferred registry, ready to be reviewed as a diff of glob rules."""
 
     status: str
+    install: Install
     registry_path: str
     registry: dict
     registry_text: str
@@ -224,6 +306,7 @@ class Draft:
         return {
             "status": self.status,
             "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "install": self.install.to_dict(),
             "registry_path": self.registry_path,
             "registry": self.registry,
             "registry_digest": self.registry_digest,
@@ -243,6 +326,78 @@ def _read(repo_root, path):
             return fh.read(), None
     except (OSError, UnicodeDecodeError) as exc:
         return None, str(exc)
+
+
+def _resolve_layout(repo_root):
+    """(the layout this install occupies or None, problem). Owns the choice.
+
+    Both layouts are looked at, never one. An install that has run the
+    relocating upgrade keeps its judgment somewhere the pre-#133 addresses
+    cannot see, and a door that read only those would draft a registry without
+    the consumer's exclusions or waivers and be reviewed as if it had them.
+
+    State standing under *both* layouts is refused rather than merged or
+    picked, and refused on its own rather than reported alongside what a
+    half-read config produced: with two rival copies of the audit scope and the
+    waivers, every root, rule, and acceptance downstream could be inferred from
+    the wrong half. Which copy holds the decisions the consumer means is not
+    knowable from the filesystem. That is the question `apply-upgrade.py`'s
+    `layout_problem` refuses to answer about an install's wiring, asked here
+    about its state.
+
+    Occupying neither is not a refusal, and not a layout either: a fresh
+    install has none of these files, and the door infers from conventions and
+    markers alone. A caller reads at the current addresses in that case,
+    because a file that is not there is not evidence of an old install.
+    """
+    present = {
+        layout.name: tuple(
+            path for path in layout.inputs
+            if os.path.isfile(os.path.join(repo_root, path))
+        )
+        for layout in LAYOUTS
+    }
+    occupied = [layout for layout in LAYOUTS if present[layout.name]]
+    if len(occupied) > 1:
+        where = "; ".join(
+            f"{layout.name} ({', '.join(present[layout.name])})"
+            for layout in occupied
+        )
+        return None, Problem(
+            code="migration-split-install",
+            message=(
+                f"this install's state stands under both layouts — {where}. "
+                f"Which copy holds the decisions you mean is not knowable from "
+                f"the filesystem, and reading either one would silently drop "
+                f"the exclusions or acceptances in the other. Keep whichever "
+                f"is current, remove the rest, then re-run."
+            ),
+        )
+    return (occupied[0] if occupied else None), None
+
+
+def _source_paths():
+    """Every address the door consults, both layouts, in a fixed order.
+
+    Both are listed whichever one an install turned out to occupy, so the
+    payload shows what was looked for as well as what was found — a table of
+    only the layout that was read cannot tell a reader whether the other was
+    ever checked, which is the question aj604/toolshed#137 was filed about.
+    """
+    return tuple(
+        path for layout in LAYOUTS for path in layout.inputs
+    ) + (SCOPE_RECORD_PATH,)
+
+
+def _install(repo_root, occupied, registry_path):
+    return Install(
+        layout=occupied.name if occupied else None,
+        registry=(
+            REGISTRY_PRESENT
+            if os.path.isfile(os.path.join(repo_root, registry_path))
+            else REGISTRY_ABSENT
+        ),
+    )
 
 
 def _sources(repo_root, paths):
@@ -587,18 +742,32 @@ def _coverage_note(repo_root, roots, extension):
 
 
 def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
-                   scope_record=SCOPE_RECORD_PATH, audit_scope=AUDIT_SCOPE_PATH,
-                   waivers=WAIVERS_PATH):
-    """Infer a reviewable draft registry from a legacy install. Writes nothing.
+                   scope_record=SCOPE_RECORD_PATH, audit_scope=None,
+                   waivers=None):
+    """Infer a reviewable draft registry from a pre-registry install.
 
-    Returns a `Draft`, or `Invalid` when the legacy state cannot be read well
-    enough to infer from — a draft built on a config the door could not parse
-    would propose the wrong corpus, and be reviewed as if it had.
+    Writes nothing. Returns a `Draft`, or `Invalid` when the install's state
+    cannot be read well enough to infer from — a draft built on a config the
+    door could not parse would propose the wrong corpus, and be reviewed as if
+    it had not.
+
+    `audit_scope` and `waivers` default to the addresses of whichever layout
+    the install occupies (`_resolve_layout`); passing either names a file
+    directly instead.
 
     `roots` overrides inference outright: a consumer whose documentation does
     not sit where the conventions put it declares it, rather than editing a
     draft that started from the wrong tree.
     """
+    occupied, problem = _resolve_layout(repo_root)
+    if problem is not None:
+        return Invalid((problem,))
+    layout = occupied or CENTRALIZED_LAYOUT
+    if audit_scope is None:
+        audit_scope = layout.audit_scope
+    if waivers is None:
+        waivers = layout.waivers
+
     scope, problem = _load_audit_scope(repo_root, audit_scope)
     if problem is not None:
         return Invalid((problem,))
@@ -693,6 +862,23 @@ def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
     if coverage is not None:
         notes.append(coverage)
 
+    install = _install(repo_root, occupied, registry_path)
+    if install.registry == REGISTRY_PRESENT:
+        # The door's own instructions redirect `--registry-only` into this
+        # path, and its dry-run loop is edit-then-re-run for exactly this
+        # reason: a second draft is inference from the install's state again,
+        # and knows nothing about the rules a reviewer edited into the file.
+        notes.append(Note(
+            code="migration-registry-already-landed",
+            message=(
+                f"a registry already stands at {registry_path} — this draft "
+                f"re-infers one from the install's state and would overwrite "
+                f"it, edits included, if redirected there again. Fix the "
+                f"landed registry and re-run the dry run instead."
+            ),
+            location=registry_path,
+        ))
+
     rules, claimed = _group_rules(documents, extension)
     sets = sorted({r.doc_set for r in rules if r.doc_set})
     payload = {
@@ -742,12 +928,13 @@ def draft_registry(repo_root, roots=None, registry_path=DEFAULT_REGISTRY_PATH,
 
     return Draft(
         status=STATUS_OK,
+        install=install,
         registry_path=registry_path,
         registry=payload,
         registry_text=text,
         registry_digest=parsed.digest,
         rules=rules,
-        sources=_sources(repo_root, LEGACY_SOURCES),
+        sources=_sources(repo_root, _source_paths()),
         notes=tuple(notes),
     )
 
@@ -835,12 +1022,19 @@ class Preserved:
                 "digest": self.digest, "disposition": self.disposition}
 
 
-def _preserved(repo_root):
+def _preserved(repo_root, layout):
+    """The consumer files this install carries, at the addresses it uses.
+
+    One layout's addresses, not both: this table is a statement about what
+    happens to *these* files, and a row for a path the install does not have
+    would be a claim about nothing.
+    """
+    preserved = layout.preserved
     return tuple(Preserved(
         path=source.path, present=source.present, digest=source.digest,
         disposition=disposition,
     ) for source, (_, disposition) in zip(
-        _sources(repo_root, [path for path, _ in PRESERVED]), PRESERVED
+        _sources(repo_root, [path for path, _ in preserved]), preserved
     ))
 
 
@@ -849,6 +1043,7 @@ class DryRun:
     """What adopting this registry would cost. A report, never a migration."""
 
     status: str
+    install: Install
     contract: str
     from_version: Optional[str]
     to_version: str
@@ -868,6 +1063,7 @@ class DryRun:
         return {
             "status": self.status,
             "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "install": self.install.to_dict(),
             "migration": {
                 "contract": self.contract,
                 "from_version": self.from_version,
@@ -1062,9 +1258,19 @@ def _artifact_class(name):
 def _artifacts(repo_root):
     """Every old artifact found, by class, with what to do instead of keeping it.
 
-    Closed-world over the legacy state directory: rather than hunting a list of
-    known filenames, anything in it that the contract does not carry across and
-    that is not a vendored script is an artifact of the old world.
+    Closed-world over *every* layout's state directory, not just the one this
+    install's state was read at. The relocation carries a closed set and leaves
+    anything else exactly where it is, so the old directory routinely survives
+    it holding precisely what this table exists to name — and an artifact is an
+    artifact wherever it sits, with no rival copy to tell apart, so reading
+    both roots here costs nothing the input resolution has to weigh.
+
+    Rather than hunting a list of known filenames, anything in a state
+    directory that its layout does not account for and that is not a vendored
+    script is an artifact of the old world. Which names *are* accounted for is
+    per layout, because the current one holds files the pre-#133 one never had
+    — the registry among them, and reporting that as a leftover would tell a
+    consumer to delete the file this migration exists to land.
     Subdirectories are left alone — a vendored engine tree is wiring, not state.
     The repository root is not a directory this contract owns, so there the
     scan is the named list of files the legacy workflows write into it.
@@ -1079,17 +1285,18 @@ def _artifacts(repo_root):
         if os.path.isfile(os.path.join(repo_root, name)):
             found[_artifact_class(name)].append(name)
 
-    legacy = os.path.join(repo_root, LEGACY_ROOT)
-    if os.path.isdir(legacy):
-        for name in sorted(os.listdir(legacy)):
-            rel = f"{LEGACY_ROOT}/{name}"
-            if rel in CARRIED_IN_LEGACY_ROOT:
+    for layout in LAYOUTS:
+        state_root = os.path.join(repo_root, layout.state_root)
+        if not os.path.isdir(state_root):
+            continue
+        for name in sorted(os.listdir(state_root)):
+            if name in layout.accounted:
                 continue
             if name.endswith(".py") or not os.path.isfile(
-                os.path.join(legacy, name)
+                os.path.join(state_root, name)
             ):
                 continue
-            found[_artifact_class(name)].append(rel)
+            found[_artifact_class(name)].append(f"{layout.state_root}/{name}")
 
     return tuple(ArtifactClass(
         name=name,
@@ -1100,8 +1307,7 @@ def _artifacts(repo_root):
 
 
 def dry_run_migration(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
-                      waivers=WAIVERS_PATH,
-                      installed_version=INSTALLED_VERSION_PATH):
+                      waivers=None, installed_version=None):
     """What adopting the landed registry costs. Reads only; writes nothing.
 
     Returns a `DryRun`, or `Invalid` naming every reason the migration is
@@ -1110,7 +1316,20 @@ def dry_run_migration(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
     case is the one that matters most: there is no bucket for it, because a
     bucket is how a corpus quietly stops being audited, so the paths are named
     and the upgrade stops.
+
+    `waivers` and `installed_version` default to the addresses of whichever
+    layout the install occupies (`_resolve_layout`, which also owns the refusal
+    when it occupies both).
     """
+    occupied, problem = _resolve_layout(repo_root)
+    if problem is not None:
+        return Invalid((problem,))
+    layout = occupied or CENTRALIZED_LAYOUT
+    if waivers is None:
+        waivers = layout.waivers
+    if installed_version is None:
+        installed_version = layout.installed_version
+
     inventory = build_inventory(repo_root, registry_path)
     if isinstance(inventory, Invalid):
         return inventory
@@ -1137,6 +1356,7 @@ def dry_run_migration(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
     rekeyed, stuck = _rekey(repo_root, inventory, accepted, registry_path)
     return DryRun(
         status=STATUS_OK,
+        install=_install(repo_root, occupied, registry_path),
         contract=MIGRATION_CONTRACT,
         from_version=declared,
         to_version=PLUGIN_VERSION,
@@ -1149,6 +1369,6 @@ def dry_run_migration(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
         rekeyed=rekeyed,
         needs_rewaiving=stuck,
         artifacts=_artifacts(repo_root),
-        preserved=_preserved(repo_root),
-        sources=_sources(repo_root, LEGACY_SOURCES),
+        preserved=_preserved(repo_root, layout),
+        sources=_sources(repo_root, _source_paths()),
     )

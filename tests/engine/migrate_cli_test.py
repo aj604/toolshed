@@ -10,7 +10,7 @@ import json
 import os
 import unittest
 
-from migrate_test import legacy_consumer, tree_digest
+from migrate_test import legacy_consumer, relocated_consumer, tree_digest
 from support import RepoTestCase, run_command
 
 from doclifecycle.migrate import draft_registry
@@ -84,6 +84,17 @@ class MigrationDryRunCommandTest(RepoTestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("migration-unclassified-document", result.stderr)
         self.assertIn("docs/notes/scratch.md", result.stderr)
+
+    def test_reads_a_relocated_installs_lockfile_without_being_told_where(self):
+        """aj604/toolshed#137: the flags default to the install's own layout, so
+        a consumer whose upgrade moved their state does not have to know that
+        happened to get a dry run that reads it."""
+        root = self.migrated(relocated_consumer())
+        result = run_command("migration-dry-run", "--repo", root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["migration"]["from_version"], "0.12.0")
+        self.assertEqual(payload["install"]["layout"], "centralized")
 
     def test_neither_command_writes_to_the_repository(self):
         root = self.migrated()

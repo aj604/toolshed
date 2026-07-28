@@ -1363,6 +1363,42 @@ Issue #74. How a consumer already running the pre-registry doc-sync install adop
 contract, and how a fresh install gets a registry at all. Two commands, neither of which writes
 anything: the migration itself is a human landing a file and a workflow bump.
 
+### Which install the door is looking at
+
+Issue #137. The four things the door infers from — the audit scope, the waivers, the version
+lockfile, and the sync marker — have two addresses, because #133 centralized an install's
+artifacts under `.doc-lifecycle/`. Both are read, and both payloads report what was found as
+`install`:
+
+| field | values | means |
+| --- | --- | --- |
+| `layout` | `centralized` | the state is at `.doc-lifecycle/` (`state/sync-marker` for the marker) |
+| | `legacy` | the state is at `.github/doc-sync/`, with the marker loose at `.github/doc-sync-marker` |
+| | `null` | neither address holds any of the four — a repository that never ran doc-sync, drafted from conventions and markers alone |
+| `registry` | `present`, `absent` | whether a file stands at the registry path |
+
+The two are orthogonal on purpose, because relocating an install and adopting the registry are
+different events in either order. `centralized` + `absent` is a relocated install that has not
+been through the door; `centralized` + `present` is one that has; `legacy` + `present` is the
+state the door's own instructions produce between drafting a registry and dry-running it. One
+enum over the pair would fuse questions with different answers and different remedies.
+
+The contract name does not vary with the layout: `legacy-doc-sync-to-registry` spans every
+pre-registry install, because none of them had a registry, and where the state sat is not what
+the migration changes.
+
+**State under both layouts is refused, never merged or picked** —
+`migration-split-install`, naming every path found under each, and on its own rather than beside
+what a half-read config produced. Which copy holds the decisions the consumer means is not
+knowable from the filesystem, and reading either would silently drop the exclusions or
+acceptances in the other. That is the question `apply-upgrade.py`'s `layout_problem` refuses to
+answer about an install's *wiring*, asked here about its *state* — different predicates, because
+the two look at different files. `sources` lists both layouts' addresses whichever one the
+install occupies, so the payload shows what was looked for as well as what was found.
+
+`--waivers` and `--installed-version` on `migration-dry-run` default to the resolved layout's
+addresses; passing either names a file directly.
+
 ### Drafting a registry
 
 ```bash
@@ -1441,6 +1477,14 @@ and overrides sort last, so it would win silently. Parsing cannot catch that —
 perfectly well formed — so a rule that classifies something other than what the draft says is
 `migration-draft-inconsistent`, naming the document.
 
+A draft run against an install that already has a registry says so:
+`migration-registry-already-landed` names the path. A second draft is inference from the
+install's state again and knows nothing about the rules a reviewer edited in, so redirecting one
+over a landed registry loses them. It is a note rather than a refusal because re-reading the
+draft's `basis` is exactly what the door's own sequence asks for next, and it reaches the draft
+payload rather than `--registry-only`'s output — that prints the registry file's bytes and
+nothing else, by design.
+
 The draft walks the corpus through `registry.without_rules()` and `inventory.walk_root()`, the
 same enumeration `build_inventory()` uses, so the documents a draft proposes rules for are
 exactly the documents the resulting inventory will hold.
@@ -1454,7 +1498,7 @@ python3 -m doclifecycle migration-dry-run --repo .
 `dry_run_migration()` reads the registry the human landed and states what adopting it costs:
 
 - **`migration`** — the contract (`legacy-doc-sync-to-registry`) and the versions it spans, read
-  from `.github/doc-sync/installed-version` and `PLUGIN_VERSION`. Absent is a fresh install
+  from the resolved layout's `installed-version` and `PLUGIN_VERSION`. Absent is a fresh install
   (`from_version: null`). Unparseable is `migration-version-unreadable`; ahead of this engine is
   `migration-version-ahead`. The comparison is numeric, like the upgrade lane's gate.
 - **`obligations`** — one row per document kind, always all three: `living` owes `assertions`,
@@ -1471,19 +1515,26 @@ python3 -m doclifecycle migration-dry-run --repo .
   The waivers file is read through `drift.load_waivers()` — the audit's own reader, so a dry run
   cannot promise the audit something else.
 - **`artifacts`** — the three classes of old artifact, each stating `carried: false`, why it
-  stops here, how to regenerate it, and every instance found. Closed-world over
-  `.github/doc-sync/`: anything there the contract does not carry across and that is not a
-  vendored script is an artifact of the old world. The repository root is not a directory this
+  stops here, how to regenerate it, and every instance found. Closed-world over *every* layout's
+  state directory, not just the one the install's state was read at: the relocation leaves
+  anything it does not carry exactly where it is, so the old directory routinely survives it
+  holding what this table exists to name, and an artifact has no rival copy to be told apart
+  from. Anything in either directory that its layout does not account for and that is not a
+  vendored script is an artifact of the old world. Which names *are* accounted for is per layout
+  — `.doc-lifecycle/` also holds `registry.json` and `evidence-tools.json`, and reporting those
+  as leftovers would tell a consumer to delete the file this migration exists to
+  land. The repository root is not a directory this
   contract owns, so there the scan is the named list of working files the legacy workflows write
   into it (`drift-report.json`, `bloat-report.json`, `manifest.json`, `distill-manifest.json`).
   Every class reports its disposition whether or not an instance was found — a reader learns that
   approvals do not survive the move without having to leave one lying around. Nothing is coerced:
   a report that predates lineage cannot be given one after the fact.
-- **`preserved`** — every consumer file the contract accounts for, with the digest it had when
-  read and what happens to it: `audit-scope.json`, `drift-waivers.json`, and
-  `.github/doc-sync-marker` are `unchanged`; `installed-version` is `set-to-target`, the one
-  consumer file the migration moves. `tests/engine/migrate_test.py` compares the whole tree byte
-  for byte before and after every call, refusal paths included.
+- **`preserved`** — every consumer file the contract accounts for, at the addresses this install
+  uses, with the digest it had when read and what happens to it: the audit scope, the waivers,
+  and the sync marker are `unchanged`; `installed-version` is `set-to-target`, the one consumer
+  file the migration moves. One layout's addresses, not both — a row for a path the install does
+  not have would be a claim about nothing. `tests/engine/migrate_test.py` compares the whole tree
+  byte for byte before and after every call, refusal paths included.
 
 A re-keyed waiver reports the **units** its acceptance now names and how many (`matched`), not a
 finding digest: a finding digest also covers the report lineage and the finding code, which are
@@ -2085,8 +2136,10 @@ one would prove nothing. `drift_cli_test.py` imports `drift_test.py`'s repositor
 than rebuilding it. `repository_test.py` holds the git reads to their read-only contract
 directly, probing every argument with the spellings git would read as options.
 `migrate_test.py` builds a real pre-registry consumer on disk — the `.github/doc-sync/` config
-and state a scheduled install carries, plus the documents it managed — and `migrate_cli_test.py`
-imports that fixture rather than rebuilding it; both compare the whole tree byte for byte
+and state a scheduled install carries, plus the documents it managed — and a second fixture
+(`relocated_consumer`) carrying the same bytes at the `.doc-lifecycle/` addresses #133 moved
+them to, which is the whole of the difference the door has to see. `migrate_cli_test.py` imports
+those fixtures rather than rebuilding them; both compare the whole tree byte for byte
 before and after, because a door that mutates during a dry run is the failure that matters.
 
 `tests/engine/acceptance/` is the repository-level fixture (a real `git init`, real commits,
