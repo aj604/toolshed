@@ -454,6 +454,44 @@
   `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/upgrade-gate.py`,
   `tests/scripts/workflow-permissions_test.py`, `.github/workflows/doc-apply.yml`
 
+## 2026-07-27 — POLICY stays legacy pending skill migration (#77 follow-up)
+- Evidence: found while implementing #77 and deliberately left alone there. `bloat.py`'s module
+  docstring and the engine README both call the bulk verdict `POLICY` a departure from — and the
+  `detecting-doc-bloat` skill's — "legacy contract", already gone from `doclifecycle.bloat`'s six
+  verdicts. `detecting-doc-bloat/SKILL.md`, its `plan-chunks.py` (the `policy_scope` config key,
+  the `POLICY_PROMPT` dispatch, the whole "policy chunk" mode), and
+  `docs/guides/auditing-doc-bloat.md` (seven verdicts, a `POLICY` row) all still instruct and
+  document it. `HANDOFF.md`'s 2026-07-26 entry states the reason plainly: "The eight helper
+  scripts are untouched — they are absorbed in later stages, so both generations coexist for
+  now." No `bloat-audit` CLI command exists, and neither `bloat-plan` nor `context-index` is
+  wired into any workflow — `doc-audit.yml` has cut over drift, not bloat.
+- Decided (POLICY is retired in the target architecture, not in what ships today): the engine's
+  scope mechanism (`enumerate_scope`, `bloat.SCOPE_VERDICTS` — an enumerable `set`/`glob`/`kind`
+  rule on `RETIRE-DOC`, resolved from the corpus-wide context index) is the one correct successor
+  to a hand-declared `policy_scope` directory, and no second bulk-verdict shape is wanted once the
+  skill migrates. `bloat.py` and the engine README need no change — they already scope the claim
+  correctly ("the legacy skill's `POLICY` verdict is deliberately absent").
+- Decided (the live skill keeps `POLICY` until it migrates): `plan-chunks.py` has no
+  context-index-driven scope mechanism of its own, so removing `POLICY` now would drop the only
+  working bulk-directory-retirement path (e.g. pruning a whole `docs/superpowers`-style tree) with
+  nothing to replace it — a functional regression dressed as a docs fix. `SKILL.md`,
+  `plan-chunks.py`, and the guide instead each gained one explicit note that `POLICY` is this
+  skill's own legacy shape, superseded in the engine, migrating in a future stage this entry does
+  not schedule. `tests/scripts/validate-bloat-output_test.py` and `plan-chunks_test.py`'s
+  `POLICY`-pinning assertions are correct as written — they pin the shape the live skill still
+  produces — and are left unchanged.
+- Rejected: stripping `POLICY` from the skill/planner/guide to match the engine outright. That
+  reads as "make all four agree" on its face, but the engine's bulk-scope mechanism was never
+  wired into `plan-chunks.py`, so agreement-by-deletion would ship a real capability loss, not a
+  documentation fix.
+- Still binds: when the bloat skill migrates to `doclifecycle.bloat` (not yet scheduled), `POLICY`
+  and `policy_scope` retire from `plan-chunks.py`, `validate-bloat-output.py`, `SKILL.md`, and the
+  guide together, in the same change that gives the skill a working replacement for bulk directory
+  retirement.
+- Code: `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`,
+  `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py`,
+  `docs/guides/auditing-doc-bloat.md`
+
 ## 2026-07-27 — a fix that speaks for another document is a person's to approve (#123)
 - Evidence: `docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, G4 — DRIFT-023, the second
   shadow cycle's one false positive and #77's only blocker. A true sentence was called `STALE`
