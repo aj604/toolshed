@@ -715,8 +715,17 @@ class UpgradeLaneStagingWiring(unittest.TestCase):
     def test_leftover_paths_refuse_before_the_commit(self):
         for label, yml in self.ymls.items():
             step = yml[yml.index("Open upgrade PR"):]
-            self.assertIn("git status --porcelain --untracked-files=all",
-                          step, label)
+            # Unstaged-tracked + untracked. NOT `git status --porcelain`, which
+            # also lists the paths just staged and would refuse every run —
+            # asserted over executable lines, since the YAML comment explains
+            # exactly that trap by name.
+            self.assertIn("git diff --name-only; git ls-files --others "
+                          "--exclude-standard", step, label)
+            code = [ln for ln in step.splitlines()
+                    if not ln.strip().startswith("#")]
+            self.assertEqual(
+                [ln.strip() for ln in code if "git status --porcelain" in ln],
+                [], label)
             self.assertIn("--status undeclared-paths", step, label)
             # The refusal must precede the commit, or it refuses too late.
             self.assertLess(step.index("undeclared-paths"),

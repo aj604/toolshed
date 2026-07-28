@@ -122,8 +122,9 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
   unextractable knobs). Three suites cover the
   wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
-  token-free, write jobs model-free and staging explicit paths — `doc-sync-upgrade.yml`'s
-  deterministic write job is the one recorded `git add -A` exemption — and no `--allowedTools`
+  token-free; every write job model-free and staging an explicit path list, with no `git add -A`
+  exemption left — #77 gave the upgrade lane `apply-upgrade.py --report-written` so it stages a
+  declared set too; and no `--allowedTools`
   grant naming a Bash executable beyond `git`/`python3`, since those patterns are prefix-matched,
   #118),
   `install-parity_test.py`

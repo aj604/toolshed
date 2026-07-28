@@ -149,14 +149,15 @@ jobs:
           git checkout -b doc-sync/upgrade
           # Stage the set apply-upgrade.py declared it wrote — never the work tree.
           git add --pathspec-from-file="${RUNNER_TEMP}/upgrade-written.txt"
-          # Anything still unstaged is a path the regeneration touched without
-          # declaring it. Refuse rather than commit it.
-          LEFTOVER=$(git status --porcelain --untracked-files=all)
+          # Whatever is left unstaged after that is a path the regeneration
+          # touched without declaring — tracked-but-unstaged, or untracked.
+          # (Plain `git status --porcelain` would also list what we just staged.)
+          # Refuse rather than commit it.
+          LEFTOVER=$( { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | paste -sd, -)
           if [ -n "${LEFTOVER}" ]; then
             python3 .github/doc-sync/render-report.py upgrade-summary \
               --status undeclared-paths --current "${{ steps.versions.outputs.current }}" \
-              --latest "${{ steps.versions.outputs.latest }}" \
-              --files "$(echo "${LEFTOVER}" | awk '{print $NF}' | paste -sd, -)"
+              --latest "${{ steps.versions.outputs.latest }}" --files "${LEFTOVER}"
             exit 1
           fi
           git commit -m "docs: upgrade doc-sync wiring to plugin v${{ steps.versions.outputs.latest }}"

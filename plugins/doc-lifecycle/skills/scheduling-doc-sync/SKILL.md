@@ -30,9 +30,10 @@ method from its one owner.
 **The model holds no repository write authority.** Every job that invokes a model runs with
 `permissions: contents: read` (plus `id-token: write` for the OAuth exchange only), checks out
 with `persist-credentials: false`, carries no `GH_TOKEN`, and hands its work forward as an
-artifact. The credentialed jobs run **no model**: the apply lane's `apply` job stages exactly
-the paths the engine's verified apply result emitted (`git add --pathspec-from-file`, never
-`git add -A`), and the upgrade lane's write job stages the output of a deterministic script.
+artifact. The credentialed jobs run **no model**, and every one of them stages an explicit path
+list — `git add --pathspec-from-file`, never `git add -A`, with no exception. The apply lane
+stages the paths the engine's verified apply result emitted; the upgrade lane stages the set
+`apply-upgrade.py` declared it wrote, and refuses when anything is left unstaged or untracked.
 `tests/scripts/workflow-permissions_test.py` fails the release if any of that slips. What none
 of this establishes is that the *report* was honest — it is model output too; the pull request
 the apply lane opens is where a person settles that.
@@ -236,9 +237,15 @@ workflow runs it from the pinned target checkout; a human forcing an upgrade run
 against their checkout with `--plugin-root "$CLAUDE_PLUGIN_ROOT"`:
 
     apply-upgrade.py --plugin-root <doc-lifecycle plugin dir> --repo <install root> --target <version>
+                     [--report-written <file>]
 
-The script writes files only; git/PR is the workflow's job (below). Never re-implement its file
-ops by hand.
+The script writes files only; git/PR is the workflow's job (below). `--report-written` is how the
+caller learns what to stage: the script declares each repo-relative path *as it writes it* — the
+rendered workflows, the copied scripts, `installed-version`, the files it actually seeded, and
+the vendored engine as a directory path (`copy_engine` empties the destination first, so a
+deletion has to be stageable). Declared by the writer, never discovered from `git status`, so a
+path the script never touched cannot ride an upgrade commit. Never re-implement its file ops by
+hand.
 
 Ownership is the whole game — total on wiring, idempotent on state (this table is the contract
 `apply-upgrade.py` implements):
@@ -268,9 +275,12 @@ currently-installed workflow and substitutes it back into the new template:
 A knob it can't extract fails the run red rather than default-guessing.
 
 **Do not commit or open the PR in upgrade mode** — the workflow owns git: it diffs the working
-tree, opens the `doc-sync/upgrade` PR (or self-explains a no-op), and the merge is what advances
-`installed-version`. Regenerating never leaves an install floating on `main`: the new wiring is
-pinned to `<target>` end to end.
+tree, stages the declared path set, opens the `doc-sync/upgrade` PR (or self-explains a no-op),
+and the merge is what advances `installed-version`. Anything left unstaged or untracked after
+that staging ends the run at the `undeclared-paths` status, which names the stray paths and
+states that nothing was committed or pushed — a regeneration that touched more than it declared
+is a bug to fix upstream, never something to sweep into the commit. Regenerating never leaves an
+install floating on `main`: the new wiring is pinned to `<target>` end to end.
 
 **Workflow-file changes can't self-land.** The Actions `GITHUB_TOKEN` cannot push files under
 `.github/workflows/` (GitHub blocks it; the `workflows` permission is not grantable to it).
@@ -359,10 +369,11 @@ landing a file, never the door.
   never version the `plugins:` selector (`@version` there is unsupported).
 - **Don't customize the installed YAML beyond the audit-cron and upgrade-cron knobs.** Real
   changes belong upstream in the plugin (aj604/toolshed) so every install gets them on next upgrade.
-- **Staging is an explicit path list, never `git add -A`.** The apply lane stages
-  `--pathspec-from-file` the paths the engine's verified apply result emitted. The one exemption
-  is the upgrade lane's write job, which stages a deterministic script's output and runs no model
-  — `workflow-permissions_test.py` encodes exactly that exemption and no other.
+- **Staging is an explicit path list, never `git add -A` — no exceptions.** Both credentialed
+  jobs stage `--pathspec-from-file`: the apply lane the paths the engine's verified apply result
+  emitted, the upgrade lane the paths `apply-upgrade.py --report-written` declared. Each then
+  re-checks what landed, and a stray path stops the run before anything is committed or pushed.
+  `workflow-permissions_test.py` asserts this over every shipped template with no exemption list.
 - **The report is a build artifact, never repo content.** The audit lane uploads
   `drift-report.json` and its cost sidecar as artifacts; don't let a hand edit reintroduce either
   as a committed file.
@@ -388,8 +399,10 @@ landing a file, never the door.
 - Committing `drift-report.json` as repo content → artifact hygiene, not history.
 - Giving a model job `contents: write`, a `GH_TOKEN`, or a credential-persisting checkout "so it
   can just push" → that is the mutation path the job split closes.
-- Replacing the apply lane's `git add --pathspec-from-file` with a trusting `git add -A` → the
-  approval set bounds what may be written, and a broad add hands a stray file the same authority.
+- Replacing either credentialed job's `git add --pathspec-from-file` with a trusting `git add -A`,
+  or dropping the leftover check that follows it → what may be written is bounded by the approval
+  set in one lane and by the declared written set in the other, and a broad add hands a stray file
+  the same authority as an approved edit.
 - Opening the apply lane's PR as a draft, or splicing a `github.event.inputs.*` value into a
   `run:` block → the PR is the change approval, and dispatch inputs reach argv only after
   validation (`tests/scripts/apply-workflow_test.py`).

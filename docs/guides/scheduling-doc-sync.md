@@ -47,9 +47,11 @@ model at all; the regeneration is a tested script.
 
 **What the model can and can't do.** Every job that runs a model is read-only: no write
 token, no credential left behind by the checkout. It hands its work to the next job as an
-artifact — a report, or an edit plan. The jobs that hold the write token run no model, and
-stage only the paths the engine's own verified result emitted. A run whose edits reach
-anywhere else — your workflow files, the pipeline's scripts, code — fails there.
+artifact — a report, or an edit plan. The jobs that hold the write token run no model, and each
+stages an explicit list of paths that something deterministic declared in advance — the engine's
+verified apply result in one lane, the upgrade script's own record of what it wrote in the other.
+A run whose changes reach anywhere else — your workflow files, the pipeline's scripts, code —
+stops there, naming what it found, having committed and pushed nothing.
 
 What this doesn't do is make a pull request's *content* trustworthy without you. The
 report that bounds the diff is model output too, so a confused run can still propose a
