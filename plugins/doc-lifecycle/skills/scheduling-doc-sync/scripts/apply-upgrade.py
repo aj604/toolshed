@@ -139,16 +139,33 @@ ENGINE_DIR = "engine"
 # apply-upgrade.py that predates the entry) is exactly the population this
 # exists to reach, not one to skip. See retired_paths for why a same-named
 # path some later release reintroduces is never left deleted.
+#
+# Only paths stage-upgrade.py's OWNED_PATTERNS already authorizes with no
+# closed list of names belong here — `.github/doc-sync/*.py` is a wildcard,
+# present since that script's first version, so no consumer's pre-upgrade
+# copy can ever predate it. Two classes of #77/#128's other retired paths
+# are deliberately absent, both left as a one-time manual cleanup instead:
+#   .github/workflows/doc-sync.yml, doc-bloat.yml — GITHUB_TOKEN can never
+#     push any change under .github/workflows/, deletion included, so
+#     retiring these here would trip doc-sync-upgrade.yml's blocked-workflows
+#     guard on every future upgrade for a consumer who already completed
+#     #127's migration to the new lane and still has these files — a
+#     regression, since without this entry that upgrade lands clean.
+#   .github/doc-sync/last-stales.json — stage-upgrade.py's JSON allowlist is
+#     a closed list (drift-waivers.json, evidence-tools.json only) that would
+#     need widening, but the copy that authorizes any given upgrade is always
+#     the consumer's pre-upgrade install (by design — code a human already
+#     reviewed), never the target release's. A one-shot jump — the normal
+#     case, since this lane always targets latest — from an install whose
+#     stage-upgrade.py predates that widening hits the paradox regardless of
+#     which version this key names, so no key closes it.
 RETIRED = {
-    # #77/#128: the legacy write lanes and the scripts that existed only to
-    # serve them.
+    # #77/#128: the scripts that existed only to serve the removed legacy
+    # write lanes.
     "0.38.0": [
-        ".github/workflows/doc-sync.yml",
-        ".github/workflows/doc-bloat.yml",
         ".github/doc-sync/sync-gate.py",
         ".github/doc-sync/authorize-paths.py",
         ".github/doc-sync/plan-distill.py",
-        ".github/doc-sync/last-stales.json",
     ],
 }
 

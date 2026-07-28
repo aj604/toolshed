@@ -95,9 +95,12 @@ def make_install(base, upgrade_yml=True, registry=False, installed_version="0.9.
         for n in names:
             (ds / n).write_text(f"# {n} @ OLD\n")
     if legacy_files:
-        # The 0.38.0-retired legacy write lanes and their scripts (#77/#128) —
-        # an install that upgraded past that version keeps these around unless
-        # apply-upgrade.py knows to remove them.
+        # The full 0.38.0-retired population (#77/#128) — an install that
+        # upgraded past that version keeps all six around unless
+        # apply-upgrade.py knows to remove them. Only the three .py scripts
+        # are RETIRED entries; the workflow files and last-stales.json are
+        # created here too so the tests can prove they're deliberately left
+        # alone (see the RETIRED table's own comment for why).
         (wf / "doc-sync.yml").write_text("name: doc-sync\n")
         (wf / "doc-bloat.yml").write_text("name: doc-bloat\n")
         (ds / "sync-gate.py").write_text("# sync-gate.py @ OLD\n")
@@ -254,11 +257,35 @@ class ApplyUpgrade(unittest.TestCase):
     # #77/#128 dropped doc-sync.yml, doc-bloat.yml, sync-gate.py,
     # authorize-paths.py, plan-distill.py, and last-stales.json from the
     # tables above at 0.38.0. A consumer who upgraded past that version with
-    # an older apply-upgrade.py kept inert-but-executable copies; removal is
+    # an older apply-upgrade.py kept inert-but-executable copies. Only the
+    # three .py scripts are in RETIRED: stage-upgrade.py's OWNED_PATTERNS
+    # (#127/#129) authorizes any `.github/doc-sync/*.py` by wildcard, but has
+    # no entry for a bare .json, and GITHUB_TOKEN can never push any change —
+    # deletion included — under .github/workflows/, so automating those two
+    # classes risks newly blocking an otherwise-clean automated upgrade
+    # (found in review; see the RETIRED table's own comment). Removal is
     # keyed to the target version only, never to the install's own current
-    # version, so that population is reached rather than permanently skipped.
+    # version, so the .py population is reached rather than permanently
+    # skipped.
 
-    def test_removes_files_retired_at_or_before_the_target(self):
+    def test_removes_the_retired_scripts_at_or_before_the_target(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, installed_version="0.37.0", legacy_files=True)
+        r = run(pr, repo, "0.38.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for rel in [
+            ".github/doc-sync/sync-gate.py",
+            ".github/doc-sync/authorize-paths.py",
+            ".github/doc-sync/plan-distill.py",
+        ]:
+            self.assertFalse((repo / rel).exists(), rel)
+
+    def test_leaves_the_workflow_files_and_last_stales_alone(self):
+        # These three matched the original #77/#128 retirement set but are
+        # deliberately excluded from RETIRED — see that table's comment.
+        # Automating their removal risks tripping guards this PR's own
+        # commits don't own (doc-sync-upgrade.yml's blocked-workflows check,
+        # stage-upgrade.py's OWNED_PATTERNS) — left for a human instead.
         pr = make_plugin_root(self.base)
         repo = make_install(self.base, installed_version="0.37.0", legacy_files=True)
         r = run(pr, repo, "0.38.0")
@@ -266,12 +293,9 @@ class ApplyUpgrade(unittest.TestCase):
         for rel in [
             ".github/workflows/doc-sync.yml",
             ".github/workflows/doc-bloat.yml",
-            ".github/doc-sync/sync-gate.py",
-            ".github/doc-sync/authorize-paths.py",
-            ".github/doc-sync/plan-distill.py",
             ".github/doc-sync/last-stales.json",
         ]:
-            self.assertFalse((repo / rel).exists(), rel)
+            self.assertTrue((repo / rel).exists(), rel)
 
     def test_removes_a_retired_path_even_when_already_at_the_retirement_version(self):
         # The exact population this exists to reach: a consumer who already
@@ -308,13 +332,15 @@ class ApplyUpgrade(unittest.TestCase):
         _, text = self.written(repo, target="0.38.0")
         declared = set(text.splitlines())
         self.assertTrue({
-            ".github/workflows/doc-sync.yml",
-            ".github/workflows/doc-bloat.yml",
             ".github/doc-sync/sync-gate.py",
             ".github/doc-sync/authorize-paths.py",
             ".github/doc-sync/plan-distill.py",
-            ".github/doc-sync/last-stales.json",
         } <= declared)
+        self.assertEqual(declared & {
+            ".github/workflows/doc-sync.yml",
+            ".github/workflows/doc-bloat.yml",
+            ".github/doc-sync/last-stales.json",
+        }, set())
 
     def test_removes_retired_paths_regardless_of_installed_version_file_presence(self):
         # Retirement is keyed purely on the target version, never read from
