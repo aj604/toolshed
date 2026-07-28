@@ -17,6 +17,15 @@ caps (chunking.max_docs, default 8; chunking.max_lines, default 1200), and
 consecutive underfull chunks with the same hint are coalesced while the
 caps hold. A single doc larger than max_lines gets its own chunk.
 
+`policy_scope` and the `POLICY` record it yields are this skill's own bulk-verdict
+shape, pending migration to the engine: `doclifecycle.bloat` already replaces
+directory-declared policy scope with enumerable `RETIRE-DOC` scopes
+(`enumerate_scope`, `bloat.SCOPE_VERDICTS`) resolved from the corpus-wide context
+index rather than from config, and does not carry `POLICY` at all. This planner
+stays on the legacy contract until that migration reaches the skill (not yet
+scheduled); see `docs/decisions.md` (2026-07-27, "POLICY stays legacy pending
+skill migration").
+
 Chunk ids are content-addressed (sha256 over member (path, content-sha256)
 pairs, the content hash computed during the same read that counts lines), so
 re-planning an unchanged tree yields the same ids — which is what makes
