@@ -35,6 +35,7 @@
   `plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md`,
   `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
   `plugins/doc-lifecycle/engine/README.md`, `tests/engine/drift_test.py`,
+  `tests/engine/soft_wrapped_fix_fixture.py`,
   `tests/engine/acceptance/scenario_drift_test.py`,
   `tests/engine/acceptance/scenario_policy_test.py`,
   `tests/baselines/multiline-fix-red/`

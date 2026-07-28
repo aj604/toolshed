@@ -23,6 +23,11 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from support import RepoTestCase  # noqa: E402
+from soft_wrapped_fix_fixture import (  # noqa: E402
+    DRIFT_021_ASSERTION,
+    DRIFT_021_FIX,
+    DRIFT_021_PREIMAGE,
+)
 
 from doclifecycle.drift import (  # noqa: E402
     MODE_FULL,
@@ -67,29 +72,6 @@ WAIVERS = ".doc-lifecycle/drift-waivers.json"
 
 LIVING_CLAIM = "The fee is 2% of the amount, in `src/fees.py`."
 UNRELATED_CLAIM = "Support answers within one business day."
-
-# DRIFT-021 from the second shadow-parity cycle (#126), replayed with its
-# audited two-line preimage and the corrected replacement wrapped to the
-# document's physical-line convention. The assertion unit is normalized prose;
-# the fix is the complete physical span fixing-docs places byte-verbatim.
-DRIFT_021_ASSERTION = (
-    "**Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
-    "upgrade-cron knobs.** Real changes belong upstream in the plugin "
-    "(aj604/toolshed) so every install gets them on next upgrade."
-)
-DRIFT_021_PREIMAGE = (
-    "- **Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
-    "upgrade-cron knobs.** Real\n"
-    "  changes belong upstream in the plugin (aj604/toolshed) so every install "
-    "gets them on next upgrade."
-)
-DRIFT_021_FIX = (
-    "- **Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
-    "upgrade-cron/audit-cron\n"
-    "  knobs.** Real changes belong upstream in the plugin (aj604/toolshed) so "
-    "every install gets them on\n"
-    "  next upgrade."
-)
 
 # A living document whose prose is not all of one kind: the four assertion
 # classes, in the one place they can be told apart.
@@ -1087,7 +1069,7 @@ class EvidencePointers(DriftRepoTestCase):
         self.assertEqual(self.stale_record(root).extra["evidence"],
                          {"source": SOURCE, "line": 1, "observed": "RATE = 0.025"})
 
-    def test_a_finding_carries_the_replacement_text_for_a_stale_claim(self):
+    def test_a_finding_carries_replacement_text_for_a_stale_assertion(self):
         root = self.drift_repo()
 
         self.assertIn("2.5%", self.stale_record(root).extra["fix"])

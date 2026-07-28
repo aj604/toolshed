@@ -31,6 +31,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import fixture  # noqa: E402  (the acceptance fixture builder)
 from scenario_approval_test import ApprovalScenarioTestCase  # noqa: E402
+from soft_wrapped_fix_fixture import (  # noqa: E402
+    DRIFT_021_ASSERTION,
+    DRIFT_021_FIX,
+    DRIFT_021_PREIMAGE,
+)
 
 from doclifecycle import ARTIFACT_SCHEMA_VERSION  # noqa: E402
 from doclifecycle.applier import apply_edit_plan  # noqa: E402
@@ -69,26 +74,6 @@ STALE_PREIMAGE = (
 )
 STALE_POSTIMAGE = fixture.LIVING_FACTUAL_FIX
 STALE_FIRST_LINE, STALE_LAST_LINE = 3, 4
-
-# DRIFT-021 from the second shadow-parity cycle (#126), replayed end to end.
-DRIFT_021_ASSERTION = (
-    "**Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
-    "upgrade-cron knobs.** Real changes belong upstream in the plugin "
-    "(aj604/toolshed) so every install gets them on next upgrade."
-)
-DRIFT_021_PREIMAGE = (
-    "- **Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
-    "upgrade-cron knobs.** Real\n"
-    "  changes belong upstream in the plugin (aj604/toolshed) so every install "
-    "gets them on next upgrade."
-)
-DRIFT_021_FIX = (
-    "- **Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
-    "upgrade-cron/audit-cron\n"
-    "  knobs.** Real changes belong upstream in the plugin (aj604/toolshed) so "
-    "every install gets them on\n"
-    "  next upgrade."
-)
 
 # The narrative document's `> As of` line, and the refresh a remedy writes over
 # it. One line, and it is the whole of the record's approved units.
