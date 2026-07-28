@@ -126,13 +126,18 @@ jobs:
             "command"|"path"|"symbol"|"behavior"|"structure"|"value", "tier": 1|2|3,
             "evidence": {"source": <repo path>, "line": <int>, "observed": <what you read>},
             "fix": <complete replacement line, STALE only>}]}]}.
-            VERIFIED and STALE each need a citation — "source" (a repository path), or
-            "command" (the single command line you ran) for a tool this run declares. Run
+            VERIFIED and STALE each need a citation — exactly one of "source" (a repository
+            path) or "command" (the single command line you ran) for a tool this run declares.
+            Never both: a verdict rests on one place a reader goes, so evidence carrying a
+            "source" and a "command" together is refused outright. Run
             `python3 .doc-lifecycle/wiring/probe-evidence-tool.py declared` for the declared tools;
             each may be read with `python3 .doc-lifecycle/wiring/probe-evidence-tool.py run <tool>
             <subcommand words> --help` (or `--version`), and the line it prints after
             "citation:" is what you put in evidence.command — the tool's own command line, not
-            that wrapper. Nothing else is reachable: the probe refuses an undeclared tool and
+            that wrapper. Put that line in literally: evidence.command is one command line, not
+            a shell program, and any of ;&|<>()$`\ in it is refused — no chaining, no pipes, no
+            redirection, no command substitution, and no pattern that needs a quote or an escape.
+            Nothing else is reachable: the probe refuses an undeclared tool and
             any invocation that is not a --help/--version read. A claim no declared tool can
             settle is genuinely UNVERIFIABLE here, and the report's evidence boundary says why.
             For every document drift-plan.json lists under "documents" with obligation
