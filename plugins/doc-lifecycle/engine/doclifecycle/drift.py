@@ -203,20 +203,38 @@ def _one_line(value):
     )
 
 
-def _is_valid_replacement_text(value, unit):
+def _unit_owns_physical_lines(unit, units):
+    """Whether no neighboring unit occupies any line this unit occupies."""
+    return not any(
+        other.ordinal != unit.ordinal
+        and other.line <= unit.end_line
+        and unit.line <= other.end_line
+        for other in units
+    )
+
+
+def _is_valid_replacement_text(value, unit, units):
     """Complete physical replacement text for one assertion unit.
 
     A soft-wrapped unit may keep that shape with LF-separated physical lines.
-    A single-line unit gains no authority to introduce new structure, and a
-    blank line would be a paragraph boundary rather than a soft wrap. CR and
-    NUL are never source-line separators in the contract.
+    It must own those lines: a sentence sharing either boundary line with a
+    neighbor cannot safely authorize a line-based multiline replacement. A
+    single-line unit gains no authority to introduce new structure, and a blank
+    line would be a paragraph boundary rather than a soft wrap. CR and NUL are
+    never source-line separators in the contract.
     """
     if not isinstance(value, str) or any(c in value for c in "\r\x00"):
         return False
     lines = value.split("\n")
     return (
         all(line.strip() != "" for line in lines)
-        and (len(lines) == 1 or unit.line < unit.end_line)
+        and (
+            len(lines) == 1
+            or (
+                unit.line < unit.end_line
+                and _unit_owns_physical_lines(unit, units)
+            )
+        )
     )
 
 
@@ -858,14 +876,17 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         fix = entry.get("fix")
         if verdict == VERDICT_STALE:
             unit_data = known.get(unit)
-            if unit_data is None or not _is_valid_replacement_text(fix, unit_data):
+            if unit_data is not None and not _is_valid_replacement_text(
+                fix, unit_data, segmentation.units
+            ):
                 bad("drift-verdict-invalid-fix",
                     f"a {VERDICT_STALE} verdict must carry 'fix': complete, "
                     f"non-empty replacement text with non-empty physical "
                     f"lines separated by LF and no CR or NUL. An embedded LF "
                     f"is permitted only when the approved assertion unit "
-                    f"already spans more than one source line; the fix is "
-                    f"never an instruction describing a replacement",
+                    f"already spans more than one source line and no other "
+                    f"unit shares any line in that span; the fix is never an "
+                    f"instruction describing a replacement",
                     where)
                 valid = False
         elif fix is not None:

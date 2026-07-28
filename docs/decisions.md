@@ -11,12 +11,13 @@
   into one 206- or 362-character physical line. `drift.py` required `_one_line(fix)`, while the
   applier already splits replacement `text` on LF and can write any number of physical lines.
 - Decided (contract): a STALE `fix` remains one string. It may contain LF-separated, non-empty
-  physical lines only when its approved assertion unit already spans more than one source line;
-  CR, NUL, blank physical lines, and a line break introduced into a single-line unit are
-  `drift-verdict-invalid-fix`. The replacement may use a different number of physical lines than
-  the preimage because a corrected passage can wrap differently, but it is still one logical
-  assertion unit. `RULESET_VERSION` advances to 6 because a verdict the prior rules refused is now
-  valid.
+  physical lines only when its approved assertion unit already spans more than one source line and
+  owns every line in that span; a sentence sharing either boundary line with another unit cannot
+  authorize a line-based multiline replacement. CR, NUL, blank physical lines, and a line break
+  introduced into a single-line or shared-line unit are `drift-verdict-invalid-fix`. The
+  replacement may use a different number of physical lines than the preimage because a corrected
+  passage can wrap differently, but it is still one logical assertion unit. `RULESET_VERSION`
+  advances to 6 because a verdict the prior rules refused is now valid.
 - Decided (method): `detecting-doc-drift` authors the complete replacement already wrapped to the
   target document's convention, including its list marker and continuation indentation.
   `fixing-docs` copies that string byte-verbatim into the edit plan's `text`; it does not reflow or
@@ -30,7 +31,8 @@
   pre-/post-change pressure runs by fresh subagents. The drift suite replays DRIFT-021's actual
   two-line preimage with a three-line corrected fix, and the repository acceptance suite carries
   that same passage through audit, policy minting, edit-plan validation, and `apply_edit_plan()`.
-  Tests also refuse CR, NUL, blank physical lines, and a multiline fix over a single-line unit.
+  Tests also refuse CR, NUL, blank physical lines, and a multiline fix over a single-line unit or
+  a multi-line sentence that shares a boundary line with neighboring assertions.
 - Code: `plugins/doc-lifecycle/engine/doclifecycle/drift.py`,
   `plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md`,
   `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,

@@ -1149,9 +1149,10 @@ named; that *is* the finding). `kind` is one of `command`, `path`, `symbol`, `be
 
 A STALE `fix` is the complete physical replacement text for its assertion unit, not an instruction
 to author one later. A unit on one source line takes one non-empty line. A unit already spanning
-multiple source lines may carry LF-separated, non-empty physical lines so a worker can preserve the
-document's wrap convention; the corrected passage may need a different number of physical lines.
-CR, NUL, a blank physical line, or an embedded LF for a single-line unit is
+multiple source lines may carry LF-separated, non-empty physical lines only when it owns every
+line in that span; a sentence that shares either boundary line with another unit cannot authorize
+a line-based multiline replacement. The corrected passage may need a different number of physical
+lines. CR, NUL, a blank physical line, or an embedded LF for a single-line or shared-line unit is
 `drift-verdict-invalid-fix`. The worker authors list markers, continuation indentation, and line
 breaks to the writing-docs bar. `fixing-docs` copies the string byte-verbatim into an edit plan,
 and the applier only performs that deterministic replacement — it never reflows Markdown.
@@ -1217,7 +1218,7 @@ passage it is about. The recorded class travels on the record too, as `assertion
 | `drift-verdict-invalid-tier` | not 1, 2, or 3 (and `true` is not tier 1) |
 | `drift-verdict-invalid-evidence` | missing, malformed, unpointed where a pointer is owed, citing both a `source` and a `command`, or a `command` that is not one shell-free line |
 | `drift-evidence-outside-boundary` | the cited source or command is outside the declared evidence boundary |
-| `drift-verdict-invalid-fix` | STALE without valid replacement text (non-empty LF lines; embedded LF only for a source unit already spanning lines; no CR/NUL), or a fix on a verdict proposing no edit |
+| `drift-verdict-invalid-fix` | STALE without valid replacement text (non-empty LF lines; embedded LF only for a source unit spanning lines it owns exclusively; no CR/NUL), or a fix on a verdict proposing no edit |
 
 Any of these — or any `classification-*` problem — means that document was **not validly
 examined**, so it becomes a coverage gap rather than a silently missing finding, and the run is

@@ -561,6 +561,24 @@ class VerdictDiscipline(DriftRepoTestCase):
         self.assertEqual(report.status, STATE_FINDINGS, report.to_dict())
         self.assertEqual(report.records[0].extra["fix"], DRIFT_021_FIX)
 
+    def test_a_shared_line_unit_cannot_carry_a_wrapped_replacement(self):
+        middle = "The fee is 2% of the amount."
+        root = self.drift_repo(**{
+            LIVING: (
+                "# Reference\n\n"
+                "First fact. The fee is\n"
+                "2% of the amount. Third fact.\n"
+            ),
+        })
+
+        reason = self.gap_reason(
+            root,
+            text=middle,
+            fix="The fee is\n2.5% of the amount.",
+        )
+
+        self.assertIn("drift-verdict-invalid-fix", reason)
+
     def test_a_single_line_unit_cannot_introduce_a_line_break(self):
         root = self.drift_repo()
 
@@ -618,8 +636,10 @@ class VerdictDiscipline(DriftRepoTestCase):
     def test_an_answer_about_a_unit_the_document_lacks_is_refused(self):
         root = self.drift_repo()
 
-        self.assertIn("classification-unknown-unit",
-                      self.gap_reason(root, unit="a" * 64))
+        reason = self.gap_reason(root, unit="a" * 64)
+
+        self.assertIn("classification-unknown-unit", reason)
+        self.assertNotIn("drift-verdict-invalid-fix", reason)
 
     def test_a_verdict_against_a_heading_is_refused(self):
         """Structure cannot carry an assertion, so it cannot be found stale —

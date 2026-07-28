@@ -100,9 +100,10 @@ writing-docs bar. Preserve the target document's physical-line convention: when 
 is soft-wrapped, draft `fix` already wrapped, with LF embedded in the JSON string and the exact
 list marker and continuation indentation the replacement needs. Do not leave reflow to
 `fixing-docs` or the applier; both place the approved string byte-verbatim. The engine accepts
-embedded LF only for a unit that already spans multiple source lines, and every physical line
-must be non-empty (no CR or NUL). The replacement may take a different number of physical lines
-when its corrected content wraps differently, but it remains one logical assertion unit.
+embedded LF only for a unit that already spans multiple source lines and owns every line in that
+span (no neighboring assertion unit shares either boundary line), and every physical line must be
+non-empty (no CR or NUL). The replacement may take a different number of physical lines when its
+corrected content wraps differently, but it remains one logical assertion unit.
 `evidence` is mandatory for **every** verdict, including VERIFIED (the
 grep/command/line that proves it) — and it is **one line: pointer + fact**. The `file:line`
 or command, and the fact it shows. No history (prior PRs, how the drift arose), no restated
