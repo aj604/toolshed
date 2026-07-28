@@ -36,9 +36,22 @@
   demonstrably not part of the release gate. `tests/baselines/` and `tests/fixtures/` are declared
   non-gate roots, asserted in both directions — a suite under either is not required to be wired,
   and nothing under either may appear in the gate.
-- Named limit: the guard is itself discovered by the mechanism it guards, so `release.yml` runs it
-  as its own step as well. That step, and the two discovery steps it reads, are the part no guard
-  inside the tree can vouch for.
+- Decided (a discovered suite is not yet a run suite), after an independent review of this guard
+  found four more ways a suite goes quiet: `run-script-suites.py` runs each suite as `python3
+  <path>`, so one without an `if __name__ == "__main__"` guard runs zero tests and reports PASS —
+  discovered, counted, and inert, and invisible to both the runner and the first version of this
+  guard. Demonstrated: a suite whose only test calls `self.fail()` was reported `PASS`. So the
+  guard now also refuses an inert by-path suite, a file that does not parse (treating a
+  SyntaxError as "not a suite" hides a file exactly when it is most broken), a suite anywhere in
+  the repository rather than only under `tests/`, and a discovery step still present but gated
+  `if: false`.
+- Named limits, all three past what this shape can settle: the guard is itself discovered by the
+  mechanism it guards, so `release.yml` runs it as its own step as well — that step, and the two
+  discovery steps it reads, are the part no guard inside the tree can vouch for. It reads command
+  *text*, so an indirection this scanner does not recognise reads as absent and a no-op wrapper
+  reads as present. And suite detection is a single-module AST walk, so a TestCase reached through
+  an imported base class not named `*TestCase`, or defined inside a conditional, is not
+  recognised. Convention bounds those, not this file.
 - Code: `.github/scripts/release-manifest.py`, `tests/scripts/release-manifest_test.py`,
   `.github/workflows/release.yml`
 
@@ -94,11 +107,14 @@
   opens a real pull request, never a draft, because what it carries was already approved
   semantically — by a person, or by a named auto-apply policy for which pull-request review is the
   designated semantic review.
-- Still binds, and this is the trust assumption the old shape lacked: a reviewer of a legacy lane's
-  pull request saw prose edits and not the finding that authorized each one — the report was a
-  build artifact, deleted before the pull request existed. Nothing bound the landed diff to the
-  report that justified it. So a record that was wrong, a record nobody read, and a record somebody
-  would have declined all landed identically. Now the approval set's digest and rendered summary
+- Still binds, and this is the trust assumption the old shape lacked: nothing *bound* a legacy
+  lane's landed diff to the report that justified it. The pull-request body did enumerate every
+  record, and the report was uploaded as a run artifact, so a reviewer could read the record list —
+  but the list travelled beside the diff, not in it. No report digest, no lineage, no approval-set
+  identity rode in the change, so a reviewer could not verify that the diff in front of them was
+  the one those records authorized, or that the list was complete. So a record that was wrong, a
+  record nobody read, and a record somebody would have declined all landed identically, and an edit
+  no record called for landed the same way. Now the approval set's digest and rendered summary
   travel in the change itself (`Doc-Lifecycle-Approval`, `Doc-Lifecycle-Report`,
   `Doc-Lifecycle-Approval-State`, `Doc-Lifecycle-Records`), the skipped records are listed and
   derived-checked so a short list hides nothing, and the artifact is never repository state.
@@ -133,8 +149,12 @@
   payload.
 - Still binds, and this is what the old key could not see: the chunk id omitted every input except
   the bytes. Upgrading the plugin left yesterday's verdicts — produced by the previous detection
-  policy — served as today's findings, because the policy version was not in the key. Editing the
-  audit configuration's scope flipped a document's kind hint without moving the id. A chunk's
+  policy — served as today's findings, because the policy version was not in the key. The audit
+  configuration that bounded and grouped the corpus was not an input to the digest at all — it
+  reached an id only by way of which files ended up in a chunk and, for a policy scope, the id's
+  one-letter prefix — so nothing in the key recorded which audit had planned that chunk, and any
+  configuration change those two did not register left the id, and the result cached under it,
+  standing. A chunk's
   verdicts depend on the corpus around it, and no inventory digest was in the key. And a carried
   result was pinned to no commit. The shape-only validation the legacy lane ran over a carried
   result could confirm the file parsed and named its chunk; it could not know the world had moved.
@@ -143,8 +163,9 @@
   input the key carried. Consistent with the 2026-07-26 entry (#60): digests are taken over
   canonical JSON of meaning, so reformatting is not a change and changing a rule is.
 - Also settled here: `.github/doc-sync/last-stales.json` is removed. The 2026-07-27 entry below
-  (#75) already recorded that its recurrence keys are file-and-line, which the new contract
-  replaces with content digests, so it cannot be re-keyed — it retires with the lanes that read it.
+  (#75) already recorded that its recurrence keys are a location identity — a record's file, line
+  number, and kind — which the new contract replaces with content digests, so it cannot be
+  re-keyed. It retires with the lanes that read it.
 - Code: `plugins/doc-lifecycle/engine/doclifecycle/cache.py`,
   `plugins/doc-lifecycle/engine/doclifecycle/report.py`,
   `plugins/doc-lifecycle/engine/README.md`, `tests/engine/acceptance/scenario_cache_test.py`;
@@ -357,8 +378,9 @@
   run reports `rekeyed: []` and `needs_rewaiving: []`. Nothing was dropped because nothing was
   there; a future waiver re-keys through the same door.
 - Decided (`last-stales.json` is kept, against the dry run's disposition): the dry run
-  classifies it as a `cache` artifact, `carried: false` — its recurrence keys are file-and-line,
-  which the new contract replaces with content digests, so it cannot be re-keyed. It is
+  classifies it as a `cache` artifact, `carried: false` — its recurrence keys are a location
+  identity (a record's file, line number, and kind), which the new contract replaces with content
+  digests, so it cannot be re-keyed. It is
   nonetheless left in place rather than deleted, because the legacy read lanes still consume it
   and are still running. It retires with them (#77). Recorded here so the drop is stated, not
   silent.

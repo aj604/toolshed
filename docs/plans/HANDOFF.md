@@ -10,9 +10,10 @@ The endgame of #57. The legacy fix lanes are gone from the templates and from th
 install: `doc-sync.yml`, `doc-bloat.yml`, and the scripts that existed only to serve them
 (`sync-gate.py`, `authorize-paths.py`, `plan-distill.py`), plus the shadow-parity harness
 (`compare-shadow-lanes.py`, `tests/baselines/shadow-parity-gate/shadow-cycle.py`) that was
-transitional by design, and `last-stales.json`, whose file-and-line recurrence keys the content-
-digest contract cannot re-key. The surviving lanes are `doc-audit.yml` (read-only),
-`doc-apply.yml` (the one writer, through the engine's applier), and `doc-sync-upgrade.yml`.
+transitional by design, and `last-stales.json`, whose recurrence keys are a record's file, line
+number, and kind — a location identity the content-digest contract cannot re-key. The surviving
+lanes are `doc-audit.yml` (read-only), `doc-apply.yml` (the one writer, through the engine's
+applier), and `doc-sync-upgrade.yml`.
 `render-report.py`, `upgrade-gate.py`, `plan-chunks.py`, and the two output validators survive
 with non-legacy owners — the upgrade lane and the two detecting skills' own read-only tooling.
 
@@ -21,9 +22,12 @@ dispatched-list-as-approval, merge-as-approval, content-only cache identity, pre
 execution, and the release gate itself. New: `.github/scripts/release-manifest.py`, the guard
 that fails when a suite exists but no `release.yml` discovery step runs it.
 
-**Named limit, not closed here:** the upgrade lane still runs on a schedule, still executes the
-target release's own upgrade logic before review, and still stages with `git add -A` — see the
-2026-07-27 "a version comparison is not a review" entry in `docs/decisions.md`.
+**Named limit, not closed here (tracked as #127):** the upgrade lane still runs on a schedule and
+still executes the target release's own upgrade logic before any human in the consumer's
+repository has read it — see the 2026-07-27 "a version comparison is not a review" entry in
+`docs/decisions.md`. Broad staging is *not* part of that limit: the same entry records it as
+closed here, and the lane now stages the explicit path list `apply-upgrade.py` reports
+(`git add --pathspec-from-file`) and refuses to commit when anything else in the work tree moved.
 
 ## Earlier milestone (2026-07-26): engine package, #57 stage 1 first slice (v0.13.0)
 

@@ -40,6 +40,10 @@ SUITE = textwrap.dedent("""\
     class ASuite(unittest.TestCase):
         def test_something(self):
             pass
+
+
+    if __name__ == "__main__":
+        unittest.main()
     """)
 
 HELPER = textwrap.dedent("""\
@@ -60,6 +64,12 @@ RELEASE_YML = textwrap.dedent("""\
           - name: Engine tests
             run: python3 -m unittest discover -s tests/engine -p '*_test.py' --verbose
     """)
+
+
+def release_manifest_disabled_steps():
+    """Any discovery step in this repo's release.yml that carries an `if:`."""
+    return guard.release_discovery_steps(
+        os.path.join(ROOT, ".github", "workflows", "release.yml"))["disabled"]
 
 
 def _write(root, rel, text):
@@ -171,6 +181,76 @@ class NonGateRootsAreExempt(unittest.TestCase):
         self.assertEqual([], self.repo.audit().unwired)
 
 
+NO_MAIN_GUARD = textwrap.dedent("""\
+    import unittest
+
+
+    class ASuite(unittest.TestCase):
+        def test_something(self):
+            pass
+    """)
+
+BROKEN = "import unittest\n\nclass ASuite(unittest.TestCase)\n    pass\n"
+
+
+class HolesAnIndependentReviewFound(unittest.TestCase):
+    """Each of these is a suite the release gate does not really run, that an
+    earlier version of this guard reported as wired."""
+
+    def setUp(self):
+        self.repo = SyntheticRepo()
+        self.addCleanup(self.repo.cleanup)
+
+    def test_a_script_suite_with_no_main_guard_is_inert(self):
+        """`run-script-suites.py` runs each suite as `python3 <path>`, so a
+        suite that never calls unittest.main() runs zero tests and reports
+        PASS — discovered, counted, and inert."""
+        self.repo.write("tests/scripts/quiet_test.py", NO_MAIN_GUARD)
+        self.assertEqual(["tests/scripts/quiet_test.py"],
+                         self.repo.audit().inert)
+
+    def test_a_script_suite_with_a_main_guard_is_not_inert(self):
+        self.assertEqual([], self.repo.audit().inert)
+
+    def test_an_engine_suite_needs_no_main_guard(self):
+        """The engine suites are run by discovery, not by path."""
+        self.repo.write("tests/engine/quiet_test.py", NO_MAIN_GUARD)
+        report = self.repo.audit()
+        self.assertEqual([], report.inert)
+        self.assertEqual([], report.unwired)
+
+    def test_a_suite_that_does_not_parse_is_reported_not_ignored(self):
+        """A SyntaxError used to make a file silently 'not a suite', which
+        hides it from the guard exactly when it is most broken."""
+        self.repo.write("tests/scripts/broken_test.py", BROKEN)
+        self.assertEqual(["tests/scripts/broken_test.py"],
+                         self.repo.audit().unreadable)
+
+    def test_a_suite_outside_tests_is_still_a_suite(self):
+        self.repo.write(".github/scripts/gap_test.py")
+        self.assertEqual([".github/scripts/gap_test.py"],
+                         self.repo.audit().unwired)
+
+    def test_a_discovery_step_switched_off_is_reported(self):
+        """The guard reads command text, so a step gated `if: false` would
+        otherwise still count as running."""
+        disabled = RELEASE_YML.replace(
+            "      - name: Engine tests\n",
+            "      - name: Engine tests\n        if: false\n")
+        self.assertIn("if: false", disabled, "the mutation did not apply")
+        repo = SyntheticRepo(release_yml=disabled)
+        self.addCleanup(repo.cleanup)
+        report = repo.audit()
+        self.assertTrue(
+            any("Engine tests" in step or "unittest" in step
+                for step in report.missing_steps),
+            f"a disabled discovery step was not reported: {report.missing_steps}")
+
+    def test_every_hole_fails_the_run(self):
+        self.repo.write("tests/scripts/quiet_test.py", NO_MAIN_GUARD)
+        self.assertFalse(self.repo.audit().ok)
+
+
 class TheManifestNamesTheGateCriteria(unittest.TestCase):
 
     def test_a_manifest_suite_that_vanished_is_reported(self):
@@ -236,6 +316,18 @@ class ThisRepositoryPassesTheGuard(unittest.TestCase):
 
     def test_no_baseline_or_fixture_is_swept_into_the_gate(self):
         self.assertEqual([], self.report.swept)
+
+    def test_no_suite_is_run_by_path_without_a_main_guard(self):
+        self.assertEqual(
+            [], self.report.inert,
+            "these run as `python3 <path>` and never call unittest.main(), "
+            f"so they run zero tests and pass: {self.report.inert}")
+
+    def test_every_python_file_in_the_gate_roots_parses(self):
+        self.assertEqual([], self.report.unreadable)
+
+    def test_no_discovery_step_is_gated_off(self):
+        self.assertEqual([], release_manifest_disabled_steps())
 
 
 if __name__ == "__main__":

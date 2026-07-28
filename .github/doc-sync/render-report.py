@@ -155,7 +155,11 @@ def split_waived(records, waivers):
 
 
 def load_merge(path):
-    """plan-distill.py --merge summary: {'applied': [ids], 'unapplied': [...]}."""
+    """Distill-merge summary: {'applied': [ids], 'unapplied': [ids]}.
+
+    Its producer was the legacy distill lane's planner, removed in
+    aj604/toolshed#77; the shape is what this reader accepts, not a live seam.
+    """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     if not (isinstance(data, dict) and isinstance(data.get("applied"), list)
@@ -632,7 +636,10 @@ def main():
 
     bbody = sub.add_parser("bloat-pr-body")
     bbody.add_argument("--report", required=True)
-    bbody.add_argument("--merge", help="plan-distill.py --merge summary JSON")
+    bbody.add_argument(
+        "--merge",
+        help="distill-merge summary JSON {'applied': [...], 'unapplied': [...]}; "
+             "its producer was removed in aj604/toolshed#77")
 
     dmerge = sub.add_parser("distill-merge-summary")
     dmerge.add_argument("--merge", required=True)
