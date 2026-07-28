@@ -808,6 +808,20 @@ class DryRunLayoutTest(RepoTestCase):
         found = [p for a in self.run_dry(root)["artifacts"] for p in a["found"]]
         self.assertEqual(found, [])
 
+    def test_rejects_an_old_world_artifact_the_relocation_left_behind(self):
+        """The relocation carries a closed set and leaves everything else where
+        it is, so the old directory survives a relocation holding exactly the
+        artifacts this table exists to name. Scanning only the layout the state
+        was read at would stop naming them the moment an install relocated."""
+        root = self.migrated()
+        os.makedirs(os.path.join(root, ".github/doc-sync"))
+        with open(os.path.join(root, ".github/doc-sync/last-stales.json"),
+                  "w", encoding="utf-8") as fh:
+            fh.write('{"stales": []}\n')
+        classes = {a["class"]: a for a in self.run_dry(root)["artifacts"]}
+        self.assertEqual(classes["cache"]["found"],
+                         [".github/doc-sync/last-stales.json"])
+
     def test_rejects_an_uncarried_file_in_the_new_root(self):
         root = self.migrated(relocated_consumer({
             ".doc-lifecycle/last-stales.json": '{"stales": []}\n',

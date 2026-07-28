@@ -1388,10 +1388,12 @@ pre-registry install, because none of them had a registry, and where the state s
 the migration changes.
 
 **State under both layouts is refused, never merged or picked** —
-`migration-split-install`, naming every path found under each. Which copy holds the decisions the
-consumer means is not knowable from the filesystem, and reading either would silently drop the
-exclusions or acceptances in the other. This is `apply-upgrade.py`'s own refusal
-(`layout_problem`) asked at the door. `sources` lists both layouts' addresses whichever one the
+`migration-split-install`, naming every path found under each, and on its own rather than beside
+what a half-read config produced. Which copy holds the decisions the consumer means is not
+knowable from the filesystem, and reading either would silently drop the exclusions or
+acceptances in the other. That is the question `apply-upgrade.py`'s `layout_problem` refuses to
+answer about an install's *wiring*, asked here about its *state* — different predicates, because
+the two look at different files. `sources` lists both layouts' addresses whichever one the
 install occupies, so the payload shows what was looked for as well as what was found.
 
 `--waivers` and `--installed-version` on `migration-dry-run` default to the resolved layout's
@@ -1476,10 +1478,12 @@ perfectly well formed — so a rule that classifies something other than what th
 `migration-draft-inconsistent`, naming the document.
 
 A draft run against an install that already has a registry says so:
-`migration-registry-already-landed` names the path, because the instructions above redirect
-`--registry-only` into it and a second draft is inference from the install's state again — it
-knows nothing about the rules a reviewer edited in. A note, not a refusal: reading the current
-draft's `basis` is exactly what step 2 of the door's own sequence asks for.
+`migration-registry-already-landed` names the path. A second draft is inference from the
+install's state again and knows nothing about the rules a reviewer edited in, so redirecting one
+over a landed registry loses them. It is a note rather than a refusal because re-reading the
+draft's `basis` is exactly what the door's own sequence asks for next, and it reaches the draft
+payload rather than `--registry-only`'s output — that prints the registry file's bytes and
+nothing else, by design.
 
 The draft walks the corpus through `registry.without_rules()` and `inventory.walk_root()`, the
 same enumeration `build_inventory()` uses, so the documents a draft proposes rules for are
@@ -1511,11 +1515,14 @@ python3 -m doclifecycle migration-dry-run --repo .
   The waivers file is read through `drift.load_waivers()` — the audit's own reader, so a dry run
   cannot promise the audit something else.
 - **`artifacts`** — the three classes of old artifact, each stating `carried: false`, why it
-  stops here, how to regenerate it, and every instance found. Closed-world over the resolved
-  layout's state directory: anything there the contract does not account for and that is not a
-  vendored script is an artifact of the old world. Which names *are* accounted for is the
-  layout's — `.doc-lifecycle/` also holds `registry.json` and `evidence-tools.json`, and
-  reporting those as leftovers would tell a consumer to delete the file this migration exists to
+  stops here, how to regenerate it, and every instance found. Closed-world over *every* layout's
+  state directory, not just the one the install's state was read at: the relocation leaves
+  anything it does not carry exactly where it is, so the old directory routinely survives it
+  holding what this table exists to name, and an artifact has no rival copy to be told apart
+  from. Anything in either directory that its layout does not account for and that is not a
+  vendored script is an artifact of the old world. Which names *are* accounted for is per layout
+  — `.doc-lifecycle/` also holds `registry.json` and `evidence-tools.json`, and reporting those
+  as leftovers would tell a consumer to delete the file this migration exists to
   land. The repository root is not a directory this
   contract owns, so there the scan is the named list of working files the legacy workflows write
   into it (`drift-report.json`, `bloat-report.json`, `manifest.json`, `distill-manifest.json`).

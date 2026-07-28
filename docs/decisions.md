@@ -11,7 +11,8 @@
   `present: false`, a registry still drafted but without the consumer's exclusions, their accepted
   waivers, or the preserved-state digests it would have inherited. Degraded inference that reads
   exactly like a clean one.
-- Decided: the door reads both roots, the shape `paths.py`'s `_WORKFLOW_PREFIXES` already uses. The
+- Decided: the door reads both roots — keeping the old addresses beside the new ones rather than
+  picking one, which is what `paths.py`'s `_WORKFLOW_PREFIXES` already does for classification. The
   four inputs (audit scope, waivers, lockfile, marker) are one address book per layout —
   `centralized` for `.doc-lifecycle/`, `legacy` for `.github/doc-sync/` — and the door reads
   whichever an install occupies. Repointing is still refused, for #133's reason: a genuinely
@@ -29,20 +30,28 @@
   instructions produce between drafting a registry and dry-running it. A single enum would have
   fused questions with different remedies.
 - Decided (it refuses rather than guesses): state standing under *both* layouts is
-  `migration-split-install`, naming every path found under each — the same question
-  `apply-upgrade.py`'s `layout_problem` refuses to answer, asked at the door. Reading either copy
-  would silently drop the exclusions or acceptances in the other, which is the exact harm this
-  issue was filed about, inverted. `sources` lists both layouts' addresses whichever one an install
+  `migration-split-install`, naming every path found under each — the question
+  `apply-upgrade.py`'s `layout_problem` refuses to answer about an install's wiring, asked here
+  about its state (different predicates: it looks at the directories, the door at the four files it
+  reads). Reading either copy would silently drop the exclusions or acceptances in the other, which
+  is the exact harm this issue was filed about, inverted; so it is refused on its own rather than
+  reported beside findings a half-read config produced, which the door's exhaustive-problems habit
+  would otherwise ask for. `sources` lists both layouts' addresses whichever one an install
   occupies, so a payload shows what was looked for and not only what was found.
-- Decided (the closed-world scan follows the layout): the dry run's artifact scan takes its
-  accounted-for names from the layout too, because `.doc-lifecycle/` also holds `registry.json` and
-  `evidence-tools.json`. A scan that kept the old list would have reported the registry as an
-  old-world leftover and told a consumer to delete the file the migration exists to land.
+- Decided (the artifact scan reads both roots, unlike the inputs): the asymmetry is deliberate.
+  Two rival copies of the audit scope are a question about which is live; two old-world caches are
+  two files to delete, so the closed-world scan covers every layout's state directory —
+  #133's relocation leaves what it does not carry exactly where it is, and scanning only the layout
+  the state was read at would stop naming those leftovers the moment an install relocated. The
+  accounted-for names are per layout, because `.doc-lifecycle/` also holds `registry.json` and
+  `evidence-tools.json`; a scan that kept the old list would have reported the registry as a
+  leftover and told a consumer to delete the file the migration exists to land.
 - Decided (a note, not a refusal): a draft against an install that already has a registry emits
-  `migration-registry-already-landed`. The skill's step 2 legitimately re-runs the draft to read
-  each rule's `basis`; the hazard is step 1's `--registry-only` redirect, which would overwrite a
-  reviewed file with fresh inference. Naming it in the payload is the door stating its own hazard
-  rather than the skill prose carrying it alone.
+  `migration-registry-already-landed`, naming the path. The skill's step 2 legitimately re-runs the
+  draft to read each rule's `basis`, and that run is where the note lands — `--registry-only`
+  prints the registry bytes and nothing else, by design, so the warning reaches the reviewer
+  *before* a redirect rather than during one. Naming it in the payload is the door stating its own
+  hazard rather than the skill prose carrying it alone.
 
 ## 2026-07-27 — doc-lifecycle install artifacts centralize under `.doc-lifecycle/` (#133)
 - Evidence: an install's artifacts were scattered across three unrelated places — nine scripts and

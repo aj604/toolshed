@@ -428,9 +428,9 @@ landing a file, never the door.
    the waivers that re-keyed, and the ones that need re-waiving. **Exit 1 means blocked** — most
    often a document under a declared root that no rule claims, named in the output. Add a rule or
    an exclude *to the registry file* and re-run this step; the loop is edit → dry-run, never back
-   through step 1, which would overwrite your edits with the inference again — a draft run once a
-   registry is landed says so itself, in `migration-registry-already-landed`. There is no
-   unclassified bucket.
+   through step 1, which would overwrite your edits with the inference again — step 2's plain
+   draft says so itself once a registry is landed, in `migration-registry-already-landed`. There
+   is no unclassified bucket.
 4. **Re-waive.** Rewrite each `needs_rewaiving` entry against what the document says now. Its
    `message` states which of the five reasons applies.
 5. **Delete the rejected artifacts.** The dry run's `artifacts` names every old report, cache, or
@@ -449,9 +449,9 @@ landing a file, never the door.
 - **Both commands find that state wherever this install keeps it** — `.doc-lifecycle/`, or
   `.github/doc-sync/` on an install that has not run the relocating upgrade. Each payload's
   `install.layout` says which it read, and `install.registry` says whether a registry is already
-  landed; don't pass `--waivers` or `--installed-version` to "help" it. State standing under
-  *both* layouts exits 1 with `migration-split-install` — keep whichever copy holds your
-  decisions, remove the other, and re-run. Never merge the two by hand into one.
+  landed; don't pass the dry run's `--waivers` or `--installed-version` to "help" it. State
+  standing under *both* layouts exits 1 with `migration-split-install` — keep whichever copy
+  holds your decisions, remove the other, and re-run. Never merge the two by hand into one.
 - Fresh installs run steps 1–3 too (the door is also **bootstrapping-docs**' registry step) —
   with no prior state it infers from markers and directory conventions alone, and reports
   `from_version: null`.
