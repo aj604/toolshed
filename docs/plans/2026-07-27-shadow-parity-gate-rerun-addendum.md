@@ -81,6 +81,15 @@ PASS on replay.** Criterion 2 (at most 2 false positives overall) was already PA
 unchanged: the record is still in the report, still a false positive, still shown to a person.
 Nothing here deletes a finding; it moves one out of the class that lands unattended.
 
+One instrument note, so a third cycle is not read off the wrong number.
+`compare-shadow-lanes.py`'s `auto_apply_eligible` is a second, coarser reading of the class —
+`STALE` plus a `fix` plus an `evidence.source`, with no engine import — and it does not know this
+refusal, so its worklist would still list a record of DRIFT-023's shape as eligible. The verdict
+did not measure G4 with it: its G4 section takes the class "as the landed policy defines it
+(`doclifecycle/policy.py`'s `CLASS_CODES`)", which is where its 12 comes from and where this
+replay's 12 comes from. The script splits an adjudication worklist; `policy-eligibility` is the
+authority, and the script leaves with the legacy lane (#77).
+
 Three further pieces of evidence, all in the repository:
 
 - **A regression test carrying the record verbatim.** `tests/engine/policy_test.py`'s
