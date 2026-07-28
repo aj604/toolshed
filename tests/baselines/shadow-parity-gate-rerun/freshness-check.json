@@ -1,0 +1,8 @@
+{
+  "command": "python3 plugins/doc-lifecycle/engine/doc-lifecycle.py validate-report --report shadow-report.json --repo .",
+  "run_at_commit": "983837b53ba88358b270a9ba6cd4192669772161",
+  "exit_code": 0,
+  "status": "findings",
+  "report_digest": "e4f987b0b421b91d3b28e7187c4468c95f5f74d0e2a484d6cb5061a7f6119106",
+  "note": "G3's freshness re-check, run at the commit the report describes, with no --registry flag: the landed .doc-lifecycle/registry.json is the engine's default and is what doc-audit.yml audits against. The full validated payload is byte-identical to shadow-report.json's content and is not kept twice. Re-running this at any later commit returns stale, by design: the verdict below it edits docs/plans/, which is inventoried, so the inventory digest moves."
+}

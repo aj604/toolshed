@@ -51,9 +51,11 @@ disabled by #75 ahead of #77 removing them from the templates), the classificati
 (`.doc-lifecycle/registry.json` — five roots, closed-world), the ci+release workflow
 (`workflows/release.yml`), that workflow's own test-suite runner
 (`.github/scripts/run-script-suites.py`, #99 — discovery-driven, so a new
-`tests/scripts/*_test.py` suite needs no hand-wiring), and the shadow-mode parity gate's harness
+`tests/scripts/*_test.py` suite needs no hand-wiring), the shadow-mode parity gate's harness
 (`tests/baselines/shadow-parity-gate/shadow-cycle.py`, #76 — recorded scaffolding, retired with
-the legacy lane in #77).
+the legacy lane in #77), and that gate's second-cycle worker orchestrator
+(`tests/baselines/shadow-parity-gate-rerun/fanout.py`, #117 — kept because it carries the worker
+prompt the verdict makes claims about).
 
 ## Layout (pointers, not descriptions)
 
@@ -65,7 +67,9 @@ the legacy lane in #77).
   document-model terms, each with an _Avoid_ list). Use its vocabulary in engine code and tests.
 - `docs/` — `plans/` (design docs + `HANDOFF.md`), `guides/` (narrative user guides). Not published.
 - `tests/` — `fixtures/` (runnable sample repos), `baselines/` (RED/GREEN skill-test records,
-  plus `shadow-parity-gate/`, the #76 gate's run evidence and its harness),
+  plus `shadow-parity-gate/`, the #76 gate's first-cycle run evidence and its harness, and
+  `shadow-parity-gate-rerun/`, #117's second cycle — the FAIL both cycles reached is recorded in
+  `docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, which #77 cites),
   `scripts/` (helper-script suites), `engine/` (engine suites). Not published.
 
 ## Working on the plugin
@@ -136,8 +140,11 @@ the legacy lane in #77).
   split, no dispatch input in any `run:` block, staging confined to the apply result's paths, a
   real PR rather than a draft). `compare-shadow-lanes_test.py` covers the shadow-mode
   parity comparison (assertion correspondence across two commits, coverage and cost deltas,
-  auto-apply-eligibility split, determinism). `release.yml`'s CI runs every
-  `tests/scripts/*_test.py` suite.
+  auto-apply-eligibility split, determinism), and `shadow-cycle_test.py` covers that gate's own
+  two instruments — `digest`'s content enumeration and its unconditional `.pyc`/`__pycache__`
+  exclusion (criterion G1b, re-registered by #117 after the first cycle changed the instrument
+  mid-measurement), and `merge`'s folding of #116's ordinal-keyed answers onto the digest key.
+  `release.yml`'s CI runs every `tests/scripts/*_test.py` suite.
 - **The engine's tests live at `tests/engine/*_test.py`** and are found by discovery
   (`python3 -m unittest discover -s tests/engine -p '*_test.py'`), which is how `release.yml`'s
   "Engine tests" step runs them — a new suite is wired by landing the file, with no list to
