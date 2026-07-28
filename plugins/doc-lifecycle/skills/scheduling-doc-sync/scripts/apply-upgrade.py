@@ -326,7 +326,35 @@ def copy_scripts(plugin_root, repo, new_lane=False):
             raise UpgradeError(f"required source script missing: {src}")
         shutil.copyfile(src, dest / name)
         written.append(f"{ROOT_DIR}/{WIRING_DIR}/{name}")
+    written += prune_orphaned_scripts(dest, scripts)
     return written
+
+
+def prune_orphaned_scripts(dest, scripts):
+    """Delete a vendored .py file this install carries that the current
+    release no longer wires up (a script dropped from SCRIPTS/NEW_LANE_SCRIPTS
+    between releases — e.g. aj604/toolshed#77's sync-gate.py). Otherwise a
+    consumer keeps a stale copy forever: copy_scripts only ever overwrote
+    what's still in the table, never removed what left it.
+
+    Scoped to top-level *.py files under `wiring/` only — engine/ is replaced
+    wholesale by copy_engine, and nothing else lives in that directory: since
+    aj604/toolshed#133 the consumer's judgment files, the lockfile and the
+    marker sit outside it, at the root and under state/. Deleting by that
+    wildcard is what stage-upgrade.py's `.doc-lifecycle/wiring/<name>.py`
+    pattern already authorizes, deletion included, so no consumer's
+    pre-upgrade copy can refuse the removal.
+
+    A relocating install reaches this with a wiring/ directory holding exactly
+    what copy_scripts just wrote, so the prune is a no-op there — the pre-#133
+    orphans are removed by the relocation's own named set instead.
+    """
+    removed = []
+    for path in sorted(dest.glob("*.py")):
+        if path.name not in scripts:
+            path.unlink()
+            removed.append(f"{ROOT_DIR}/{WIRING_DIR}/{path.name}")
+    return removed
 
 
 def copy_engine(plugin_root, repo):

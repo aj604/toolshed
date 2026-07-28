@@ -17,12 +17,19 @@
   copies deleted; `SKILL.md`'s install steps and `CLAUDE.md`'s inventory no longer list them. The
   canonical scripts stay exactly where they were — owned by `detecting-doc-bloat` and
   `detecting-doc-drift`, unaffected.
-- Known gap, named here and left to a separate PR rather than duplicated: `copy_scripts()` still
-  only ever overwrites what `SCRIPTS` names — nothing deletes a script that leaves the table,
-  which already silently stranded #77's own `sync-gate.py`/`authorize-paths.py`/`plan-distill.py`
-  in any repo that upgraded past that release, and now leaves this decision's three retired
-  scripts the same way in any repo that already vendored them. #130 is an open PR addressing this
-  generally (a version-keyed retirement table); this entry does not duplicate that work.
+- Closed here rather than deferred, because the deferral target went away: `copy_scripts()` only
+  ever overwrote what `SCRIPTS` names, so nothing deleted a script that left the table — which
+  would have stranded this decision's own three retired scripts in any repo that already vendored
+  them. `prune_orphaned_scripts()` now deletes a `.py` directly under `.doc-lifecycle/wiring/`
+  that the current wiring no longer names, and declares the deletion in `--report-written`.
+  `stage-upgrade.py`'s `wiring/<name>.py` pattern already authorizes those paths, deletions
+  included, so no consumer's pre-upgrade path authority refuses the prune.
+- Not the cleanup of #77's own orphans: those sit at the pre-#133 addresses, and every `.py` in
+  `.github/doc-sync/` leaves with the relocation's named set (#133 entry below). The prune is what
+  keeps a *future* retirement from stranding a copy. #130 proposed a version-keyed `RETIRED` table
+  for the same purpose and was closed as superseded — the relocation covers the paths it named,
+  and this covers the general case. The three artifacts no upgrade lane can remove
+  (`doc-sync.yml`, `doc-bloat.yml`, `last-stales.json`) are tracked as a manual cleanup in #139.
 - Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py`,
   `tests/scripts/apply-upgrade_test.py`,
   `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `CLAUDE.md`,

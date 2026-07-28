@@ -294,7 +294,9 @@ human forcing an upgrade runs the same script against their checkout with
                      [--report-written <file>]
 
 The script writes files only; git/PR is the workflow's job (below). `--report-written` declares
-each repo-relative path *as it writes it* — the rendered workflows, the copied scripts,
+each repo-relative path *as it writes it* — the rendered workflows, the copied scripts, any
+orphaned vendored script it deleted (a `.py` file under `.doc-lifecycle/wiring/` no longer in the
+current wiring — a prior release's script),
 `installed-version`, the files it actually seeded, and the vendored engine as a directory path
 (`copy_engine` empties the destination first, so a deletion has to be stageable). **The lane does
 not read it**: a declaration by the release being landed is not evidence about that release, so
@@ -308,7 +310,7 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | File | Owner | Upgrade behavior |
 |------|-------|------------------|
 | `doc-sync-upgrade.yml` | plugin (wiring) | **Regenerate** from the new template, re-injecting the consumer's existing knob (below), not the template default. No version to re-pin — the Pin steps read `installed-version` at runtime. |
-| `.doc-lifecycle/wiring/*.py` (the three always-installed scripts: `upgrade-gate.py`, `render-report.py`, `stage-upgrade.py`) | plugin (wiring) | **Overwrite** from the new version. |
+| `.doc-lifecycle/wiring/*.py` (the three always-installed scripts: `upgrade-gate.py`, `render-report.py`, `stage-upgrade.py`) | plugin (wiring) | **Overwrite** from the new version. A `.py` file here no longer in the current wiring (e.g. a script a later release retired) is **deleted**, not left stale. |
 | `.doc-lifecycle/installed-version` | version state | **Set** to `<target>` (bare semver). This is what advances the pin; on a version-only release it's the *only* file that changes. |
 | `.doc-lifecycle/audit-scope.json` | consumer (tuned config) | **Never touch.** A relocation carries it to this path once, and no upgrade rewrites it afterwards. |
 | `.doc-lifecycle/drift-waivers.json` | consumer (accepted-claim record) | **Never touch.** Seed `{"waivers": []}` only if absent (pre-0.11 installs lack it). |
