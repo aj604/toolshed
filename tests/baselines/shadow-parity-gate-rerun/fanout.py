@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """Fan out the shadow cycle's model workers as headless `claude -p` sessions.
 
-Not repository content — the scratch orchestrator for issue #117's cycle. It
-lives outside the repository on purpose (G1b clause 5).
+The orchestrator that ran issue #117's cycle, kept as evidence rather than as
+tooling: the gate record's G3 and G5 sections make claims about what the
+workers were told and what their sessions cost, and `PROMPT` below is that
+instruction verbatim. It ran from a directory outside the repository and wrote
+nothing into it — every task slice, session record, and answer landed in
+`--out` — which is half of why criterion G1b's before/after digests match; the
+other half is that the workers were dispatched with no `Write` tool at all.
 
-Each task is a contiguous run of one document's assertion units. A worker gets
-the task file, the repository to read, and the engine's verdicts contract, and
-returns the answer as its final message. Nothing is written to the repository:
-the workers have no Write tool at all.
+Each task is a contiguous run of one document's assertion-capable units,
+identified by the ordinal range a worker answers for. The worker runs the
+engine's own `segment` command to get the units, reads the repository to check
+them, and returns the answer as its final message — there is no path by which
+it could write one.
+
+Only the scaffolding around `PROMPT` has been touched since the run: `--repo`
+was made a flag whose default records the worktree the cycle ran in, so this
+file is runnable somewhere else without rewriting it.
 """
 
 import argparse
@@ -19,9 +29,13 @@ import sys
 import threading
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# The worktree the 2026-07-27 cycle ran in, kept as the default so the record
+# says where it ran; `--repo` overrides it anywhere else.
 REPO = "/Users/averyjones/Repos/skills/toolshed/.claude/worktrees/agent-af5ec7e63745224e2"
 
+# doc-audit.yml's model job minus `Write`. The lane writes verdicts.json into
+# the repository; a worker here has no way to write anything anywhere, which
+# is what makes the write proof structural rather than procedural.
 TOOLS = "Skill,Read,Grep,Glob,Bash(git *),Bash(python3 *)"
 
 PROMPT = """\
@@ -193,7 +207,7 @@ answer, so give the FULL set for your task file again, with these fixed:
 """
 
 
-def run_task(task, outdir, model, lock, log, problems=None):
+def run_task(task, outdir, model, repo, lock, log, problems=None):
     task_path = os.path.join(outdir, task["name"] + ".task.json")
     with open(task_path, "w", encoding="utf-8") as fh:
         json.dump({"path": task["path"], "units": task["units"]}, fh, indent=2)
@@ -207,7 +221,7 @@ def run_task(task, outdir, model, lock, log, problems=None):
     result = subprocess.run(
         ["claude", "-p", "--model", model, "--output-format", "json",
          "--allowedTools", TOOLS],
-        input=prompt, capture_output=True, text=True, cwd=REPO,
+        input=prompt, capture_output=True, text=True, cwd=repo,
     )
     elapsed = time.time() - started
 
@@ -249,6 +263,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--segments", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--repo", default=REPO,
+                        help="the repository the workers read; the default "
+                             "records the worktree this cycle ran in")
     parser.add_argument("--chunk", type=int, default=45)
     parser.add_argument("--model", default="sonnet")
     parser.add_argument("--workers", type=int, default=6)
@@ -289,7 +306,7 @@ def main():
                     return
                 task = queue.pop(0)
             try:
-                run_task(task, args.out, args.model, lock, log,
+                run_task(task, args.out, args.model, args.repo, lock, log,
                          problems.get(task["path"]))
             except Exception as exc:  # a worker dying must not stop the round
                 with lock:

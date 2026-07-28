@@ -53,10 +53,9 @@ disabled by #75 ahead of #77 removing them from the templates), the classificati
 (`.github/scripts/run-script-suites.py`, #99 — discovery-driven, so a new
 `tests/scripts/*_test.py` suite needs no hand-wiring), the shadow-mode parity gate's harness
 (`tests/baselines/shadow-parity-gate/shadow-cycle.py`, #76 — recorded scaffolding, retired with
-the legacy lane in #77; its `digest` and `merge` subcommands are the gate's own instruments and
-are pinned by `tests/scripts/shadow-cycle_test.py`), and that gate's second-cycle worker
-orchestrator (`tests/baselines/shadow-parity-gate-rerun/fanout.py`, #117 — kept because it
-carries the worker prompt the verdict makes claims about).
+the legacy lane in #77), and that gate's second-cycle worker orchestrator
+(`tests/baselines/shadow-parity-gate-rerun/fanout.py`, #117 — kept because it carries the worker
+prompt the verdict makes claims about).
 
 ## Layout (pointers, not descriptions)
 
@@ -141,8 +140,11 @@ carries the worker prompt the verdict makes claims about).
   split, no dispatch input in any `run:` block, staging confined to the apply result's paths, a
   real PR rather than a draft). `compare-shadow-lanes_test.py` covers the shadow-mode
   parity comparison (assertion correspondence across two commits, coverage and cost deltas,
-  auto-apply-eligibility split, determinism). `release.yml`'s CI runs every
-  `tests/scripts/*_test.py` suite.
+  auto-apply-eligibility split, determinism), and `shadow-cycle_test.py` covers that gate's own
+  two instruments — `digest`'s content enumeration and its unconditional `.pyc`/`__pycache__`
+  exclusion (criterion G1b, re-registered by #117 after the first cycle changed the instrument
+  mid-measurement), and `merge`'s folding of #116's ordinal-keyed answers onto the digest key.
+  `release.yml`'s CI runs every `tests/scripts/*_test.py` suite.
 - **The engine's tests live at `tests/engine/*_test.py`** and are found by discovery
   (`python3 -m unittest discover -s tests/engine -p '*_test.py'`), which is how `release.yml`'s
   "Engine tests" step runs them — a new suite is wired by landing the file, with no list to

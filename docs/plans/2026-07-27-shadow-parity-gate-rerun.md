@@ -130,10 +130,16 @@ wrong the first time, so it is stated before the measurement, not after it:
   not depend on a consumer's ignore file listing them.
 
 *Why the instrument cannot move again.* It is now under test.
-`tests/scripts/shadow-cycle_test.py` (13 tests) pins both halves — what is hashed, what is
-excluded, and that the porcelain state is reported rather than assumed — and lands in this same
+`tests/scripts/shadow-cycle_test.py` pins both halves — what is hashed, what is excluded, and
+that the porcelain state is reported rather than assumed — and lands in this same
 pre-registration commit. Changing the instrument mid-cycle now means changing a committed test,
 which is a visible act rather than an edit to a helper nobody is watching.
+
+*One more instrument change, disclosed here because it is not one of the two this issue named.*
+The same commit teaches `shadow-cycle.py merge` to resolve the ordinal-keyed answers #116
+landed, mapping them to the digest a round-1 answer would have used so a repair round can still
+override one. It is not a criterion and it measures nothing; without it no post-#116 cycle could
+be folded at all. Recorded rather than left for a reader to notice in the diff.
 
 **PASS** iff all five hold:
 
@@ -197,7 +203,7 @@ examination is what the money buys, so it is what the cost is divided by.
 
 - **Legacy:** its 31 records are the only assertions it can be shown to have judged — it declares
   no scope and emits no coverage, so everything it examined and did not report is invisible.
-  $2.7202 / 31 = **$0.0878 per assertion judged**. This flatters the legacy lane if it read more
+  $2.7202237 / 31 = **$0.087749 per assertion judged**. This flatters the legacy lane if it read more
   than it reported, and that is registered here as a known bias in the baseline's favour: the
   bound the new lane must clear is, if anything, tighter than a perfectly-instrumented
   comparison would set.
@@ -207,7 +213,7 @@ examination is what the money buys, so it is what the cost is divided by.
   re-derive from a committed artifact.
 
 *The bound.* **PASS** iff the new lane's USD per assertion judged is at most **3x** the legacy
-lane's — at most **$0.2634**. The multiplier is the first cycle's, deliberately unchanged.
+lane's — at most **$0.263248**. The multiplier is the first cycle's, deliberately unchanged.
 
 *The second clause, also required for PASS.* Model cost, turns, and wall-clock are recorded for
 both lanes. The first cycle recorded `turns: null` and `duration_ms: null` for the shadow lane
@@ -594,8 +600,10 @@ hand.
 ### G7 — PASS
 
 This file carries the verdict and the artifacts are under
-`tests/baselines/shadow-parity-gate-rerun/`. Comments pointing here are posted on #76 and #77
-when the PR opens — until then the record lives only on a branch, and #77 cannot cite a branch.
+`tests/baselines/shadow-parity-gate-rerun/`. Comments pointing here are posted on
+[#76](https://github.com/aj604/toolshed/issues/76#issuecomment-5098915380) and
+[#77](https://github.com/aj604/toolshed/issues/77#issuecomment-5098916362) — #77's names the
+single blocker, so the issue it gates says what it is waiting for without opening this file.
 
 ## What #77 needs before this gate can be re-run and pass
 

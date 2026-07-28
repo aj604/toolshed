@@ -151,8 +151,12 @@ class DigestTest(unittest.TestCase):
             os.utime(os.path.join(root, "README.md"), (0, 0))
             self.assertEqual(self.digest(root)["digest"], before["digest"])
 
-    def test_the_git_directory_is_not_hashed(self):
-        """`.git` churns on every read; hashing it would measure the harness."""
+    def test_git_state_alone_does_not_move_the_digest(self):
+        """`.git` churns on every read; hashing it would measure the harness.
+
+        Asking git for the content is what keeps `.git/` out — it never lists
+        itself — so this pins the property rather than an exclusion rule.
+        """
         with tempfile.TemporaryDirectory() as root:
             make_repo(root)
             before = self.digest(root)
@@ -229,6 +233,29 @@ class MergeTest(unittest.TestCase):
             verdicts = payload["documents"][0]["verdicts"]
             self.assertEqual(len(verdicts), 1)
             self.assertEqual(verdicts[0]["assertion_class"], "factual")
+
+    def test_a_segments_file_without_ordinals_still_merges_by_digest(self):
+        """A recorded cycle predating #116 has no ordinals to resolve against.
+
+        The module's whole purpose is re-running recorded cycles, so an older
+        segments file must fold by digest rather than raise on a key the
+        segmenter did not emit yet.
+        """
+        with tempfile.TemporaryDirectory() as root:
+            directory = os.path.join(root, "slices")
+            os.makedirs(directory)
+            with open(os.path.join(directory, "segments.json"), "w") as fh:
+                json.dump({"documents": [{"path": "DOC.md", "units": [
+                    {"digest": "a" * 64}, {"digest": "b" * 64}]}]}, fh)
+            with open(os.path.join(directory, "doc.answer.json"), "w") as fh:
+                json.dump({"path": "DOC.md", "verdicts": [
+                    {"unit": "b" * 64, "assertion_class": "factual"},
+                    {"unit": 0, "assertion_class": "factual"},
+                ]}, fh)
+            payload = self.merged(root, directory)
+            self.assertEqual(
+                [v["unit"] for v in payload["documents"][0]["verdicts"]],
+                ["b" * 64])
 
     def test_several_answer_files_for_one_document_are_folded_together(self):
         """A large document is sliced across workers; each writes its own file."""

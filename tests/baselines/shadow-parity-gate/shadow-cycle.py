@@ -15,22 +15,29 @@ recorded, and re-run.
         for the gate's G1b criterion: the new lane must leave the tree
         byte-identical.
 
-        Two exclusions, both re-registered for the 2026-07-27 cycle
-        (aj604/toolshed#117) after the first cycle failed G1b on its
-        instrument rather than on the lane:
+        Asking git what the content is settles `.git/` for free: it is never
+        listed, so it is never hashed, and a directory that churns on every
+        read cannot make the instrument measure itself.
 
-        * `.git/` — it churns on every read, so hashing it measures the
-          harness.
-        * `.pyc` files and anything under a `__pycache__` directory —
-          unconditionally, never by trusting a consumer's `.gitignore` to list
-          them. CPython writes them the moment anything imports the engine,
-          and a `.pyc` embeds its source's mtime, so `git checkout` of an
-          *unchanged* source file re-keys them without any process writing to
-          the repository. Counting those measured the instrument, not the lane.
+        One exclusion is made here rather than by git, and it is the one
+        re-registered for the 2026-07-27 cycle (aj604/toolshed#117) after the
+        first cycle failed G1b on its instrument rather than on the lane:
+        `.pyc` files and anything under a `__pycache__` directory, dropped
+        unconditionally rather than by trusting a consumer's `.gitignore` to
+        list them. CPython writes them the moment anything imports the engine,
+        and a `.pyc` embeds its source's mtime, so `git checkout` of an
+        *unchanged* source file re-keys them without any process writing to
+        the repository. Counting those measured the instrument, not the lane.
 
         `porcelain_clean` is the other half of the criterion, reported rather
         than assumed: a digest taken over a tree somebody is editing proves
-        nothing about what the cycle did.
+        nothing about what the cycle did. It is `git status --porcelain`
+        verbatim, so in a repository whose ignore rules do *not* exclude
+        `__pycache__` the two halves can disagree — the digest holds and the
+        porcelain goes dirty over byproducts. That is the honest report of
+        two different questions, not a bug: this repository's `.gitignore`
+        does list them, and a consumer's that does not has a real untracked
+        file the criterion should not hide.
 
     shadow-cycle.py slices --repo . --registry <path> --out <dir>
         One task file per declared living document, each carrying that
@@ -93,8 +100,8 @@ def content_paths(repo):
     """The repository's content as the repository defines it, sorted.
 
     Tracked plus untracked-but-not-ignored, which is the same set
-    `git status` reasons about — so a clean porcelain and an unchanged digest
-    are two statements about one thing, not two instruments that can disagree.
+    `git status` reasons about — one enumeration, asked of git, rather than a
+    walk that re-derives the ignore rules and can drift from them.
     """
     listed = set()
     for argv in (("ls-files", "-z"),
@@ -179,7 +186,14 @@ def merge(slices_dir, repair_dir, out):
     documents, dropped, kept = [], 0, 0
     for path in sorted(rounds[0]):
         known = {u["digest"] for u in segments[path]}
-        by_ordinal = {u["ordinal"]: u["digest"] for u in segments[path]}
+        # `.get`, not `[...]`: a segments file recorded before #116 added the
+        # ordinal has none to resolve against, and re-running a recorded cycle
+        # is what this module is for. Such a file simply has no ordinal
+        # answers to fold, and an integer against it drops like any other unit
+        # the document does not contain.
+        by_ordinal = {
+            u["ordinal"]: u["digest"] for u in segments[path] if "ordinal" in u
+        }
         by_unit = {}
         for round_answers in rounds:
             for answer in round_answers.get(path, []):
