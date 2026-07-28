@@ -4,6 +4,46 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-27 — the migration door reads both install layouts, and says which (#137)
+- Evidence: the named limit the #133 entry below recorded, measured not reasoned. `apply-upgrade.py`'s
+  relocation branch fires for a registry-free install too, and afterwards `migration-draft` read its
+  inference inputs from a directory that was gone — `status: ok`, `from_version: null`, every source
+  `present: false`, a registry still drafted but without the consumer's exclusions, their accepted
+  waivers, or the preserved-state digests it would have inherited. Degraded inference that reads
+  exactly like a clean one.
+- Decided: the door reads both roots, the shape `paths.py`'s `_WORKFLOW_PREFIXES` already uses. The
+  four inputs (audit scope, waivers, lockfile, marker) are one address book per layout —
+  `centralized` for `.doc-lifecycle/`, `legacy` for `.github/doc-sync/` — and the door reads
+  whichever an install occupies. Repointing is still refused, for #133's reason: a genuinely
+  pre-registry consumer is what this door exists for, and most of them have never relocated.
+- Decided (the contract does not vary): `legacy-doc-sync-to-registry` spans both layouts. Neither had
+  a registry, and where an install kept its state is not what the migration changes — so the layout
+  is reported as a fact about the install rather than folded into the contract's name.
+- Decided (two facts, not one enum): the payloads carry `install: {layout, registry}`. `layout` is
+  where the state was found (`null` when neither address holds any of the four — a repository that
+  never ran doc-sync, which the door still drafts for). `registry` is whether a file stands at the
+  registry path. They are orthogonal because relocating and adopting the registry are different
+  events in either order, so the three states the fix had to keep apart — pre-registry never
+  relocated, relocated still pre-door, relocated already through the door — are three readings of
+  the pair, and so is the fourth real one: `legacy` + `present`, which is what the door's own
+  instructions produce between drafting a registry and dry-running it. A single enum would have
+  fused questions with different remedies.
+- Decided (it refuses rather than guesses): state standing under *both* layouts is
+  `migration-split-install`, naming every path found under each — the same question
+  `apply-upgrade.py`'s `layout_problem` refuses to answer, asked at the door. Reading either copy
+  would silently drop the exclusions or acceptances in the other, which is the exact harm this
+  issue was filed about, inverted. `sources` lists both layouts' addresses whichever one an install
+  occupies, so a payload shows what was looked for and not only what was found.
+- Decided (the closed-world scan follows the layout): the dry run's artifact scan takes its
+  accounted-for names from the layout too, because `.doc-lifecycle/` also holds `registry.json` and
+  `evidence-tools.json`. A scan that kept the old list would have reported the registry as an
+  old-world leftover and told a consumer to delete the file the migration exists to land.
+- Decided (a note, not a refusal): a draft against an install that already has a registry emits
+  `migration-registry-already-landed`. The skill's step 2 legitimately re-runs the draft to read
+  each rule's `basis`; the hazard is step 1's `--registry-only` redirect, which would overwrite a
+  reviewed file with fresh inference. Naming it in the payload is the door stating its own hazard
+  rather than the skill prose carrying it alone.
+
 ## 2026-07-27 — doc-lifecycle install artifacts centralize under `.doc-lifecycle/` (#133)
 - Evidence: an install's artifacts were scattered across three unrelated places — nine scripts and
   the vendored engine in `.github/doc-sync/`, the judgment files beside them, the sync marker loose
@@ -73,6 +113,8 @@
   available are both refused elsewhere: repointing the door is what the bullet above rules out, and
   leaving a registry-free install on the old layout means `apply-upgrade.py` writing to two
   addresses, which is the dual-path window #133 rejects outright. Filed rather than patched here.
+  Closed by the #137 entry above, which took neither of those two: the door reads both layouts and
+  reports which one it read.
 - Named limit: an install predating this release cannot be relocated by the automated upgrade lane.
   That lane runs the *installed* copy of `stage-upgrade.py` — reviewed code the consumer already
   holds, which is the property the #127 entry below establishes — and a pre-#133 copy does not know

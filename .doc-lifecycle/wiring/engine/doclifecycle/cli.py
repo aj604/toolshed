@@ -44,8 +44,8 @@ from .drift import (
 )
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .migrate import (
-    INSTALLED_VERSION_PATH,
-    WAIVERS_PATH,
+    CENTRALIZED_LAYOUT,
+    LEGACY_LAYOUT,
     draft_registry,
     dry_run_migration,
 )
@@ -576,14 +576,21 @@ def _parser():
     )
     _add_corpus_arguments(dry_run)
     dry_run.add_argument(
-        "--waivers", default=WAIVERS_PATH,
-        help=f"repo-relative legacy waivers file (default: {WAIVERS_PATH})",
+        "--waivers", default=None,
+        help=(
+            f"repo-relative legacy waivers file (default: this install's own — "
+            f"{CENTRALIZED_LAYOUT.waivers}, or {LEGACY_LAYOUT.waivers} on an "
+            f"install that has not relocated)"
+        ),
     )
     dry_run.add_argument(
-        "--installed-version", default=INSTALLED_VERSION_PATH,
+        "--installed-version", default=None,
         help=(
             f"repo-relative version lockfile the migration reads its from-version "
-            f"out of (default: {INSTALLED_VERSION_PATH})"
+            f"out of (default: this install's own — "
+            f"{CENTRALIZED_LAYOUT.installed_version}, or "
+            f"{LEGACY_LAYOUT.installed_version} on an install that has not "
+            f"relocated)"
         ),
     )
     dry_run.set_defaults(
