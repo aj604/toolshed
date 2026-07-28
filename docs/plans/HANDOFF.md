@@ -38,7 +38,9 @@ review artifact it amends); vocabulary: `CONTEXT.md`; durable decisions: `docs/d
 
 Stage 0 landed first (#59, v0.12.0): the scheduled lanes' model steps hold no repository write
 authority — model jobs are `contents: read` and token-free, credentialed jobs run no model and
-stage only paths `authorize-paths.py` derives from the validated report.
+stage only an explicit path list derived from the validated report. At this milestone that
+derivation was `authorize-paths.py`; the invariant still holds at HEAD, but #77 removed that
+script with the lanes it served, and the deriving component is now the engine's applier.
 
 Landed (#60): `plugins/doc-lifecycle/engine/` — the stdlib-only `doclifecycle` package with the
 registry parser (globs → kind + set, fail-closed validation, meaning-based digest) and the
