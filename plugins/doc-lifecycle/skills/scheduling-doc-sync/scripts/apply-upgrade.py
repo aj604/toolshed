@@ -46,9 +46,11 @@ Ownership (total on wiring, idempotent on state):
     the migration door (scheduling-doc-sync's Migration mode) is what produces it.
 
     Total ownership of wiring also covers retirement: RETIRED lists paths this
-    script shipped in a past release and no longer does. Crossing one of its
-    version keys during an upgrade deletes the path if present — an install
-    already past that key, or one that never had the path, is untouched.
+    script shipped in a past release and no longer does. Every entry at or
+    before the upgrade target is deleted if present, regardless of the
+    install's current version — including one that already reached that
+    version through an apply-upgrade.py older than the entry itself, which
+    is the population this exists to reach. A path already gone is untouched.
 
 Exit status: 0 on success; 1 on any error (missing source/installed file, a knob
 that can't be extracted, or a template placeholder the script doesn't know) —
@@ -122,12 +124,12 @@ ENGINE_DIR = "engine"
 
 # Paths this script has shipped in the past but no longer owns, keyed by the
 # target version whose SCRIPTS/TEMPLATE_PLACEHOLDERS tables (above) stopped
-# carrying them. An install upgrading across one of these keys had a version
-# that laid the path down and one that doesn't — so it is stale on disk unless
-# this script deletes it too. Keyed by version rather than deleted unconditionally
-# so a same-named path a later template reintroduces is never caught by an
-# older entry here: apply_upgrade only fires an entry when the install's
-# installed-version is older than its key and the target reaches at least it.
+# carrying them. Any upgrade whose target reaches a key deletes that entry's
+# paths if present — not gated on the install's current version, since an
+# install that already sits at or past a key (upgraded there with an
+# apply-upgrade.py that predates the entry) is exactly the population this
+# exists to reach, not one to skip. See retired_paths for why a same-named
+# path some later release reintroduces is never left deleted.
 RETIRED = {
     # #77/#128: the legacy write lanes and the scripts that existed only to
     # serve them.
@@ -166,28 +168,23 @@ def _semver(version):
     return tuple(int(p) for p in version.split("."))
 
 
-def installed_version(repo):
-    """The install's current version, or "0.0.0" for one predating the lockfile.
+def retired_paths(target):
+    """Paths to delete: every RETIRED entry at or before the version being
+    upgraded to — regardless of the install's current version.
 
-    Absence means an install old enough to predate self-upgrade entirely —
-    older than every entry RETIRED could ever carry — the same reasoning
-    read_knobs already applies to a missing doc-sync-upgrade.yml.
+    Not gated on the install's current version. An install that already
+    advanced past a retirement key (because it upgraded with an
+    apply-upgrade.py older than the one that added the entry) is exactly the
+    population this exists to clean up, and re-checking an install that has
+    none of these paths left is a no-op — see remove_retired. A same-named
+    path some later release reintroduces for an unrelated purpose is never
+    stuck deleted: apply_upgrade calls this before render_workflows/
+    copy_scripts, so the same run's regeneration lays the new file back down.
     """
-    path = repo / ".github" / "doc-sync" / "installed-version"
-    if not path.is_file():
-        return "0.0.0"
-    return path.read_text().strip()
-
-
-def retired_paths(repo, target):
-    """Paths to delete: shipped before this install's current version, retired
-    at a version at or before the one being upgraded to."""
-    current = _semver(installed_version(repo))
     tgt = _semver(target)
     paths = []
     for version, entries in RETIRED.items():
-        v = _semver(version)
-        if current < v <= tgt:
+        if _semver(version) <= tgt:
             paths.extend(entries)
     return paths
 
@@ -195,12 +192,12 @@ def retired_paths(repo, target):
 def remove_retired(repo, target):
     """Delete files this script no longer owns.
 
-    Idempotent: a path already absent (already upgraded past it, or never
+    Idempotent: a path already absent (already cleaned up, or never
     installed) is silently skipped. Returns only what this run actually
     removed — see seed_waivers for the same declare-only-what-you-did shape.
     """
     removed = []
-    for rel in retired_paths(repo, target):
+    for rel in retired_paths(target):
         path = repo / rel
         if not path.is_file():
             continue
@@ -399,8 +396,8 @@ def apply_upgrade(plugin_root, repo, target):
     """
     new_lane = adopted_registry(repo)
     knobs = read_knobs(repo)
-    # Read before write_version below overwrites the file retired_paths reads to
-    # know this install's current version.
+    # Before render_workflows/copy_scripts: a same-named path a later release
+    # reintroduces must come back deleted-then-recopied, never just deleted.
     removed = remove_retired(repo, target)
     written = render_workflows(plugin_root, repo, knobs, new_lane=new_lane)
     written += copy_scripts(plugin_root, repo, new_lane=new_lane)

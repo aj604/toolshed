@@ -253,10 +253,11 @@ class ApplyUpgrade(unittest.TestCase):
     # #77/#128 dropped doc-sync.yml, doc-bloat.yml, sync-gate.py,
     # authorize-paths.py, plan-distill.py, and last-stales.json from the
     # tables above at 0.38.0. A consumer who upgraded past that version with
-    # an older apply-upgrade.py kept inert-but-executable copies; the removal
-    # list is what deletes them going forward.
+    # an older apply-upgrade.py kept inert-but-executable copies; removal is
+    # keyed to the target version only, never to the install's own current
+    # version, so that population is reached rather than permanently skipped.
 
-    def test_removes_files_retired_between_current_and_target(self):
+    def test_removes_files_retired_at_or_before_the_target(self):
         pr = make_plugin_root(self.base)
         repo = make_install(self.base, installed_version="0.37.0", legacy_files=True)
         r = run(pr, repo, "0.38.0")
@@ -271,18 +272,27 @@ class ApplyUpgrade(unittest.TestCase):
         ]:
             self.assertFalse((repo / rel).exists(), rel)
 
-    def test_leaves_a_retired_path_alone_once_already_past_its_retirement_version(self):
-        # Simulates a file present at that name for some unrelated reason on an
-        # install already upgraded past 0.38.0 — the version window for that
-        # entry has closed, so this run must not touch it.
+    def test_removes_a_retired_path_even_when_already_at_the_retirement_version(self):
+        # The exact population this exists to reach: a consumer who already
+        # upgraded to 0.38.0 with an apply-upgrade.py that predates this
+        # cleanup logic kept the legacy files, and installed-version already
+        # reads "0.38.0". Gating removal on "current < retirement version"
+        # would permanently skip them on every later upgrade too, since
+        # installed-version only advances — it would never again read older
+        # than 0.38.0.
         pr = make_plugin_root(self.base)
         repo = make_install(self.base, installed_version="0.38.0", legacy_files=True)
         r = run(pr, repo, "0.39.0")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(
-            (repo / ".github/doc-sync/sync-gate.py").read_text(),
-            "# sync-gate.py @ OLD\n",
-        )
+        self.assertFalse((repo / ".github/doc-sync/sync-gate.py").exists())
+
+    def test_removes_a_retired_path_when_the_target_equals_its_retirement_version(self):
+        # The boundary the version check must include, not exclude.
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, installed_version="0.37.0", legacy_files=True)
+        r = run(pr, repo, "0.38.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((repo / ".github/doc-sync/sync-gate.py").exists())
 
     def test_retired_paths_absent_is_a_silent_no_op(self):
         pr = make_plugin_root(self.base)
@@ -305,9 +315,10 @@ class ApplyUpgrade(unittest.TestCase):
             ".github/doc-sync/last-stales.json",
         } <= declared)
 
-    def test_no_installed_version_file_is_treated_as_older_than_any_retirement(self):
-        # A pre-self-upgrade install predates the lockfile entirely (same
-        # absence read_knobs already tolerates for doc-sync-upgrade.yml).
+    def test_removes_retired_paths_regardless_of_installed_version_file_presence(self):
+        # Retirement is keyed purely on the target version, never read from
+        # the install's own lockfile — so a pre-self-upgrade install missing
+        # installed-version entirely still gets cleaned up.
         pr = make_plugin_root(self.base)
         repo = make_install(self.base, upgrade_yml=False, legacy_files=True)
         (repo / ".github/doc-sync/installed-version").unlink()
