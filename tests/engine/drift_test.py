@@ -23,6 +23,11 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from support import RepoTestCase  # noqa: E402
+from soft_wrapped_fix_fixture import (  # noqa: E402
+    DRIFT_021_ASSERTION,
+    DRIFT_021_FIX,
+    DRIFT_021_PREIMAGE,
+)
 
 from doclifecycle.drift import (  # noqa: E402
     MODE_FULL,
@@ -538,10 +543,66 @@ class VerdictDiscipline(DriftRepoTestCase):
         self.assertEqual([r.extra["code"] for r in report.records],
                          ["UNVERIFIABLE"])
 
-    def test_a_stale_verdict_without_a_replacement_line_is_refused(self):
+    def test_a_stale_verdict_without_replacement_text_is_refused(self):
         root = self.drift_repo()
 
         self.assertIn("drift-verdict-invalid-fix", self.gap_reason(root, fix=None))
+
+    def test_a_soft_wrapped_unit_carries_its_wrapped_replacement(self):
+        root = self.drift_repo(**{
+            LIVING: f"# Reference\n\n{DRIFT_021_PREIMAGE}\n",
+        })
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root,
+            self.verdict(root, text=DRIFT_021_ASSERTION, fix=DRIFT_021_FIX),
+        ))
+
+        self.assertEqual(report.status, STATE_FINDINGS, report.to_dict())
+        self.assertEqual(report.records[0].extra["fix"], DRIFT_021_FIX)
+
+    def test_a_shared_line_unit_cannot_carry_a_wrapped_replacement(self):
+        middle = "The fee is 2% of the amount."
+        root = self.drift_repo(**{
+            LIVING: (
+                "# Reference\n\n"
+                "First fact. The fee is\n"
+                "2% of the amount. Third fact.\n"
+            ),
+        })
+
+        reason = self.gap_reason(
+            root,
+            text=middle,
+            fix="The fee is\n2.5% of the amount.",
+        )
+
+        self.assertIn("drift-verdict-invalid-fix", reason)
+
+    def test_a_single_line_unit_cannot_introduce_a_line_break(self):
+        root = self.drift_repo()
+
+        self.assertIn(
+            "drift-verdict-invalid-fix",
+            self.gap_reason(root, fix="The fee is\n2.5% of the amount."),
+        )
+
+    def test_a_wrapped_replacement_has_only_non_empty_lf_lines(self):
+        root = self.drift_repo(**{
+            LIVING: f"# Reference\n\n{DRIFT_021_PREIMAGE}\n",
+        })
+        malformed = (
+            "first line\rsecond line",
+            "first line\x00second line",
+            "first line\n\nthird line",
+        )
+
+        for fix in malformed:
+            with self.subTest(fix=repr(fix)):
+                self.assertIn(
+                    "drift-verdict-invalid-fix",
+                    self.gap_reason(root, text=DRIFT_021_ASSERTION, fix=fix),
+                )
 
     def test_a_non_stale_verdict_carrying_a_fix_is_refused(self):
         root = self.drift_repo()
@@ -575,8 +636,10 @@ class VerdictDiscipline(DriftRepoTestCase):
     def test_an_answer_about_a_unit_the_document_lacks_is_refused(self):
         root = self.drift_repo()
 
-        self.assertIn("classification-unknown-unit",
-                      self.gap_reason(root, unit="a" * 64))
+        reason = self.gap_reason(root, unit="a" * 64)
+
+        self.assertIn("classification-unknown-unit", reason)
+        self.assertNotIn("drift-verdict-invalid-fix", reason)
 
     def test_a_verdict_against_a_heading_is_refused(self):
         """Structure cannot carry an assertion, so it cannot be found stale —
@@ -1026,7 +1089,7 @@ class EvidencePointers(DriftRepoTestCase):
         self.assertEqual(self.stale_record(root).extra["evidence"],
                          {"source": SOURCE, "line": 1, "observed": "RATE = 0.025"})
 
-    def test_a_finding_carries_the_replacement_line_for_a_stale_claim(self):
+    def test_a_finding_carries_replacement_text_for_a_stale_assertion(self):
         root = self.drift_repo()
 
         self.assertIn("2.5%", self.stale_record(root).extra["fix"])

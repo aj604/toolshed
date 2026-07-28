@@ -35,7 +35,7 @@ and shipped as the `scheduling-doc-sync` skill, wires detect→fix to cron/PR).
    human eye waves through. And they stay `UNVERIFIABLE` even when you can build a code case
    that the boast overreaches ("handles arbitrarily large inputs" vs. a whole-buffer read):
    put that argument in `evidence`, not in the verdict. `STALE` is reserved for claims with a
-   checkable true value to restore — puffery has none, so any replacement line you'd draft is
+   checkable true value to restore — puffery has none, so any replacement text you'd draft is
    new authorship, and cutting or rewording it is a human decision, not a sync. In a
    scheduled install the human's third option is a durable waiver
    (`.doc-lifecycle/drift-waivers.json`, owned by scheduling-doc-sync): an accepted claim
@@ -95,8 +95,16 @@ coverage. Each record uses exactly these fields (no extras): `claim`, `location`
 Rules: `kind` is one of `command` / `path` / `symbol` / `behavior` / `structure` / `value`;
 `verdict` is one of `VERIFIED` / `STALE` / `UNVERIFIABLE` — literal enum strings, no invented
 values. `fix` is non-null only for `STALE`, and it is the **complete replacement text** for
-the line at `location` — never an instruction like "change X to Y" — and must meet the
-writing-docs bar. `evidence` is mandatory for **every** verdict, including VERIFIED (the
+the assertion unit at `location` — never an instruction like "change X to Y" — and must meet the
+writing-docs bar. Preserve the target document's physical-line convention: when the source unit
+is soft-wrapped, draft `fix` already wrapped, with LF embedded in the JSON string and the exact
+list marker and continuation indentation the replacement needs. Do not leave reflow to
+`fixing-docs` or the applier; both place the approved string byte-verbatim. The engine accepts
+embedded LF only for a unit that already spans multiple source lines and owns every line in that
+span (no neighboring assertion unit shares either boundary line), and every physical line must be
+non-empty (no CR or NUL). The replacement may take a different number of physical lines when its
+corrected content wraps differently, but it remains one logical assertion unit.
+`evidence` is mandatory for **every** verdict, including VERIFIED (the
 grep/command/line that proves it) — and it is **one line: pointer + fact**. The `file:line`
 or command, and the fact it shows. No history (prior PRs, how the drift arose), no restated
 command output, no reasoning narrative — the verdict carries the conclusion; evidence

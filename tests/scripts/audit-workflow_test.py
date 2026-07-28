@@ -221,6 +221,15 @@ class DeclaredEvidenceTools(unittest.TestCase):
                          "declares one — the prompt must not assert it")
 
 
+class StaleFixPrompt(unittest.TestCase):
+    def test_the_prompt_requires_physical_replacement_text_and_preserved_wraps(self):
+        prompt = " ".join("\n".join(jobs()["audit"]).split())
+
+        self.assertIn("complete physical replacement text", prompt)
+        self.assertIn("preserve its existing soft wrap with embedded LF", prompt)
+        self.assertIn("copied byte-verbatim", prompt)
+
+
 class RenderScriptWired(unittest.TestCase):
     def test_publish_job_renders_through_the_tested_script(self):
         body = jobs()["publish"]

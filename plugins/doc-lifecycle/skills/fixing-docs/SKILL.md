@@ -93,6 +93,12 @@ inside an approved span produces a diff the applier certifies and no reviewer ap
 Compose text only where the record supplies none (a merged remainder, a distillation's
 residue), and route it through **writing-docs**.
 
+A STALE `fix` may itself contain LF when its approved assertion unit was soft-wrapped. That LF,
+the list marker, and continuation indentation are part of the approved replacement: copy the
+whole string byte-verbatim into the operation's `text`, including every embedded line break.
+Never collapse or re-wrap it while planning. The audit method already made the authoring judgment;
+the engine README's **The applier** section owns the replacement mechanics.
+
 This is the one artifact you author, so here is the whole shape — a `STALE` record
 remedied by a single `replace`:
 

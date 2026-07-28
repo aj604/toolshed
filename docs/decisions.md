@@ -1,8 +1,46 @@
 # Decisions
 
-> As of 2026-07-27 — entries are dated and appended, newest first; a superseded decision stays
+> As of 2026-07-28 — entries are dated and appended, newest first; a superseded decision stays
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
+
+## 2026-07-28 — a STALE fix preserves a soft-wrapped unit's physical shape (#126)
+- Evidence: DRIFT-021 and DRIFT-022 in
+  `tests/baselines/shadow-parity-gate-rerun/shadow-report.json` correctly identify stale passages
+  and contain correct replacement prose, but each `fix` collapses a two- or four-line list item
+  into one 206- or 362-character physical line. `drift.py` required `_one_line(fix)`, while the
+  applier already splits replacement `text` on LF and can write any number of physical lines.
+- Decided (contract): a STALE `fix` remains one string. It may contain LF-separated, non-empty
+  physical lines only when its approved assertion unit already spans more than one source line and
+  owns every line in that span; a sentence sharing either boundary line with another unit cannot
+  authorize a line-based multiline replacement. CR, NUL, blank physical lines, and a line break
+  introduced into a single-line or shared-line unit are `drift-verdict-invalid-fix`. The
+  replacement may use a different number of physical lines than the preimage because a corrected
+  passage can wrap differently, but it is still one logical assertion unit. `RULESET_VERSION`
+  advances to 6 because a verdict the prior rules refused is now valid.
+- Decided (method): `detecting-doc-drift` authors the complete replacement already wrapped to the
+  target document's convention, including its list marker and continuation indentation.
+  `fixing-docs` copies that string byte-verbatim into the edit plan's `text`; it does not reflow or
+  reinterpret it. The engine validates the mechanical boundary, while the writing-docs bar owns
+  the judgment of where Markdown should wrap.
+- Rejected: applier-side reflow. Markdown links, emphasis, code spans, list indentation, and local
+  column conventions make line breaking an authoring judgment. Giving that judgment to the
+  applier would contradict its deterministic, refusal-based role and make applied bytes differ
+  from the approved record.
+- Verified: `tests/baselines/multiline-fix-red/` records the production RED failure and identical
+  pre-/post-change pressure runs by fresh subagents. The drift suite replays DRIFT-021's actual
+  two-line preimage with a three-line corrected fix, and the repository acceptance suite carries
+  that same passage through audit, policy minting, edit-plan validation, and `apply_edit_plan()`.
+  Tests also refuse CR, NUL, blank physical lines, and a multiline fix over a single-line unit or
+  a multi-line sentence that shares a boundary line with neighboring assertions.
+- Code: `plugins/doc-lifecycle/engine/doclifecycle/drift.py`,
+  `plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md`,
+  `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
+  `plugins/doc-lifecycle/engine/README.md`, `tests/engine/drift_test.py`,
+  `tests/engine/soft_wrapped_fix_fixture.py`,
+  `tests/engine/acceptance/scenario_drift_test.py`,
+  `tests/engine/acceptance/scenario_policy_test.py`,
+  `tests/baselines/multiline-fix-red/`
 
 ## 2026-07-27 — a vendored copy needs a reader, or it doesn't get vendored (#77 follow-up)
 - Evidence: `apply-upgrade.py`'s `SCRIPTS` table kept vendoring `plan-chunks.py`,

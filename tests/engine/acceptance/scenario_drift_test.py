@@ -72,7 +72,7 @@ def marker(repo):
 
 
 class DriftScenarioTestCase(fixture.AcceptanceFixtureTestCase):
-    def verdicts(self, repo, plan, stale=(fixture.LIVING_FACTUAL,)):
+    def verdicts(self, repo, plan, stale=(fixture.LIVING_FACTUAL,), fixes=None):
         """A lane's answer for every living document the plan declared.
 
         The fixture's own prose supplies three of the four assertion classes:
@@ -81,6 +81,8 @@ class DriftScenarioTestCase(fixture.AcceptanceFixtureTestCase):
         is factual and VERIFIED against the fixture's evidence source — except
         the texts named in `stale`, so a scenario states only what it is about.
         """
+        stale_fixes = {fixture.LIVING_FACTUAL: fixture.LIVING_FACTUAL_FIX}
+        stale_fixes.update(fixes or {})
         unjudged = {
             fixture.LIVING_NORMATIVE: NORMATIVE,
             fixture.LIVING_RATIONALE: RATIONALE,
@@ -103,7 +105,7 @@ class DriftScenarioTestCase(fixture.AcceptanceFixtureTestCase):
                         "verdict": "STALE", "kind": "value", "tier": 3,
                         "evidence": {"source": fixture.EVIDENCE_SOURCE,
                                      "line": 7, "observed": OBSERVED_RATE},
-                        "fix": unit.text.replace("2% rate", "2.5% rate"),
+                        "fix": stale_fixes[unit.text],
                     })
                 else:
                     entries.append({
@@ -360,6 +362,13 @@ class FollowableEvidence(DriftScenarioTestCase):
 
         self.assertEqual(record.extra["location"], f"{fixture.LIVING_DOC}:3")
         self.assertEqual(record.extra["assertion"], fixture.LIVING_FACTUAL)
+
+    def test_its_fix_preserves_the_assertion_units_soft_wrap(self):
+        repo = self.build_fixture()
+
+        record = self.stale_record(self.full_report(repo))
+
+        self.assertEqual(record.extra["fix"], fixture.LIVING_FACTUAL_FIX)
 
     def test_it_names_the_source_line_and_the_fact_observed_there(self):
         repo = self.build_fixture()
