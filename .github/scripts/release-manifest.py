@@ -148,18 +148,79 @@ def _test_classes(tree):
     return [classes[name] for name in known]
 
 
+def _unittest_main_bindings(tree):
+    """Names this file's imports bind to the `unittest` module, and names
+    bound to `unittest.main` itself via `from unittest import main`.
+
+    `import unittest.mock` (unaliased) binds the top-level name `unittest`
+    too — Python's `import a.b` always binds `a` — so an unaliased dotted
+    import counts. `import unittest.mock as um` does not: `um` names the
+    submodule itself, which has no `.main`.
+    """
+    unittest_names, main_names = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "unittest":
+                    unittest_names.add(alias.asname or alias.name)
+                elif alias.asname is None \
+                        and alias.name.split(".")[0] == "unittest":
+                    unittest_names.add("unittest")
+        elif isinstance(node, ast.ImportFrom) and node.module == "unittest":
+            for alias in node.names:
+                if alias.name == "main":
+                    main_names.add(alias.asname or alias.name)
+    return unittest_names, main_names
+
+
+def _calls_unittest_main(node, unittest_names, main_names, local_funcs, seen):
+    """Whether `node` calls unittest.main, directly or through a chain of
+    module-level function calls (a wrapper that does setup before
+    delegating to `unittest.main()` is a real idiom). `seen` guards against
+    revisiting a function already on the call path."""
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        if isinstance(func, ast.Attribute) and func.attr == "main" \
+                and isinstance(func.value, ast.Name) \
+                and func.value.id in unittest_names:
+            return True
+        if isinstance(func, ast.Name):
+            if func.id in main_names:
+                return True
+            if func.id in local_funcs and func.id not in seen:
+                seen.add(func.id)
+                if _calls_unittest_main(local_funcs[func.id], unittest_names,
+                                         main_names, local_funcs, seen):
+                    return True
+    return False
+
+
 def _has_main_guard(tree):
-    """`if __name__ == "__main__": unittest.main()`, however it is spelled.
+    """`if __name__ == "__main__": unittest.main()`, however it is spelled
+    (`unittest.main(verbosity=2)`, `sys.exit(unittest.main())`, an aliased
+    or dotted `import unittest`, `from unittest import main`, or a local
+    wrapper function that calls one of the above).
 
     Only the script-runner's suites need one: it runs each as `python3
-    <path>`, so a suite without it runs zero tests and exits 0.
+    <path>`, so a suite without it runs zero tests and exits 0. The call
+    must resolve to unittest.main specifically — a `__main__` block that
+    calls an unrelated local `main()` also runs zero tests.
     """
+    unittest_names, main_names = _unittest_main_bindings(tree)
+    local_funcs = {
+        node.name: node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
     for node in ast.walk(tree):
         if not isinstance(node, ast.If):
             continue
         if "__name__" not in ast.unparse(node.test):
             continue
-        if "main(" in ast.unparse(ast.Module(body=node.body, type_ignores=[])):
+        if any(_calls_unittest_main(stmt, unittest_names, main_names,
+                                     local_funcs, set())
+               for stmt in node.body):
             return True
     return False
 

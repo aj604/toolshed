@@ -46,7 +46,7 @@ line it restates, the quoted overlap, the grep. "Feels redundant" is not admissi
 | `EXTRACT-AND-MOVE` | right content, wrong doc (an operator gotcha buried in a README) |
 | `MERGE-DOC` / `RETIRE-DOC` | a doc is a near-duplicate of another — fold the remainder in, or delete it |
 | `DISTILL` | a design doc whose implementation landed — approving it sends the artifact to the distiller, which extracts the durable residue and retires the scaffolding |
-| `POLICY` | a directory you declared as one class of ephemeral artifact (scope config) — one bulk record naming every covered file; approving it applies the stated policy (typically retirement) to exactly those files |
+| `POLICY` | a directory you declared as one class of ephemeral artifact (scope config) — one bulk record naming every covered file; approving it applies the stated policy (typically retirement) to exactly those files. Legacy: this skill's own bulk-verdict shape, pending migration to the engine (`doclifecycle.bloat`), which already replaces it with enumerable-scope `RETIRE-DOC` records — see `docs/decisions.md` (2026-07-27) |
 
 ## Step 3 — approve by ID (this is the only mandate there is)
 

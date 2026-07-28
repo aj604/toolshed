@@ -29,7 +29,11 @@ judgment one bounded chunk at a time. Three non-negotiables:
   `references/planning-artifacts.md`.
 - A **policy chunk** (directory declared `policy_scope` in the repo's
   `.doc-lifecycle/audit-scope.json`) yields exactly one `POLICY` record.
-  Rules: `planning-artifacts.md`.
+  Rules: `planning-artifacts.md`. `POLICY` is this skill's own legacy
+  bulk-verdict shape — the engine (`doclifecycle.bloat`) already replaces it
+  with enumerable-scope `RETIRE-DOC` records and carries no `POLICY`; this
+  skill migrates to the engine in a future, not-yet-scheduled stage
+  (`docs/decisions.md`, 2026-07-27).
 
 ## Modes
 
@@ -94,7 +98,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-
 
 Records carry exactly `id, doc, location, verdict, evidence, proposal,
 status, files`; verdicts are `CUT / CONDENSE / EXTRACT-AND-MOVE / RETIRE-DOC /
-MERGE-DOC / DISTILL / POLICY`; the final report is wrapped with `"schema": 2`.
+MERGE-DOC / DISTILL / POLICY` (`POLICY` is legacy — see *Doc kinds* above);
+the final report is wrapped with `"schema": 2`.
 `DISTILL` records carry classification + landed-code evidence **only** — the
 claims/insights/decision-entry authoring is the `doc-distiller` agent's
 post-approval job, dispatched by `fixing-docs`. Field rules, the worked
