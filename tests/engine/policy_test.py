@@ -574,13 +574,63 @@ class AFixThatSpeaksForAnotherDocument(PolicyTestCase):
 
     def test_a_fix_may_name_the_document_the_finding_lives_in(self):
         # Self-reference is not a cross-document assertion: the applier reads
-        # and rewrites this document, and the preimage pins the passage.
+        # and rewrites this document, and the preimage pins the passage. The
+        # preimage deliberately does *not* name it, so the carve-out is the
+        # only thing that admits this record.
         eligibility = self.eligibility([self.repointing(
-            assertion="The fee is documented in docs/a.md.",
+            assertion="The fee is documented here.",
             fix="The 2.5% fee is documented in docs/a.md.",
         )])
 
         self.assertEqual(refusals(eligibility), {"R-1": None})
+
+    def test_the_carve_out_is_the_path_and_not_the_bare_filename(self):
+        # `a.md` is not this document — a bare filename names no one document,
+        # and seven files in this repository are called SKILL.md. Refusing is
+        # the conservative reading, and it is the one that holds when a fix
+        # names a *sibling* whose filename happens to match.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The fee is documented here.",
+            fix="The 2.5% fee is documented in a.md.",
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_a_preimage_that_merely_mentions_a_file_has_not_pinned_it(self):
+        # The subtler DRIFT-023: the claim mentions the successor in passing,
+        # so a rule about *new* names would admit a fix that swaps which
+        # document the sentence is about. The preimage pins this passage's
+        # text, never that file's contents.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The gate record is `docs/plans/a.md` (a rerun is "
+                      "planned at `docs/plans/b.md`).",
+            fix="The gate record, criteria and verdict, is `docs/plans/b.md`.",
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_dropping_a_document_the_claim_named_is_a_claim_too(self):
+        eligibility = self.eligibility([self.repointing(
+            assertion="Both `docs/plans/a.md` and `docs/plans/b.md` apply.",
+            fix="Only `docs/plans/a.md` applies.",
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_a_fix_that_is_not_text_is_read_rather_than_skipped(self):
+        # Fail shut on a shape this module does not know: #77's item 2 may give
+        # `fix` a multi-line form, and a guard that skipped what it could not
+        # read would hand that form straight through.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The gate record is `docs/plans/a.md`.",
+            fix=["The gate record is", "`docs/plans/b.md`."],
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
 
     def test_a_fix_that_rewrites_a_symbol_stays_eligible(self):
         # DRIFT-014's shape, and the reason the recognizer must not read a

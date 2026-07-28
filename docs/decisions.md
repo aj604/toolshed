@@ -12,13 +12,17 @@
   commit that file's Verdict section read "Not yet run". The record carries an exact preimage and
   an `evidence.source`, so `policy.py` would have minted for it with no human.
 - Decided, and it is the mechanical half that carries the guarantee: `policy.py` refuses a record
-  whose `fix` names a file the claim it replaces did not — `policy-fix-names-other-document`. A
-  preimage pins what a run read; a `fix` is what a model wrote, and a document it names that the
-  claim did not is one the record pins nothing from. A citation does not settle it: a pointer
-  says one line was consulted, and what a document contains is the thing being asserted. The
-  finding's own document is excluded — rewriting a passage that names its own file speaks for
-  nothing else. Recognizing a file reference is `paths.path_references`, beside the classifier
-  whose suffix tables it reuses, so one module answers "what is a path" for both questions.
+  whose `fix` changes which documents the passage names — `policy-fix-names-other-document`. A
+  preimage pins what a run read; a `fix` is what a model wrote, and a document the replacement
+  adds or drops is one the record pins nothing from. A citation does not settle it: a pointer
+  says one line was consulted, and what a document contains is the thing being asserted. Both
+  directions, not just additions: a preimage that *mentions* a file has pinned the sentence and
+  not the file, so an additions-only rule would admit a repointing that swapped which document
+  the sentence is about (found by this PR's spec review, with a working bypass). The finding's own
+  document is excluded, by its repository path and not its filename — rewriting a passage that
+  names its own file speaks for nothing else, while a bare filename names no one document
+  (seven files here are `SKILL.md`). Recognizing a file reference is `paths.path_references`,
+  beside the classifier whose suffix tables it reuses, so one module answers "what is a path".
 - Decided, as defense in depth and not as a guarantee: `detecting-doc-drift` now states that a
   `fix` naming a file is settled by opening that file, and `doc-audit.yml`'s prompt names
   fix-authoring among what it sends workers to that skill for. This addresses the wrong fix being
@@ -31,15 +35,16 @@
   switching on the code. It also asks a model to classify its own finding into the class that
   refuses it, where the exclusion reads what the model wrote. Left available — the exclusion does
   not foreclose it.
-- Named limit: the recognizer is deliberately generous but not exhaustive, so a fix that names
-  another document in prose only ("see the engine README") is not caught by shape. The method
-  rule is what covers that case, and it is the half without a guarantee. A fix that repoints is
-  now a person's to approve even when the model got it right — the cost is one more record in the
-  review queue, paid against a class whose error budget is zero.
+- Named limits, both past what shape can settle and both left to the method rule: a document
+  named without its suffix (`docs/plans/2026-07-27-rerun`) and one named in prose alone ("see the
+  engine README"). And a fix that repoints is now a person's to approve even when the model got
+  it right — one more record in the review queue, paid against a class whose error budget is zero.
 - Verified: G4 re-measured on the recorded cycle's own report — 24 records, 12 eligible before,
   11 after, exactly one decision changed, the other 23 identical
   (`docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md`, which states why no third live
-  cycle was run). Six mutants of the guard and the recognizer, each killed.
+  cycle was run). Eleven mutants of the guard, the comparison, the carve-out, and the recognizer,
+  each killed — two of them only after review, which found a mutant the first round's tests let
+  live and a bypass the first round's comparison allowed.
 - Code: plugins/doc-lifecycle/engine/doclifecycle/policy.py,
   plugins/doc-lifecycle/engine/doclifecycle/paths.py,
   plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md,

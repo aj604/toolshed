@@ -83,7 +83,7 @@ target does not carry it yet, the fix says what the target actually shows, and i
 the repository settles it, the record is `UNVERIFIABLE` with the pointer in `evidence` rather
 than a `STALE` with a drafted replacement. This is the rule that makes a repointing fix safe to
 land, and the auto-apply policy refuses one anyway (`policy-fix-names-other-document`) — a fix
-that names a document the claim did not is a person's to approve.
+that changes which files the line names is a person's to approve.
 
 ## The output contract (this is the "shape")
 

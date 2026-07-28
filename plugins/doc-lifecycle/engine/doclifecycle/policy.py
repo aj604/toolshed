@@ -42,12 +42,16 @@ that says why (`evidence.source`). Everything the policy admits satisfies both;
 everything a bloat audit produces is a judgment about whether a passage should
 exist at all, which no pointer settles.
 
-*And the replacement stays inside what the record pins.* A `fix` naming a
-document the claim it replaces never named asserts something about a file this
-record pins nothing from, however exact its preimage and however real its
-citation. That is the shape the second shadow-parity cycle caught (#123): a
-superseded pointer repointed at its successor, with a property of the successor
-asserted that nobody had opened it to check, in the class that lands unattended.
+*And the replacement stays inside what the record pins.* The preimage is the
+half of a record a run *read*; a `fix` is the half a model *wrote*. A preimage
+pins its passage's own text and never another file's contents, so a replacement
+that changes which documents the passage names — adding one, or dropping one —
+is saying something about a file this record pins nothing from, however exact
+the preimage and however real the citation, which reports that one line was read
+rather than what the document contains. That is the shape the second
+shadow-parity cycle caught (#123): a superseded pointer repointed at its
+successor, asserting a property of the successor nobody had opened it to check,
+in the class that lands unattended.
 """
 
 import json
@@ -362,25 +366,36 @@ def _never_eligible(code, record_id):
     )
 
 
-def _unnamed_documents(record):
-    """The documents a `fix` speaks about that the claim it replaces did not.
+def _redirected_documents(record):
+    """The documents a `fix` adds to, or drops from, the ones its preimage named.
 
-    The preimage is the pinned half of a record: text this run read out of the
-    document. A `fix` is the authored half, and a file it names that the
-    preimage did not is a document the record asserts something about without
-    pinning anything from it — most often that it exists, usually that it
-    contains what the sentence says it contains. The record's own document is
-    excluded: rewriting a passage that names its own file is not speaking for
-    anything else.
+    Both directions, because both are a claim: naming a document the preimage
+    did not says something about that document, and dropping one says the
+    passage no longer depends on it. Equality is also what keeps the subtler
+    case out — a preimage that *mentions* a file has pinned the sentence, never
+    the file's contents, so "the fix only names files the preimage mentioned"
+    would admit a repointing that swapped which one the sentence is about.
+
+    The record's own document is excluded from both sides, by its repository
+    path and not by its filename: rewriting a passage that names its own file
+    speaks for nothing else, while a bare filename names no one document —
+    this repository alone carries seven `SKILL.md`.
+
+    A `fix` that is not text is read as its repr rather than skipped: a shape
+    this module does not know must not be a shape it ignores.
     """
     fix = record.extra.get(FIX_FIELD)
-    if not isinstance(fix, str):
+    if fix is None:
         return ()
-    named = set(path_references(record.extra.get(PREIMAGE_FIELD)))
     own = record.extra.get(PATH_FIELD)
-    if isinstance(own, str):
-        named.update((own, own.rpartition("/")[2]))
-    return tuple(p for p in path_references(fix) if p not in named)
+    own = {own} if isinstance(own, str) else set()
+
+    def named(text):
+        return set(path_references(text if isinstance(text, str) else repr(text))) - own
+
+    before = named(record.extra.get(PREIMAGE_FIELD))
+    after = named(fix)
+    return tuple(sorted(before ^ after))
 
 
 def _decide(policy, record, enabled):
@@ -486,19 +501,20 @@ def _decide(policy, record, enabled):
             location=record_id,
         )
 
-    unnamed = _unnamed_documents(record)
-    if unnamed:
+    redirected = _redirected_documents(record)
+    if redirected:
         return None, Problem(
             code="policy-fix-names-other-document",
             message=(
-                f"record {record_id}'s fix speaks for {list(unnamed)}, which "
-                f"the claim it replaces never named: the remedy asserts "
-                f"something about a document this record pins nothing from, so "
-                f"the assertion is the model's and not the repository's. A "
-                f"citation does not settle it either — a pointer says one line "
-                f"was read, and what a document contains is the thing being "
-                f"asserted. A pointer whose target has been superseded is a "
-                f"finding for a person, who can open the new one"
+                f"record {record_id}'s fix changes which documents this passage "
+                f"speaks for — {list(redirected)} is named on one side of the "
+                f"replacement and not the other. The assertion pins the "
+                f"passage's own text, never another file's contents, so what "
+                f"the replacement says about that document is the model's and "
+                f"not the repository's. A citation does not settle it either: a "
+                f"pointer says one line was read, and what a document contains "
+                f"is the thing being asserted. A pointer whose target has been "
+                f"superseded is a finding for a person, who can open the new one"
             ),
             location=record_id,
         )

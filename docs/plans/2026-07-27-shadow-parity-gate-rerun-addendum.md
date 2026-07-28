@@ -23,17 +23,25 @@ budget for that class is zero.
 
 Two changes, and only the first is a guarantee.
 
-**A policy exclusion, which is mechanical.** `policy.py` refuses a record whose `fix` names a
-file the claim it replaces did not — `policy-fix-names-other-document`, decided per record and
+**A policy exclusion, which is mechanical.** `policy.py` refuses a record whose `fix` changes
+which documents its passage names — `policy-fix-names-other-document`, decided per record and
 reported with the rest. A preimage pins what a run *read*; a `fix` is the half a model *wrote*,
-and when the replacement names a document the record pins nothing from, the assertion about that
-document is the model's, not the repository's. An `evidence.source` pointing at that same
-document does not close the gap: a citation says one line was consulted, and what a document
-contains is the thing being asserted. The document the finding lives in is excluded, since
-rewriting a passage that names its own file speaks for nothing else. Recognizing a file reference
-is `paths.path_references`, which reads a dotted symbol (`approval.Record.targets()`) and a
-slash-joined prose list (`cron/cap/upgrade-cron`) as prose, and is otherwise generous — a token
-it over-reads costs a person one more record to look at, and one it misses costs the refusal.
+and a document the replacement adds or drops is one the record pins nothing from, so what the
+replacement says about it is the model's and not the repository's. An `evidence.source` pointing
+at that same document does not close the gap: a citation says one line was consulted, and what a
+document contains is the thing being asserted. Both directions, not only additions — a preimage
+that *mentions* a file has pinned the sentence and not the file, so an additions-only rule would
+still admit a repointing that swapped which document the sentence is about. The document the
+finding lives in is excluded, by its repository path and not its filename: rewriting a passage
+that names its own file speaks for nothing else, while a bare filename names no one document.
+Recognizing a file reference is `paths.path_references`, which reads a dotted symbol
+(`approval.Record.targets()`) and a slash-joined prose list (`cron/cap/upgrade-cron`) as prose,
+and is otherwise generous — a token it over-reads costs a person one more record to look at, and
+one it misses costs the refusal.
+
+Two references are past what shape can settle, and the method rule below is what covers them: a
+document named without its suffix (`docs/plans/2026-07-27-rerun`) and one named in prose alone
+("the second cycle's rerun plan"). Both are recorded as limits rather than left to be discovered.
 
 **A method rule in `detecting-doc-drift`, which is not.** "A `fix` that names a file is settled
 by opening that file" — a `Supersedes:` header says a file replaced another, never what the
@@ -69,12 +77,13 @@ other 23 records' decisions — eligible class and refusal code alike — are id
 after, so the exclusion did not buy its refusal by refusing the true positives too. DRIFT-023's
 new refusal reads:
 
-> record DRIFT-023's fix speaks for ['docs/plans/2026-07-27-shadow-parity-gate-rerun.md'], which
-> the claim it replaces never named: the remedy asserts something about a document this record
-> pins nothing from, so the assertion is the model's and not the repository's. A citation does
-> not settle it either — a pointer says one line was read, and what a document contains is the
-> thing being asserted. A pointer whose target has been superseded is a finding for a person, who
-> can open the new one.
+> record DRIFT-023's fix changes which documents this passage speaks for —
+> ['docs/plans/2026-07-27-shadow-parity-gate-rerun.md'] is named on one side of the replacement
+> and not the other. The assertion pins the passage's own text, never another file's contents, so
+> what the replacement says about that document is the model's and not the repository's. A
+> citation does not settle it either: a pointer says one line was read, and what a document
+> contains is the thing being asserted. A pointer whose target has been superseded is a finding
+> for a person, who can open the new one
 
 **G4 criterion 1, re-measured: 0 false positives in the auto-apply-eligible class, budget 0 —
 PASS on replay.** Criterion 2 (at most 2 false positives overall) was already PASS at 1 and is
@@ -90,7 +99,7 @@ did not measure G4 with it: its G4 section takes the class "as the landed policy
 replay's 12 comes from. The script splits an adjudication worklist; `policy-eligibility` is the
 authority, and the script leaves with the legacy lane (#77).
 
-Three further pieces of evidence, all in the repository:
+Four further pieces of evidence, all in the repository:
 
 - **A regression test carrying the record verbatim.** `tests/engine/policy_test.py`'s
   `AFixThatSpeaksForAnotherDocument` builds DRIFT-023's assertion, fix, and evidence as recorded
@@ -99,11 +108,23 @@ Three further pieces of evidence, all in the repository:
 - **The over-refusal cases are tests too, not an argument.** DRIFT-014's symbol rewrite,
   DRIFT-021's knob list, DRIFT-022's two build artifacts, and a fix naming the finding's own
   document each assert *eligible* — the shapes a blunter exclusion would have swept up.
-- **Mutation results.** Six mutants, each killed: removing the guard (4 failures, 1 error in
-  `policy_test`), widening the own-document carve-out to the cited document (3 failures, 1
-  error), and four mutations of the recognizer — dropping directory references, dropping bare
-  filenames, reading any slash token as a path, reading any dotted token as a path — each failing
-  `paths_test`, `policy_test`, or both.
+- **The bypass an adversarial spec review found, and closed.** The first implementation refused
+  only files the fix *added*. Given a preimage that mentioned the successor in passing — "the gate
+  record is `a.md` (a rerun is planned at `b.md`)" — a fix repointing the sentence at `b.md` named
+  no new file and stayed eligible: DRIFT-023 with one clause added to the claim. The comparison is
+  now equality in both directions, which refuses that and costs nothing on this corpus (still 11
+  eligible, still the same 23 decisions). `test_a_preimage_that_merely_mentions_a_file_has_not_pinned_it`
+  is that record.
+- **Mutation results.** Eleven mutants, each killed: removing the guard; relaxing the comparison
+  to added names only, and to dropped names only; removing the own-document carve-out, widening
+  it to the bare filename, and widening it to the cited document; skipping a `fix` that is not
+  text; and four mutations of the recognizer — dropping directory references, dropping bare
+  filenames, reading any slash token as a path, reading any dotted token as a path. Each fails
+  `policy_test`, `paths_test`, or both. Recorded because it is the point of the exercise: the
+  first round had six mutants and one of them, *removing* the carve-out, **survived** — the test
+  that named the branch had a preimage that already named the document, so the carve-out was
+  never what admitted the record. A claim of "each killed" is worth what the mutants are worth,
+  and this one is worth what review made of it.
 
 ## Why no third cycle
 
