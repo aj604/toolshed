@@ -2,10 +2,10 @@
 """Guards template/dogfood equivalence for the whole vendored install.
 
 This repo runs the pipeline on itself, so `.github/workflows/doc-*.yml`,
-`.github/doc-sync/*.py`, and the vendored `.github/doc-sync/engine/` tree must be
-exactly what `scheduling-doc-sync` installs from the plugin with this install's
-knobs. Editing one copy and forgetting the other ships wiring nobody runs, or
-dogfoods wiring nobody gets.
+`.doc-lifecycle/wiring/*.py`, and the vendored `.doc-lifecycle/wiring/engine/`
+tree must be exactly what `scheduling-doc-sync` installs from the plugin with
+this install's knobs. Editing one copy and forgetting the other ships wiring
+nobody runs, or dogfoods wiring nobody gets.
 
 Asserted by regenerating through apply-upgrade.py — the same engine the upgrade
 lane uses — into a scratch tree and comparing bytes. Only the install-time knobs
@@ -13,12 +13,18 @@ lane uses — into a scratch tree and comparing bytes. Only the install-time kno
 engine is a whole-directory comparison rather than a rendering: it is vendored
 wholesale, never rendered and never edited in place.
 
+This suite also owns the one static claim about the move that produced this
+layout (aj604/toolshed#133): nothing the plugin ships still reaches for the
+pre-#133 install directory. Whole-tree equivalence between plugin and install is
+already its subject, so a path that survived the move is its business too.
+
 Run: python3 tests/scripts/install-parity_test.py
 """
 
 import importlib.util
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import unittest
@@ -28,11 +34,40 @@ PLUGIN_ROOT = ROOT / "plugins" / "doc-lifecycle"
 UPGRADE = PLUGIN_ROOT / "skills" / "scheduling-doc-sync" / "scripts" / "apply-upgrade.py"
 
 # The new engine is vendored wholesale rather than edited in place: the lanes that
-# run it (doc-audit.yml, doc-apply.yml) call `.github/doc-sync/engine/`, and what
-# they run must be the engine this repo sources and tests. Equivalence is a
+# run it (doc-audit.yml, doc-apply.yml) call `.doc-lifecycle/wiring/engine/`, and
+# what they run must be the engine this repo sources and tests. Equivalence is a
 # directory-tree comparison, per issue #57's distribution decision.
 ENGINE_SRC = PLUGIN_ROOT / "engine"
-ENGINE_DEST = ROOT / ".github" / "doc-sync" / "engine"
+ENGINE_DEST = ROOT / ".doc-lifecycle" / "wiring" / "engine"
+
+LEGACY_ROOT = ".github/doc-sync"
+# `os.path.join(".github", "doc-sync", …)` and `repo / ".github" / "doc-sync"`:
+# the same path, spelled so that neither `.github/doc-sync` nor
+# `.doc-lifecycle` appears anywhere in the line. Anchored on the separator that
+# makes it a path component, so the lane's own name — `git config user.name
+# "doc-sync"` — is not mistaken for one.
+SPLIT_LEGACY_COMPONENT = re.compile(
+    r"""(?:[,/]\s*["']doc-sync["']|["']doc-sync["']\s*[,/])""")
+
+# The two modules that name the pre-#133 directory on purpose, and why. Every
+# other mention in a shipped template or script is a reference the relocation
+# missed, and would send a lane at a path that no longer exists.
+LEGACY_REFERENCE_ALLOWED = {
+    # The migration door's legacy contract. It recognizes a consumer arriving
+    # from a genuinely pre-registry install, which really does live there;
+    # repointing it would break recognition of the installs it exists for.
+    "engine/doclifecycle/migrate.py",
+    # The path classifier keeps the old prefix beside the new one so an install
+    # that has not yet relocated — and any leftover the relocation left behind —
+    # is still classified as wiring rather than handed back as source.
+    "engine/doclifecycle/paths.py",
+    # The relocation itself: the code that carries an install out of the old
+    # directory, the authority that permits exactly that, and the summary a
+    # maintainer reads when it happens all have to name where it is leaving.
+    "skills/scheduling-doc-sync/scripts/apply-upgrade.py",
+    "skills/scheduling-doc-sync/scripts/stage-upgrade.py",
+    "skills/scheduling-doc-sync/scripts/render-report.py",
+}
 
 
 def load_apply_upgrade():
@@ -60,19 +95,19 @@ class TemplatesMatchTheDogfoodInstall(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.mod.copy_scripts(PLUGIN_ROOT, pathlib.Path(tmp),
                                   new_lane=self.new_lane)
-            vendored = sorted(p.name for p in
-                              (ROOT / ".github" / "doc-sync").glob("*.py"))
+            wiring = ROOT / ".doc-lifecycle" / "wiring"
+            vendored = sorted(p.name for p in wiring.glob("*.py"))
             self.assertEqual(
                 vendored, sorted(self.scripts),
-                ".github/doc-sync/ holds a different set of scripts than "
+                ".doc-lifecycle/wiring/ holds a different set of scripts than "
                 "apply-upgrade.py installs")
             for name in self.scripts:
-                copied = (pathlib.Path(tmp) / ".github" / "doc-sync"
+                copied = (pathlib.Path(tmp) / ".doc-lifecycle" / "wiring"
                           / name).read_text()
-                installed = (ROOT / ".github" / "doc-sync" / name).read_text()
+                installed = (wiring / name).read_text()
                 self.assertEqual(
                     installed, copied,
-                    f".github/doc-sync/{name} differs from its plugin source — "
+                    f".doc-lifecycle/wiring/{name} differs from its plugin source — "
                     f"re-copy it (the dogfood install is a vendored copy)")
 
     def test_every_installed_workflow_regenerates_byte_identically(self):
@@ -100,18 +135,18 @@ class TemplatesMatchTheDogfoodInstall(unittest.TestCase):
 
         self.assertTrue(
             ENGINE_DEST.is_dir(),
-            ".github/doc-sync/engine/ is missing — the new engine's lanes run "
+            ".doc-lifecycle/wiring/engine/ is missing — the new engine's lanes run "
             "the vendored copy, not the plugin checkout")
         source, vendored = tree(ENGINE_SRC), tree(ENGINE_DEST)
         self.assertEqual(
             sorted(vendored), sorted(source),
-            ".github/doc-sync/engine/ holds a different set of files than "
+            ".doc-lifecycle/wiring/engine/ holds a different set of files than "
             "plugins/doc-lifecycle/engine/ — re-vendor it wholesale "
             "(apply-upgrade.py's copy_engine), never edit it in place")
         for name in sorted(source):
             self.assertEqual(
                 vendored[name], source[name],
-                f".github/doc-sync/engine/{name} differs from "
+                f".doc-lifecycle/wiring/engine/{name} differs from "
                 f"plugins/doc-lifecycle/engine/{name} — the vendored engine is "
                 f"a copy, and the plugin tree is the single source")
 
@@ -135,6 +170,59 @@ class TemplatesMatchTheDogfoodInstall(unittest.TestCase):
                 unknown, [],
                 f"{name}: template placeholder(s) {unknown} have no knob in "
                 f"apply-upgrade.py")
+
+
+class TheOldInstallDirectoryIsGone(unittest.TestCase):
+    """aj604/toolshed#133: nothing still reaches for `.github/doc-sync/`.
+
+    A missed reference is a lane calling a path that no longer exists — a
+    failure a consumer discovers on their first run after upgrading, at 01:00,
+    with no one watching. Cheaper to fail here.
+    """
+
+    def test_no_shipped_template_or_script_names_the_old_directory(self):
+        offenders = []
+        for path in sorted(PLUGIN_ROOT.rglob("*")):
+            if not path.is_file() or path.suffix not in (".py", ".yml"):
+                continue
+            rel = str(path.relative_to(PLUGIN_ROOT))
+            if rel in LEGACY_REFERENCE_ALLOWED:
+                continue
+            for number, line in enumerate(
+                    path.read_text().splitlines(), 1):
+                # The joined spelling, and the split one. A path assembled
+                # component by component — `os.path.join(".github",
+                # "doc-sync", …)` — reads as neither the old path nor the new
+                # one to a search for either, which is exactly how one survived
+                # the move with its own docstring already updated.
+                if LEGACY_ROOT in line or SPLIT_LEGACY_COMPONENT.search(line):
+                    offenders.append(f"{rel}:{number}: {line.strip()}")
+        self.assertEqual(
+            offenders, [],
+            f"these still name {LEGACY_ROOT}/, which a current install does not "
+            f"have — repoint them at .doc-lifecycle/ (or, if the reference is "
+            f"deliberately about a pre-#133 install, say so in "
+            f"LEGACY_REFERENCE_ALLOWED)")
+
+    def test_the_dogfooded_install_holds_no_trace_of_it(self):
+        self.assertFalse((ROOT / ".github" / "doc-sync").exists(),
+                         "this repo's own install has not been relocated")
+        self.assertFalse((ROOT / ".github" / "doc-sync-marker").exists(),
+                         "the loose marker survived the relocation")
+
+    def test_the_three_tiers_are_where_the_contract_says(self):
+        root = ROOT / ".doc-lifecycle"
+        for name in ("registry.json", "audit-scope.json", "drift-waivers.json",
+                     "evidence-tools.json", "installed-version"):
+            self.assertTrue((root / name).is_file(),
+                            f".doc-lifecycle/{name} is missing")
+        self.assertTrue((root / "wiring" / "engine").is_dir())
+        self.assertTrue((root / "state" / "sync-marker").is_file())
+        # `.github/` keeps the workflow YAML and nothing else of the plugin's.
+        self.assertEqual(
+            sorted(p.name for p in (ROOT / ".github").iterdir()),
+            ["scripts", "workflows"],
+            ".github/ holds doc-lifecycle content other than the workflows")
 
 
 if __name__ == "__main__":

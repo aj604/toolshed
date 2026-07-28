@@ -48,7 +48,7 @@ policy chunks are {"id", "kind": "policy", "turns": N, "dir", "files"}. The
 run-surface report (doc count, chunk count, projected invocations, resume
 skips) always prints to stderr.
 
-Config discovery: --config if given, else <root>/.github/doc-sync/audit-scope.json.
+Config discovery: --config if given, else <root>/.doc-lifecycle/audit-scope.json.
 All keys optional; an absent file is pure defaults:
     exclude / include: glob lists ('*' stays within a path segment, '**'
         crosses segments; include re-adds anything it matches — whitelist wins)
@@ -408,7 +408,7 @@ def emit_prompt(chunk):
 def main():
     ap = argparse.ArgumentParser(description="Plan doc-bloat sweep chunks.")
     ap.add_argument("--config", help="scope config JSON (default: "
-                    "<root>/.github/doc-sync/audit-scope.json)")
+                    "<root>/.doc-lifecycle/audit-scope.json)")
     ap.add_argument("--root", default=os.getcwd(),
                     help="repo root to enumerate (default: cwd)")
     ap.add_argument("--out", help="write the manifest here (default: stdout)")
@@ -434,7 +434,7 @@ def main():
         return 0
 
     config = args.config or os.path.join(
-        args.root, ".github", "doc-sync", "audit-scope.json")
+        args.root, ".doc-lifecycle", "audit-scope.json")
     cfg = load_config(config)
     ndocs, chunks = plan(args.root, cfg)
 

@@ -4,6 +4,111 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-27 — doc-lifecycle install artifacts centralize under `.doc-lifecycle/` (#133)
+- Evidence: an install's artifacts were scattered across three unrelated places — nine scripts and
+  the vendored engine in `.github/doc-sync/`, the judgment files beside them, the sync marker loose
+  at `.github/doc-sync-marker`, and `registry.json` already at `.doc-lifecycle/` because the new
+  engine put it there. `.github/` is GitHub's directory, not a plugin's; nothing about that tree
+  said which of its files a consumer is expected to edit. The ownership split was real and enforced
+  in code — `apply-upgrade.py`'s table, `stage-upgrade.py`'s patterns — and invisible in the
+  filesystem, so hand-editing a regenerated script looked reasonable right up until the next
+  upgrade silently reverted it.
+- Decided: one directory, three tiers, and the tier is the contract rather than a convention.
+  `.doc-lifecycle/` root holds consumer judgment (`registry.json`, `audit-scope.json`,
+  `drift-waivers.json`, `evidence-tools.json`) plus `installed-version` — the lockfile is
+  plugin-owned but sits at the root because a human reads it to answer "what version am I on".
+  `wiring/` holds the nine scripts and the vendored engine, regenerated wholesale by the upgrade
+  lane and never hand-edited. `state/` holds what the lanes wrote. A reader now learns the
+  ownership rule from `ls`, which is the only place it was missing.
+- Decided: `.github/doc-sync-marker` becomes `.doc-lifecycle/state/sync-marker`. It is legacy state
+  — #77 removed the last lane that read it — and it is carried rather than deleted because whose
+  state it is decides that, and it is the consumer's. Renaming it into the state tier is what makes
+  "machine-written" a tier with a member rather than an empty promise; a fresh install has none, so
+  `state/` exists only in an install that came through the relocation.
+- Decided: the workflow YAML stays in `.github/workflows/`. GitHub reads workflows from nowhere
+  else, so this is the one exception the layout cannot absorb — and afterwards it is the only
+  doc-lifecycle content under `.github/`, which is a cleaner boundary than the half-move that
+  moving them would have produced.
+- Decided (existing installs): `apply-upgrade.py` gained a relocation branch, entered when
+  `.github/doc-sync/` exists and `.doc-lifecycle/wiring/` does not. The judgment files and the
+  marker are carried byte-for-byte; the scripts, the engine, and the lockfile are written fresh at
+  the new paths rather than moved, because the contract overwrites those unconditionally and moving
+  bytes about to be replaced buys nothing.
+- Decided (the closed-world rule): the relocation names a set — the judgment files, the lockfile,
+  the marker, the old directory's `.py` files, its `engine/` — and carries or removes exactly that.
+  Anything else a consumer left in the old directory is left exactly where it is and named on the
+  run surface, and the old directory survives when it still holds one. A plugin leaving a directory
+  does not get to sweep it, and the alternative — a recursive move — would silently relocate files
+  the plugin never owned.
+- Decided (it refuses rather than guesses): both layouts present is refused, because which of the
+  two directories holds the live wiring is not knowable from the filesystem and picking one would
+  discard whichever half a stopped relocation left behind. `wiring/` present without
+  `.doc-lifecycle/installed-version` beside it is refused as a relocation that stopped partway,
+  since the two are written in the same run. A vendored script whose bytes differ from the target
+  release's is deliberately *not* one of these — that is what every real upgrade looks like.
+- Decided (classification): the engine's path classifier takes `.doc-lifecycle/` as a whole prefix
+  into the workflow class, keeping `.github/doc-sync/` beside it for installs that have not
+  relocated. Taking the prefix rather than enumerating files closes a real gap: `registry.json` was
+  previously protected only incidentally, by not wearing a documentation suffix, and an edit set
+  naming it was refused for the right outcome by the wrong reason. The judgment files, the wiring,
+  and the state are now one class because they share one property — no approved documentation edit
+  may reach any of them.
+- Decided (path authority): `stage-upgrade.py`'s widening is scoped by *direction*, not by path.
+  The carried consumer state (`audit-scope.json`, `state/sync-marker`) is authorized as a create
+  only — a write into a path holding nothing destroys nothing, and once it holds the consumer's
+  judgment no upgrade may touch it again — and the old layout's named set is authorized as a
+  removal only. So the widening buys exactly the one-time move and cannot be reused for anything
+  after it, and "left in place and reported" is enforceable rather than merely intended.
+- Decided (deliberately untouched): `migrate.py`'s legacy constants still point at
+  `.github/doc-sync/`. The migration door reads a genuinely pre-registry install, which is a
+  different scenario from this relocation and predates it; repointing those constants would make
+  the door unable to find the state it exists to read. #133 names this a decision and its own
+  testing section makes the door's suite a tripwire — "a change to it would be a signal that the
+  migration door was repointed by mistake" — so this entry records the cost rather than paying it.
+- Named limit (found in review, measured not reasoned): the relocation fires for a registry-free
+  install too, and afterwards the migration door reads its inference inputs from a directory that
+  is gone. `migration-draft` on such a repo returns `status: ok` with `from_version: null` and
+  every source `present: false` — so the door still drafts a registry, but without the audit
+  scope, the waivers, or the preserved-state digests it would have inherited. The two fixes
+  available are both refused elsewhere: repointing the door is what the bullet above rules out, and
+  leaving a registry-free install on the old layout means `apply-upgrade.py` writing to two
+  addresses, which is the dual-path window #133 rejects outright. Filed rather than patched here.
+- Named limit: an install predating this release cannot be relocated by the automated upgrade lane.
+  That lane runs the *installed* copy of `stage-upgrade.py` — reviewed code the consumer already
+  holds, which is the property the #127 entry below establishes — and a pre-#133 copy does not know
+  the new layout, so it refuses the change set as unowned. Such an install relocates by re-running
+  `scheduling-doc-sync` in Upgrade mode from a local checkout. This is the same shape as #127's own
+  named limit: the wiring that upgrades a consumer is the wiring they already have.
+- Follows from that limit, and worth stating because it is easy to assume otherwise: the *run
+  surface* a pre-0.40.0 install renders is also its own. Both jobs copy the installed
+  `*.py` out before anything runs, so an old install renders its old `refused` text and has no
+  `blocked-relocation` status to render at all. The relocation guidance added to `refused` here
+  reaches a 0.40.0-or-later install; what reaches an older one is the documentation — the skill's
+  "Relocating a pre-0.40.0 install", the guide's upgrade section, and the release notes. #133's
+  stories 7 and 9 ("the run surface says plainly that this was a relocation") are therefore
+  satisfied going forward and not retroactively, and no test claims otherwise.
+- Decided (where the leftovers are named): on the step log, not `$GITHUB_STEP_SUMMARY`. The
+  leftovers are printed by `apply-upgrade.py`, which in the lane is the *target release's* code
+  running in the uncredentialed job — text from an unreviewed release belongs in the log, not
+  composed into the run summary a maintainer reads as this repository's own voice. The summary says
+  where to look instead.
+- Verified: `tests/scripts/apply-upgrade_test.py` (the relocation branch — what is carried, what is
+  written fresh, what is removed, the leftovers left and reported, and both refusals);
+  `tests/scripts/stage-upgrade_test.py` (the direction-scoped authority, including a modify at a
+  create-only path); `tests/scripts/install-parity_test.py` (the dogfooded install byte-identical
+  to what `apply-upgrade.py` lays down at the new paths, and that no shipped template or script
+  still names the old directory — in either the joined spelling or the `os.path.join` one, which is
+  how a default config path survived the move with its own docstring already updated).
+  The classifier's widening is the `_WORKFLOW_PREFIXES` tuple in
+  `plugins/doc-lifecycle/engine/doclifecycle/paths.py`; `tests/engine/paths_test.py`'s
+  `FORBIDDEN_CLASSES` names every tier of the new spelling, the registry and a vendored
+  `engine/README.md` included — the two files whose own suffix would otherwise class them as
+  configuration and documentation.
+- Verified (mutation): each entry of both safety-critical lists was deliberately broken in turn —
+  dropped, narrowed to a subdirectory, misspelled without its leading dot, widened to reach the
+  registry, and stripped of its direction check — and every one of the eleven mutations failed a
+  test. A path list nothing fails on is a list that is not guarding.
+
 ## 2026-07-27 — publishing a tag is not a consumer's decision to run new code (#127)
 - Evidence: `.github/workflows/doc-sync-upgrade.yml` before this change — one job holding
   `contents: write`, `pull-requests: write` and a push token, which on a weekly cron ran

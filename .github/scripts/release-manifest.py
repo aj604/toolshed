@@ -191,7 +191,7 @@ def scan_file(path):
 # Directories that hold no suite of their own: version control, caches, and
 # the vendored engine, which is a parity-enforced mirror of the plugin tree
 # rather than a source of its own.
-SKIP_DIRS = (".git", "node_modules", "__pycache__", ".github/doc-sync/engine")
+SKIP_DIRS = (".git", "node_modules", "__pycache__", ".doc-lifecycle/wiring/engine")
 
 
 def suites_in_tree(repo_root, non_gate_roots=NON_GATE_ROOTS):

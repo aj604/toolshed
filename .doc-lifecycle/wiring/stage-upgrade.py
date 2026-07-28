@@ -34,6 +34,7 @@ Two duties:
 
 2. Transfer exactly that path set into the credentialed job's checkout:
        stage-upgrade.py apply --bundle DIR --repo DIR --target X.Y.Z --out FILE
+                        [--blocked-status-out FILE]
    Re-derives the authority from the manifest (never trusting that `manifest`
    already checked it — the two run in different trust domains, with an artifact
    in between), verifies every bundled file against its recorded digest, then
@@ -46,19 +47,38 @@ Two duties:
 
 What `apply-upgrade.py` owns, and therefore all this authorizes:
 
-    .github/doc-sync/installed-version              the version lockfile
-    .github/doc-sync/drift-waivers.json             seeded when absent
-    .github/doc-sync/evidence-tools.json            seeded when absent
-    .github/doc-sync/<name>.py                      the vendored scripts
-    .github/doc-sync/engine/**                      the engine, vendored whole
+    .doc-lifecycle/installed-version                the version lockfile
+    .doc-lifecycle/drift-waivers.json               seeded when absent
+    .doc-lifecycle/evidence-tools.json              seeded when absent
+    .doc-lifecycle/wiring/<name>.py                 the vendored scripts
+    .doc-lifecycle/wiring/engine/**                 the engine, vendored whole
     .github/workflows/doc-<name>.yml                the installed lanes
 
-Deliberately outside it: `.github/doc-sync-marker`, `.github/doc-sync/audit-scope.json`,
-and `.doc-lifecycle/registry.json` are consumer state an upgrade preserves, so a
-regeneration that changed one is a regeneration to refuse, not to land. The
-script and workflow names are matched by pattern rather than by a fixed list
-because a release may add a lane; the confinement that matters is the directory
-and the extension, and every byte still reaches a human as a pull request.
+Deliberately outside it: `.doc-lifecycle/state/sync-marker`,
+`.doc-lifecycle/audit-scope.json`, and `.doc-lifecycle/registry.json` are consumer
+state an upgrade preserves, so a regeneration that changed one is a regeneration
+to refuse, not to land. The script and workflow names are matched by pattern
+rather than by a fixed list because a release may add a lane; the confinement
+that matters is the directory and the extension, and every byte still reaches a
+human as a pull request.
+
+One upgrade writes outside that steady-state set: the one-time relocation of a
+pre-#133 install out of `.github/doc-sync/`. It is authorized by *direction*
+rather than by path alone, so the widening cannot be reused for anything else:
+
+    created, never modified                        .doc-lifecycle/audit-scope.json
+                                                   .doc-lifecycle/state/sync-marker
+    removed, never written                         .github/doc-sync-marker
+                                                   .github/doc-sync/installed-version
+                                                   .github/doc-sync/{audit-scope,
+                                                     drift-waivers,evidence-tools}.json
+                                                   .github/doc-sync/<name>.py
+                                                   .github/doc-sync/engine/**
+
+An upgrade may therefore carry a consumer's audit scope and marker to the new
+layout exactly once — a create at a path holding nothing — and may never rewrite
+either afterwards. Nothing else in the old directory is authorized at all, which
+is what makes a consumer's own file there something the relocation leaves alone.
 
 Exit status: 0 authorized; 1 a difference outside the authority, a bundle that
 does not match its manifest, or a digest mismatch; 2 bad input.
@@ -78,14 +98,39 @@ import sys
 WIRING_ROOTS = (".github", ".doc-lifecycle")
 
 # Repo-relative paths `apply-upgrade.py` owns. Anchored, single-segment where
-# the directory is flat, so `.github/doc-sync/../../evil` cannot match even
-# before normalization rejects it.
+# the directory is flat, so `.doc-lifecycle/wiring/../../evil` cannot match even
+# before normalization rejects it. Note what is *not* here and cannot be added by
+# widening a character class: `.doc-lifecycle/registry.json`,
+# `.doc-lifecycle/audit-scope.json`, and anything under `.doc-lifecycle/state/`.
 OWNED_PATTERNS = (
+    re.compile(r"^\.doc-lifecycle/installed-version$"),
+    re.compile(r"^\.doc-lifecycle/(?:drift-waivers|evidence-tools)\.json$"),
+    re.compile(r"^\.doc-lifecycle/wiring/[A-Za-z0-9_-]+\.py$"),
+    re.compile(r"^\.doc-lifecycle/wiring/engine/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+$"),
+    re.compile(r"^\.github/workflows/doc-[a-z0-9-]+\.yml$"),
+)
+
+# The one-time relocation of a pre-#133 install (aj604/toolshed#133), authorized
+# by direction so the widening buys exactly the move and nothing after it.
+#
+# Consumer state the relocation carries to the new layout. A create only: the
+# path holds nothing yet, so writing it destroys nothing, and once it holds the
+# consumer's judgment no upgrade may touch it again.
+RELOCATION_CREATE_PATTERNS = (
+    re.compile(r"^\.doc-lifecycle/audit-scope\.json$"),
+    re.compile(r"^\.doc-lifecycle/state/sync-marker$"),
+)
+
+# The old layout's named set. A removal only: an upgrade may take these away as
+# the install leaves `.github/`, and may never write there again. Anything else
+# a consumer left in that directory matches nothing here, which is what makes
+# "left in place and reported" enforceable rather than merely intended.
+LEGACY_REMOVE_PATTERNS = (
+    re.compile(r"^\.github/doc-sync-marker$"),
     re.compile(r"^\.github/doc-sync/installed-version$"),
-    re.compile(r"^\.github/doc-sync/(?:drift-waivers|evidence-tools)\.json$"),
+    re.compile(r"^\.github/doc-sync/(?:audit-scope|drift-waivers|evidence-tools)\.json$"),
     re.compile(r"^\.github/doc-sync/[A-Za-z0-9_-]+\.py$"),
     re.compile(r"^\.github/doc-sync/engine/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+$"),
-    re.compile(r"^\.github/workflows/doc-[a-z0-9-]+\.yml$"),
 )
 
 # Never compared, never transferred: a bytecode cache is a build artifact of
@@ -118,12 +163,10 @@ def refuse(errors):
 def safety_error(path):
     """Why this path may never name a file in the install — or None.
 
-    A near-twin of `authorize-paths.py`'s function of the same name, and
-    deliberately not shared with it: that one ends by denying `.github/workflows/`
-    and `.github/doc-sync/` outright, which is exactly the set this script exists
-    to admit. Only the path-shape half is common, and a helper that took the deny
-    list as a parameter would make the two lanes' opposite answers look like one
-    rule with a flag. Keep them in step by hand; each is unit-tested on its own.
+    Path shape only — is this string a canonical repo-relative name at all —
+    with no opinion about which paths an upgrade may reach. `authority_error`
+    below is what answers that, and keeping the two apart is what lets this
+    script admit exactly the tree every other component in the pipeline denies.
     """
     if not isinstance(path, str) or not path.strip():
         return "empty path"
@@ -141,16 +184,42 @@ def safety_error(path):
     return None
 
 
-def authority_error(path):
-    """Why an upgrade may not write this path — or None."""
+def authority_error(path, status):
+    """Why an upgrade may not make this change to this path — or None.
+
+    The status is half the question, not decoration: the relocation's widenings
+    are one-directional, so `A` at `.doc-lifecycle/audit-scope.json` is a
+    consumer's scope being carried into an empty slot, while `M` at the same
+    path is the upgrade rewriting judgment it does not own.
+    """
     err = safety_error(path)
     if err:
         return err
-    if not any(p.match(path) for p in OWNED_PATTERNS):
-        return ("not a file the upgrade engine owns (the wiring is "
-                ".github/doc-sync/ and .github/workflows/doc-*.yml; the marker, "
-                "audit-scope.json and the registry are consumer state)")
-    return None
+    if any(p.match(path) for p in OWNED_PATTERNS):
+        return None
+    if status == "A" and any(p.match(path) for p in RELOCATION_CREATE_PATTERNS):
+        return None
+    if status == "D" and any(p.match(path) for p in LEGACY_REMOVE_PATTERNS):
+        return None
+    return ("not a change the upgrade engine owns (the wiring is "
+            ".doc-lifecycle/wiring/ and .github/workflows/doc-*.yml; the marker, "
+            "audit-scope.json and the registry are consumer state a relocation "
+            "may create once and no upgrade may rewrite; the pre-#133 install at "
+            ".github/doc-sync/ may only be removed)")
+
+
+def is_relocation(entries):
+    """Does this change set move an install out of the pre-#133 layout?
+
+    True when it removes any of the old layout's named paths — the one thing a
+    routine upgrade never does. The upgrade lane reads this to tell a maintainer
+    that this run needs their hands because the install moved, not because a
+    workflow template happened to change.
+    """
+    return any(e.get("status") == "D"
+               and isinstance(e.get("path"), str)
+               and any(p.match(e["path"]) for p in LEGACY_REMOVE_PATTERNS)
+               for e in entries if isinstance(e, dict))
 
 
 def digest(path):
@@ -221,7 +290,7 @@ def run_manifest(args):
             status, sha = "A", digest(after[rel])
         else:
             status, sha = "D", None
-        err = authority_error(rel)
+        err = authority_error(rel, status)
         if err:
             errors.append(f"{rel}: {err}")
             continue
@@ -278,12 +347,12 @@ def run_apply(args):
             errors.append(f"{entry!r}: not a manifest entry")
             continue
         path, status = entry.get("path"), entry.get("status")
-        err = authority_error(path)
-        if err:
-            errors.append(f"{path!r}: {err}")
-            continue
         if status not in ("A", "M", "D"):
             errors.append(f"{path}: unknown status {status!r}")
+            continue
+        err = authority_error(path, status)
+        if err:
+            errors.append(f"{path!r}: {err}")
             continue
         if status == "D":
             plan.append((status, path, None))
@@ -329,6 +398,17 @@ def run_apply(args):
     with open(args.out, "wb") as f:
         for _, path, _ in plan:
             f.write(path.encode("utf-8") + b"\0")
+
+    # The status to render *if* the push turns out to be blocked. The Actions
+    # token cannot push under `.github/workflows/`, and both a template change
+    # and a relocation rewrite those files — but only one of them is a one-time
+    # move of the whole install, and a maintainer reading the summary should not
+    # have to work out which they are looking at. Decided here, where the change
+    # set is, rather than by pattern-matching paths in workflow YAML.
+    if args.blocked_status_out:
+        relocation = is_relocation(data["entries"])
+        with open(args.blocked_status_out, "w", encoding="utf-8") as f:
+            f.write("blocked-relocation" if relocation else "blocked-workflows")
 
     print(f"{len(plan)} path(s) authorized and transferred", file=sys.stderr)
     for _, path, _ in plan:
@@ -385,6 +465,11 @@ def main():
                      help="refuse a bundle regenerating a different version")
     app.add_argument("--out", required=True,
                      help="NUL-separated staging list for git add")
+    app.add_argument("--blocked-status-out",
+                     help="write the run-surface status to use if the push is "
+                          "blocked on .github/workflows/: blocked-relocation "
+                          "when this change set moves the install out of "
+                          ".github/doc-sync/, else blocked-workflows")
 
     ver = sub.add_parser("verify", help="check what git staged against it")
     ver.add_argument("--paths", required=True, help="the `apply` --out list")

@@ -225,6 +225,11 @@ documentation, and living under a documentation root launders nothing. `other` i
 rather than `documentation`: eligibility is a positive list, so an unrecognized shape is refused
 too.
 
+`workflow` covers the plugin's own install directory taken whole — `.doc-lifecycle/` and its
+pre-relocation spelling `.github/doc-sync/`, both prefixes, so the regenerated wiring, the
+credentialed jobs' state, and the consumer's judgment files (the registry included) are one
+class rather than sorted by suffix.
+
 A path that does not exist yet is authorizable — `create-document` must be able to name its
 target before anything is written there. Ancestors that do exist are still checked, so a new
 file cannot be created behind an alias or under a case-folded twin of an existing directory.
@@ -1327,7 +1332,7 @@ invalidates the run, since a typo that silently un-waived everything would defea
 
 ```bash
 python3 -m doclifecycle drift-audit --repo . --mode full \
-  --verdicts verdicts.json --waivers .github/doc-sync/drift-waivers.json \
+  --verdicts verdicts.json --waivers .doc-lifecycle/drift-waivers.json \
   --evidence 'src/**' --exclude-evidence 'src/vendor/**' --evidence-command gh
 ```
 

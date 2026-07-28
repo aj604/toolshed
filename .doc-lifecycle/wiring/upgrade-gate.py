@@ -2,7 +2,7 @@
 """Version-comparison gate for the doc-sync self-upgrade pipeline.
 
 The upgrade workflow (doc-sync-upgrade.yml) reads the installed version from
-.github/doc-sync/installed-version and the latest release tag from the GitHub
+.doc-lifecycle/installed-version and the latest release tag from the GitHub
 API; this script owns the one decision between them so the semver comparison is
 unit-tested instead of living in YAML string-fu.
 

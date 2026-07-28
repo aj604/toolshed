@@ -60,7 +60,7 @@ jobs:
 
       # Pin the plugin marketplace to the installed release: the skills a model step executes
       # must be frozen at the vendored wiring's version. The single source of truth is
-      # .github/doc-sync/installed-version (the lockfile the upgrade lane advances); reading it
+      # .doc-lifecycle/installed-version (the lockfile the upgrade lane advances); reading it
       # at runtime keeps this workflow file byte-identical across versions, so a routine version
       # bump changes only that lockfile and not a `.github/workflows/` file. claude-code-action
       # rejects a `…/toolshed.git#v<version>` URL ref-pin (its validator requires the URL end in
@@ -71,12 +71,12 @@ jobs:
       - name: Pin plugin marketplace
         run: |
           set -euo pipefail
-          VERSION=$(cat .github/doc-sync/installed-version)
+          VERSION=$(cat .doc-lifecycle/installed-version)
           rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
           git clone --depth 1 --branch "v${VERSION}" \
             https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
 
-      # Deterministic — no model. The engine (vendored at .github/doc-sync/engine/, same as
+      # Deterministic — no model. The engine (vendored at .doc-lifecycle/wiring/engine/, same as
       # every other engine call this lane makes) derives the scope from the registry alone, so
       # a reader can re-derive what this run examined instead of trusting it.
       # `continue-on-error` + `steps.plan.outcome` (not a hand-rolled exit-code capture) gates
@@ -87,7 +87,7 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/engine/doc-lifecycle.py drift-plan --repo . --mode full \
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py drift-plan --repo . --mode full \
             > drift-plan.json
 
       # Model step run via the official runner (anthropics/claude-code-action) — it owns Claude
@@ -117,7 +117,7 @@ jobs:
             escalation, "verified means you ran the command", and its rules for authoring a
             fix — a fix that names a file is settled by opening that file) to audit this
             repository's documentation, but write your answer in the *engine's* verdicts shape, not that
-            skill's — this run validates through `python3 .github/doc-sync/engine/doc-lifecycle.py
+            skill's — this run validates through `python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py
             drift-audit`, whose --verdicts contract is:
             {"documents": [{"path": <doc path from drift-plan.json>, "status": "ok",
             "verdicts": [{"unit": <unit ordinal, an integer>, "assertion_class":
@@ -128,15 +128,15 @@ jobs:
             "fix": <complete replacement line, STALE only>}]}]}.
             VERIFIED and STALE each need a citation — "source" (a repository path), or
             "command" (the single command line you ran) for a tool this run declares. Run
-            `python3 .github/doc-sync/probe-evidence-tool.py declared` for the declared tools;
-            each may be read with `python3 .github/doc-sync/probe-evidence-tool.py run <tool>
+            `python3 .doc-lifecycle/wiring/probe-evidence-tool.py declared` for the declared tools;
+            each may be read with `python3 .doc-lifecycle/wiring/probe-evidence-tool.py run <tool>
             <subcommand words> --help` (or `--version`), and the line it prints after
             "citation:" is what you put in evidence.command — the tool's own command line, not
             that wrapper. Nothing else is reachable: the probe refuses an undeclared tool and
             any invocation that is not a --help/--version read. A claim no declared tool can
             settle is genuinely UNVERIFIABLE here, and the report's evidence boundary says why.
             For every document drift-plan.json lists under "documents" with obligation
-            "assertions": run `python3 .github/doc-sync/engine/doc-lifecycle.py segment --repo .
+            "assertions": run `python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py segment --repo .
             --path <path>` to get its assertion units, and answer for each by its "ordinal" field
             (the small integer printed alongside it) — never its 64-character "digest": the
             engine maps the ordinal back to the unit for you, so there is nothing to transcribe.
@@ -150,7 +150,7 @@ jobs:
       - name: Extract cost/turn observability (best-effort — never gates the run)
         if: always()
         run: |
-          python3 .github/doc-sync/render-audit-summary.py cost \
+          python3 .doc-lifecycle/wiring/render-audit-summary.py cost \
             --execution-log "${{ steps.model.outputs.execution_file || '/home/runner/work/_temp/claude-execution-output.json' }}" \
             --out audit-cost.json
 
@@ -187,15 +187,15 @@ jobs:
           # would say the config was why. A run that cannot state its own
           # boundary does not publish one.
           declared=0
-          EVIDENCE_FLAGS=$(python3 .github/doc-sync/probe-evidence-tool.py declared --flags) || declared=$?
+          EVIDENCE_FLAGS=$(python3 .doc-lifecycle/wiring/probe-evidence-tool.py declared --flags) || declared=$?
           if [ "$declared" -ne 0 ]; then
             echo "declared evidence tools unreadable (probe exit code: $declared)"
             echo "refusing to publish a report whose evidence boundary would"
-            echo "silently narrow to tool-free — fix .github/doc-sync/evidence-tools.json"
+            echo "silently narrow to tool-free — fix .doc-lifecycle/evidence-tools.json"
             exit "$declared"
           fi
           code=0
-          python3 .github/doc-sync/engine/doc-lifecycle.py drift-audit --repo . --mode full \
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py drift-audit --repo . --mode full \
             $( [ -f verdicts.json ] && echo "--verdicts verdicts.json" ) \
             ${EVIDENCE_FLAGS} \
             > drift-report.json || code=$?
@@ -283,7 +283,7 @@ jobs:
             echo "report is already invalid — nothing to re-validate freshness against"
           else
             code=0
-            python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
+            python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py validate-report \
               --report drift-report.json --repo . > revalidated.json || code=$?
             case "$code" in
               0|1|3|4)
@@ -302,6 +302,6 @@ jobs:
       - name: Render job summary
         if: always()
         run: |
-          python3 .github/doc-sync/render-audit-summary.py summary \
+          python3 .doc-lifecycle/wiring/render-audit-summary.py summary \
             --report drift-report.json \
             $( [ -f audit-cost.json ] && echo "--cost audit-cost.json" )

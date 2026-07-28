@@ -373,12 +373,12 @@ class DeclaredToolsFailureIsNotSilent(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.repo = self.tmp.name
-        os.makedirs(os.path.join(self.repo, ".github", "doc-sync", "engine"))
+        os.makedirs(os.path.join(self.repo, ".doc-lifecycle", "wiring", "engine"))
         self._stub("engine/doc-lifecycle.py",
                    'import sys\nsys.stdout.write("{}")\nsys.exit(0)\n')
 
     def _stub(self, relpath, body, exit_code=None):
-        path = os.path.join(self.repo, ".github", "doc-sync", *relpath.split("/"))
+        path = os.path.join(self.repo, ".doc-lifecycle", "wiring", *relpath.split("/"))
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("#!/usr/bin/env python3\n" + body)
         os.chmod(path, 0o755)
@@ -449,11 +449,11 @@ class FreshnessRevalidationBehavior(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.repo = self.tmp.name
-        os.makedirs(os.path.join(self.repo, ".github", "doc-sync", "engine"))
+        os.makedirs(os.path.join(self.repo, ".doc-lifecycle", "wiring", "engine"))
 
     def _stub_validate_report(self, stdout, exit_code):
         stub_path = os.path.join(
-            self.repo, ".github", "doc-sync", "engine", "doc-lifecycle.py")
+            self.repo, ".doc-lifecycle", "wiring", "engine", "doc-lifecycle.py")
         with open(stub_path, "w", encoding="utf-8") as fh:
             fh.write(
                 "#!/usr/bin/env python3\n"

@@ -191,6 +191,20 @@ FORBIDDEN_CLASSES = [
     ("docs/.gitlab-ci.yml", "workflow"),
     ("docs/Jenkinsfile", "workflow"),
     ("docs/.github/doc-sync/sync-gate.py", "workflow"),
+    # The plugin's own directory in a wired repository, taken whole
+    # (aj604/toolshed#133). Every tier of it is the pipeline's own wiring or
+    # state, and none of it is a document — including the two files that wear a
+    # documentation-adjacent shape: the registry, which is JSON and would
+    # otherwise be configuration, and a README a release vendored beside the
+    # engine, which is Markdown and would otherwise be eligible.
+    ("docs/.doc-lifecycle/registry.json", "workflow"),
+    ("docs/.doc-lifecycle/audit-scope.json", "workflow"),
+    ("docs/.doc-lifecycle/installed-version", "workflow"),
+    ("docs/.doc-lifecycle/wiring/render-report.py", "workflow"),
+    ("docs/.doc-lifecycle/wiring/engine/doclifecycle/applier.py", "workflow"),
+    ("docs/.doc-lifecycle/wiring/engine/README.md", "workflow"),
+    ("docs/.doc-lifecycle/state/sync-marker", "workflow"),
+    ("docs/.Doc-Lifecycle/wiring/engine/README.md", "workflow"),
     ("docs/.git/hooks/pre-commit", "hook"),
     ("docs/.husky/pre-push", "hook"),
     ("docs/.pre-commit-config.yaml", "hook"),

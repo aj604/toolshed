@@ -235,18 +235,18 @@ class TheCredentialedJobRunsNothingUntrusted(unittest.TestCase):
                     f"the credentialed job reaches into {root}: {line.strip()}")
 
     # The bug this replaced a weaker check for: the bundle legitimately carries
-    # the target release's own `.github/doc-sync/*.py`, so a credentialed step
+    # the target release's own `.doc-lifecycle/wiring/*.py`, so a credentialed step
     # invoking one out of the work tree *after* the transfer runs the release's
     # code with the push token — the split defeated two steps later.
     def test_no_program_it_runs_can_have_been_overwritten_by_the_transfer(self):
         for job in ("regenerate", "land"):
             body = code_lines(self.jobs[job])
             copy = next(i for i, ln in enumerate(body)
-                        if "cp .github/doc-sync/*.py" in ln)
+                        if "cp .doc-lifecycle/wiring/*.py" in ln)
             for i, line in enumerate(body[copy:], copy):
                 for call in re.findall(r'python3 "?([^\s"]+)', line):
                     self.assertNotIn(
-                        ".github/doc-sync/", call,
+                        ".doc-lifecycle/wiring/", call,
                         f"job '{job}' runs {call} out of the work tree after "
                         f"the trusted copy was taken — the regeneration "
                         f"overwrites that path with the release's own copy, so "
@@ -257,7 +257,7 @@ class TheCredentialedJobRunsNothingUntrusted(unittest.TestCase):
                             ("land", "stage-upgrade.py\" apply")):
             body = code_lines(self.jobs[job])
             copy = next(i for i, ln in enumerate(body)
-                        if "cp .github/doc-sync/*.py" in ln)
+                        if "cp .doc-lifecycle/wiring/*.py" in ln)
             write = next(i for i, ln in enumerate(body) if writer in ln)
             self.assertLess(
                 copy, write,
@@ -310,7 +310,7 @@ class TheLockfileRemainsThePin(unittest.TestCase):
     def test_every_job_reads_the_lockfile_rather_than_a_literal(self):
         for name in ("detect", "regenerate"):
             self.assertIn(
-                "cat .github/doc-sync/installed-version",
+                "cat .doc-lifecycle/installed-version",
                 "\n".join(code_lines(jobs()[name])))
 
 
@@ -348,9 +348,35 @@ class RefusalsReachTheRunSurface(unittest.TestCase):
         joined = "\n".join("\n".join(code_lines(body))
                            for body in self.jobs.values())
         for status in ("available", "notified", "refused", "noop",
-                       "blocked-workflows", "opened", "pending"):
+                       "opened", "pending"):
             self.assertIn(f"--status {status}", joined,
                           f"no run-surface summary for the {status!r} outcome")
+
+    def test_the_blocked_status_comes_from_the_path_authority(self):
+        # Both a template change and the one-time relocation out of
+        # `.github/doc-sync/` are blocked by the same push restriction, and the
+        # summary has to say which. That is decided by the code that saw the
+        # change set (aj604/toolshed#133), never by grepping paths in YAML.
+        body = "\n".join(code_lines(self.jobs["land"]))
+        self.assertIn("--blocked-status-out", body)
+        self.assertIn('--status "$(cat "${RUNNER_TEMP}/blocked-status.txt")"',
+                      body)
+        for literal in ("--status blocked-workflows", "--status blocked-relocation"):
+            self.assertNotIn(
+                literal, body,
+                f"{literal} is spelled in the YAML — which blocked status this "
+                f"is belongs to stage-upgrade.py, which read the manifest")
+
+    def test_the_blocked_patch_is_the_staged_diff_so_creations_survive(self):
+        # A relocation's patch is mostly creations; `git diff` before staging
+        # would carry only the deletions and be unapplicable.
+        body = code_lines(self.jobs["land"])
+        stage = next(i for i, ln in enumerate(body)
+                     if "git add --pathspec-from-file=" in ln)
+        patch = next(i for i, ln in enumerate(body)
+                     if "doc-sync-upgrade.patch" in ln)
+        self.assertLess(stage, patch)
+        self.assertIn("git diff --cached > ", body[patch])
 
     def test_the_blocked_workflows_patch_is_published(self):
         body = "\n".join(self.jobs["land"])

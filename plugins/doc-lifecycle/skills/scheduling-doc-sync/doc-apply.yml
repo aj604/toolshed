@@ -92,7 +92,7 @@ jobs:
           REPORT_RUN_ID: ${{ inputs.report_run_id }}
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-apply-summary.py run-id \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py run-id \
             --run-id "$REPORT_RUN_ID" --out "$GITHUB_OUTPUT"
 
       # Bind the dispatched run to *this repository's* doc-audit lane before its
@@ -134,7 +134,7 @@ jobs:
           REPORT_DIGEST: ${{ inputs.report_digest }}
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-apply-summary.py verify-report \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py verify-report \
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
             --expected-digest "$REPORT_DIGEST"
 
@@ -149,9 +149,9 @@ jobs:
           # verdict-carrying exit (a model-free run is `partial`, exit 4) would
           # abort the step before the digest is read. The payload is the answer
           # here, not the exit code — and a payload without one refuses below.
-          python3 .github/doc-sync/engine/doc-lifecycle.py drift-audit --repo . --mode full \
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py drift-audit --repo . --mode full \
             > "${RUNNER_TEMP}/current-lineage.json" || true
-          python3 .github/doc-sync/render-apply-summary.py config-digest \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py config-digest \
             --report "${RUNNER_TEMP}/current-lineage.json" \
             --out "${RUNNER_TEMP}/config-digest.txt"
 
@@ -163,14 +163,14 @@ jobs:
           # `bash -e`, so the code is captured with `||` rather than read from
           # `$?` after a command that would already have ended the step.
           code=0
-          python3 .github/doc-sync/engine/doc-lifecycle.py validate-report \
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py validate-report \
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" --repo . \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
             > "${RUNNER_TEMP}/revalidated.json" || code=$?
           # 4 is `partial`: a report that did not examine everything it declared
           # still carries records an approval set can be minted from, and its
           # coverage gaps travel into the pull-request body.
-          python3 .github/doc-sync/render-apply-summary.py gate --stage revalidation \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage revalidation \
             --payload "${RUNNER_TEMP}/revalidated.json" --exit-code "$code" \
             --accept-exit-code 4
 
@@ -179,7 +179,7 @@ jobs:
           RECORDS: ${{ inputs.records }}
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-apply-summary.py record-args \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py record-args \
             --records "$RECORDS" --out "${RUNNER_TEMP}/record-args.txt"
 
       # The semantic approval, minted from the named subset. The argv comes from the file the
@@ -192,21 +192,21 @@ jobs:
           set -uo pipefail
           mapfile -t RECORD_ARGS < "${RUNNER_TEMP}/record-args.txt"
           code=0
-          python3 .github/doc-sync/engine/doc-lifecycle.py mint-approval \
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py mint-approval \
             "${RECORD_ARGS[@]}" \
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" --repo . \
             --minter "$MINTER" --minter-kind human \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
             --out "${RUNNER_TEMP}/approval.json" \
             > "${RUNNER_TEMP}/mint-result.json" || code=$?
-          python3 .github/doc-sync/render-apply-summary.py gate --stage minting \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage minting \
             --payload "${RUNNER_TEMP}/mint-result.json" --exit-code "$code"
 
       - name: Publish the approval digest to the credentialed job
         id: approval
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-apply-summary.py approval-digest \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py approval-digest \
             --approval "${RUNNER_TEMP}/approval.json" --out "$GITHUB_OUTPUT"
 
       # The summary and trailers the change carries. Rendered here, where the approval set
@@ -216,7 +216,7 @@ jobs:
         run: |
           set -uo pipefail
           code=0
-          python3 .github/doc-sync/engine/doc-lifecycle.py render-approval \
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py render-approval \
             --approval "${RUNNER_TEMP}/approval.json" --repo . \
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
@@ -225,24 +225,24 @@ jobs:
           # below: a step's status is its *last* command's, errexit or not, so a
           # non-terminal gate that only returned 1 would let the trailers render
           # and the step pass. The refusal must end the step here.
-          python3 .github/doc-sync/render-apply-summary.py gate --stage rendering \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage rendering \
             --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code" || exit 1
           # Gated too, and not as an afterthought: an approval set this command
           # refuses prints nothing at all, and an empty trailers block is what a
           # change would land looking authorized without.
           code=0
-          python3 .github/doc-sync/engine/doc-lifecycle.py render-approval \
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py render-approval \
             --approval "${RUNNER_TEMP}/approval.json" --repo . \
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
             --trailers > "${RUNNER_TEMP}/trailers.txt" || code=$?
-          python3 .github/doc-sync/render-apply-summary.py gate --stage rendering \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage rendering \
             --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code"
 
       - name: Derive the branch name from the approval digest
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-apply-summary.py branch-name \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py branch-name \
             --approval "${RUNNER_TEMP}/approval.json" \
             --out "${RUNNER_TEMP}/branch.txt"
 
@@ -298,7 +298,7 @@ jobs:
       - name: Pin plugin marketplace
         run: |
           set -euo pipefail
-          VERSION=$(cat .github/doc-sync/installed-version)
+          VERSION=$(cat .doc-lifecycle/installed-version)
           rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
           git clone --depth 1 --branch "v${VERSION}" \
             https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
@@ -377,7 +377,7 @@ jobs:
 
             Finally stamp the plan's digest with the engine's own canonical digest, which is
             what binds the plan to review:
-            python3 -c 'import json,sys; sys.path.insert(0,".github/doc-sync/engine"); from doclifecycle.digest import sha256_canonical as d; p=json.load(open("edit-plan.json")); p.pop("digest",None); p["digest"]=d(p); json.dump(p,open("edit-plan.json","w"))'
+            python3 -c 'import json,sys; sys.path.insert(0,".doc-lifecycle/wiring/engine"); from doclifecycle.digest import sha256_canonical as d; p=json.load(open("edit-plan.json")); p.pop("digest",None); p["digest"]=d(p); json.dump(p,open("edit-plan.json","w"))'
 
             If you cannot author a correct operation for an approved record, write the plan
             without it and say so — a partial plan is refused honestly; a guessed preimage is
@@ -436,20 +436,20 @@ jobs:
         run: |
           set -uo pipefail
           code=0
-          python3 .github/doc-sync/engine/doc-lifecycle.py apply-plan --repo . \
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py apply-plan --repo . \
             --plan "${RUNNER_TEMP}/plan/edit-plan.json" \
             --approval "${RUNNER_TEMP}/apply/approval.json" \
             --report "${RUNNER_TEMP}/apply/drift-report.json" \
             --audit-config-digest "$(cat "${RUNNER_TEMP}/apply/config-digest.txt")" \
             --expected-digest "$EXPECTED_APPROVAL" \
             > "${RUNNER_TEMP}/apply-result.json" || code=$?
-          python3 .github/doc-sync/render-apply-summary.py gate --stage apply \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage apply \
             --payload "${RUNNER_TEMP}/apply-result.json" --exit-code "$code"
 
       - name: Derive the staged path list from the verified apply result
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-apply-summary.py staged-paths \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py staged-paths \
             --result "${RUNNER_TEMP}/apply-result.json" \
             --approval "${RUNNER_TEMP}/apply/approval.json" \
             --out "${RUNNER_TEMP}/staged-paths.txt"
@@ -463,7 +463,7 @@ jobs:
           { git diff --name-only -z; \
             git ls-files --others --exclude-standard -z; } \
             > "${RUNNER_TEMP}/unstaged.txt"
-          python3 .github/doc-sync/render-apply-summary.py verify-staged \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py verify-staged \
             --paths "${RUNNER_TEMP}/staged-paths.txt" \
             --staged "${RUNNER_TEMP}/staged.txt" \
             --unstaged "${RUNNER_TEMP}/unstaged.txt"
@@ -471,16 +471,16 @@ jobs:
       - name: Render the commit message, pull-request title, and body
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-apply-summary.py commit-message \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py commit-message \
             --result "${RUNNER_TEMP}/apply-result.json" \
             --approval "${RUNNER_TEMP}/apply/approval.json" \
             --trailers "${RUNNER_TEMP}/apply/trailers.txt" \
             --out "${RUNNER_TEMP}/commit-message.txt"
-          python3 .github/doc-sync/render-apply-summary.py pr-title \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py pr-title \
             --result "${RUNNER_TEMP}/apply-result.json" \
             --approval "${RUNNER_TEMP}/apply/approval.json" \
             --out "${RUNNER_TEMP}/pr-title.txt"
-          python3 .github/doc-sync/render-apply-summary.py pr-body \
+          python3 .doc-lifecycle/wiring/render-apply-summary.py pr-body \
             --result "${RUNNER_TEMP}/apply-result.json" \
             --approval "${RUNNER_TEMP}/apply/approval.json" \
             --report "${RUNNER_TEMP}/apply/drift-report.json" \

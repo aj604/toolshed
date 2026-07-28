@@ -38,7 +38,7 @@ and shipped as the `scheduling-doc-sync` skill, wires detect→fix to cron/PR).
    checkable true value to restore — puffery has none, so any replacement line you'd draft is
    new authorship, and cutting or rewording it is a human decision, not a sync. In a
    scheduled install the human's third option is a durable waiver
-   (`.github/doc-sync/drift-waivers.json`, owned by scheduling-doc-sync): an accepted claim
+   (`.doc-lifecycle/drift-waivers.json`, owned by scheduling-doc-sync): an accepted claim
    stops resurfacing on run surfaces, while this skill keeps emitting it — detection stays
    pure; disposition is the pipeline's job. Lines
    already marked `> UNVERIFIED: <claim>` (the marker

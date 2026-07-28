@@ -39,27 +39,31 @@ wiring and opens the version-bump PR, #127). #77 removed the legacy
 scripts, so an install is exactly those three templates; `apply-upgrade.py` installs the two
 engine lanes only into a repo holding `.doc-lifecycle/registry.json`, and the upgrade lane
 everywhere. The sample repos under `tests/fixtures/` are the other runnable
-code that matters, alongside the dogfooded install under `.github/` (`doc-sync/upgrade-gate.py`,
-`doc-sync/stage-upgrade.py`,
-`doc-sync/render-report.py`, `doc-sync/render-audit-summary.py`,
-`doc-sync/render-apply-summary.py`, `doc-sync/probe-evidence-tool.py`,
-`doc-sync/plan-chunks.py`, `doc-sync/validate-drift-output.py`,
-`doc-sync/validate-bloat-output.py`,
-`doc-sync/engine/` (the `doclifecycle` package vendored wholesale from
+code that matters, alongside the dogfooded install under `.doc-lifecycle/` (#133 centralized it
+there out of `.github/doc-sync/`; three tiers by owner — consumer judgment at the root,
+plugin-regenerated wiring under `wiring/`, machine-written state under `state/`):
+`wiring/upgrade-gate.py`,
+`wiring/stage-upgrade.py`,
+`wiring/render-report.py`, `wiring/render-audit-summary.py`,
+`wiring/render-apply-summary.py`, `wiring/probe-evidence-tool.py`,
+`wiring/plan-chunks.py`, `wiring/validate-drift-output.py`,
+`wiring/validate-bloat-output.py`,
+`wiring/engine/` (the `doclifecycle` package vendored wholesale from
 `plugins/doc-lifecycle/engine/`, byte-identical to it — the only copy the lanes run, never
 edited in place),
-`doc-sync/audit-scope.json` (bloat-audit scope config, and one of Migration mode's inference
-inputs), `doc-sync/drift-waivers.json`
+`registry.json` (the classification registry — five roots, closed-world),
+`audit-scope.json` (bloat-audit scope config, and one of Migration mode's inference
+inputs), `drift-waivers.json`
 (accepted-UNVERIFIABLE claims — `drift-audit --waivers` annotates against it, and Migration
 mode re-keys it; no installed lane passes that flag today),
-`doc-sync/evidence-tools.json` (the local tools the audit lane may cite — `gh` here),
-`doc-sync/installed-version`
-(the plugin-version lockfile the upgrade workflow reads), `workflows/doc-audit.yml`,
-`workflows/doc-apply.yml`, `workflows/doc-sync-upgrade.yml`; `.github/doc-sync-marker` survives
-as legacy state no lane reads — Migration mode's dry run reports its digest among the consumer
-state it preserves), the classification registry
-(`.doc-lifecycle/registry.json` — five roots, closed-world), the ci+release workflow
-(`workflows/release.yml`), that workflow's own test-suite runner
+`evidence-tools.json` (the local tools the audit lane may cite — `gh` here),
+`installed-version`
+(the plugin-version lockfile the upgrade workflow reads), and `state/sync-marker`, which survives
+as legacy state no lane reads — carried across the relocation byte-for-byte because whose state it
+is decides that. The three lane workflows stay in `.github/workflows/` (`doc-audit.yml`,
+`doc-apply.yml`, `doc-sync-upgrade.yml`) because GitHub reads workflows only from there, and are
+the only doc-lifecycle content left under `.github/`. Also runnable: the ci+release workflow
+(`.github/workflows/release.yml`), that workflow's own test-suite runner
 (`.github/scripts/run-script-suites.py`, #99 — discovery-driven, so a new
 `tests/scripts/*_test.py` suite needs no hand-wiring), the release manifest guard
 (`.github/scripts/release-manifest.py`, #77 — it reads `release.yml` for the discovery steps CI
@@ -81,6 +85,11 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   root**: `/plugin marketplace add <owner>/<repo>` only finds `marketplace.json` there.
 - `plugins/doc-lifecycle/` — the one published plugin. `.claude-plugin/plugin.json` is its
   manifest; `skills/`, `agents/`, and `engine/` hold its contents.
+- `.doc-lifecycle/` — this repo's own install of the plugin (#133). Judgment files and
+  `installed-version` at the root are hand-edited; `wiring/` is regenerated wholesale by the
+  upgrade lane, so an edit there is reverted on the next upgrade; `state/` is machine-written.
+  Its lane workflows live in `.github/workflows/` — GitHub's requirement, and the only
+  doc-lifecycle content under `.github/`.
 - `CONTEXT.md` — the ubiquitous language for the #57 re-architecture (component, contract, and
   document-model terms, each with an _Avoid_ list). Use its vocabulary in engine code and tests.
 - `docs/` — `plans/` (design docs + `HANDOFF.md`), `guides/` (narrative user guides). Not published.

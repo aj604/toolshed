@@ -1,13 +1,13 @@
 # doc-sync-upgrade — keep the installed doc-sync wiring current with the plugin.
 # Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill; re-run that
-# skill to upgrade this file. Preserves .github/doc-sync-marker, audit-scope.json,
+# skill to upgrade this file. Preserves .doc-lifecycle/state/sync-marker, audit-scope.json,
 # and the install-time knobs. Design: docs/decisions.md's doc-sync self-upgrade
 # entry in aj604/toolshed.
 #
 # Why this exists: the nightly/weekly workflows pin plugin_marketplaces to a
 # release tag, so the skills they invoke are frozen at the version the vendored
 # wiring was generated from. This workflow is the ONLY thing that advances that
-# pin — and `.github/doc-sync/installed-version` remains the pin, so this YAML is
+# pin — and `.doc-lifecycle/installed-version` remains the pin, so this YAML is
 # byte-identical across versions.
 #
 # Three jobs, split strictly by trust and by who decides (aj604/toolshed#127).
@@ -81,9 +81,9 @@ jobs:
         id: versions
         run: |
           set -euo pipefail
-          test -f .github/doc-sync/installed-version || {
-            echo "::error::.github/doc-sync/installed-version missing — run the scheduling-doc-sync installer"; exit 1; }
-          CURRENT=$(cat .github/doc-sync/installed-version)
+          test -f .doc-lifecycle/installed-version || {
+            echo "::error::.doc-lifecycle/installed-version missing — run the scheduling-doc-sync installer"; exit 1; }
+          CURRENT=$(cat .doc-lifecycle/installed-version)
           # Latest published release of the plugin marketplace (tagName is v-prefixed).
           LATEST=$(gh release view --repo aj604/toolshed --json tagName --jq .tagName | sed 's/^v//')
           {
@@ -99,13 +99,13 @@ jobs:
         run: |
           set -euo pipefail
           # Semver comparison lives in the tested gate, never in YAML string-fu.
-          DECISION=$(python3 .github/doc-sync/upgrade-gate.py compare \
+          DECISION=$(python3 .doc-lifecycle/wiring/upgrade-gate.py compare \
             --current "$CURRENT" --latest "$LATEST")
           echo "gate: ${DECISION}"
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
           # current / ahead both self-explain and stop here.
           if [ "${DECISION}" != "upgrade" ]; then
-            python3 .github/doc-sync/render-report.py upgrade-summary \
+            python3 .doc-lifecycle/wiring/render-report.py upgrade-summary \
               --status "${DECISION}" --current "$CURRENT" --latest "$LATEST"
           fi
 
@@ -116,7 +116,7 @@ jobs:
           LATEST: ${{ steps.versions.outputs.latest }}
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-report.py upgrade-notice \
+          python3 .doc-lifecycle/wiring/render-report.py upgrade-notice \
             --current "$CURRENT" --latest "$LATEST" \
             --repo "${GITHUB_REPOSITORY}" --workflow doc-sync-upgrade \
             --title-out "${RUNNER_TEMP}/notice-title.txt" \
@@ -134,7 +134,7 @@ jobs:
           set -euo pipefail
           gh issue list --state open --limit 200 --json number,title \
             > "${RUNNER_TEMP}/open-issues.json"
-          python3 .github/doc-sync/upgrade-gate.py notice \
+          python3 .doc-lifecycle/wiring/upgrade-gate.py notice \
             --issues "${RUNNER_TEMP}/open-issues.json" \
             --title "${RUNNER_TEMP}/notice-title.txt" \
             --out "$GITHUB_OUTPUT"
@@ -150,7 +150,7 @@ jobs:
             --title "$(cat "${RUNNER_TEMP}/notice-title.txt")" \
             --body-file "${RUNNER_TEMP}/notice-body.md" \
             >> "$GITHUB_STEP_SUMMARY"
-          python3 .github/doc-sync/render-report.py upgrade-summary \
+          python3 .doc-lifecycle/wiring/render-report.py upgrade-summary \
             --status available --current "$CURRENT" --latest "$LATEST"
 
       - name: Say the notice already stands
@@ -160,7 +160,7 @@ jobs:
           LATEST: ${{ steps.versions.outputs.latest }}
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/render-report.py upgrade-summary \
+          python3 .doc-lifecycle/wiring/render-report.py upgrade-summary \
             --status notified --current "$CURRENT" --latest "$LATEST"
 
   # The only job that runs the target release's code, and it holds nothing: no
@@ -188,13 +188,13 @@ jobs:
           TARGET: ${{ inputs.target }}
         run: |
           set -euo pipefail
-          test -f .github/doc-sync/installed-version || {
-            echo "::error::.github/doc-sync/installed-version missing — run the scheduling-doc-sync installer"; exit 1; }
-          CURRENT=$(cat .github/doc-sync/installed-version)
+          test -f .doc-lifecycle/installed-version || {
+            echo "::error::.doc-lifecycle/installed-version missing — run the scheduling-doc-sync installer"; exit 1; }
+          CURRENT=$(cat .doc-lifecycle/installed-version)
           echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
-          TARGET_CLEAN=$(python3 .github/doc-sync/upgrade-gate.py normalize \
+          TARGET_CLEAN=$(python3 .doc-lifecycle/wiring/upgrade-gate.py normalize \
             --version "$TARGET" --out "$GITHUB_OUTPUT")
-          DECISION=$(python3 .github/doc-sync/upgrade-gate.py compare \
+          DECISION=$(python3 .doc-lifecycle/wiring/upgrade-gate.py compare \
             --current "${CURRENT}" --latest "${TARGET_CLEAN}")
           if [ "${DECISION}" != "upgrade" ]; then
             echo "::error::dispatched target ${TARGET_CLEAN} is not newer than the installed ${CURRENT} (gate: ${DECISION}) — this lane advances the pin, it never rewinds it"
@@ -211,7 +211,7 @@ jobs:
           set -euo pipefail
           rm -rf "${RUNNER_TEMP}/trusted"
           mkdir -p "${RUNNER_TEMP}/trusted"
-          cp .github/doc-sync/*.py "${RUNNER_TEMP}/trusted/"
+          cp .doc-lifecycle/wiring/*.py "${RUNNER_TEMP}/trusted/"
 
       # Into a scratch copy, never the checkout: the regeneration writes only
       # where this job can afford it to.
@@ -299,7 +299,7 @@ jobs:
 
       # Before anything is transferred, and this is the load-bearing step of the
       # whole job: the bundle legitimately carries the target release's own
-      # `.github/doc-sync/*.py` — `stage-upgrade.py` and `render-report.py`
+      # `.doc-lifecycle/wiring/*.py` — `stage-upgrade.py` and `render-report.py`
       # included — so a later step invoking one out of the work tree would be
       # running the release's code with this job's push token, which is exactly
       # what the split exists to prevent. Every program below runs from this
@@ -309,7 +309,7 @@ jobs:
           set -euo pipefail
           rm -rf "${RUNNER_TEMP}/trusted"
           mkdir -p "${RUNNER_TEMP}/trusted"
-          cp .github/doc-sync/*.py "${RUNNER_TEMP}/trusted/"
+          cp .doc-lifecycle/wiring/*.py "${RUNNER_TEMP}/trusted/"
 
       # An already-open upgrade PR awaits a human — don't stack a second one.
       - name: Refuse to stack on an open upgrade PR
@@ -349,7 +349,8 @@ jobs:
           set -euo pipefail
           python3 "${RUNNER_TEMP}/trusted/stage-upgrade.py" apply \
             --bundle "${RUNNER_TEMP}/upgrade-bundle" --repo . \
-            --target "${TARGET}" --out "${RUNNER_TEMP}/staged-paths.txt"
+            --target "${TARGET}" --out "${RUNNER_TEMP}/staged-paths.txt" \
+            --blocked-status-out "${RUNNER_TEMP}/blocked-status.txt"
 
       - name: Stage exactly those paths
         if: steps.pending.outputs.open_prs == '0'
@@ -386,10 +387,16 @@ jobs:
           # runtime), so the push below succeeds. But an upgrade that changes the workflow
           # TEMPLATES themselves can't land automatically — emit the diff as a patch
           # artifact and fail loud with apply instructions, not a cryptic push rejection.
+          #
+          # The staged diff, so a one-time relocation's patch carries its newly created
+          # files and not only the deletions (aj604/toolshed#133). Which of the two
+          # blocked statuses this is was decided by the path authority, from the change
+          # set it authorized — a summary that says "your install moved" is not something
+          # to derive by grepping paths in YAML.
           if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
             git diff --cached > "$RUNNER_TEMP/doc-sync-upgrade.patch"
             python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-summary \
-              --status blocked-workflows --current "$CURRENT" \
+              --status "$(cat "${RUNNER_TEMP}/blocked-status.txt")" --current "$CURRENT" \
               --latest "$TARGET" --files "${CHANGED}"
             exit 1
           fi

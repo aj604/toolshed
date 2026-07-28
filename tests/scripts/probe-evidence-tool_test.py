@@ -32,7 +32,7 @@ SCRIPT = os.path.join(
     "scripts", "probe-evidence-tool.py",
 )
 
-CONFIG_RELPATH = os.path.join(".github", "doc-sync", "evidence-tools.json")
+CONFIG_RELPATH = os.path.join(".doc-lifecycle", "evidence-tools.json")
 
 
 def run(*args, cwd=None, path=None):

@@ -49,6 +49,16 @@ DECLARABLE_TARGET_CLASSES = (DOCUMENTATION,)
 _WORKFLOW_PREFIXES = (
     ".github/workflows/",
     ".github/actions/",
+    # The plugin's own directory in a wired repository, taken whole: the
+    # regenerated wiring under `wiring/`, the credentialed jobs' state under
+    # `state/`, and the consumer's judgment files at its root — the registry
+    # included, which otherwise would be protected only incidentally by not
+    # wearing a documentation suffix.
+    ".doc-lifecycle/",
+    # The pre-relocation spelling of the same tree. Kept beside the current one
+    # rather than replaced: an install that has not yet run the relocating
+    # upgrade still holds wiring there, and leftovers survive the relocation by
+    # design, so removing this would hand that wiring back as source.
     ".github/doc-sync/",
     ".circleci/",
     ".buildkite/",
@@ -271,7 +281,7 @@ def path_references(text):
 def classify_target(path):
     """The target class a canonical repository-relative path belongs to.
 
-    Pure, and ordered most-dangerous-first: a `.py` under `.github/doc-sync/`
+    Pure, and ordered most-dangerous-first: a `.py` under `.doc-lifecycle/`
     is wiring before it is source, and `.env.production` is a credential before
     it is configuration. The last resort is `other`, never `documentation` —
     an unrecognized shape is not evidence of safety.
