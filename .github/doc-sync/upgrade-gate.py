@@ -15,12 +15,32 @@ Prints exactly one decision token on stdout:
     ahead     installed is newer than any release (a dev/prerelease pin) —
               skip, never downgrade
 
+    upgrade-gate.py normalize --version <raw> --out FILE
+
+Writes `target=X.Y.Z` to FILE (a `$GITHUB_OUTPUT`) — the same strict parse, used
+to shape-check a human's `workflow_dispatch` input before it names a git ref.
+The dispatched value reaches the clone only through the normalized output, so a
+value carrying a ref expression, a path separator, or shell metacharacters fails
+here rather than becoming argv.
+
+    upgrade-gate.py notice --issues FILE --title FILE --out FILE
+
+Prints `open` or `exists` and writes `notice=<decision>` to FILE (a
+`$GITHUB_OUTPUT`) — whether the detecting job should file a notice for this
+release, or whether one already stands. `--issues` is `gh issue list --json
+number,title` output; `--title` is the file `render-report.py upgrade-notice`
+wrote, so the dedupe key is the exact title a reader would see. One open notice
+per release: a weekly check that keeps finding the same unreviewed release keeps
+quiet.
+
 Exit status: 0 with a decision on stdout; 2 on unparseable input (empty,
-non-numeric, or not exactly three dot-separated components). A malformed
-version fails the workflow step red rather than silently guessing.
+non-numeric, or not exactly three dot-separated components; an issue list that
+is not a JSON array). A malformed version fails the workflow step red rather
+than silently guessing.
 """
 
 import argparse
+import json
 import sys
 
 
@@ -52,7 +72,51 @@ def main():
     cmp_.add_argument("--current", required=True)
     cmp_.add_argument("--latest", required=True)
 
+    norm = sub.add_parser("normalize")
+    norm.add_argument("--version", required=True)
+    norm.add_argument("--out", required=True)
+
+    note = sub.add_parser("notice")
+    note.add_argument("--issues", required=True)
+    note.add_argument("--title", required=True)
+    note.add_argument("--out", required=True)
+
     args = parser.parse_args()
+
+    if args.mode == "notice":
+        try:
+            with open(args.title, encoding="utf-8") as f:
+                title = f.read().strip()
+            with open(args.issues, encoding="utf-8") as f:
+                issues = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        if not title:
+            print("error: --title file is empty", file=sys.stderr)
+            return 2
+        if not isinstance(issues, list):
+            print("error: --issues must be a JSON array "
+                  "(gh issue list --json number,title)", file=sys.stderr)
+            return 2
+        standing = any(isinstance(i, dict) and i.get("title") == title
+                       for i in issues)
+        decision = "exists" if standing else "open"
+        with open(args.out, "a", encoding="utf-8") as f:
+            f.write(f"notice={decision}\n")
+        print(decision)
+        return 0
+
+    if args.mode == "normalize":
+        try:
+            version = ".".join(str(p) for p in parse(args.version))
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        with open(args.out, "a", encoding="utf-8") as f:
+            f.write(f"target={version}\n")
+        print(version)
+        return 0
 
     try:
         current = parse(args.current)

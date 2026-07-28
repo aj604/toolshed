@@ -4,6 +4,88 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-27 — publishing a tag is not a consumer's decision to run new code (#127)
+- Evidence: `.github/workflows/doc-sync-upgrade.yml` before this change — one job holding
+  `contents: write`, `pull-requests: write` and a push token, which on a weekly cron ran
+  `upgrade-gate.py compare` (a 69-line semver comparison), cloned the newest release tag, and
+  executed that clone's `apply-upgrade.py` from inside the credentialed job. Nobody in the
+  consumer repository had read a line of that release when it ran, and the pull request it opened
+  reviewed the *result* of an execution that had already happened. Filed out of #77, whose scope
+  sentence named "self-executing upgrade logic" among the mutation paths to remove; #77's own PR
+  closed the broad-staging half of that sentence and left this one.
+- Decided (who decides): a version comparison detects, a human dispatches. The `schedule:` cron now
+  reaches only a `detect` job that compares two numbers and stops — no clone, none of the release's
+  code — and files one tracking issue naming the release, deduped on its exact title so a weekly
+  check that keeps finding the same unreviewed release keeps quiet. Execution runs only under
+  `workflow_dispatch` carrying a `target`, and the same tested gate that shape-checks the input
+  refuses anything that is not strictly newer than the pin, so a dispatch can advance the pin and
+  never rewind it. `issues: write` is the detecting job's only write scope, and it buys a
+  notification.
+- Decided (who holds what): the same trust split `doc-audit.yml`/`doc-apply.yml` already run.
+  `regenerate` is the only job that runs the target release's code and it holds nothing — no token,
+  no secret, `contents: read`, a checkout persisting no credential — and it runs `apply-upgrade.py`
+  against a scratch copy of the wiring roots rather than the work tree. `land` holds the
+  credentials and executes none of the release's code: every byte the release produced reaches it
+  as data inside an artifact.
+- Decided (and this is where the first draft was wrong, caught in review): both jobs copy
+  `.github/doc-sync/*.py` out to `$RUNNER_TEMP/trusted/` before anything writes, and run every
+  wiring script from there. The regeneration produces the release's own `stage-upgrade.py` and
+  `render-report.py`, and `land`'s transfer legitimately lands them in `.github/doc-sync/` — so
+  "the credentialed job runs only the install's own scripts" was true of the paths and false of
+  the bytes: two steps after the transfer, `land` was invoking the release's code with the push
+  token, which is the property this whole entry exists to establish. The claim is about *when* the
+  copy was taken, never about which directory it sits in, and
+  `upgrade-workflow_test.py::test_no_program_it_runs_can_have_been_overwritten_by_the_transfer` is
+  what keeps it that way.
+- Decided (what bounds the write): a new vendored script, `stage-upgrade.py`, is the upgrade lane's
+  path authority — the inverse of `authorize-paths.py`, which denies exactly the wiring this one
+  is about. It compares the scratch tree against the install, refuses the whole run if any
+  difference lies outside what `apply-upgrade.py` owns (the marker, `audit-scope.json`, the
+  registry, a workflow that is not `doc-*.yml`, a non-`.py` drop into `.github/doc-sync/`, a
+  symlink, anything outside the wiring roots), and emits a manifest of `{status, path, sha256}`.
+  The credentialed job re-derives that authority from the manifest rather than trusting it, checks
+  every bundled file against its recorded digest, refuses a bundle carrying a file the manifest
+  does not name, and stages by explicit pathspec. It is vendored — unlike `apply-upgrade.py`,
+  which is not — precisely because the boundary has to be drawn by code the consumer already
+  reviewed, so the vendored set goes eight → nine and the install's committed set fifteen →
+  sixteen.
+- Rejected: `workflow_dispatch`-only, dropping the schedule. Simplest, and it satisfies the same
+  criterion, but consumers lose the "a new release exists" signal entirely and an install would
+  sit unpatched until someone thought to look.
+- Rejected: keeping the schedule as the trigger and relying on the split alone. The split closes
+  the credential half, not the decision half: a compromised release would still execute in every
+  consumer's runner on the next cron tick, and a job with `contents: read` on a public repo is not
+  a job whose execution nobody needs to authorize.
+- Still binds, from the 2026-07-07 deterministic-upgrade entry below: the lane runs no model, so
+  its write scopes never sit behind a model process; `.github/doc-sync/installed-version` remains
+  the pin and the workflow YAML carries no version, so a routine upgrade still never has to push a
+  file under `.github/workflows/`. That entry's "the vendored set stays six" is superseded twice
+  over — by the audit/apply lanes and now by `stage-upgrade.py` — but its reason for not vendoring
+  `apply-upgrade.py` still holds and is now load-bearing: the target release's copy is what runs,
+  which is exactly why it may not run credentialed.
+- Named limit: a consumer's *first* upgrade to this release still runs the old single-job lane,
+  because the wiring that upgrades them is the wiring they already have. There is no way around
+  that from this side; it is the last run of the shape this entry retires.
+- Named limit: `land` copies bytes the unreviewed release produced. That is what an upgrade is —
+  the guarantee is that nothing from the release *executes* with credentials, that what lands is
+  confined to the wiring, and that a person reads the diff as a pull request before it is merged.
+- Supersedes, once it lands: #77's entry naming this as a "Known gap" is still on that issue's
+  unmerged branch, so there is nothing here to mark yet. Whoever merges #77 should mark that
+  paragraph superseded by this entry rather than leaving both standing as live gaps.
+- Verified: `tests/scripts/stage-upgrade_test.py` (the authority, both directions — the manifest
+  step's refusals, and the credentialed step re-deriving them from a manifest edited in between);
+  `tests/scripts/upgrade-workflow_test.py` (the three-job split, dispatch-gated execution, no
+  dispatch input in any `run:`, the credentialed job invoking nothing from the clone or scratch
+  tree, no version literal in the YAML, a run-surface summary for every terminal state);
+  `tests/scripts/upgrade-gate_test.py`'s `Normalize` (a target that is not three decimal
+  components never becomes argv). `tests/scripts/workflow-permissions_test.py` lost its
+  `BROAD_ADD_EXEMPT` set: no shipped write job stages broadly any more, and the exception that
+  named this lane is gone with the `git add -A` it excused.
+- Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync-upgrade.yml`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/stage-upgrade.py`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/upgrade-gate.py`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/render-report.py`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py`
 ## 2026-07-27 — the release gate is discovery, plus a guard on discovery (#77)
 - Evidence: issue #57's distilled-decisions comment (2026-07-26): "Release gate is deterministic:
   all script suites + the repository-level acceptance fixture (extended with a registry case incl.
@@ -193,7 +275,9 @@
   holds with no exemption — deleting that exemption is what proves it. Nothing here is a judgment
   about the diff; it is the same discipline the applier's whole-diff confinement enforces, which
   is that a write scope is not a licence to commit whatever happens to be on disk.
-- Known gap, tracked as #127 and wired as blocking #77 — stated plainly, and near the top rather
+- Known gap, tracked as #127 and wired as blocking #77 — **superseded by the 2026-07-27 entry
+  "publishing a tag is not a consumer's decision to run new code (#127)" above, which closed it.**
+  Left standing as the record of what was true then. Stated plainly, and near the top rather
   than as a footnote, because this entry would otherwise read as a guarantee it does not carry:
   the lane still runs on a schedule, and still executes the target release's own upgrade logic
   from the freshly cloned checkout, in a job holding `contents: write` and a push token, before

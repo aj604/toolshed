@@ -8,11 +8,15 @@ templates with the consumer's existing knobs, and bump the lockfile.
 This script does exactly that — the mechanical work the headless model used to do
 in upgrade mode — so the upgrade lane needs no model call (and no model auth).
 
-It writes files only. The caller (doc-sync-upgrade.yml, or a human forcing an
-upgrade) owns git: it diffs the working tree, opens the review PR, and the merge
-is what advances installed-version. A pure version bump — a release that changed
-no script logic and no template — leaves only installed-version diffing, since the
-re-copied scripts and re-rendered templates come out byte-identical.
+It writes files only, and it is the *target release's* copy that runs, so the
+lane never runs it in a job holding a credential: doc-sync-upgrade.yml's
+uncredentialed `regenerate` job points --repo at a scratch copy of the install,
+and the vendored stage-upgrade.py (run from the installed checkout, never from
+here) is what decides which of the paths written there may be landed
+(aj604/toolshed#127). The merge of the pull request that follows is what advances
+installed-version. A pure version bump — a release that changed no script logic
+and no template — leaves only installed-version diffing, since the re-copied
+scripts and re-rendered templates come out byte-identical.
 
 Usage:
     apply-upgrade.py --plugin-root <path> --repo <root> --target <version>
@@ -75,7 +79,7 @@ TEMPLATE_PLACEHOLDERS = {
     "doc-sync-upgrade.yml": ["{{UPGRADE_CRON}}"],
 }
 
-# Vendored scripts and the skill dir each is copied from (the upgrade lane's two
+# Vendored scripts and the skill dir each is copied from (the upgrade lane's three
 # from this skill, the planner + bloat validator from detecting-doc-bloat, the
 # drift validator from detecting-doc-drift). Mirror scheduling-doc-sync's install
 # steps 5-6. The last three are the detecting skills' own read-only tooling: they
@@ -84,6 +88,11 @@ TEMPLATE_PLACEHOLDERS = {
 SCRIPTS = {
     "upgrade-gate.py": "scheduling-doc-sync/scripts",
     "render-report.py": "scheduling-doc-sync/scripts",
+    # The upgrade lane's own path authority. Vendored, unlike apply-upgrade.py,
+    # precisely because the upgrade lane must run it from the *installed*
+    # checkout: it is the code that decides what the target release's
+    # regeneration is allowed to have written (aj604/toolshed#127).
+    "stage-upgrade.py": "scheduling-doc-sync/scripts",
     "plan-chunks.py": "detecting-doc-bloat/scripts",
     "validate-bloat-output.py": "detecting-doc-bloat/scripts",
     "validate-drift-output.py": "detecting-doc-drift/scripts",
@@ -357,7 +366,10 @@ def main():
     parser.add_argument(
         "--report-written",
         help="write the regenerated paths here, one per line, for `git add "
-             "--pathspec-from-file=` (the caller stages this set and nothing else)")
+             "--pathspec-from-file=`. For a human forcing an upgrade locally; "
+             "the workflow no longer reads it — a declaration by the release "
+             "being landed is not evidence about that release "
+             "(aj604/toolshed#127)")
     args = parser.parse_args()
 
     try:

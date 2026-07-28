@@ -20,6 +20,11 @@ install:
    `python3` — those patterns are prefix-matched, so naming a program grants
    all of it (aj604/toolshed#118).
 
+(4) has no exceptions left. `doc-sync-upgrade.yml`'s write job held the last
+one, staging a deterministic script's output wholesale; aj604/toolshed#77 took
+`git add -A` out of it and #127 split the lane so the write job stages the path
+set `stage-upgrade.py` authorized.
+
 Parsed with a line scanner rather than a YAML library: the test suite is
 stdlib-only, and the shipped workflows are uniformly 2-space indented.
 
