@@ -41,6 +41,17 @@ units, and a unit digest *is* its content) and someone can follow the pointer
 that says why (`evidence.source`). Everything the policy admits satisfies both;
 everything a bloat audit produces is a judgment about whether a passage should
 exist at all, which no pointer settles.
+
+*And the replacement stays inside what the record pins.* The preimage is the
+half of a record a run *read*; a `fix` is the half a model *wrote*. A preimage
+pins its passage's own text and never another file's contents, so a replacement
+that changes which documents the passage names — adding one, or dropping one —
+is saying something about a file this record pins nothing from, however exact
+the preimage and however real the citation, which reports that one line was read
+rather than what the document contains. That is the shape the second
+shadow-parity cycle caught (#123): a superseded pointer repointed at its
+successor, asserting a property of the successor nobody had opened it to check,
+in the class that lands unattended.
 """
 
 import json
@@ -53,6 +64,7 @@ from . import approval as approval_mod
 from .bloat import CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC
 from .drift import CODE_ANCHOR_STALE, VERDICT_STALE
 from .inventory import DEFAULT_REGISTRY_PATH
+from .paths import path_references
 from .report import Report
 from .results import STATUS_OK, Invalid, Problem
 
@@ -128,6 +140,13 @@ DESTINATION_FIELD = "destination"
 # A human's dispute, recorded by the drift audit and never removed from the
 # report. It reaches any finding code, so a STALE record can carry one.
 WAIVED_FIELD = "waived"
+# The replacement text a STALE verdict carries. It is the one field on a record
+# a model *authored* rather than observed, which is why the refusal below reads
+# it against the preimage rather than trusting it.
+FIX_FIELD = "fix"
+# The document the finding lives in — the only one a mechanical remedy reads,
+# rewrites, or may speak about.
+PATH_FIELD = "path"
 
 
 @dataclass(frozen=True)
@@ -347,6 +366,38 @@ def _never_eligible(code, record_id):
     )
 
 
+def _redirected_documents(record):
+    """The documents a `fix` adds to, or drops from, the ones its preimage named.
+
+    Both directions, because both are a claim: naming a document the preimage
+    did not says something about that document, and dropping one says the
+    passage no longer depends on it. Equality is also what keeps the subtler
+    case out — a preimage that *mentions* a file has pinned the sentence, never
+    the file's contents, so "the fix only names files the preimage mentioned"
+    would admit a repointing that swapped which one the sentence is about.
+
+    The record's own document is excluded from both sides, by its repository
+    path and not by its filename: rewriting a passage that names its own file
+    speaks for nothing else, while a bare filename names no one document —
+    this repository alone carries seven `SKILL.md`.
+
+    A `fix` that is not text is read as its repr rather than skipped: a shape
+    this module does not know must not be a shape it ignores.
+    """
+    fix = record.extra.get(FIX_FIELD)
+    if fix is None:
+        return ()
+    own = record.extra.get(PATH_FIELD)
+    own = {own} if isinstance(own, str) else set()
+
+    def named(text):
+        return set(path_references(text if isinstance(text, str) else repr(text))) - own
+
+    before = named(record.extra.get(PREIMAGE_FIELD))
+    after = named(fix)
+    return tuple(sorted(before ^ after))
+
+
 def _decide(policy, record, enabled):
     """The policy's verdict on one record. `(eligible_class, Problem or None)`.
 
@@ -446,6 +497,24 @@ def _decide(policy, record, enabled):
                 f"the contradicting fact was observed — PR review is the "
                 f"semantic review for what a policy mints, and a reviewer with "
                 f"nothing to follow cannot perform it"
+            ),
+            location=record_id,
+        )
+
+    redirected = _redirected_documents(record)
+    if redirected:
+        return None, Problem(
+            code="policy-fix-names-other-document",
+            message=(
+                f"record {record_id}'s fix changes which documents this passage "
+                f"speaks for — {list(redirected)} is named on one side of the "
+                f"replacement and not the other. The assertion pins the "
+                f"passage's own text, never another file's contents, so what "
+                f"the replacement says about that document is the model's and "
+                f"not the repository's. A citation does not settle it either: a "
+                f"pointer says one line was read, and what a document contains "
+                f"is the thing being asserted. A pointer whose target has been "
+                f"superseded is a finding for a person, who can open the new one"
             ),
             location=record_id,
         )

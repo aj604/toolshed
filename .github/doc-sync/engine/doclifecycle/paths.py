@@ -9,9 +9,16 @@ problem — never silently normalized into something acceptable.
 Refusal, not repair, is the rule. Rewriting `docs//a.md` to `docs/a.md` would
 make two spellings name one authorization, and a record's identity is its
 spelling; so the module names the one canonical form and refuses the rest.
+
+Owning path safety means owning path *shape*, so the recognizer lives here
+too: `path_references` reads a piece of prose and says which of its tokens name
+a file or directory in a repository. It authorizes nothing and opens nothing —
+it answers "what did this sentence put in front of a reader as a file", which
+is a question about spelling, and this module is where spelling is decided.
 """
 
 import os
+import re
 import stat
 import unicodedata
 from dataclasses import dataclass, replace
@@ -181,6 +188,84 @@ _DOCUMENTATION_SUFFIXES = (
 
 def _folded(names):
     return tuple(name.casefold() for name in names)
+
+
+# --------------------------------------------------------------------------
+# Recognizing a file reference in prose
+# --------------------------------------------------------------------------
+
+# Every suffix this module knows, whatever class it sorts a path into: a
+# reference to a file is a reference whether the file is documentation, source,
+# configuration, or a key nobody should have named. Reusing the classifier's
+# own tuples is the point — a second list would drift from the first, and the
+# two answers would disagree about the same filename.
+_FILE_SUFFIXES = (
+    _DOCUMENTATION_SUFFIXES
+    + _SOURCE_SUFFIXES
+    + _CONFIGURATION_SUFFIXES
+    + _EXECUTABLE_SUFFIXES
+    + _CREDENTIAL_SUFFIXES
+)
+# The well-known files that wear no suffix at all.
+_FILE_NAMES = (
+    _CONFIGURATION_NAMES + _WORKFLOW_NAMES + _HOOK_NAMES + _CREDENTIAL_NAMES
+)
+
+# What a path is spelled with. Everything else — backticks, quotes, brackets,
+# parentheses, whitespace, prose punctuation — separates one candidate from the
+# next, so a path inside code fencing or a markdown link comes out whole.
+_TOKEN_BOUNDARY = re.compile(r"[^A-Za-z0-9._\-/~+]+")
+
+
+def _reference(token):
+    """The file or directory `token` names, canonically spelled, or `None`.
+
+    Two shapes count, and the pair is chosen to separate a file reference from
+    the two things that look like one in ordinary prose:
+
+    - a token with a separator, whose last component is either empty (a
+      directory, `docs/plans/`) or carries a dot (a file, `docs/a.md`). The dot
+      is what keeps `cron/cap/upgrade-cron` and `aj604/toolshed` — slash-joined
+      prose, not paths — from reading as files.
+    - a bare name with a known suffix, or a well-known suffixless filename.
+      Requiring the suffix be one this module knows is what keeps
+      `approval.Record.targets` and `e.g.` from reading as files.
+    """
+    token = token.strip().rstrip(".,")
+    while token.startswith("./"):
+        token = token[2:]
+    if token in ("", ".", "..", "/"):
+        return None
+
+    if "/" in token:
+        name = token.rpartition("/")[2]
+        return token if (name == "" or "." in name) else None
+
+    folded = token.casefold()
+    if folded in _folded(_FILE_NAMES):
+        return token
+    suffix = next(
+        (s for s in _folded(_FILE_SUFFIXES) if folded.endswith(s)), None
+    )
+    return token if suffix is not None and len(folded) > len(suffix) else None
+
+
+def path_references(text):
+    """Every file or directory `text` names, deduplicated and sorted.
+
+    Pure, and generous where it is unsure: a caller asking this question is
+    asking whether a sentence speaks about some file, and reading one token too
+    many costs a second look, while reading one too few costs the answer.
+    """
+    if not isinstance(text, str):
+        return ()
+    found = {
+        reference
+        for token in _TOKEN_BOUNDARY.split(text)
+        for reference in (_reference(token),)
+        if reference is not None
+    }
+    return tuple(sorted(found))
 
 
 def classify_target(path):

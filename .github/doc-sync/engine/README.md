@@ -1844,6 +1844,27 @@ repository that enabled everything still cannot reach them:
 | `policy-missing-preimage` | no `units`, or no `assertion` — nothing pinned to replace |
 | `policy-missing-evidence` | no `evidence.source` — a PR reviewer has nothing to follow |
 | `policy-external-evidence` | `evidence.command` — a real pointer, but outside the closed world, so nobody re-deriving the change from the commit can settle it |
+| `policy-fix-names-other-document` | the `fix` changes which documents the passage names — the remedy speaks for a document this record pins nothing from |
+
+The last one is the narrowest and the newest (#123). A preimage pins what a run *read*; a
+`fix` is the half a model *wrote*. When the replacement changes which files the passage names,
+it says something about a document the record pins nothing from — that it exists, that it
+carries a section, that it is now the live one. A citation does not close the gap:
+`evidence.source` says one line was consulted, and what a document contains is the thing being
+asserted. Both directions count, because a preimage that *mentions* a file has pinned the
+sentence and not the file, so admitting any fix that named only files the preimage mentioned
+would admit a repointing that swapped which one the sentence is about. The document the finding
+lives in is excluded, by its repository path and not by its filename — rewriting a passage that
+names its own file speaks for nothing else, while a bare filename names no one document. A
+`fix` that is not text is read as its repr rather than skipped. The shape this refuses is
+DRIFT-023 of the second shadow-parity cycle: a superseded pointer repointed at its successor,
+asserting the successor "carries criteria and verdict" while that file's verdict section still
+read "Not yet run" (`docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md`). Recognizing a
+file reference is `paths.path_references`, which reads a dotted symbol and a slash-joined prose
+list as prose, and is generous everywhere else: a token it over-reads costs a person one more
+record, and one it misses costs the refusal — a document named without its suffix
+(`docs/plans/2026-07-27-rerun`) or in prose alone ("the rerun plan") is past what shape can
+settle, and the drift skill's method rule is what covers those.
 
 Deciding is `policy_eligibility(policy, report)`, which is always an `Eligibility` and never
 `Invalid`: a report of bloat findings is not a failed run but one whose answer is "a person

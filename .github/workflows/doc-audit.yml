@@ -108,8 +108,9 @@ jobs:
           plugins: doc-lifecycle@toolshed
           prompt: >-
             Use the doc-lifecycle:detecting-doc-drift skill's verification method (tiers,
-            escalation, "verified means you ran the command") to audit this repository's
-            documentation, but write your answer in the *engine's* verdicts shape, not that
+            escalation, "verified means you ran the command", and its rules for authoring a
+            fix — a fix that names a file is settled by opening that file) to audit this
+            repository's documentation, but write your answer in the *engine's* verdicts shape, not that
             skill's — this run validates through `python3 .github/doc-sync/engine/doc-lifecycle.py
             drift-audit`, whose --verdicts contract is:
             {"documents": [{"path": <doc path from drift-plan.json>, "status": "ok",

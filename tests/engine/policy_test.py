@@ -486,6 +486,181 @@ class WhatAPolicyMayNeverMint(PolicyTestCase):
 
 
 # --------------------------------------------------------------------------
+# Acceptance criterion 5 (#123): a fix that asserts something about another
+# document is a finding for a human, whatever the record pins about its own.
+# --------------------------------------------------------------------------
+
+# DRIFT-023 of the second shadow-parity cycle, verbatim
+# (`tests/baselines/shadow-parity-gate-rerun/shadow-report.json`). The verdict
+# is right — the pointer was superseded — and the fix asserts the successor
+# "carries criteria and verdict", which the worker never opened it to check. At
+# the audited commit that file's Verdict section read "Not yet run".
+DRIFT_023_ASSERTION = (
+    "This repository's own gate record, criteria and verdict, is "
+    "`docs/plans/2026-07-26-shadow-parity-gate.md`."
+)
+DRIFT_023_FIX = (
+    "This repository's own gate record, criteria and verdict, is "
+    "`docs/plans/2026-07-27-shadow-parity-gate-rerun.md` (the first cycle's, "
+    "now superseded, is `docs/plans/2026-07-26-shadow-parity-gate.md`)."
+)
+DRIFT_023_EVIDENCE = {
+    "source": "docs/plans/2026-07-27-shadow-parity-gate-rerun.md",
+    "line": 5,
+    "observed": "the rerun file's header reads Supersedes: "
+                "docs/plans/2026-07-26-shadow-parity-gate.md",
+}
+
+
+class AFixThatSpeaksForAnotherDocument(PolicyTestCase):
+    def repointing(self, **extra):
+        fields = dict(
+            assertion=DRIFT_023_ASSERTION,
+            fix=DRIFT_023_FIX,
+            evidence=dict(DRIFT_023_EVIDENCE),
+        )
+        fields.update(extra)
+        return self.stale(**fields)
+
+    def test_a_fix_naming_a_document_the_claim_did_not_is_refused(self):
+        eligibility = self.eligibility([self.repointing()])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_the_refusal_names_the_document_nobody_read(self):
+        eligibility = self.eligibility([self.repointing()])
+
+        message = eligibility.decisions[0].refusal.message
+        self.assertIn("docs/plans/2026-07-27-shadow-parity-gate-rerun.md",
+                      message)
+
+    def test_an_evidence_pointer_at_that_document_does_not_settle_it(self):
+        # The whole of the DRIFT-023 failure: the record *does* cite the new
+        # file. A citation pins one line; the fix asserted what the file
+        # contains, which no pointer to its header settles.
+        eligibility = self.eligibility([self.repointing()])
+
+        self.assertIsNotNone(eligibility.decisions[0].refusal)
+
+    def test_the_repointing_record_reaches_no_approval_set(self):
+        result = self.mint([self.repointing()])
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertIn("policy-fix-names-other-document", codes(result))
+        self.assertIn("policy-nothing-eligible", codes(result))
+
+    def test_a_bare_filename_the_claim_did_not_name_is_refused_too(self):
+        # The same assertion, spelled without a directory.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The output contract is SKILL.md.",
+            fix="The output contract is output-contract.md.",
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_a_fix_that_only_rewords_a_document_the_claim_names_is_eligible(self):
+        # DRIFT-022's shape: both spellings name the same two build artifacts,
+        # so the fix asserts nothing about a document the record did not pin.
+        eligibility = self.eligibility([self.repointing(
+            assertion="Never let a hand edit reintroduce `drift-report.json`"
+                      "/`pr-body.md` into a commit.",
+            fix="Never let a hand edit reintroduce `drift-report.json`"
+                "/`pr-body.md` into the sync PR commit.",
+        )])
+
+        self.assertEqual(refusals(eligibility), {"R-1": None})
+
+    def test_a_fix_may_name_the_document_the_finding_lives_in(self):
+        # Self-reference is not a cross-document assertion: the applier reads
+        # and rewrites this document, and the preimage pins the passage. The
+        # preimage deliberately does *not* name it, so the carve-out is the
+        # only thing that admits this record.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The fee is documented here.",
+            fix="The 2.5% fee is documented in docs/a.md.",
+        )])
+
+        self.assertEqual(refusals(eligibility), {"R-1": None})
+
+    def test_the_carve_out_is_the_path_and_not_the_bare_filename(self):
+        # `a.md` is not this document — a bare filename names no one document,
+        # and seven files in this repository are called SKILL.md. Refusing is
+        # the conservative reading, and it is the one that holds when a fix
+        # names a *sibling* whose filename happens to match.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The fee is documented here.",
+            fix="The 2.5% fee is documented in a.md.",
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_a_preimage_that_merely_mentions_a_file_has_not_pinned_it(self):
+        # The subtler DRIFT-023: the claim mentions the successor in passing,
+        # so a rule about *new* names would admit a fix that swaps which
+        # document the sentence is about. The preimage pins this passage's
+        # text, never that file's contents.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The gate record is `docs/plans/a.md` (a rerun is "
+                      "planned at `docs/plans/b.md`).",
+            fix="The gate record, criteria and verdict, is `docs/plans/b.md`.",
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_dropping_a_document_the_claim_named_is_a_claim_too(self):
+        eligibility = self.eligibility([self.repointing(
+            assertion="Both `docs/plans/a.md` and `docs/plans/b.md` apply.",
+            fix="Only `docs/plans/a.md` applies.",
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_a_fix_that_is_not_text_is_read_rather_than_skipped(self):
+        # Fail shut on a shape this module does not know: #77's item 2 may give
+        # `fix` a multi-line form, and a guard that skipped what it could not
+        # read would hand that form straight through.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The gate record is `docs/plans/a.md`.",
+            fix=["The gate record is", "`docs/plans/b.md`."],
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_a_fix_that_rewrites_a_symbol_stays_eligible(self):
+        # DRIFT-014's shape, and the reason the recognizer must not read a
+        # dotted symbol as a file: this is the class the policy exists for.
+        eligibility = self.eligibility([self.repointing(
+            assertion="one record authorizes (`approval.Record.targets()`)",
+            fix="one record authorizes (`approval.ApprovedRecord.targets()`)",
+        )])
+
+        self.assertEqual(refusals(eligibility), {"R-1": None})
+
+    def test_a_fix_editing_a_slash_separated_knob_list_stays_eligible(self):
+        # DRIFT-021's shape: slashes, no file.
+        eligibility = self.eligibility([self.repointing(
+            assertion="beyond the cron/cap/bloat-cron/upgrade-cron knobs",
+            fix="beyond the cron/cap/bloat-cron/upgrade-cron/audit-cron knobs",
+        )])
+
+        self.assertEqual(refusals(eligibility), {"R-1": None})
+
+    def test_an_anchor_refresh_is_not_put_through_the_fix_check(self):
+        # A narrative anchor names the files it is dated against, and its
+        # refresh is the engine's own arithmetic on a date — there is no
+        # model-authored fix to read a new document out of.
+        eligibility = self.eligibility([self.anchor_stale()])
+
+        self.assertEqual(refusals(eligibility), {"R-2": None})
+
+
+# --------------------------------------------------------------------------
 # Acceptance criterion 4: the identical applier and confinement path, no bypass.
 # --------------------------------------------------------------------------
 
