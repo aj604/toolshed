@@ -8,16 +8,29 @@ verdicts file); here they are separated so the cycle can be run locally,
 recorded, and re-run.
 
     shadow-cycle.py digest --repo .
-        A sha256 over every file in the worktree except .git/ and whatever the
-        repository's own ignore rules exclude, as sorted "mode path sha256"
-        lines. The before/after evidence for the gate's G1b criterion: the new
-        lane must leave the tree byte-identical.
+        A sha256 over the repository's content *as the repository defines it* —
+        the tracked files plus the untracked ones its ignore rules do not
+        exclude — as sorted "mode path sha256" lines, together with
+        `git status --porcelain`. Emitted as JSON. The before/after evidence
+        for the gate's G1b criterion: the new lane must leave the tree
+        byte-identical.
 
-        The ignore rules are not a convenience. CPython writes
-        `engine/doclifecycle/__pycache__/*.pyc` the moment anything imports the
-        engine, and a `.pyc` embeds its source's mtime — so `git checkout` of an
-        unchanged source file re-keys 16 files that no process wrote to the
-        repository. Counting those measured the instrument, not the lane.
+        Two exclusions, both re-registered for the 2026-07-27 cycle
+        (aj604/toolshed#117) after the first cycle failed G1b on its
+        instrument rather than on the lane:
+
+        * `.git/` — it churns on every read, so hashing it measures the
+          harness.
+        * `.pyc` files and anything under a `__pycache__` directory —
+          unconditionally, never by trusting a consumer's `.gitignore` to list
+          them. CPython writes them the moment anything imports the engine,
+          and a `.pyc` embeds its source's mtime, so `git checkout` of an
+          *unchanged* source file re-keys them without any process writing to
+          the repository. Counting those measured the instrument, not the lane.
+
+        `porcelain_clean` is the other half of the criterion, reported rather
+        than assumed: a digest taken over a tree somebody is editing proves
+        nothing about what the cycle did.
 
     shadow-cycle.py slices --repo . --registry <path> --out <dir>
         One task file per declared living document, each carrying that
@@ -28,10 +41,18 @@ recorded, and re-run.
     shadow-cycle.py merge --slices <dir> --repair <dir> --out <path>
         Fold both rounds' answers into the one verdicts file
         `drift-audit --verdicts` consumes. Later rounds win per unit — that is
-        what a repair round means. Answers naming a digest the document does
-        not contain, and second answers for a unit already covered, are
-        dropped: neither carries information, and the engine refuses the whole
-        document over either.
+        what a repair round means. Answers naming a unit the document does not
+        contain, and second answers for a unit already covered, are dropped:
+        neither carries information, and the engine refuses the whole document
+        over either.
+
+        A worker answers by a unit's small integer *ordinal*, the identity
+        aj604/toolshed#116 introduced after this gate measured a 2.9%
+        transcription error rate on 64-character digests. Both spellings are
+        resolved to the digest here, so a repair round keyed by ordinal
+        overrides a round-1 answer keyed by digest for the same unit — two
+        spellings that did not land on one key would make a repair round a
+        silent no-op.
 """
 
 import argparse
@@ -54,41 +75,64 @@ def engine(repo, *argv):
     return json.loads(result.stdout)
 
 
-def ignored(repo):
-    """The paths the repository's own ignore rules exclude, as a prefix set."""
-    result = subprocess.run(
-        ["git", "ls-files", "--others", "--ignored", "--exclude-standard",
-         "--directory"],
-        capture_output=True, text=True, cwd=repo,
+def git(repo, *argv):
+    result = subprocess.run(["git", *argv], capture_output=True, text=True,
+                            cwd=repo)
+    if result.returncode != 0:
+        sys.exit(f"git {argv[0]} exited {result.returncode}: {result.stderr}")
+    return result.stdout
+
+
+def _byproduct(relative):
+    """A CPython import byproduct, excluded whatever the ignore rules say."""
+    parts = relative.split(os.sep)
+    return relative.endswith(".pyc") or "__pycache__" in parts
+
+
+def content_paths(repo):
+    """The repository's content as the repository defines it, sorted.
+
+    Tracked plus untracked-but-not-ignored, which is the same set
+    `git status` reasons about — so a clean porcelain and an unchanged digest
+    are two statements about one thing, not two instruments that can disagree.
+    """
+    listed = set()
+    for argv in (("ls-files", "-z"),
+                 ("ls-files", "--others", "--exclude-standard", "-z")):
+        listed.update(p for p in git(repo, *argv).split("\0") if p)
+    return sorted(
+        p for p in listed
+        if not _byproduct(p.replace("/", os.sep))
     )
-    return tuple(line.rstrip("/") for line in result.stdout.splitlines() if line)
 
 
 def digest(repo):
-    skip = ignored(repo)
     entries = []
-    for root, dirnames, filenames in os.walk(repo):
-        dirnames[:] = sorted(
-            d for d in dirnames
-            if d != ".git"
-            and os.path.relpath(os.path.join(root, d), repo) not in skip
+    for relative in content_paths(repo):
+        path = os.path.join(repo, relative.replace("/", os.sep))
+        if not os.path.lexists(path):
+            # Tracked and deleted. Porcelain reports it too; recorded here so
+            # the digest moves as well, rather than a deletion reading as "no
+            # change" because the file simply stopped being enumerated.
+            entries.append(f"- {relative} deleted")
+            continue
+        info = os.lstat(path)
+        if os.path.islink(path):
+            body = os.readlink(path).encode()
+        else:
+            with open(path, "rb") as fh:
+                body = fh.read()
+        entries.append(
+            f"{info.st_mode:o} {relative} {hashlib.sha256(body).hexdigest()}"
         )
-        for name in sorted(filenames):
-            path = os.path.join(root, name)
-            relative = os.path.relpath(path, repo)
-            if relative in skip:
-                continue
-            info = os.lstat(path)
-            if os.path.islink(path):
-                body = os.readlink(path).encode()
-            else:
-                with open(path, "rb") as fh:
-                    body = fh.read()
-            entries.append(
-                f"{info.st_mode:o} {relative} {hashlib.sha256(body).hexdigest()}"
-            )
     listing = "\n".join(entries)
-    return hashlib.sha256(listing.encode()).hexdigest(), len(entries)
+    porcelain = git(repo, "status", "--porcelain").strip()
+    return {
+        "digest": hashlib.sha256(listing.encode()).hexdigest(),
+        "files": len(entries),
+        "porcelain_clean": porcelain == "",
+        "porcelain": porcelain,
+    }
 
 
 def slices(repo, registry, out):
@@ -135,14 +179,17 @@ def merge(slices_dir, repair_dir, out):
     documents, dropped, kept = [], 0, 0
     for path in sorted(rounds[0]):
         known = {u["digest"] for u in segments[path]}
+        by_ordinal = {u["ordinal"]: u["digest"] for u in segments[path]}
         by_unit = {}
         for round_answers in rounds:
             for answer in round_answers.get(path, []):
                 unit = answer.get("unit")
+                if isinstance(unit, int) and not isinstance(unit, bool):
+                    unit = by_ordinal.get(unit)
                 if unit not in known:
                     dropped += 1
                     continue
-                by_unit[unit] = answer
+                by_unit[unit] = dict(answer, unit=unit)
         verdicts = [by_unit[u] for u in sorted(by_unit)]
         kept += len(verdicts)
         documents.append({"path": path, "status": "ok", "verdicts": verdicts})
@@ -171,8 +218,7 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     if args.command == "digest":
-        value, count = digest(os.path.abspath(args.repo))
-        print(f"{value}  ({count} files)")
+        print(json.dumps(digest(os.path.abspath(args.repo)), indent=2))
     elif args.command == "slices":
         slices(os.path.abspath(args.repo), args.registry,
                os.path.abspath(args.out))
