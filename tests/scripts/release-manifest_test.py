@@ -192,6 +192,53 @@ NO_MAIN_GUARD = textwrap.dedent("""\
 
 BROKEN = "import unittest\n\nclass ASuite(unittest.TestCase)\n    pass\n"
 
+LOCAL_MAIN_GUARD = textwrap.dedent("""\
+    import unittest
+
+
+    class ASuite(unittest.TestCase):
+        def test_something(self):
+            pass
+
+
+    def main():
+        print("looks legit, runs no tests")
+
+
+    if __name__ == "__main__":
+        main()
+    """)
+
+DOTTED_UNITTEST_IMPORT = textwrap.dedent("""\
+    import unittest.mock
+
+
+    class ASuite(unittest.TestCase):
+        def test_something(self):
+            pass
+
+
+    if __name__ == "__main__":
+        unittest.main()
+    """)
+
+WRAPPER_MAIN_GUARD = textwrap.dedent("""\
+    import unittest
+
+
+    class ASuite(unittest.TestCase):
+        def test_something(self):
+            pass
+
+
+    def main():
+        unittest.main()
+
+
+    if __name__ == "__main__":
+        main()
+    """)
+
 
 class HolesAnIndependentReviewFound(unittest.TestCase):
     """Each of these is a suite the release gate does not really run, that an
@@ -210,6 +257,30 @@ class HolesAnIndependentReviewFound(unittest.TestCase):
                          self.repo.audit().inert)
 
     def test_a_script_suite_with_a_main_guard_is_not_inert(self):
+        self.assertEqual([], self.repo.audit().inert)
+
+    def test_a_main_guard_calling_an_unrelated_local_main_is_inert(self):
+        """A __main__ block that calls a local no-op `main()` instead of
+        `unittest.main()` also runs zero tests under `python3 <path>` — the
+        guard must require the call resolve to unittest.main, not just any
+        function literally named main."""
+        self.repo.write("tests/scripts/quiet_test.py", LOCAL_MAIN_GUARD)
+        self.assertEqual(["tests/scripts/quiet_test.py"],
+                         self.repo.audit().inert)
+
+    def test_a_dotted_unittest_import_still_recognizes_unittest_main(self):
+        """`import unittest.mock` binds the top-level name `unittest` too
+        (Python's `import a.b` binds `a`), so `unittest.main()` still runs
+        the tests. The guard must not report this suite inert just because
+        its only unittest import is dotted."""
+        self.repo.write("tests/scripts/quiet_test.py", DOTTED_UNITTEST_IMPORT)
+        self.assertEqual([], self.repo.audit().inert)
+
+    def test_a_local_wrapper_delegating_to_unittest_main_is_not_inert(self):
+        """A module-level `main()` that itself calls `unittest.main()` (setup
+        before delegating) genuinely runs the tests — the guard must resolve
+        one level of local-function indirection, not just the guard body."""
+        self.repo.write("tests/scripts/quiet_test.py", WRAPPER_MAIN_GUARD)
         self.assertEqual([], self.repo.audit().inert)
 
     def test_an_engine_suite_needs_no_main_guard(self):
