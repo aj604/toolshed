@@ -7,18 +7,48 @@
 # Why this exists: the nightly/weekly workflows pin plugin_marketplaces to a
 # release tag, so the skills they invoke are frozen at the version the vendored
 # wiring was generated from. This workflow is the ONLY thing that advances that
-# pin — weekly it compares the installed version to the plugin's latest release
-# and, when a newer one ships, regenerates the wiring at it and opens a review PR.
+# pin — and `.github/doc-sync/installed-version` remains the pin, so this YAML is
+# byte-identical across versions.
+#
+# Three jobs, split strictly by trust and by who decides (aj604/toolshed#127).
+# Upgrading means running the *target release's* own `apply-upgrade.py`, which no
+# one in this repository has reviewed at the moment it runs. Publishing a tag on
+# the marketplace is not this repository's decision to execute new code, and a
+# version number is not a reviewable artifact — so the schedule detects and a
+# human dispatches:
+#
+#   detect      Scheduled. Compares two version numbers and stops there: nothing
+#     is cloned, and none of the release's code runs. When a newer release exists
+#     it files one notice issue naming it. `issues: write` is its only write
+#     scope, and it is the scope of a notification, not of a change.
+#   regenerate  Dispatch only, and the only job that runs the target release's
+#     code. It holds `contents: read`, no `GH_TOKEN`, and a checkout that
+#     persists no credential. It copies this install's wiring roots into a
+#     scratch tree, runs the clone's `apply-upgrade.py` against that copy, and
+#     `stage-upgrade.py manifest` reports exactly which paths changed — refusing
+#     the whole run if any difference lies outside the wiring the upgrade engine
+#     owns. It cannot write to this repository, and it never touches the checkout
+#     the next job trusts.
+#   land        Credentialed, and it executes nothing from the clone: every byte
+#     the release produced reaches it as data inside an artifact. It re-derives
+#     the same path authority from the manifest, transfers exactly that path set,
+#     stages exactly it, and opens the pull request whose merge is the review.
+#
+# The lane runs no model at all, so its write scopes never sit behind a model
+# process — the 2026-07-07 deterministic-upgrade decision, still binding.
 name: doc-sync-upgrade
 
 on:
   schedule:
     - cron: "0 2 * * 1"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "The release to upgrade to, as bare semver (X.Y.Z). Leave blank to only check whether a newer one exists."
+        required: false
+        default: ""
 
-# Least privilege by default; the one job widens what it needs. This lane runs
-# no model at all (the regeneration is deterministic), so its write scopes never
-# sit behind a model process.
+# Least privilege by default; each job widens only what it needs.
 permissions:
   contents: read
 
@@ -27,15 +57,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  upgrade:
+  # Detection only. This job never clones the release and never runs its code, so
+  # its one write scope buys a notification and nothing else.
+  detect:
+    if: inputs.target == ''
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+      issues: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Resolve versions
         id: versions
@@ -46,140 +81,292 @@ jobs:
           CURRENT=$(cat .github/doc-sync/installed-version)
           # Latest published release of the plugin marketplace (tagName is v-prefixed).
           LATEST=$(gh release view --repo aj604/toolshed --json tagName --jq .tagName | sed 's/^v//')
-          OPEN_PRS=$(gh pr list --head doc-sync/upgrade --state open --json number --jq length)
           {
             echo "current=${CURRENT}"
             echo "latest=${LATEST}"
-            echo "open_prs=${OPEN_PRS}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Gate
         id: gate
+        env:
+          CURRENT: ${{ steps.versions.outputs.current }}
+          LATEST: ${{ steps.versions.outputs.latest }}
         run: |
           set -euo pipefail
-          # An already-open upgrade PR awaits a human — don't stack a second one.
-          if [ "${{ steps.versions.outputs.open_prs }}" -gt 0 ]; then
-            echo "decision=skip-pending" >> "$GITHUB_OUTPUT"
-            PR_URL=$(gh pr list --head doc-sync/upgrade --state open --json url --jq '.[0].url')
-            python3 .github/doc-sync/render-report.py upgrade-summary \
-              --status pending --current "${{ steps.versions.outputs.current }}" \
-              --latest "${{ steps.versions.outputs.latest }}" --pr-url "${PR_URL}"
-            exit 0
-          fi
           # Semver comparison lives in the tested gate, never in YAML string-fu.
           DECISION=$(python3 .github/doc-sync/upgrade-gate.py compare \
-            --current "${{ steps.versions.outputs.current }}" \
-            --latest "${{ steps.versions.outputs.latest }}")
+            --current "$CURRENT" --latest "$LATEST")
           echo "gate: ${DECISION}"
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
-          # current / ahead both self-explain and stop here; only 'upgrade' proceeds.
+          # current / ahead both self-explain and stop here.
           if [ "${DECISION}" != "upgrade" ]; then
             python3 .github/doc-sync/render-report.py upgrade-summary \
-              --status "${DECISION}" --current "${{ steps.versions.outputs.current }}" \
-              --latest "${{ steps.versions.outputs.latest }}"
+              --status "${DECISION}" --current "$CURRENT" --latest "$LATEST"
           fi
 
-      # Check out the target release so apply-upgrade.py has the new version's wiring
-      # (templates + scripts) to copy from, and runs its own target-version upgrade
-      # logic. Clone the *target* (steps.versions.latest), not installed-version —
-      # the lockfile still holds the old version until this run advances it. Clone
-      # under RUNNER_TEMP, outside the work tree, so it is neither stageable nor
-      # visible to the confinement check below.
-      - name: Check out target marketplace at v${{ steps.versions.outputs.latest }}
+      # One open notice per release: a weekly check that keeps finding the same
+      # unreviewed release keeps quiet rather than filing a duplicate every week.
+      - name: Decide whether to file the notice
+        id: notice
         if: steps.gate.outputs.decision == 'upgrade'
+        env:
+          CURRENT: ${{ steps.versions.outputs.current }}
+          LATEST: ${{ steps.versions.outputs.latest }}
+        run: |
+          set -euo pipefail
+          gh issue list --state open --limit 200 --json number,title \
+            > "${RUNNER_TEMP}/open-issues.json"
+          python3 .github/doc-sync/render-report.py upgrade-notice \
+            --current "$CURRENT" --latest "$LATEST" \
+            --repo "${GITHUB_REPOSITORY}" --workflow doc-sync-upgrade \
+            --issues "${RUNNER_TEMP}/open-issues.json" \
+            --title-out "${RUNNER_TEMP}/notice-title.txt" \
+            --body-out "${RUNNER_TEMP}/notice-body.md" \
+            --out "$GITHUB_OUTPUT"
+
+      - name: File the notice
+        if: steps.notice.outputs.notice == 'open'
+        env:
+          CURRENT: ${{ steps.versions.outputs.current }}
+          LATEST: ${{ steps.versions.outputs.latest }}
+        run: |
+          set -euo pipefail
+          gh issue create \
+            --title "$(cat "${RUNNER_TEMP}/notice-title.txt")" \
+            --body-file "${RUNNER_TEMP}/notice-body.md" \
+            >> "$GITHUB_STEP_SUMMARY"
+          python3 .github/doc-sync/render-report.py upgrade-summary \
+            --status available --current "$CURRENT" --latest "$LATEST"
+
+      - name: Say the notice already stands
+        if: steps.notice.outputs.notice == 'exists'
+        env:
+          CURRENT: ${{ steps.versions.outputs.current }}
+          LATEST: ${{ steps.versions.outputs.latest }}
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/render-report.py upgrade-summary \
+            --status notified --current "$CURRENT" --latest "$LATEST"
+
+  # The only job that runs the target release's code, and it holds nothing: no
+  # token, no write scope, no persisted checkout credential.
+  regenerate:
+    if: inputs.target != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      target: ${{ steps.target.outputs.target }}
+      current: ${{ steps.target.outputs.current }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # The dispatch input never reaches a shell as a substitution: it travels
+      # through `env:` and is re-emitted by the tested gate as strict X.Y.Z, so
+      # what names a git ref below is the gate's output, never the raw input. The
+      # same gate refuses a downgrade — a dispatch may only move the pin forward.
+      - name: Normalize the dispatched target
+        id: target
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          test -f .github/doc-sync/installed-version || {
+            echo "::error::.github/doc-sync/installed-version missing — run the scheduling-doc-sync installer"; exit 1; }
+          CURRENT=$(cat .github/doc-sync/installed-version)
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          TARGET_CLEAN=$(python3 .github/doc-sync/upgrade-gate.py normalize \
+            --version "$TARGET" --out "$GITHUB_OUTPUT")
+          DECISION=$(python3 .github/doc-sync/upgrade-gate.py compare \
+            --current "${CURRENT}" --latest "${TARGET_CLEAN}")
+          if [ "${DECISION}" != "upgrade" ]; then
+            echo "::error::dispatched target ${TARGET_CLEAN} is not newer than the installed ${CURRENT} (gate: ${DECISION}) — this lane advances the pin, it never rewinds it"
+            exit 1
+          fi
+
+      # Into a scratch copy, never the checkout: the next steps read the checkout
+      # to decide what changed, and the tooling that decides it must be the code
+      # this repository already reviewed — not whatever the clone just wrote.
+      - name: Copy the wiring roots into a scratch tree
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/scratch"
+          mkdir -p "${RUNNER_TEMP}/scratch"
+          for root in .github .doc-lifecycle; do
+            [ -d "${root}" ] || continue
+            cp -a "${root}" "${RUNNER_TEMP}/scratch/"
+          done
+
+      - name: Check out the target marketplace
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
         run: |
           set -euo pipefail
           rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
-          git clone --depth 1 --branch "v${{ steps.versions.outputs.latest }}" \
+          git clone --depth 1 --branch "v${TARGET}" \
             https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
 
-      # Regenerate the wiring deterministically at the new version. Now that the
-      # workflow YAML is version-agnostic (the Pin steps read installed-version at
-      # runtime), an upgrade is pure mechanics — re-copy the vendored scripts, re-render
-      # the owned templates with the consumer's preserved knobs, bump the lockfile — so a
-      # tested script does it, no model call (hence no model auth in this workflow).
-      # Run it FROM the pinned checkout so the target version's own upgrade logic
-      # applies. The script writes files only; the steps below own git/PR. apply-upgrade.py
-      # owns which files to lay down and how to preserve state/knobs — never re-implement
-      # that as a cp/sed here.
-      #
-      # --report-written makes the script declare the paths it wrote, so the commit
-      # below stages that set by name instead of sweeping the work tree.
-      - name: Regenerate wiring (deterministic)
-        if: steps.gate.outputs.decision == 'upgrade'
+      # The target release's own upgrade logic, run against the scratch copy in a
+      # job that can write nothing here. apply-upgrade.py owns which files to lay
+      # down and how to preserve state/knobs — never re-implement that as a
+      # cp/sed here.
+      - name: Regenerate the wiring into the scratch tree
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
         run: |
           set -euo pipefail
           python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py" \
             --plugin-root "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle" \
-            --repo "${GITHUB_WORKSPACE}" \
-            --target "${{ steps.versions.outputs.latest }}" \
-            --report-written "${RUNNER_TEMP}/upgrade-written.txt"
+            --repo "${RUNNER_TEMP}/scratch" \
+            --target "${TARGET}"
 
-      - name: Open upgrade PR
-        if: steps.gate.outputs.decision == 'upgrade'
+      # Run from the checkout — the tree the regeneration never touched — so the
+      # code drawing the boundary is code a human reviewed. A difference outside
+      # the wiring the upgrade engine owns fails here, with every offending path
+      # named, and no bundle is produced for the credentialed job to land.
+      - name: Report exactly what the regeneration wrote
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
+          CURRENT: ${{ steps.target.outputs.current }}
+        run: |
+          set -uo pipefail
+          code=0
+          python3 .github/doc-sync/stage-upgrade.py manifest \
+            --scratch "${RUNNER_TEMP}/scratch" --repo . \
+            --target "${TARGET}" --bundle "${RUNNER_TEMP}/upgrade-bundle" || code=$?
+          if [ "${code}" -ne 0 ]; then
+            python3 .github/doc-sync/render-report.py upgrade-summary \
+              --status refused --current "$CURRENT" --latest "${TARGET}"
+            exit "${code}"
+          fi
+
+      - name: Upload the regenerated wiring
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: doc-sync-upgrade-bundle
+          path: ${{ runner.temp }}/upgrade-bundle
+          if-no-files-found: error
+
+  # Credentialed, and it runs none of the release's code. Everything the target
+  # release produced arrives as data in an artifact; the authority over which of
+  # those paths may be written is re-derived here from the installed checkout.
+  land:
+    needs: regenerate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # An already-open upgrade PR awaits a human — don't stack a second one.
+      - name: Refuse to stack on an open upgrade PR
+        id: pending
+        env:
+          CURRENT: ${{ needs.regenerate.outputs.current }}
+          TARGET: ${{ needs.regenerate.outputs.target }}
         run: |
           set -euo pipefail
-          if git diff --quiet && git diff --cached --quiet; then
+          OPEN_PRS=$(gh pr list --head doc-sync/upgrade --state open --json number --jq length)
+          echo "open_prs=${OPEN_PRS}" >> "$GITHUB_OUTPUT"
+          if [ "${OPEN_PRS}" -gt 0 ]; then
+            PR_URL=$(gh pr list --head doc-sync/upgrade --state open --json url --jq '.[0].url')
+            python3 .github/doc-sync/render-report.py upgrade-summary \
+              --status pending --current "$CURRENT" --latest "$TARGET" --pr-url "${PR_URL}"
+          fi
+
+      # Into RUNNER_TEMP, never the work tree: the staging check below reads the
+      # complete working-tree diff, and a downloaded artifact would be an
+      # untracked change it must refuse.
+      - name: Download the regenerated wiring
+        if: steps.pending.outputs.open_prs == '0'
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: doc-sync-upgrade-bundle
+          path: ${{ runner.temp }}/upgrade-bundle
+
+      # `--target` binds the bundle to the version this run was dispatched for;
+      # the path authority is re-derived from the manifest rather than taken on
+      # the previous job's word, and every bundled file is checked against the
+      # digest recorded for it.
+      - name: Transfer exactly the paths the manifest names
+        if: steps.pending.outputs.open_prs == '0'
+        env:
+          TARGET: ${{ needs.regenerate.outputs.target }}
+        run: |
+          set -euo pipefail
+          python3 .github/doc-sync/stage-upgrade.py apply \
+            --bundle "${RUNNER_TEMP}/upgrade-bundle" --repo . \
+            --target "${TARGET}" --out "${RUNNER_TEMP}/staged-paths.txt"
+
+      - name: Stage exactly those paths
+        if: steps.pending.outputs.open_prs == '0'
+        run: |
+          set -euo pipefail
+          git switch -c doc-sync/upgrade
+          git add --pathspec-from-file="${RUNNER_TEMP}/staged-paths.txt" --pathspec-file-nul
+          git diff --cached --name-only -z --no-renames > "${RUNNER_TEMP}/staged.txt"
+          { git diff --name-only -z; \
+            git ls-files --others --exclude-standard -z; } \
+            > "${RUNNER_TEMP}/unstaged.txt"
+          python3 .github/doc-sync/stage-upgrade.py verify \
+            --paths "${RUNNER_TEMP}/staged-paths.txt" \
+            --staged "${RUNNER_TEMP}/staged.txt" \
+            --unstaged "${RUNNER_TEMP}/unstaged.txt"
+
+      - name: Open the upgrade pull request
+        if: steps.pending.outputs.open_prs == '0'
+        env:
+          CURRENT: ${{ needs.regenerate.outputs.current }}
+          TARGET: ${{ needs.regenerate.outputs.target }}
+        run: |
+          set -euo pipefail
+          if git diff --cached --quiet; then
             # Version advanced but the regenerated wiring is byte-identical — nothing to land.
             python3 .github/doc-sync/render-report.py upgrade-summary \
-              --status noop --current "${{ steps.versions.outputs.current }}" \
-              --latest "${{ steps.versions.outputs.latest }}"
+              --status noop --current "$CURRENT" --latest "$TARGET"
             exit 0
           fi
-          CHANGED=$(git diff --name-only | paste -sd, -)
+          CHANGED=$(git diff --cached --name-only | paste -sd, -)
           # The Actions GITHUB_TOKEN cannot push files under .github/workflows/ — GitHub
           # blocks it, and the `workflows` permission is not grantable to it. Version-only
           # upgrades don't touch those files (the pin is read from installed-version at
           # runtime), so the push below succeeds. But an upgrade that changes the workflow
           # TEMPLATES themselves can't land automatically — emit the diff as a patch
           # artifact and fail loud with apply instructions, not a cryptic push rejection.
-          if git diff --name-only | grep -q '^\.github/workflows/'; then
-            git diff > "$RUNNER_TEMP/doc-sync-upgrade.patch"
+          if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
+            git diff --cached > "$RUNNER_TEMP/doc-sync-upgrade.patch"
             python3 .github/doc-sync/render-report.py upgrade-summary \
-              --status blocked-workflows --current "${{ steps.versions.outputs.current }}" \
-              --latest "${{ steps.versions.outputs.latest }}" --files "${CHANGED}"
+              --status blocked-workflows --current "$CURRENT" \
+              --latest "$TARGET" --files "${CHANGED}"
             exit 1
           fi
           python3 .github/doc-sync/render-report.py upgrade-pr-body \
-            --current "${{ steps.versions.outputs.current }}" \
-            --latest "${{ steps.versions.outputs.latest }}" \
+            --current "$CURRENT" --latest "$TARGET" \
             --files "${CHANGED}" > "$RUNNER_TEMP/upgrade-pr-body.md"
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
-          git checkout -b doc-sync/upgrade
-          # Stage the set apply-upgrade.py declared it wrote — never the work tree.
-          git add --pathspec-from-file="${RUNNER_TEMP}/upgrade-written.txt"
-          # Whatever is left unstaged after that is a path the regeneration
-          # touched without declaring — tracked-but-unstaged, or untracked.
-          # (Plain `git status --porcelain` would also list what we just staged.)
-          # Refuse rather than commit it.
-          LEFTOVER=$( { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | paste -sd, -)
-          if [ -n "${LEFTOVER}" ]; then
-            python3 .github/doc-sync/render-report.py upgrade-summary \
-              --status undeclared-paths --current "${{ steps.versions.outputs.current }}" \
-              --latest "${{ steps.versions.outputs.latest }}" --files "${LEFTOVER}"
-            exit 1
-          fi
-          git commit -m "docs: upgrade doc-sync wiring to plugin v${{ steps.versions.outputs.latest }}"
-          # Push via an explicit token URL for parity with the other lanes' pushes (and to
-          # not depend on checkout's persisted credential surviving). --force: a closed-unmerged
-          # PR can leave a stale branch. No -u: a token-bearing URL must not persist in config.
-          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" doc-sync/upgrade
+          git commit -m "docs: upgrade doc-sync wiring to plugin v${TARGET}"
+          # --force: a closed-unmerged PR can leave a stale branch behind.
+          git push --force origin HEAD:refs/heads/doc-sync/upgrade
           PR_URL=$(gh pr create \
-            --title "docs: upgrade doc-sync wiring to plugin v${{ steps.versions.outputs.latest }}" \
+            --title "docs: upgrade doc-sync wiring to plugin v${TARGET}" \
             --body-file "$RUNNER_TEMP/upgrade-pr-body.md" \
             --head doc-sync/upgrade \
             --base "${{ github.ref_name }}")
           python3 .github/doc-sync/render-report.py upgrade-summary \
-            --status opened --current "${{ steps.versions.outputs.current }}" \
-            --latest "${{ steps.versions.outputs.latest }}" --pr-url "${PR_URL}"
+            --status opened --current "$CURRENT" --latest "$TARGET" --pr-url "${PR_URL}"
 
       # When the upgrade regenerated workflow files, the step above wrote the diff here
       # and failed loud (the token can't push .github/workflows/); publish it so a human
       # can apply it locally. No-op for the common version-only upgrade (no patch file).
       - name: Upload upgrade patch (manual apply for workflow-file changes)
-        if: always() && steps.gate.outputs.decision == 'upgrade'
-        uses: actions/upload-artifact@v4
+        if: always() && steps.pending.outputs.open_prs == '0'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: doc-sync-upgrade-patch
           path: ${{ runner.temp }}/doc-sync-upgrade.patch

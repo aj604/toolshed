@@ -3,12 +3,17 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture absorbed the helper scripts into; see its `README.md`) plus nine skill
+re-architecture absorbed the helper scripts into; see its `README.md`) plus ten skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
 `.../detecting-doc-bloat/scripts/plan-chunks.py`, plus
-`scheduling-doc-sync`'s `scripts/upgrade-gate.py` (the upgrade lane's semver comparison),
+`scheduling-doc-sync`'s `scripts/upgrade-gate.py` (the upgrade lane's semver comparison, plus the
+strict X.Y.Z shape-check a dispatched upgrade target passes before it names a git ref),
+`scripts/stage-upgrade.py` (that lane's path authority, #127 — it derives what a regeneration
+wrote by comparing the scratch tree against the install, refuses the run whole if any difference
+lies outside what `apply-upgrade.py` owns, and is vendored precisely because both upgrade jobs
+must run it from the installed checkout),
 `scripts/render-report.py` (that lane's run surface, plus `detecting-doc-bloat`'s in-session
 `bloat-triage` rendering — its only two consumers since #77),
 `scripts/render-audit-summary.py` (the audit lane's run-surface rendering — #71),
@@ -19,18 +24,22 @@ and summary — #72),
 `drift-audit --evidence-command` from `evidence-tools.json` and runs each declared tool only as
 a `--help`/`--version` read, under the model step's existing `Bash(python3 *)` grant rather than
 a wider one, #118), and
-`scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
-the upgrade lane, not vendored into installs) — all under `scheduling-doc-sync/scripts/`, not the
+`scripts/apply-upgrade.py` (the deterministic upgrade engine — the *target release's* own copy is
+what the upgrade lane runs, in the one job holding no credential, and it stays deliberately
+un-vendored) — all under `scheduling-doc-sync/scripts/`, not the
 skill's base directory, which holds only the templates; all `python3`, no deps)
 plus the three GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml` — the read-only scheduled
 audit, #71; `doc-apply.yml` — the manual apply dispatch, the one lane that writes, #72; and
-`doc-sync-upgrade.yml` — the model-free version-bump PR lane). #77 removed the legacy
+`doc-sync-upgrade.yml` — the model-free upgrade lane, whose weekly schedule only detects a newer
+release and files a notice issue, while a human dispatch naming the target is what regenerates the
+wiring and opens the version-bump PR, #127). #77 removed the legacy
 `doc-sync.yml` / `doc-bloat.yml` write lanes and their gate/path-authority/distill-planner
 scripts, so an install is exactly those three templates; `apply-upgrade.py` installs the two
 engine lanes only into a repo holding `.doc-lifecycle/registry.json`, and the upgrade lane
 everywhere. The sample repos under `tests/fixtures/` are the other runnable
 code that matters, alongside the dogfooded install under `.github/` (`doc-sync/upgrade-gate.py`,
+`doc-sync/stage-upgrade.py`,
 `doc-sync/render-report.py`, `doc-sync/render-audit-summary.py`,
 `doc-sync/render-apply-summary.py`, `doc-sync/probe-evidence-tool.py`,
 `doc-sync/plan-chunks.py`, `doc-sync/validate-drift-output.py`,
@@ -116,15 +125,18 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
 - **The helper scripts have unit tests** (stdlib `unittest`, no deps) at
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
   output contract. `upgrade-gate_test.py` covers the
-  `doc-sync-upgrade.yml` version-comparison gate, `render-report_test.py` that lane's run-surface
-  strings (and `bloat-triage`, which `detecting-doc-bloat` renders in session), and
+  `doc-sync-upgrade.yml` version-comparison gate and its `normalize` shape-check (a dispatched
+  target that is not three decimal components never becomes argv), `stage-upgrade_test.py` that
+  lane's path authority in both directions (the manifest step's refusals, and the credentialed
+  step re-deriving them from a manifest edited in between), `render-report_test.py` that lane's
+  run-surface strings (and `bloat-triage`, which `detecting-doc-bloat` renders in session), and
   `apply-upgrade_test.py` that workflow's
   deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
   unextractable knobs). Three suites cover the
   wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
   token-free; every write job model-free and staging an explicit path list, with no `git add -A`
-  exemption left — #77 gave the upgrade lane `apply-upgrade.py --report-written` so it stages a
-  declared set too; and no `--allowedTools`
+  exemption left — #127 replaced the upgrade lane's last broad add with the path set
+  `stage-upgrade.py` authorizes from the manifest; and no `--allowedTools`
   grant naming a Bash executable beyond `git`/`python3`, since those patterns are prefix-matched,
   #118),
   `install-parity_test.py`
@@ -150,7 +162,11 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   run surface (every refusal, the staged path list, and the rendered PR body, title, and commit
   message), and `apply-workflow_test.py` adds `doc-apply.yml`'s static checks (three-job trust
   split, no dispatch input in any `run:` block, staging confined to the apply result's paths, a
-  real PR rather than a draft). `release-manifest_test.py` covers the release manifest guard by
+  real PR rather than a draft). `upgrade-workflow_test.py` does the same for `doc-sync-upgrade.yml`
+  (#127: its own three-job split, execution reachable only by dispatch and never by the schedule,
+  the credentialed job invoking no program out of the clone or the scratch tree, no dispatch input
+  in any `run:` block, no version literal in the YAML, and a run-surface summary for every terminal
+  state). `release-manifest_test.py` covers the release manifest guard by
   mutation — synthetic repositories in which a suite is genuinely unwired, each of which the
   guard must name — plus a run against this repository. `release.yml`'s CI runs every
   `tests/scripts/*_test.py` suite, and the guard is what catches a suite discovery silently

@@ -15,6 +15,14 @@ Prints exactly one decision token on stdout:
     ahead     installed is newer than any release (a dev/prerelease pin) —
               skip, never downgrade
 
+    upgrade-gate.py normalize --version <raw> --out FILE
+
+Writes `target=X.Y.Z` to FILE (a `$GITHUB_OUTPUT`) — the same strict parse, used
+to shape-check a human's `workflow_dispatch` input before it names a git ref.
+The dispatched value reaches the clone only through the normalized output, so a
+value carrying a ref expression, a path separator, or shell metacharacters fails
+here rather than becoming argv.
+
 Exit status: 0 with a decision on stdout; 2 on unparseable input (empty,
 non-numeric, or not exactly three dot-separated components). A malformed
 version fails the workflow step red rather than silently guessing.
@@ -52,7 +60,22 @@ def main():
     cmp_.add_argument("--current", required=True)
     cmp_.add_argument("--latest", required=True)
 
+    norm = sub.add_parser("normalize")
+    norm.add_argument("--version", required=True)
+    norm.add_argument("--out", required=True)
+
     args = parser.parse_args()
+
+    if args.mode == "normalize":
+        try:
+            version = ".".join(str(p) for p in parse(args.version))
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        with open(args.out, "a", encoding="utf-8") as f:
+            f.write(f"target={version}\n")
+        print(version)
+        return 0
 
     try:
         current = parse(args.current)

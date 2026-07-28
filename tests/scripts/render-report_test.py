@@ -678,58 +678,14 @@ class GrowthBacklog(unittest.TestCase):
         self.assertIn("Growth backlog: empty", self.summary())
 
 
-class UpgradeLaneStagingWiring(unittest.TestCase):
-    """Pins doc-sync-upgrade.yml's staging contract with apply-upgrade.py.
-
-    The lane's write job holds `contents: write`, so what it stages is the whole
-    of its blast radius. It stages the path set apply-upgrade.py declared it
-    wrote and refuses anything left over — these strings are the seam between
-    the YAML and the two unit-tested scripts, in both the shipped template and
-    this repo's install."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.ymls = {}
-        for label, parts in {
-            "template": ("plugins", "doc-lifecycle", "skills",
-                         "scheduling-doc-sync", "doc-sync-upgrade.yml"),
-            "dogfood": (".github", "workflows", "doc-sync-upgrade.yml"),
-        }.items():
-            path = os.path.join(os.path.dirname(__file__), "..", "..", *parts)
-            with open(path, encoding="utf-8") as f:
-                cls.ymls[label] = f.read()
-
-    def test_regeneration_asks_for_the_written_set(self):
-        for label, yml in self.ymls.items():
-            self.assertIn('--report-written "${RUNNER_TEMP}/upgrade-written.txt"',
-                          yml, label)
-
-    def test_staging_is_the_declared_set_and_never_broad(self):
-        for label, yml in self.ymls.items():
-            self.assertIn(
-                'git add --pathspec-from-file="${RUNNER_TEMP}/upgrade-written.txt"',
-                yml, label)
-            self.assertNotIn("git add -A", yml, label)
-            self.assertNotIn("git add --all", yml, label)
-
-    def test_leftover_paths_refuse_before_the_commit(self):
-        for label, yml in self.ymls.items():
-            step = yml[yml.index("Open upgrade PR"):]
-            # Unstaged-tracked + untracked. NOT `git status --porcelain`, which
-            # also lists the paths just staged and would refuse every run —
-            # asserted over executable lines, since the YAML comment explains
-            # exactly that trap by name.
-            self.assertIn("git diff --name-only; git ls-files --others "
-                          "--exclude-standard", step, label)
-            code = [ln for ln in step.splitlines()
-                    if not ln.strip().startswith("#")]
-            self.assertEqual(
-                [ln.strip() for ln in code if "git status --porcelain" in ln],
-                [], label)
-            self.assertIn("--status undeclared-paths", step, label)
-            # The refusal must precede the commit, or it refuses too late.
-            self.assertLess(step.index("undeclared-paths"),
-                            step.index("git commit -m"), label)
+# The upgrade lane's staging contract used to be pinned here, against
+# apply-upgrade.py's `--report-written` declaration. aj604/toolshed#127 replaced
+# that seam: the lane no longer asks the release being landed what it wrote, it
+# derives the set by comparing the scratch tree against the install, and
+# `tests/scripts/upgrade-workflow_test.py` owns the YAML assertions for the
+# three-job split that does it. The `undeclared-paths` summary and
+# `--report-written` remain for a human forcing an upgrade from a local
+# checkout, and are covered below and in apply-upgrade_test.py respectively.
 
 
 class UpgradeRender(unittest.TestCase):
@@ -853,6 +809,86 @@ class UpgradeRender(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("`.github/workflows/doc-sync-upgrade.yml`", r.stdout)
         self.assertIn("`.github/doc-sync/upgrade-gate.py`", r.stdout)
+
+    # -- detection-only statuses (aj604/toolshed#127) ----------------------
+
+    def test_available_says_nothing_ran_and_names_the_dispatch(self):
+        r = self.run_script("upgrade-summary", "--status", "available",
+                            "--current", "0.7.0", "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        summary = self.summary()
+        self.assertIn("0.8.0", summary)
+        # The whole point of the split: detection executes nothing.
+        self.assertIn("none of the release's code ran", summary)
+        self.assertIn("target: 0.8.0", summary)
+
+    def test_notified_explains_why_no_second_issue_was_filed(self):
+        r = self.run_script("upgrade-summary", "--status", "notified",
+                            "--current", "0.7.0", "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no second one was filed", self.summary())
+
+    def test_refused_states_that_nothing_was_staged(self):
+        r = self.run_script("upgrade-summary", "--status", "refused",
+                            "--current", "0.7.0", "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        summary = self.summary()
+        self.assertIn("outside the wiring", summary)
+        self.assertIn("no pull request was opened", summary)
+
+    # -- upgrade-notice ----------------------------------------------------
+
+    def notice(self, issues, latest="0.8.0"):
+        issues_path = os.path.join(self.tmp.name, "issues.json")
+        with open(issues_path, "w") as f:
+            json.dump(issues, f)
+        paths = {k: os.path.join(self.tmp.name, k) for k in
+                 ("title.txt", "body.md", "gh-output.txt")}
+        r = self.run_script("upgrade-notice", "--current", "0.7.0",
+                            "--latest", latest, "--repo", "acme/widgets",
+                            "--issues", issues_path,
+                            "--title-out", paths["title.txt"],
+                            "--body-out", paths["body.md"],
+                            "--out", paths["gh-output.txt"])
+        read = {}
+        for key, path in paths.items():
+            if not os.path.exists(path):
+                read[key] = ""
+                continue
+            with open(path, encoding="utf-8") as f:
+                read[key] = f.read()
+        return r, read
+
+    def test_notice_opens_when_no_issue_names_the_release(self):
+        r, out = self.notice([])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "open")
+        self.assertIn("notice=open", out["gh-output.txt"])
+        self.assertIn("0.8.0", out["title.txt"])
+
+    def test_notice_dedupes_on_the_exact_title(self):
+        _, first = self.notice([])
+        title = first["title.txt"].strip()
+        r, out = self.notice([{"number": 4, "title": title}])
+        self.assertEqual(r.stdout.strip(), "exists")
+        self.assertIn("notice=exists", out["gh-output.txt"])
+
+    def test_an_issue_for_another_release_does_not_suppress_the_notice(self):
+        r, out = self.notice(
+            [{"number": 4, "title": "doc-sync: doc-lifecycle 0.7.9 is available"}])
+        self.assertEqual(r.stdout.strip(), "open")
+
+    def test_the_notice_body_routes_the_reader_to_the_release_and_dispatch(self):
+        _, out = self.notice([])
+        body = out["body.md"]
+        self.assertIn("https://github.com/acme/widgets/releases/tag/v0.8.0", body)
+        self.assertIn("target: 0.8.0", body)
+        # It must not read as if an upgrade already happened.
+        self.assertIn("Nothing has run.", body)
+
+    def test_a_non_array_issue_payload_exits_2(self):
+        r, _ = self.notice({"issues": []})
+        self.assertEqual(r.returncode, 2)
 
 
 class DistillMergeRender(unittest.TestCase):

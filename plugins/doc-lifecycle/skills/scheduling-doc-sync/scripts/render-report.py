@@ -554,7 +554,89 @@ def render_upgrade_summary(status, current, latest, pr_url, files=""):
             "into the work tree. Nothing was committed or pushed. Reproduce locally with "
             "`apply-upgrade.py --report-written` and compare that list against "
             "`git status`.")
+    if status == "available":
+        return (f"📣 **A newer doc-lifecycle release exists: `{current}` → `{latest}`.** "
+                f"This check detects; it does not upgrade. Nothing was cloned and none of "
+                f"the release's code ran — a notice issue tracks it, and the upgrade "
+                f"happens when a human dispatches this workflow with `target: {latest}`.")
+    if status == "notified":
+        return (f"⏭️ **Already flagged — `{current}` → `{latest}`.** An open notice issue "
+                f"names this release; no second one was filed. Dispatch this workflow with "
+                f"`target: {latest}` when you have reviewed the release.")
+    if status == "refused":
+        return (f"🛑 **Upgrade refused — the regeneration reached outside the wiring.** "
+                f"Regenerating `{current}` → `{latest}` changed a path the upgrade engine "
+                f"does not own; the step log names every one. Nothing was staged and no "
+                f"pull request was opened. Review the release before retrying.")
     raise ValueError(f"unknown upgrade status: {status!r}")
+
+
+# The notice issue's title is the dedupe key: one open issue per release, so a
+# weekly check that keeps finding the same unreviewed release keeps quiet.
+UPGRADE_NOTICE_TITLE = "doc-sync: doc-lifecycle {latest} is available"
+
+
+def render_upgrade_notice_title(latest):
+    return UPGRADE_NOTICE_TITLE.format(latest=latest)
+
+
+def render_upgrade_notice_body(current, latest, repo, workflow):
+    """The tracking issue the scheduled detection files — a signal, not a change.
+
+    Deliberately an instruction to a human rather than an automated follow-up:
+    dispatching the workflow IS the decision that lets the target release's own
+    upgrade logic run here, so the issue's job is to make that decision informed
+    and easy, never to make it automatically.
+    """
+    return "\n".join([
+        f"This install's doc-sync wiring is pinned to `{current}` "
+        f"(`.github/doc-sync/installed-version`). doc-lifecycle `{latest}` has shipped.",
+        "",
+        "**Nothing has run.** The weekly check compares two version numbers and stops "
+        "there; it does not clone the release and it does not execute its upgrade logic. "
+        "A version number is not a reviewable artifact, so the comparison is a "
+        "notification, not an authorization.",
+        "",
+        "**To upgrade**, review the release first — "
+        f"https://github.com/{repo}/releases/tag/v{latest} — then run the "
+        f"`{workflow}` workflow from the Actions tab with:",
+        "",
+        "```",
+        f"target: {latest}",
+        "```",
+        "",
+        "That dispatch regenerates the wiring in a job holding no token and no write "
+        "scope, and a separate credentialed job — which executes none of the release's "
+        "code — stages exactly the wiring paths it produced and opens a pull request. "
+        "Merging that pull request is what advances the pin.",
+        "",
+        "Close this issue to stop being reminded about "
+        f"`{latest}`; the next release files a new one.",
+    ])
+
+
+def render_upgrade_notice(current, latest, repo, workflow, issues_path,
+                          title_out, body_out, out):
+    """Decide whether to file the notice, and render it. Prints the decision."""
+    title = render_upgrade_notice_title(latest)
+    try:
+        with open(issues_path, encoding="utf-8") as f:
+            issues = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        raise ValueError(f"cannot read --issues {issues_path}: {e}")
+    if not isinstance(issues, list):
+        raise ValueError(f"--issues {issues_path} must be a JSON array "
+                         f"(gh issue list --json number,title)")
+    existing = [i for i in issues
+                if isinstance(i, dict) and i.get("title") == title]
+    decision = "exists" if existing else "open"
+    with open(title_out, "w", encoding="utf-8") as f:
+        f.write(title + "\n")
+    with open(body_out, "w", encoding="utf-8") as f:
+        f.write(render_upgrade_notice_body(current, latest, repo, workflow) + "\n")
+    with open(out, "a", encoding="utf-8") as f:
+        f.write(f"notice={decision}\n")
+    return decision
 
 
 def render_upgrade_pr_body(current, latest, files):
@@ -673,6 +755,17 @@ def main():
     upr.add_argument("--latest", required=True)
     upr.add_argument("--files", default="")
 
+    unot = sub.add_parser("upgrade-notice")
+    unot.add_argument("--current", required=True)
+    unot.add_argument("--latest", required=True)
+    unot.add_argument("--repo", required=True)
+    unot.add_argument("--workflow", default="doc-sync-upgrade")
+    unot.add_argument("--issues", required=True,
+                      help="gh issue list --json number,title output")
+    unot.add_argument("--title-out", required=True)
+    unot.add_argument("--body-out", required=True)
+    unot.add_argument("--out", required=True, help="$GITHUB_OUTPUT")
+
     bgaps = sub.add_parser("bloat-unswept-summary")
     bgaps.add_argument("--report", required=True)
 
@@ -695,6 +788,10 @@ def main():
                 args.status, args.current, args.latest, args.pr_url, args.files))
         elif args.mode == "upgrade-pr-body":
             print(render_upgrade_pr_body(args.current, args.latest, args.files))
+        elif args.mode == "upgrade-notice":
+            print(render_upgrade_notice(
+                args.current, args.latest, args.repo, args.workflow,
+                args.issues, args.title_out, args.body_out, args.out))
         elif args.mode == "distill-merge-summary":
             write_summary(render_distill_merge_summary(load_merge(args.merge)))
         elif args.mode == "growth-backlog":

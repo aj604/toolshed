@@ -36,7 +36,8 @@ TPL_DOC_AUDIT = (
 TPL_DOC_APPLY = "name: doc-apply\non:\n  workflow_dispatch: {}\n"
 
 SCRIPT_SOURCES = {
-    "scheduling-doc-sync/scripts": ["upgrade-gate.py", "render-report.py"],
+    "scheduling-doc-sync/scripts": ["upgrade-gate.py", "render-report.py",
+                                   "stage-upgrade.py"],
     "detecting-doc-bloat/scripts": ["plan-chunks.py", "validate-bloat-output.py"],
     "detecting-doc-drift/scripts": ["validate-drift-output.py"],
 }

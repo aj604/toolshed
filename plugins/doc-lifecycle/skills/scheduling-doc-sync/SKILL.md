@@ -1,6 +1,6 @@
 ---
 name: scheduling-doc-sync
-description: Use when wiring a repo for automated/unattended documentation audit — "set up doc sync", "automate drift detection", "schedule nightly doc checks", "keep docs in sync automatically" — installs the doc-lifecycle GitHub Actions (a scheduled read-only audit, a manual apply dispatch, a weekly self-upgrade) instead of hand-rolling workflow YAML. Also the door for upgrading an existing install.
+description: Use when wiring a repo for automated/unattended documentation audit — "set up doc sync", "automate drift detection", "schedule nightly doc checks", "keep docs in sync automatically" — installs the doc-lifecycle GitHub Actions (a scheduled read-only audit, a manual apply dispatch, a weekly upgrade check) instead of hand-rolling workflow YAML. Also the door for upgrading an existing install.
 ---
 
 # Scheduling Doc Sync
@@ -15,25 +15,29 @@ Installs the shipped automation into a target repo — **three workflows**:
 - `doc-apply.yml` — the manual apply dispatch. A reviewer names the record digests they approve
   from one audit run; the lane mints the approval set from that selection, plans, applies, and
   opens a pull request. The one lane that writes repository content.
-- `doc-sync-upgrade.yml` — the weekly self-upgrade. Compares the installed version to the
-  plugin's latest release, regenerates the wiring at a newer one, opens a review PR.
+- `doc-sync-upgrade.yml` — the self-upgrade lane, three jobs split by who decides and who holds
+  credentials. Its weekly schedule only compares the installed version to the plugin's latest
+  release and files one notice issue naming a newer one; regenerating the wiring runs solely on a
+  `workflow_dispatch` carrying that version as `target`, and lands as a review PR.
 
 **You install wiring; you do not re-derive it.** Orchestration lives in the shipped workflow
 YAML; every lifecycle rule — scope, verdict contract, approval, application — lives in the
 `doclifecycle` engine package (`plugins/doc-lifecycle/engine/README.md`), vendored into the
 install and reached only through its public CLI. Every run-surface string lives in a shipped
 script: `render-audit-summary.py` for the audit lane, `render-apply-summary.py` for the apply
-lane, `render-report.py` for the upgrade lane; the upgrade lane's version comparison lives in
-`upgrade-gate.py`. Never inline audit or apply method into workflow YAML — that forks the
-method from its one owner.
+lane, `render-report.py` for the upgrade lane; the upgrade lane's version comparison and the
+shape-check on its dispatched target live in `upgrade-gate.py`, and which paths an upgrade may
+write in `stage-upgrade.py`. Never inline audit or apply method into workflow YAML — that forks
+the method from its one owner.
 
 **The model holds no repository write authority.** Every job that invokes a model runs with
 `permissions: contents: read` (plus `id-token: write` for the OAuth exchange only), checks out
 with `persist-credentials: false`, carries no `GH_TOKEN`, and hands its work forward as an
 artifact. The credentialed jobs run **no model**, and every one of them stages an explicit path
 list — `git add --pathspec-from-file`, never `git add -A`, with no exception. The apply lane
-stages the paths the engine's verified apply result emitted; the upgrade lane stages the set
-`apply-upgrade.py` declared it wrote, and refuses when anything is left unstaged or untracked.
+stages the paths the engine's verified apply result emitted; the upgrade lane stages the path set
+`stage-upgrade.py` authorized out of the regeneration's manifest, and refuses if git staged
+anything else or left a change behind in the work tree.
 `tests/scripts/workflow-permissions_test.py` fails the release if any of that slips. What none
 of this establishes is that the *report* was honest — it is model output too; the pull request
 the apply lane opens is where a person settles that.
@@ -47,10 +51,11 @@ executes are frozen at the same version as the vendored wiring, and can't drift 
 The version is read at runtime, NOT hardcoded in the workflow YAML, so the workflow files stay
 byte-identical across versions — a routine upgrade changes only the lockfile, never a
 `.github/workflows/` file (which the Actions token cannot push; see Upgrade mode). The upgrade
-lane is the exception: it clones the *target* release it's regenerating to
-(`steps.versions.latest`), since `installed-version` still holds the old version until the skill
-advances it. Clone under `$RUNNER_TEMP`, never inside the work tree, or the exported edit set
-captures it. Pin via the local checkout, NOT a
+lane is the exception: its `regenerate` job clones the *target* release it is regenerating to —
+the dispatched version, and only as `upgrade-gate.py normalize` re-emitted it — since
+`installed-version` still holds the old version until the upgrade PR merges. Its scheduled job
+clones nothing at all. Clone under `$RUNNER_TEMP`, never inside the work tree, or the exported
+edit set captures it. Pin via the local checkout, NOT a
 `plugin_marketplaces: …/toolshed.git#v<version>` ref — `claude-code-action`'s URL validator
 requires the value end in `.git`, so a `#<ref>` fragment is rejected outright.
 `doc-sync-upgrade.yml` is the only thing that advances the pin, and only via a reviewable PR.
@@ -59,11 +64,12 @@ The `plugins:` selector stays bare `doc-lifecycle@toolshed` (`claude-code-action
 
 The three workflow templates are in this skill's base directory (announced when the skill
 loads), and its own scripts one level down in `scripts/` — `upgrade-gate.py`,
-`render-report.py`, `render-audit-summary.py`, `render-apply-summary.py`,
+`stage-upgrade.py`, `render-report.py`, `render-audit-summary.py`, `render-apply-summary.py`,
 `probe-evidence-tool.py`. The chunk planner and the two output validators are copied from the
 sibling skills that own them (install step 6). `scripts/apply-upgrade.py` is the deterministic
-upgrade engine — run from the pinned checkout by the upgrade lane, never vendored into the
-install (see Upgrade mode).
+upgrade engine — the *target release's* copy of it is what the upgrade lane runs, so it is never
+vendored into the install; `stage-upgrade.py` is vendored for the mirror-image reason, because it
+is the code that bounds what that run may have written (see Upgrade mode).
 
 ## The audit lane (`doc-audit.yml`)
 
@@ -169,9 +175,10 @@ has no knob — manual dispatch carries no schedule to preserve.
    the workflow files are version-agnostic (Overview). The version from step 2 lands only in
    that lockfile.
 5. Copy this skill's scripts into `.github/doc-sync/`: `scripts/upgrade-gate.py`,
-   `scripts/render-report.py`, `scripts/render-audit-summary.py`,
+   `scripts/stage-upgrade.py`, `scripts/render-report.py`, `scripts/render-audit-summary.py`,
    `scripts/render-apply-summary.py`, `scripts/probe-evidence-tool.py` (the version-comparison
-   gate, and each lane's run-surface rendering, run from the repo, unit-tested upstream).
+   gate, the upgrade lane's path authority, and each lane's run-surface rendering — run from the
+   repo, unit-tested upstream).
 6. Copy the sibling skills' scripts into `.github/doc-sync/`:
    `../detecting-doc-bloat/scripts/plan-chunks.py`,
    `../detecting-doc-bloat/scripts/validate-bloat-output.py`, and
@@ -205,9 +212,10 @@ has no knob — manual dispatch carries no schedule to preserve.
     so on a fresh install always write it. `doc-sync-upgrade.yml` reads it to decide whether a
     newer release exists; it advances only when an upgrade PR merges.
 12. Tell the user, concretely:
-    - the fifteen files to commit, plus the vendored `engine/` tree: the three workflows
-      (`doc-audit.yml`, `doc-apply.yml`, `doc-sync-upgrade.yml`); the eight scripts under
-      `.github/doc-sync/` (`upgrade-gate.py`, `render-report.py`, `render-audit-summary.py`,
+    - the sixteen files to commit, plus the vendored `engine/` tree: the three workflows
+      (`doc-audit.yml`, `doc-apply.yml`, `doc-sync-upgrade.yml`); the nine scripts under
+      `.github/doc-sync/` (`upgrade-gate.py`, `stage-upgrade.py`, `render-report.py`,
+      `render-audit-summary.py`,
       `render-apply-summary.py`, `probe-evidence-tool.py`, `plan-chunks.py`,
       `validate-drift-output.py`, `validate-bloat-output.py`); the three seeded state files
       (`audit-scope.json`, `drift-waivers.json`, `evidence-tools.json`); and `installed-version`;
@@ -216,36 +224,55 @@ has no knob — manual dispatch carries no schedule to preserve.
     - applying is a deliberate second step: read that run's report, then
       `gh workflow run doc-apply -f report_run_id=<id> -f report_digest=<digest> -f records="<digests>" -f base=main`
       — the digests you name are the approval, and the PR it opens is what a merge approves;
-    - the weekly upgrade check opens a `doc-sync/upgrade` PR only when a newer plugin release
-      ships; when the install is already current (or ahead of releases) it self-explains and stops;
-    - run them now with `gh workflow run doc-audit` and `gh workflow run doc-sync-upgrade`;
-    - upgrades happen automatically via `doc-sync-upgrade.yml`; to force one, re-run this skill
-      (see Upgrade mode — consumer state and knobs preserved; wiring + pin + lockfile refreshed).
+    - the weekly upgrade check only detects: when a newer plugin release ships it files one notice
+      issue naming it (one open notice per release, so a repeat check stays quiet), and when the
+      install is already current or ahead of releases it self-explains and stops. It clones
+      nothing and runs none of the release's code;
+    - upgrading is a separate, human decision: read the release, then
+      `gh workflow run doc-sync-upgrade -f target=<X.Y.Z>`, which regenerates the wiring and opens
+      a `doc-sync/upgrade` PR whose merge advances the pin;
+    - run them now with `gh workflow run doc-audit` and `gh workflow run doc-sync-upgrade` (the
+      latter with no `target` — the detecting half);
+    - to upgrade from a local checkout instead, re-run this skill (see Upgrade mode — consumer
+      state and knobs preserved; wiring + pin + lockfile refreshed).
 
 ## Upgrade mode
 
-Run by `doc-sync-upgrade.yml` once a newer plugin release exists (or by a human forcing an
-upgrade). It regenerates the vendored wiring at the new version while leaving every
-consumer-owned value alone. **It is not a fresh install** — skip the Preflight (secrets and
-PR-permissions are already in place) and do not re-seed the state files.
+Run by `doc-sync-upgrade.yml`'s `regenerate` job when a human dispatches that workflow with a
+`target` (or by a human forcing an upgrade from a local checkout). It regenerates the vendored
+wiring at the new version while leaving every consumer-owned value alone. **It is not a fresh
+install** — skip the Preflight (secrets and PR-permissions are already in place) and do not
+re-seed the state files.
+
+**A version comparison detects; it never authorizes execution.** Upgrading means running the
+*target release's* own `apply-upgrade.py`, which nobody in the consumer repository has read at the
+moment it runs, so the schedule reaches only the `detect` job: it compares two numbers, files one
+notice issue naming the release (`render-report.py upgrade-notice`, deduped on that title so a
+repeat check keeps quiet), and stops — cloning nothing, running none of the release's code, and
+holding `issues: write` as its whole write scope. Execution happens only under
+`workflow_dispatch` carrying a `target`, and `upgrade-gate.py` both shape-checks that input to
+strict X.Y.Z before it names a git ref and refuses a target that is not strictly newer than the
+pin. A dispatch advances the pin; it never rewinds it.
 
 **The regeneration is deterministic — `scripts/apply-upgrade.py`, no model.** The workflow YAML
 is version-agnostic, so an upgrade is pure mechanics (re-copy the scripts, re-render the
 templates with the consumer's preserved knobs, replace the vendored engine, bump the lockfile),
 and a tested script owns it — the upgrade lane makes no model call, and needs no model auth. The
-workflow runs it from the pinned target checkout; a human forcing an upgrade runs the same script
-against their checkout with `--plugin-root "$CLAUDE_PLUGIN_ROOT"`:
+workflow runs it from the target release's own checkout, in the job that holds no credential; a
+human forcing an upgrade runs the same script against their checkout with
+`--plugin-root "$CLAUDE_PLUGIN_ROOT"`:
 
     apply-upgrade.py --plugin-root <doc-lifecycle plugin dir> --repo <install root> --target <version>
                      [--report-written <file>]
 
-The script writes files only; git/PR is the workflow's job (below). `--report-written` is how the
-caller learns what to stage: the script declares each repo-relative path *as it writes it* — the
-rendered workflows, the copied scripts, `installed-version`, the files it actually seeded, and
-the vendored engine as a directory path (`copy_engine` empties the destination first, so a
-deletion has to be stageable). Declared by the writer, never discovered from `git status`, so a
-path the script never touched cannot ride an upgrade commit. Never re-implement its file ops by
-hand.
+The script writes files only; git/PR is the workflow's job (below). `--report-written` declares
+each repo-relative path *as it writes it* — the rendered workflows, the copied scripts,
+`installed-version`, the files it actually seeded, and the vendored engine as a directory path
+(`copy_engine` empties the destination first, so a deletion has to be stageable). **The lane does
+not read it**: a declaration by the release being landed is not evidence about that release, so
+what gets staged comes from `stage-upgrade.py` comparing trees the lane controls. The flag remains
+for a human forcing an upgrade from a checkout they took themselves. Never re-implement the
+script's file ops by hand.
 
 Ownership is the whole game — total on wiring, idempotent on state (this table is the contract
 `apply-upgrade.py` implements):
@@ -253,7 +280,7 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | File | Owner | Upgrade behavior |
 |------|-------|------------------|
 | `doc-sync-upgrade.yml` | plugin (wiring) | **Regenerate** from the new template, re-injecting the consumer's existing knob (below), not the template default. No version to re-pin — the Pin steps read `installed-version` at runtime. |
-| `.github/doc-sync/*.py` (the five always-installed scripts) | plugin (wiring) | **Overwrite** from the new version. |
+| `.github/doc-sync/*.py` (the six always-installed scripts) | plugin (wiring) | **Overwrite** from the new version. |
 | `.github/doc-sync/installed-version` | version state | **Set** to `<target>` (bare semver). This is what advances the pin; on a version-only release it's the *only* file that changes. |
 | `.github/doc-sync/audit-scope.json` | consumer (tuned config) | **Never touch.** |
 | `.github/doc-sync/drift-waivers.json` | consumer (accepted-claim record) | **Never touch.** Seed `{"waivers": []}` only if absent (pre-0.11 installs lack it). |
@@ -274,20 +301,46 @@ currently-installed workflow and substitutes it back into the new template:
 
 A knob it can't extract fails the run red rather than default-guessing.
 
-**Do not commit or open the PR in upgrade mode** — the workflow owns git: it diffs the working
-tree, stages the declared path set, opens the `doc-sync/upgrade` PR (or self-explains a no-op),
-and the merge is what advances `installed-version`. Anything left unstaged or untracked after
-that staging ends the run at the `undeclared-paths` status, which names the stray paths and
-states that nothing was committed or pushed — a regeneration that touched more than it declared
-is a bug to fix upstream, never something to sweep into the commit. Regenerating never leaves an
-install floating on `main`: the new wiring is pinned to `<target>` end to end.
+**The job that runs the release's code holds nothing, and the job that holds credentials runs
+nothing the release wrote.** `regenerate` has `contents: read`, no `GH_TOKEN`, no secret, and a
+checkout persisting no credential; it copies the wiring roots (`.github/`, `.doc-lifecycle/`) into
+a scratch tree under `$RUNNER_TEMP` and runs the clone's `apply-upgrade.py` against that copy, so
+the checkout it reads afterwards is one the regeneration never touched. `land` holds
+`contents: write` + `pull-requests: write` and invokes only `.github/doc-sync/*` from its own
+checkout — every byte the release produced reaches it as data inside the `doc-sync-upgrade-bundle`
+artifact. That second half is a claim about *when the tooling copy was taken* — from the installed
+checkout, before anything the release wrote existed — not about which directory it sits in: a
+regeneration writes the release's own copies of these very scripts, so a path that merely looks
+installed proves nothing.
+
+**`stage-upgrade.py` is the authority between the two jobs.** `manifest` derives what changed by
+comparing the scratch tree against the install and refuses the whole run if any difference lies
+outside what `apply-upgrade.py` owns (the marker, `audit-scope.json`, the registry, a workflow
+that is not `doc-*.yml`, a non-`.py` drop into `.github/doc-sync/`, a symlink, anything outside
+the wiring roots), emitting `{status, path, sha256}` entries plus the changed files. `apply`
+re-derives that same authority from the manifest instead of trusting that `manifest` already
+did — the two run in different trust domains with an artifact in between — checks every bundled
+file against its recorded digest, refuses a bundle carrying a file the manifest does not name, and
+prints the staging list. `verify` then checks what git actually staged against that list. All
+three run from the installed checkout.
+
+**Do not commit or open the PR in upgrade mode** — the workflow's `land` job owns git: it
+transfers the manifest's path set into its own checkout, stages exactly that set by pathspec,
+opens the `doc-sync/upgrade` PR (or self-explains a no-op), and the merge is what advances
+`installed-version`. A difference outside the wiring ends the run before any of that, at the
+`refused` status, which names every offending path and states that nothing was staged and no pull
+request opened — a regeneration that reached past the wiring is a bug to fix upstream, never
+something to sweep into the commit. Anything git staged beyond the authorized set, or left behind
+in the work tree, fails the `verify` check the same way. Regenerating never leaves an install
+floating on `main`: the new wiring is pinned to `<target>` end to end.
 
 **Workflow-file changes can't self-land.** The Actions `GITHUB_TOKEN` cannot push files under
 `.github/workflows/` (GitHub blocks it; the `workflows` permission is not grantable to it).
 Because the Pin steps read `installed-version` at runtime, a *version-only* upgrade touches only
 that lockfile (+ the scripts and the vendored engine) and the PR opens normally. But an upgrade
 whose new templates change the workflow YAML itself can't be pushed by the workflow — the
-`Open upgrade PR` step detects a changed `.github/workflows/` file, writes the diff to the
+`land` job's `Open the upgrade pull request` step detects a changed `.github/workflows/` file,
+writes the diff to the
 `doc-sync-upgrade-patch` artifact, and fails loud with `git apply` instructions
 (`render-report.py upgrade-summary --status blocked-workflows`). A human applies that patch with
 a `workflow`-scoped credential. This is rare and expected; don't try to "fix" it by widening the
@@ -367,11 +420,20 @@ landing a file, never the door.
   in the checkout, not the URL.) `installed-version` is the lockfile — it advances only when a
   `doc-sync/upgrade` PR merges. Never ship an unpinned marketplace checkout (bare `main`), and
   never version the `plugins:` selector (`@version` there is unsupported).
+- **Upgrading is a human's dispatch, never a version comparison's conclusion.** A newer release is
+  a notice issue, not a mandate: the schedule detects and stops, and the target release's code
+  runs only under `workflow_dispatch` naming a `target`, in a job holding `contents: read`, no
+  token and no secret — while the job holding `contents: write` runs only `.github/doc-sync/*`
+  from its own checkout, taken before the release wrote anything. Never route the schedule into
+  the regenerating job, never give the detecting job a scope beyond `issues: write`, and never
+  move the release's `apply-upgrade.py` into the credentialed one
+  (`tests/scripts/upgrade-workflow_test.py`).
 - **Don't customize the installed YAML beyond the audit-cron and upgrade-cron knobs.** Real
   changes belong upstream in the plugin (aj604/toolshed) so every install gets them on next upgrade.
 - **Staging is an explicit path list, never `git add -A` — no exceptions.** Both credentialed
   jobs stage `--pathspec-from-file`: the apply lane the paths the engine's verified apply result
-  emitted, the upgrade lane the paths `apply-upgrade.py --report-written` declared. Each then
+  emitted, the upgrade lane the paths `stage-upgrade.py` authorized out of the regeneration's
+  manifest. Each then
   re-checks what landed, and a stray path stops the run before anything is committed or pushed.
   `workflow-permissions_test.py` asserts this over every shipped template with no exemption list.
 - **The report is a build artifact, never repo content.** The audit lane uploads
@@ -419,3 +481,18 @@ landing a file, never the door.
   pin via the local checkout of the release tag only.
 - Resetting `.github/doc-sync/installed-version`, or overwriting a seeded state file, during an
   upgrade → upgrade preserves consumer state; only wiring + the pin + the lockfile change.
+- Making the scheduled upgrade check clone the release or run its `apply-upgrade.py` "so upgrades
+  land unattended", or moving that execution into the credentialed `land` job → that is
+  pre-review execution of unreviewed code, which the three-job split exists to close. The
+  schedule detects; a dispatch authorizes.
+- Running `stage-upgrade.py` (or any other check) out of the clone or `$RUNNER_TEMP/scratch`, or
+  landing the bundle with a trusting `cp -a` + `git add -A` → the boundary is only worth what the
+  code drawing it is, so it runs from the installed checkout and `apply` re-derives the authority
+  from the manifest instead of trusting `manifest` already did.
+- Staging an upgrade from `apply-upgrade.py --report-written` inside the lane → that is the
+  release being landed declaring what it wrote, which is not evidence about that release. Derive
+  the set with `stage-upgrade.py manifest`, from trees the lane controls; the flag is for a human
+  running the upgrade against a checkout they took themselves.
+- Splicing `inputs.target` straight into the `git clone` (or any other `run:` line) → the
+  dispatched value reaches a shell only as `upgrade-gate.py normalize` re-emitted it, and the same
+  gate is what refuses a target that would rewind the pin.

