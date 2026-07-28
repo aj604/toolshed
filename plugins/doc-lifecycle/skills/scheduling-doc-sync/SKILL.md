@@ -147,8 +147,10 @@ cost differ, and splits the new lane's records into an adjudication worklist by 
 auto-apply policy could land them with no human (`render` prints the same as Markdown). It
 judges nothing — a false positive is a claim about the repository, and only a reader with the
 repository open settles one. This repository's own gate record, criteria and verdict, is
-`docs/plans/2026-07-26-shadow-parity-gate.md`. The script leaves with the legacy lane
-(aj604/toolshed#77).
+`docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, with its G4 re-measurement in
+`docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md`; the first cycle's, which it
+supersedes, stays at `docs/plans/2026-07-26-shadow-parity-gate.md`. The script leaves with the
+legacy lane (aj604/toolshed#77).
 
 ## Preflight (run all; report failures, don't silently skip)
 

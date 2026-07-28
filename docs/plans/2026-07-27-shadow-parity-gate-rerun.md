@@ -2,6 +2,9 @@
 
 **Status:** criteria re-registered 2026-07-27 in their own commit, before this cycle runs and
 before any comparison output exists. Verdict recorded in a later commit.
+**Amended by:** `docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md` — the G4 blocker
+below is fixed (#123) and G4 is re-measured there on this cycle's own report. Everything in this
+file is what this cycle measured, unchanged.
 **Supersedes:** `docs/plans/2026-07-26-shadow-parity-gate.md` (the first cycle's **FAIL**), which
 stays as history and is still the record of what the first cycle measured.
 **Blocks:** #77 (remove the legacy documentation-sync automation) cites this file's Verdict

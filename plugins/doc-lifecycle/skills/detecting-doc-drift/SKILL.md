@@ -75,6 +75,16 @@ STALE record whose `fix` only changes a line number** — a line-number-only cor
 drift. Mark `STALE` only when the value/behavior/symbol is wrong or the anchor points to a
 construct that moved or no longer exists.
 
+**A `fix` that names a file is settled by opening that file.** Every property the replacement
+asserts of another document — that it exists, that it carries a section, that it is now the
+live one — is read there first. A `Supersedes:` header, a filename, or a commit message says a
+file replaced another, never what the replacement contains. Assert only what you read: if the
+target does not carry it yet, the fix says what the target actually shows, and if nothing in
+the repository settles it, the record is `UNVERIFIABLE` with the pointer in `evidence` rather
+than a `STALE` with a drafted replacement. This is the rule that makes a repointing fix safe to
+land, and the auto-apply policy refuses one anyway (`policy-fix-names-other-document`) — a fix
+that names a document the claim did not is a person's to approve.
+
 ## The output contract (this is the "shape")
 
 The drift report holds one record per extracted claim — STALE records drive fixes;
@@ -133,5 +143,7 @@ The validator (step 4) also cross-checks a wrapped object's `summary` counts aga
 - A record with an invented `kind` (e.g. `schema_mismatch`) → use the six enum values only.
 - Marking an anchor STALE for being off by a line, or emitting a `fix` that only changes a
   line number → not drift. The anchor is metadata, not its own claim.
+- Repointing a claim at a superseding document you did not open → the header says it supersedes,
+  not what it contains. Open the target; assert only what it shows.
 - Evidence that tells a story — prior fixes, what re-staled the line, pasted command output →
   one line, pointer + fact. History lives in git; the record proves, it doesn't narrate.

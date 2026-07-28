@@ -4,6 +4,48 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-27 — a fix that speaks for another document is a person's to approve (#123)
+- Evidence: `docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, G4 — DRIFT-023, the second
+  shadow cycle's one false positive and #77's only blocker. A true sentence was called `STALE`
+  because the document it pointed at had been superseded, and its `fix` repointed the sentence at
+  the successor while asserting the successor "carries criteria and verdict". At the audited
+  commit that file's Verdict section read "Not yet run". The record carries an exact preimage and
+  an `evidence.source`, so `policy.py` would have minted for it with no human.
+- Decided, and it is the mechanical half that carries the guarantee: `policy.py` refuses a record
+  whose `fix` names a file the claim it replaces did not — `policy-fix-names-other-document`. A
+  preimage pins what a run read; a `fix` is what a model wrote, and a document it names that the
+  claim did not is one the record pins nothing from. A citation does not settle it: a pointer
+  says one line was consulted, and what a document contains is the thing being asserted. The
+  finding's own document is excluded — rewriting a passage that names its own file speaks for
+  nothing else. Recognizing a file reference is `paths.path_references`, beside the classifier
+  whose suffix tables it reuses, so one module answers "what is a path" for both questions.
+- Decided, as defense in depth and not as a guarantee: `detecting-doc-drift` now states that a
+  `fix` naming a file is settled by opening that file, and `doc-audit.yml`'s prompt names
+  fix-authoring among what it sends workers to that skill for. This addresses the wrong fix being
+  *authored*, which the exclusion does not — but it is model behavior, so nothing rests on it.
+- Rejected: the prompt change alone. It is the narrowest correction the gate's record suggested,
+  and it has no hard guarantee — verifying it means re-running workers, and a worker that
+  regressed would land the assertion unattended, which is the budget the criterion sets at zero.
+- Rejected: a new record code for "pointer superseded". The most structural option and the
+  biggest contract change: producers, validators, the applier's remedy table, and every consumer
+  switching on the code. It also asks a model to classify its own finding into the class that
+  refuses it, where the exclusion reads what the model wrote. Left available — the exclusion does
+  not foreclose it.
+- Named limit: the recognizer is deliberately generous but not exhaustive, so a fix that names
+  another document in prose only ("see the engine README") is not caught by shape. The method
+  rule is what covers that case, and it is the half without a guarantee. A fix that repoints is
+  now a person's to approve even when the model got it right — the cost is one more record in the
+  review queue, paid against a class whose error budget is zero.
+- Verified: G4 re-measured on the recorded cycle's own report — 24 records, 12 eligible before,
+  11 after, exactly one decision changed, the other 23 identical
+  (`docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md`, which states why no third live
+  cycle was run). Six mutants of the guard and the recognizer, each killed.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/policy.py,
+  plugins/doc-lifecycle/engine/doclifecycle/paths.py,
+  plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml,
+  tests/engine/policy_test.py, tests/engine/paths_test.py
+
 ## 2026-07-27 — the audit lane declares tools without widening its grant (#118)
 - Evidence: `docs/plans/2026-07-26-shadow-parity-gate.md`, "Cause B" — its second forcing
   condition, "the workers' tool set … did not include `gh`", which #115 left open. Six

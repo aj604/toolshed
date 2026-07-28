@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Tests for path authorization: the single owner of path safety.
 
-Seam: doclifecycle.paths.authorize_path(path, repo_root=, roots=, target_class=)
-— one candidate path in, one typed authorization or typed refusal out. Nothing
-below the seam is tested directly.
+Two seams, and the module owns both halves of "what is a repository path":
+
+- `authorize_path(path, repo_root=, roots=, target_class=)` — one candidate
+  path in, one typed authorization or typed refusal out.
+- `path_references(text)` — the recognizer: which tokens in a piece of prose a
+  reader would take as naming a file or directory in this repository. It
+  authorizes nothing and touches no filesystem.
+
+Nothing below either seam is tested directly.
 
 Run: python3 tests/engine/paths_test.py
 """
@@ -16,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from support import RepoTestCase  # noqa: E402  (also puts the engine on sys.path)
 
-from doclifecycle.paths import authorize_path  # noqa: E402
+from doclifecycle.paths import authorize_path, path_references  # noqa: E402
 
 
 class Authorized(RepoTestCase):
@@ -471,6 +477,84 @@ class WhatThePathIs(RepoTestCase):
 
         self.assertTrue(decision.authorized, decision.problem)
         self.assertEqual(decision.path, "docs/new/deep/runbook.md")
+
+
+class WhatProseNamesAsAFile(unittest.TestCase):
+    """`path_references`: the file names a sentence puts in front of a reader.
+
+    Generous on purpose. Its one consumer refuses eligibility when a reference
+    turns up, so a token this misses is a refusal that does not happen, and a
+    token it over-reads is a human looking at one more record.
+    """
+
+    def references(self, text):
+        return set(path_references(text))
+
+    def test_a_repository_path_inside_backticks_is_a_reference(self):
+        text = ("This repository's own gate record, criteria and verdict, is "
+                "`docs/plans/2026-07-27-shadow-parity-gate-rerun.md`.")
+
+        self.assertEqual(self.references(text),
+                         {"docs/plans/2026-07-27-shadow-parity-gate-rerun.md"})
+
+    def test_a_sentence_naming_two_documents_names_both(self):
+        text = ("is `docs/plans/b.md` (the first, now superseded, is "
+                "`docs/plans/a.md`).")
+
+        self.assertEqual(self.references(text),
+                         {"docs/plans/a.md", "docs/plans/b.md"})
+
+    def test_a_bare_filename_with_a_known_suffix_is_a_reference(self):
+        self.assertEqual(self.references("see SKILL.md for the shape"),
+                         {"SKILL.md"})
+
+    def test_a_markdown_link_target_is_a_reference(self):
+        self.assertEqual(self.references("[the guide](docs/guides/tour.md)"),
+                         {"docs/guides/tour.md"})
+
+    def test_a_directory_is_a_reference(self):
+        self.assertEqual(self.references("the records live under `docs/plans/`"),
+                         {"docs/plans/"})
+
+    def test_slash_separated_prose_is_not_a_path(self):
+        # The knob list that DRIFT-021's fix edits: slashes, but no file.
+        text = "beyond the cron/cap/bloat-cron/upgrade-cron/audit-cron knobs"
+
+        self.assertEqual(self.references(text), set())
+
+    def test_an_owner_slash_repository_is_not_a_path(self):
+        self.assertEqual(self.references("upstream in the plugin (aj604/toolshed)"),
+                         set())
+
+    def test_a_dotted_symbol_is_not_a_path(self):
+        # `approval.ApprovedRecord.targets()` and `report.current_lineage()`
+        # are the two DRIFT records whose fixes rewrite a symbol. Reading a
+        # symbol as a file would refuse the fixes this policy exists to admit.
+        text = ("one record authorizes (`approval.ApprovedRecord.targets()`), "
+                "and `report.current_lineage()` supplies the rest")
+
+        self.assertEqual(self.references(text), set())
+
+    def test_an_abbreviation_is_not_a_path(self):
+        self.assertEqual(self.references("unique within the report (e.g. `B1`)"),
+                         set())
+
+    def test_a_trailing_sentence_period_is_not_part_of_the_name(self):
+        self.assertEqual(self.references("It moved to docs/reference/api.md."),
+                         {"docs/reference/api.md"})
+
+    def test_a_reference_is_reported_once_however_often_it_is_written(self):
+        text = "`a/b.md` and `a/b.md` again, plus a/b.md"
+
+        self.assertEqual(path_references(text), ("a/b.md",))
+
+    def test_text_that_names_nothing_has_no_references(self):
+        self.assertEqual(path_references("The service charges a 2% fee."), ())
+
+    def test_the_same_text_is_read_the_same_way_twice(self):
+        text = "moved from `docs/a.md` to `docs/b.md`"
+
+        self.assertEqual(path_references(text), path_references(text))
 
 
 class Determinism(RepoTestCase):

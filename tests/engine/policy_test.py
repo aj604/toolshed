@@ -486,6 +486,131 @@ class WhatAPolicyMayNeverMint(PolicyTestCase):
 
 
 # --------------------------------------------------------------------------
+# Acceptance criterion 5 (#123): a fix that asserts something about another
+# document is a finding for a human, whatever the record pins about its own.
+# --------------------------------------------------------------------------
+
+# DRIFT-023 of the second shadow-parity cycle, verbatim
+# (`tests/baselines/shadow-parity-gate-rerun/shadow-report.json`). The verdict
+# is right — the pointer was superseded — and the fix asserts the successor
+# "carries criteria and verdict", which the worker never opened it to check. At
+# the audited commit that file's Verdict section read "Not yet run".
+DRIFT_023_ASSERTION = (
+    "This repository's own gate record, criteria and verdict, is "
+    "`docs/plans/2026-07-26-shadow-parity-gate.md`."
+)
+DRIFT_023_FIX = (
+    "This repository's own gate record, criteria and verdict, is "
+    "`docs/plans/2026-07-27-shadow-parity-gate-rerun.md` (the first cycle's, "
+    "now superseded, is `docs/plans/2026-07-26-shadow-parity-gate.md`)."
+)
+DRIFT_023_EVIDENCE = {
+    "source": "docs/plans/2026-07-27-shadow-parity-gate-rerun.md",
+    "line": 5,
+    "observed": "the rerun file's header reads Supersedes: "
+                "docs/plans/2026-07-26-shadow-parity-gate.md",
+}
+
+
+class AFixThatSpeaksForAnotherDocument(PolicyTestCase):
+    def repointing(self, **extra):
+        fields = dict(
+            assertion=DRIFT_023_ASSERTION,
+            fix=DRIFT_023_FIX,
+            evidence=dict(DRIFT_023_EVIDENCE),
+        )
+        fields.update(extra)
+        return self.stale(**fields)
+
+    def test_a_fix_naming_a_document_the_claim_did_not_is_refused(self):
+        eligibility = self.eligibility([self.repointing()])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_the_refusal_names_the_document_nobody_read(self):
+        eligibility = self.eligibility([self.repointing()])
+
+        message = eligibility.decisions[0].refusal.message
+        self.assertIn("docs/plans/2026-07-27-shadow-parity-gate-rerun.md",
+                      message)
+
+    def test_an_evidence_pointer_at_that_document_does_not_settle_it(self):
+        # The whole of the DRIFT-023 failure: the record *does* cite the new
+        # file. A citation pins one line; the fix asserted what the file
+        # contains, which no pointer to its header settles.
+        eligibility = self.eligibility([self.repointing()])
+
+        self.assertIsNotNone(eligibility.decisions[0].refusal)
+
+    def test_the_repointing_record_reaches_no_approval_set(self):
+        result = self.mint([self.repointing()])
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertIn("policy-fix-names-other-document", codes(result))
+        self.assertIn("policy-nothing-eligible", codes(result))
+
+    def test_a_bare_filename_the_claim_did_not_name_is_refused_too(self):
+        # The same assertion, spelled without a directory.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The output contract is SKILL.md.",
+            fix="The output contract is output-contract.md.",
+        )])
+
+        self.assertEqual(refusals(eligibility),
+                         {"R-1": "policy-fix-names-other-document"})
+
+    def test_a_fix_that_only_rewords_a_document_the_claim_names_is_eligible(self):
+        # DRIFT-022's shape: both spellings name the same two build artifacts,
+        # so the fix asserts nothing about a document the record did not pin.
+        eligibility = self.eligibility([self.repointing(
+            assertion="Never let a hand edit reintroduce `drift-report.json`"
+                      "/`pr-body.md` into a commit.",
+            fix="Never let a hand edit reintroduce `drift-report.json`"
+                "/`pr-body.md` into the sync PR commit.",
+        )])
+
+        self.assertEqual(refusals(eligibility), {"R-1": None})
+
+    def test_a_fix_may_name_the_document_the_finding_lives_in(self):
+        # Self-reference is not a cross-document assertion: the applier reads
+        # and rewrites this document, and the preimage pins the passage.
+        eligibility = self.eligibility([self.repointing(
+            assertion="The fee is documented in docs/a.md.",
+            fix="The 2.5% fee is documented in docs/a.md.",
+        )])
+
+        self.assertEqual(refusals(eligibility), {"R-1": None})
+
+    def test_a_fix_that_rewrites_a_symbol_stays_eligible(self):
+        # DRIFT-014's shape, and the reason the recognizer must not read a
+        # dotted symbol as a file: this is the class the policy exists for.
+        eligibility = self.eligibility([self.repointing(
+            assertion="one record authorizes (`approval.Record.targets()`)",
+            fix="one record authorizes (`approval.ApprovedRecord.targets()`)",
+        )])
+
+        self.assertEqual(refusals(eligibility), {"R-1": None})
+
+    def test_a_fix_editing_a_slash_separated_knob_list_stays_eligible(self):
+        # DRIFT-021's shape: slashes, no file.
+        eligibility = self.eligibility([self.repointing(
+            assertion="beyond the cron/cap/bloat-cron/upgrade-cron knobs",
+            fix="beyond the cron/cap/bloat-cron/upgrade-cron/audit-cron knobs",
+        )])
+
+        self.assertEqual(refusals(eligibility), {"R-1": None})
+
+    def test_an_anchor_refresh_is_not_put_through_the_fix_check(self):
+        # A narrative anchor names the files it is dated against, and its
+        # refresh is the engine's own arithmetic on a date — there is no
+        # model-authored fix to read a new document out of.
+        eligibility = self.eligibility([self.anchor_stale()])
+
+        self.assertEqual(refusals(eligibility), {"R-2": None})
+
+
+# --------------------------------------------------------------------------
 # Acceptance criterion 4: the identical applier and confinement path, no bypass.
 # --------------------------------------------------------------------------
 

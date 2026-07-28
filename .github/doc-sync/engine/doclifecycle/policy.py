@@ -41,6 +41,13 @@ units, and a unit digest *is* its content) and someone can follow the pointer
 that says why (`evidence.source`). Everything the policy admits satisfies both;
 everything a bloat audit produces is a judgment about whether a passage should
 exist at all, which no pointer settles.
+
+*And the replacement stays inside what the record pins.* A `fix` naming a
+document the claim it replaces never named asserts something about a file this
+record pins nothing from, however exact its preimage and however real its
+citation. That is the shape the second shadow-parity cycle caught (#123): a
+superseded pointer repointed at its successor, with a property of the successor
+asserted that nobody had opened it to check, in the class that lands unattended.
 """
 
 import json
@@ -53,6 +60,7 @@ from . import approval as approval_mod
 from .bloat import CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC
 from .drift import CODE_ANCHOR_STALE, VERDICT_STALE
 from .inventory import DEFAULT_REGISTRY_PATH
+from .paths import path_references
 from .report import Report
 from .results import STATUS_OK, Invalid, Problem
 
@@ -128,6 +136,13 @@ DESTINATION_FIELD = "destination"
 # A human's dispute, recorded by the drift audit and never removed from the
 # report. It reaches any finding code, so a STALE record can carry one.
 WAIVED_FIELD = "waived"
+# The replacement text a STALE verdict carries. It is the one field on a record
+# a model *authored* rather than observed, which is why the refusal below reads
+# it against the preimage rather than trusting it.
+FIX_FIELD = "fix"
+# The document the finding lives in — the only one a mechanical remedy reads,
+# rewrites, or may speak about.
+PATH_FIELD = "path"
 
 
 @dataclass(frozen=True)
@@ -347,6 +362,27 @@ def _never_eligible(code, record_id):
     )
 
 
+def _unnamed_documents(record):
+    """The documents a `fix` speaks about that the claim it replaces did not.
+
+    The preimage is the pinned half of a record: text this run read out of the
+    document. A `fix` is the authored half, and a file it names that the
+    preimage did not is a document the record asserts something about without
+    pinning anything from it — most often that it exists, usually that it
+    contains what the sentence says it contains. The record's own document is
+    excluded: rewriting a passage that names its own file is not speaking for
+    anything else.
+    """
+    fix = record.extra.get(FIX_FIELD)
+    if not isinstance(fix, str):
+        return ()
+    named = set(path_references(record.extra.get(PREIMAGE_FIELD)))
+    own = record.extra.get(PATH_FIELD)
+    if isinstance(own, str):
+        named.update((own, own.rpartition("/")[2]))
+    return tuple(p for p in path_references(fix) if p not in named)
+
+
 def _decide(policy, record, enabled):
     """The policy's verdict on one record. `(eligible_class, Problem or None)`.
 
@@ -446,6 +482,23 @@ def _decide(policy, record, enabled):
                 f"the contradicting fact was observed — PR review is the "
                 f"semantic review for what a policy mints, and a reviewer with "
                 f"nothing to follow cannot perform it"
+            ),
+            location=record_id,
+        )
+
+    unnamed = _unnamed_documents(record)
+    if unnamed:
+        return None, Problem(
+            code="policy-fix-names-other-document",
+            message=(
+                f"record {record_id}'s fix speaks for {list(unnamed)}, which "
+                f"the claim it replaces never named: the remedy asserts "
+                f"something about a document this record pins nothing from, so "
+                f"the assertion is the model's and not the repository's. A "
+                f"citation does not settle it either — a pointer says one line "
+                f"was read, and what a document contains is the thing being "
+                f"asserted. A pointer whose target has been superseded is a "
+                f"finding for a person, who can open the new one"
             ),
             location=record_id,
         )
