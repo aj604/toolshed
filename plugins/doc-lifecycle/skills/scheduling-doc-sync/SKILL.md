@@ -305,14 +305,17 @@ A knob it can't extract fails the run red rather than default-guessing.
 **The job that runs the release's code holds nothing, and the job that holds credentials runs
 nothing the release wrote.** `regenerate` has `contents: read`, no `GH_TOKEN`, no secret, and a
 checkout persisting no credential; it copies the wiring roots (`.github/`, `.doc-lifecycle/`) into
-a scratch tree under `$RUNNER_TEMP` and runs the clone's `apply-upgrade.py` against that copy, so
-the checkout it reads afterwards is one the regeneration never touched. `land` holds
-`contents: write` + `pull-requests: write` and invokes only `.github/doc-sync/*` from its own
-checkout — every byte the release produced reaches it as data inside the `doc-sync-upgrade-bundle`
-artifact. That second half is a claim about *when the tooling copy was taken* — from the installed
-checkout, before anything the release wrote existed — not about which directory it sits in: a
-regeneration writes the release's own copies of these very scripts, so a path that merely looks
-installed proves nothing.
+a scratch tree under `$RUNNER_TEMP` and runs the clone's `apply-upgrade.py` against that copy.
+`land` holds `contents: write` + `pull-requests: write` — every byte the release produced reaches
+it as data inside the `doc-sync-upgrade-bundle` artifact.
+
+Both jobs first copy `.github/doc-sync/*.py` to `$RUNNER_TEMP/trusted/` and run every wiring
+script from there. This is the step the split rests on, and the easy one to get wrong: the
+regeneration writes the release's own `stage-upgrade.py` and `render-report.py`, and `land`'s
+transfer legitimately lands them in `.github/doc-sync/` — so a step invoking one out of the work
+tree afterwards runs the release's code with `land`'s push token, the split defeated two steps
+after it was drawn. "The install's tooling, not the release's" is a claim about *when the copy was
+taken*, never about which directory it sits in.
 
 **`stage-upgrade.py` is the authority between the two jobs.** `manifest` derives what changed by
 comparing the scratch tree against the install and refuses the whole run if any difference lies
@@ -323,7 +326,7 @@ re-derives that same authority from the manifest instead of trusting that `manif
 did — the two run in different trust domains with an artifact in between — checks every bundled
 file against its recorded digest, refuses a bundle carrying a file the manifest does not name, and
 prints the staging list. `verify` then checks what git actually staged against that list. All
-three run from the installed checkout.
+three run from that pre-transfer copy.
 
 **Do not commit or open the PR in upgrade mode** — the workflow's `land` job owns git: it
 transfers the manifest's path set into its own checkout, stages exactly that set by pathspec,

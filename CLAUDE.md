@@ -13,7 +13,8 @@ strict X.Y.Z shape-check a dispatched upgrade target passes before it names a gi
 `scripts/stage-upgrade.py` (that lane's path authority, #127 — it derives what a regeneration
 wrote by comparing the scratch tree against the install, refuses the run whole if any difference
 lies outside what `apply-upgrade.py` owns, and is vendored precisely because both upgrade jobs
-must run it from the installed checkout),
+must run it from a copy of the install's own tooling taken before the regeneration wrote the
+release's copy of it),
 `scripts/render-report.py` (that lane's run surface, plus `detecting-doc-bloat`'s in-session
 `bloat-triage` rendering — its only two consumers since #77),
 `scripts/render-audit-summary.py` (the audit lane's run-surface rendering — #71),
@@ -125,8 +126,9 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
 - **The helper scripts have unit tests** (stdlib `unittest`, no deps) at
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
   output contract. `upgrade-gate_test.py` covers the
-  `doc-sync-upgrade.yml` version-comparison gate and its `normalize` shape-check (a dispatched
-  target that is not three decimal components never becomes argv), `stage-upgrade_test.py` that
+  `doc-sync-upgrade.yml` version-comparison gate, its `normalize` shape-check (a dispatched
+  target that is not three decimal components never becomes argv), and its `notice` dedupe (one
+  open notice issue per release), `stage-upgrade_test.py` that
   lane's path authority in both directions (the manifest step's refusals, and the credentialed
   step re-deriving them from a manifest edited in between), `render-report_test.py` that lane's
   run-surface strings (and `bloat-triage`, which `detecting-doc-bloat` renders in session), and
@@ -164,7 +166,7 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   split, no dispatch input in any `run:` block, staging confined to the apply result's paths, a
   real PR rather than a draft). `upgrade-workflow_test.py` does the same for `doc-sync-upgrade.yml`
   (#127: its own three-job split, execution reachable only by dispatch and never by the schedule,
-  the credentialed job invoking no program out of the clone or the scratch tree, no dispatch input
+  neither job invoking a wiring script the regeneration could have overwritten, no dispatch input
   in any `run:` block, no version literal in the YAML, and a run-surface summary for every terminal
   state). `release-manifest_test.py` covers the release manifest guard by
   mutation — synthetic repositories in which a suite is genuinely unwired, each of which the
