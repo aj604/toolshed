@@ -22,31 +22,21 @@ SCRIPT = os.path.join(
 
 # Minimal stand-ins for the shipped templates: enough placeholders + a GitHub
 # ${{ }} expression (which the leftover-placeholder guard must NOT trip on).
-TPL_DOC_SYNC = (
-    "name: doc-sync\n"
-    "on:\n  schedule:\n    - cron: \"{{CRON_SCHEDULE}}\"\n"
-    "env:\n  CAP: \"{{BLAST_RADIUS_CAP}}\"\n"
-    "  GH_TOKEN: ${{ github.token }}\n"
-)
-TPL_DOC_BLOAT = (
-    "name: doc-bloat\n"
-    "on:\n  schedule:\n    - cron: \"{{BLOAT_CRON}}\"\n"
-    "jobs:\n  x: ${{ github.sha }}\n"
-)
 TPL_DOC_UPGRADE = (
     "name: doc-sync-upgrade\n"
     "on:\n  schedule:\n    - cron: \"{{UPGRADE_CRON}}\"\n"
+    "jobs:\n  x: ${{ github.sha }}\n"
 )
 
 TPL_DOC_AUDIT = (
     "name: doc-audit\n"
     "on:\n  schedule:\n    - cron: \"{{AUDIT_CRON}}\"\n"
+    "jobs:\n  x: ${{ github.token }}\n"
 )
 TPL_DOC_APPLY = "name: doc-apply\non:\n  workflow_dispatch: {}\n"
 
 SCRIPT_SOURCES = {
-    "scheduling-doc-sync/scripts": ["sync-gate.py", "upgrade-gate.py", "render-report.py",
-                                   "plan-distill.py", "authorize-paths.py"],
+    "scheduling-doc-sync/scripts": ["upgrade-gate.py", "render-report.py"],
     "detecting-doc-bloat/scripts": ["plan-chunks.py", "validate-bloat-output.py"],
     "detecting-doc-drift/scripts": ["validate-drift-output.py"],
 }
@@ -64,8 +54,6 @@ def make_plugin_root(base, version_tag="NEW"):
     root = base / "plugin-root"
     sds = root / "skills" / "scheduling-doc-sync"
     (sds).mkdir(parents=True)
-    (sds / "doc-sync.yml").write_text(TPL_DOC_SYNC)
-    (sds / "doc-bloat.yml").write_text(TPL_DOC_BLOAT)
     (sds / "doc-sync-upgrade.yml").write_text(TPL_DOC_UPGRADE)
     (sds / "doc-audit.yml").write_text(TPL_DOC_AUDIT)
     (sds / "doc-apply.yml").write_text(TPL_DOC_APPLY)
@@ -93,13 +81,6 @@ def make_install(base, upgrade_yml=True, registry=False):
     ds = repo / ".github" / "doc-sync"
     wf.mkdir(parents=True)
     ds.mkdir(parents=True)
-    (wf / "doc-sync.yml").write_text(
-        "name: doc-sync\non:\n  schedule:\n    - cron: \"15 2 * * *\"\n"
-        "env:\n  CAP: \"7\"\n  GH_TOKEN: ${{ github.token }}\n"
-    )
-    (wf / "doc-bloat.yml").write_text(
-        "name: doc-bloat\non:\n  schedule:\n    - cron: \"30 6 * * 3\"\n"
-    )
     if upgrade_yml:
         (wf / "doc-sync-upgrade.yml").write_text(
             "name: doc-sync-upgrade\non:\n  schedule:\n    - cron: \"45 7 * * 4\"\n"
@@ -122,12 +103,12 @@ def make_install(base, upgrade_yml=True, registry=False):
     return repo
 
 
-def run(plugin_root, repo, target):
-    return subprocess.run(
-        [sys.executable, SCRIPT, "--plugin-root", str(plugin_root),
-         "--repo", str(repo), "--target", target],
-        capture_output=True, text=True,
-    )
+def run(plugin_root, repo, target, report=None):
+    argv = [sys.executable, SCRIPT, "--plugin-root", str(plugin_root),
+            "--repo", str(repo), "--target", target]
+    if report is not None:
+        argv += ["--report-written", str(report)]
+    return subprocess.run(argv, capture_output=True, text=True)
 
 
 class ApplyUpgrade(unittest.TestCase):
@@ -148,23 +129,25 @@ class ApplyUpgrade(unittest.TestCase):
         pr = make_plugin_root(self.base)
         repo = make_install(self.base)
         run(pr, repo, "0.9.4")
-        ds = (repo / ".github/workflows/doc-sync.yml").read_text()
-        self.assertIn('cron: "15 2 * * *"', ds)
-        self.assertIn('CAP: "7"', ds)
-        db = (repo / ".github/workflows/doc-bloat.yml").read_text()
-        self.assertIn('cron: "30 6 * * 3"', db)
         du = (repo / ".github/workflows/doc-sync-upgrade.yml").read_text()
         self.assertIn('cron: "45 7 * * 4"', du)
+
+    def test_preserves_the_audit_lane_knob_on_a_registry_install(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        r = run(pr, repo, "0.36.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        da = (repo / ".github/workflows/doc-audit.yml").read_text()
+        self.assertIn('cron: "5 1 * * *"', da)
 
     def test_no_placeholder_survives_and_github_expr_untouched(self):
         pr = make_plugin_root(self.base)
         repo = make_install(self.base)
         run(pr, repo, "0.9.4")
-        ds = (repo / ".github/workflows/doc-sync.yml").read_text()
-        self.assertNotIn("{{CRON_SCHEDULE}}", ds)
-        self.assertNotIn("{{BLAST_RADIUS_CAP}}", ds)
+        du = (repo / ".github/workflows/doc-sync-upgrade.yml").read_text()
+        self.assertNotIn("{{UPGRADE_CRON}}", du)
         # The GitHub expression must be rendered verbatim, not eaten by the guard.
-        self.assertIn("${{ github.token }}", ds)
+        self.assertIn("${{ github.sha }}", du)
 
     def test_bumps_installed_version_with_trailing_newline(self):
         pr = make_plugin_root(self.base)
@@ -174,7 +157,7 @@ class ApplyUpgrade(unittest.TestCase):
             (repo / ".github/doc-sync/installed-version").read_text(), "0.9.4\n"
         )
 
-    def test_overwrites_all_eight_scripts_from_source(self):
+    def test_overwrites_every_vendored_script_from_source(self):
         pr = make_plugin_root(self.base)
         repo = make_install(self.base)
         run(pr, repo, "0.9.4")
@@ -245,7 +228,7 @@ class ApplyUpgrade(unittest.TestCase):
             declared,
         )
 
-    def test_a_legacy_only_install_gets_no_evidence_tools_file(self):
+    def test_a_registry_free_install_gets_no_evidence_tools_file(self):
         # The config is the audit lane's, and that lane is not installable in a
         # repository that has not been through the migration door.
         pr = make_plugin_root(self.base)
@@ -253,6 +236,101 @@ class ApplyUpgrade(unittest.TestCase):
         run(pr, repo, "0.36.0")
         self.assertFalse(
             (repo / ".github/doc-sync/evidence-tools.json").exists())
+
+    # --- the declared written set (--report-written) ------------------------
+    #
+    # The upgrade lane stages this set by name and refuses anything left over
+    # (doc-sync-upgrade.yml's "Open upgrade PR" step), so a path the run wrote
+    # but did not declare would strand an uncommittable change and fail the
+    # run. These assert the declaration against a real regeneration.
+
+    def written(self, repo, registry=False, target="0.9.4"):
+        pr = make_plugin_root(self.base)
+        report = self.base / "written.txt"
+        r = run(pr, repo, target, report=report)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r, report.read_text()
+
+    def test_reported_set_names_every_file_the_run_wrote(self):
+        repo = make_install(self.base, registry=True)
+        _, text = self.written(repo, target="0.36.0")
+        declared = set(text.splitlines())
+        expected = {".github/workflows/doc-sync-upgrade.yml",
+                    ".github/workflows/doc-audit.yml",
+                    ".github/workflows/doc-apply.yml",
+                    ".github/doc-sync/installed-version",
+                    ".github/doc-sync/engine"}
+        for names in SCRIPT_SOURCES.values():
+            expected |= {f".github/doc-sync/{n}" for n in names}
+        for names in NEW_LANE_SCRIPT_SOURCES.values():
+            expected |= {f".github/doc-sync/{n}" for n in names}
+        # Both seeds fire on this install: neither file existed beforehand.
+        expected |= {".github/doc-sync/drift-waivers.json",
+                     ".github/doc-sync/evidence-tools.json"}
+        self.assertEqual(declared, expected)
+
+    def test_reported_set_names_the_engine_directory_not_its_members(self):
+        # copy_engine rmtree's the destination, so a module deleted upstream has
+        # to be staged as a deletion — only the directory pathspec covers a path
+        # that no longer exists to be listed.
+        repo = make_install(self.base, registry=True)
+        _, text = self.written(repo, target="0.36.0")
+        lines = text.splitlines()
+        self.assertIn(".github/doc-sync/engine", lines)
+        self.assertEqual(
+            [p for p in lines if p.startswith(".github/doc-sync/engine/")], [])
+
+    def test_a_seeded_file_is_declared_only_when_it_was_seeded(self):
+        # An existing waivers file is never written, so staging it would put a
+        # consumer's untouched judgment in the upgrade commit.
+        repo = make_install(self.base, registry=True)
+        tuned = '{"waivers": [{"file": "README.md", "claim": "fast"}]}\n'
+        (repo / ".github/doc-sync/drift-waivers.json").write_text(tuned)
+        _, text = self.written(repo, target="0.36.0")
+        self.assertNotIn(".github/doc-sync/drift-waivers.json",
+                         text.splitlines())
+        self.assertEqual(
+            (repo / ".github/doc-sync/drift-waivers.json").read_text(), tuned)
+
+    def test_a_registry_free_install_declares_no_new_lane_wiring(self):
+        repo = make_install(self.base)
+        _, text = self.written(repo)
+        declared = set(text.splitlines())
+        self.assertEqual(
+            declared & {".github/workflows/doc-audit.yml",
+                        ".github/workflows/doc-apply.yml",
+                        ".github/doc-sync/engine",
+                        ".github/doc-sync/evidence-tools.json"}, set())
+
+    def test_report_is_sorted_newline_delimited_pathspec_input(self):
+        # `git add --pathspec-from-file=` reads one pathspec per line; a blank
+        # line or a leading `:` would be magic-pathspec syntax, not a path.
+        repo = make_install(self.base, registry=True)
+        _, text = self.written(repo, target="0.36.0")
+        self.assertTrue(text.endswith("\n"))
+        lines = text.splitlines()
+        self.assertEqual(lines, sorted(lines))
+        self.assertEqual(len(lines), len(set(lines)))
+        for line in lines:
+            self.assertTrue(line.strip(), "blank line in the pathspec file")
+            self.assertFalse(line.startswith(":"), line)
+            self.assertFalse(line.startswith("/"), line)
+
+    def test_every_declared_path_exists_after_the_run(self):
+        repo = make_install(self.base, registry=True)
+        _, text = self.written(repo, target="0.36.0")
+        for rel in text.splitlines():
+            self.assertTrue((repo / rel).exists(),
+                            f"declared but not written: {rel}")
+
+    def test_no_report_file_written_without_the_flag(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base)
+        r = run(pr, repo, "0.9.4")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((self.base / "written.txt").exists())
+        # The human-readable summary is unchanged by the flag's absence.
+        self.assertIn("regenerated wiring at v0.9.4", r.stdout)
 
     # --- absent upgrade.yml (pre-self-upgrade install) ----------------------
 
@@ -267,30 +345,42 @@ class ApplyUpgrade(unittest.TestCase):
 
     # --- fail loud ----------------------------------------------------------
 
-    def test_missing_installed_doc_sync_fails(self):
+    def test_missing_source_template_fails(self):
         pr = make_plugin_root(self.base)
+        (pr / "skills/scheduling-doc-sync/doc-sync-upgrade.yml").unlink()
         repo = make_install(self.base)
-        (repo / ".github/workflows/doc-sync.yml").unlink()
         r = run(pr, repo, "0.9.4")
         self.assertEqual(r.returncode, 1)
         self.assertIn("missing", r.stderr)
 
-    def test_unextractable_cap_fails(self):
+    def test_unextractable_upgrade_cron_fails(self):
         pr = make_plugin_root(self.base)
         repo = make_install(self.base)
-        (repo / ".github/workflows/doc-sync.yml").write_text(
-            "name: doc-sync\non:\n  schedule:\n    - cron: \"15 2 * * *\"\n"
-            # CAP line removed — extraction must fail, not default-guess.
+        # The file is present but carries no cron line — extraction must fail,
+        # not fall back to the default reserved for an absent file.
+        (repo / ".github/workflows/doc-sync-upgrade.yml").write_text(
+            "name: doc-sync-upgrade\non:\n  workflow_dispatch: {}\n"
         )
         r = run(pr, repo, "0.9.4")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("blast-radius cap", r.stderr)
+        self.assertIn("upgrade cron", r.stderr)
+
+    def test_unextractable_audit_cron_fails(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        (repo / ".github/workflows/doc-audit.yml").write_text(
+            "name: doc-audit\non:\n  workflow_dispatch: {}\n"
+        )
+        r = run(pr, repo, "0.36.0")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("audit cron", r.stderr)
 
     def test_unknown_template_placeholder_fails(self):
         pr = make_plugin_root(self.base)
         # A new template knob apply-upgrade.py doesn't know about.
-        (pr / "skills/scheduling-doc-sync/doc-bloat.yml").write_text(
-            "name: doc-bloat\non:\n  schedule:\n    - cron: \"{{BLOAT_CRON}}\"\n"
+        (pr / "skills/scheduling-doc-sync/doc-sync-upgrade.yml").write_text(
+            "name: doc-sync-upgrade\n"
+            "on:\n  schedule:\n    - cron: \"{{UPGRADE_CRON}}\"\n"
             "env:\n  NEW: \"{{BRAND_NEW_KNOB}}\"\n"
         )
         repo = make_install(self.base)

@@ -43,11 +43,10 @@ import sys
 def extract_cost(execution_log_path):
     """{"available", "turns", "cost_usd", "duration_ms"} — never raises.
 
-    Mirrors sync-gate.py's `result_subtype()`: claude-code-action's execution
-    output is a JSON list of events (or a single event); the last "result"
-    event carries the run's totals. Missing, unreadable, or empty of a result
-    event is simply "not available" — a best-effort observability figure,
-    never worth failing the run over.
+    claude-code-action's execution output is a JSON list of events (or a single
+    event); the last "result" event carries the run's totals. Missing,
+    unreadable, or empty of a result event is simply "not available" — a
+    best-effort observability figure, never worth failing the run over.
     """
     unavailable = {"available": False, "turns": None, "cost_usd": None,
                    "duration_ms": None}

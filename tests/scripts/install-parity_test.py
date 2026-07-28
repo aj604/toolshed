@@ -9,10 +9,9 @@ dogfoods wiring nobody gets.
 
 Asserted by regenerating through apply-upgrade.py — the same engine the upgrade
 lane uses — into a scratch tree and comparing bytes. Only the install-time knobs
-(cron schedules, blast-radius cap) and this install's recorded legacy-lane
-divergence (below) are substituted, so any other divergence fails. The engine is
-a whole-directory comparison rather than a rendering: it is vendored wholesale,
-never rendered and never edited in place.
+(the lanes' cron schedules) are substituted, so any other divergence fails. The
+engine is a whole-directory comparison rather than a rendering: it is vendored
+wholesale, never rendered and never edited in place.
 
 Run: python3 tests/scripts/install-parity_test.py
 """
@@ -35,85 +34,6 @@ UPGRADE = PLUGIN_ROOT / "skills" / "scheduling-doc-sync" / "scripts" / "apply-up
 ENGINE_SRC = PLUGIN_ROOT / "engine"
 ENGINE_DEST = ROOT / ".github" / "doc-sync" / "engine"
 
-# Issue #75 disabled this install's legacy lanes before enabling the new apply
-# lane, so two generations never race over the same documents. That is a
-# deliberate divergence from the shipped templates, which keep theirs until #77
-# removes them — recorded here as exact substitutions so every *other* byte still
-# has to match. Re-rendering the wiring (an upgrade PR) reverts the disable, and
-# this test is what fails loudly when it does.
-#
-# Each lane is stopped at its entry job, not only at its write job. Disabling the
-# write job alone would leave the lane running nightly, spending model turns, and
-# then ending in a skipped job that states no outcome — every one of these lanes'
-# terminal summaries is rendered from inside the write job it would have
-# disabled. A lane that cannot say how it ended is worse than one that does not
-# run. The write jobs are gated too, so a manual `workflow_dispatch` cannot reach
-# them either.
-LEGACY_LANES_DISABLED = {
-    "doc-sync.yml": [(
-        "jobs:\n"
-        "  plan:\n",
-        "jobs:\n"
-        "  plan:\n"
-        "    # doc-lifecycle#75: the legacy lane is disabled in this install, ahead\n"
-        "    # of the new audit and apply lanes and of #77 removing it from the\n"
-        "    # template. Stopping the entry job skips every job that needs it.\n"
-        "    if: false\n",
-    ), (
-        "    if: always() && needs.detect.result == 'success'"
-        " && needs.fix.result != 'failure'\n",
-        "    # doc-lifecycle#75: the legacy write path is disabled in this install,\n"
-        "    # ahead of the new apply lane (doc-apply.yml) and of #77 removing this\n"
-        "    # job from the template. Original condition: always() &&\n"
-        "    # needs.detect.result == 'success' && needs.fix.result != 'failure'\n"
-        "    if: false\n",
-    )],
-    # The `prune_land` anchor carries its job header: `prune` (a read-only model
-    # job) shares its condition verbatim, so the condition alone is not a unique
-    # anchor and would edit the wrong job.
-    "doc-bloat.yml": [
-        (
-            "jobs:\n"
-            "  plan:\n",
-            "jobs:\n"
-            "  plan:\n"
-            "    # doc-lifecycle#75: the legacy lane is disabled in this install, ahead\n"
-            "    # of the new audit and apply lanes and of #77 removing it from the\n"
-            "    # template. Stopping the entry job skips every job that needs it.\n"
-            "    if: false\n",
-        ),
-        (
-            "  prune_land:\n"
-            "    needs: [plan, assemble, prune]\n"
-            "    if: needs.assemble.outputs.prune == 'open'\n",
-            "  prune_land:\n"
-            "    needs: [plan, assemble, prune]\n"
-            "    # doc-lifecycle#75: legacy write path disabled in this install (see\n"
-            "    # doc-sync.yml's land job). Original condition:\n"
-            "    # needs.assemble.outputs.prune == 'open'\n"
-            "    if: false\n",
-        ),
-        (
-            "    if: always() && needs.assemble.outputs.distill == 'open'\n",
-            "    # doc-lifecycle#75: legacy write path disabled in this install (see\n"
-            "    # doc-sync.yml's land job). Original condition: always() &&\n"
-            "    # needs.assemble.outputs.distill == 'open'\n"
-            "    if: false\n",
-        ),
-    ],
-}
-
-
-def disable_legacy_lanes(name, text):
-    """Apply this install's recorded divergence from the shipped template."""
-    for old, new in LEGACY_LANES_DISABLED.get(name, ()):
-        if text.count(old) != 1:
-            raise AssertionError(
-                f"{name}: the template no longer carries exactly one "
-                f"{old.strip()!r} — update LEGACY_LANES_DISABLED")
-        text = text.replace(old, new)
-    return text
-
 
 def load_apply_upgrade():
     sys.dont_write_bytecode = True
@@ -127,7 +47,7 @@ class TemplatesMatchTheDogfoodInstall(unittest.TestCase):
     def setUp(self):
         self.mod = load_apply_upgrade()
         # This repository has adopted the registry contract, so its install
-        # carries the new engine's lanes as well as the legacy ones.
+        # carries the new engine's lanes on top of the base wiring.
         self.new_lane = self.mod.adopted_registry(ROOT)
         self.assertTrue(
             self.new_lane,
@@ -165,7 +85,7 @@ class TemplatesMatchTheDogfoodInstall(unittest.TestCase):
                             / name).read_text()
                 installed = (ROOT / ".github" / "workflows" / name).read_text()
                 self.assertEqual(
-                    installed, disable_legacy_lanes(name, rendered),
+                    installed, rendered,
                     f".github/workflows/{name} differs from the template it is "
                     f"installed from (skills/scheduling-doc-sync/{name}) — "
                     f"update both copies")

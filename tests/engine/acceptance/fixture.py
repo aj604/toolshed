@@ -132,12 +132,13 @@ SYMLINK_PATHS = (SYMLINK_ABS_DOC, SYMLINK_REL_DOC, SYMLINK_DIR)
 # prompt-injection attempt, this time in a source comment rather than a doc.
 EVIDENCE_SOURCE = "src/payment_service.py"
 
-# Consumer-side state a scheduled install carries between runs (see
-# `.github/doc-sync-marker`, `.github/doc-sync/drift-waivers.json`, and
-# `.github/doc-sync/last-stales.json` in this repo's own dogfooded install —
-# the last one per "F4 — recurrence flag",
-# docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md —
-# for the shapes mirrored here).
+# Consumer-side state a scheduled install carries between runs. The first two
+# are live in this repo's own dogfooded install (`.github/doc-sync-marker`,
+# `.github/doc-sync/drift-waivers.json`); the third is the legacy write lanes'
+# recurrence state ("F4 — recurrence flag",
+# docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md), which
+# aj604/toolshed#77 retired here but which a consumer's install still carries
+# on disk — so the engine is held to leaving it alone either way.
 MARKER_PATH = ".github/doc-sync-marker"
 WAIVERS_PATH = ".github/doc-sync/drift-waivers.json"
 PREV_STALE_PATH = ".github/doc-sync/last-stales.json"

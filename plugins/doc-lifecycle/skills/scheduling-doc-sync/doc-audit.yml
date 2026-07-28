@@ -1,7 +1,7 @@
 # doc-audit — read-only scheduled audit, rebuilt on the new engine (aj604/toolshed#71).
-# Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill, alongside (not instead
-# of) doc-sync.yml: this is the new engine's audit lane, landed while the legacy drift/bloat
-# lanes stay live (aj604/toolshed#57's shadow-mode gate, #76, decides when they retire — #77).
+# Installed by the doc-lifecycle plugin's `scheduling-doc-sync` skill. This is the new engine's
+# audit lane; it was landed alongside the legacy drift and bloat lanes, which the shadow-mode
+# parity gate (aj604/toolshed#76) cleared for retirement and #77 removed.
 #
 # Two jobs, split strictly by trust, per the re-architecture's scheduler-adapter contract:
 # `audit` executes the model with `contents: read` and no credential at all (checkout drops
@@ -58,10 +58,16 @@ jobs:
           fetch-depth: 0   # anchor/evidence checks read file history
           persist-credentials: false   # no write-capable credential in a model job
 
-      # Pin the plugin marketplace to the installed release, exactly as doc-sync.yml does — the
-      # skills a model step executes must be frozen at the vendored wiring's version. See that
-      # file's Pin step for the full rationale (claude-code-action rejects a `…#v<version>`
-      # ref-pinned URL; the durable pin is a local checkout of the release tag).
+      # Pin the plugin marketplace to the installed release: the skills a model step executes
+      # must be frozen at the vendored wiring's version. The single source of truth is
+      # .github/doc-sync/installed-version (the lockfile the upgrade lane advances); reading it
+      # at runtime keeps this workflow file byte-identical across versions, so a routine version
+      # bump changes only that lockfile and not a `.github/workflows/` file. claude-code-action
+      # rejects a `…/toolshed.git#v<version>` URL ref-pin (its validator requires the URL end in
+      # `.git`), so clone the tag to a local path under RUNNER_TEMP — outside the work tree, so
+      # the exported edit set never captures it. This step is the owner of that rationale;
+      # doc-apply.yml's Pin step cites it (aj604/toolshed#77 removed the doc-sync.yml that
+      # previously held it).
       - name: Pin plugin marketplace
         run: |
           set -euo pipefail

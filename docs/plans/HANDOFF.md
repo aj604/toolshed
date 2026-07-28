@@ -1,10 +1,31 @@
 # Documentation Skills Suite — Handoff
 
-**Last updated:** 2026-07-26
-**HEAD at handoff:** engine package with registry-driven closed-world inventory — see `git log`
+**Last updated:** 2026-07-27
+**HEAD at handoff:** the legacy write lanes removed; the engine is the only writer — see `git log`
 **Repo:** `toolshed` (git)
 
-## Latest milestone (2026-07-26): engine package, #57 stage 1 first slice (v0.13.0)
+## Latest milestone (2026-07-27): legacy write lanes removed, release gate guarded (#77)
+
+The endgame of #57. The legacy fix lanes are gone from the templates and from this repo's own
+install: `doc-sync.yml`, `doc-bloat.yml`, and the scripts that existed only to serve them
+(`sync-gate.py`, `authorize-paths.py`, `plan-distill.py`), plus the shadow-parity harness
+(`compare-shadow-lanes.py`, `tests/baselines/shadow-parity-gate/shadow-cycle.py`) that was
+transitional by design, and `last-stales.json`, whose file-and-line recurrence keys the content-
+digest contract cannot re-key. The surviving lanes are `doc-audit.yml` (read-only),
+`doc-apply.yml` (the one writer, through the engine's applier), and `doc-sync-upgrade.yml`.
+`render-report.py`, `upgrade-gate.py`, `plan-chunks.py`, and the two output validators survive
+with non-legacy owners — the upgrade lane and the two detecting skills' own read-only tooling.
+
+Five decision-log entries record what was superseded and the trust assumptions that replace it:
+dispatched-list-as-approval, merge-as-approval, content-only cache identity, pre-review upgrade
+execution, and the release gate itself. New: `.github/scripts/release-manifest.py`, the guard
+that fails when a suite exists but no `release.yml` discovery step runs it.
+
+**Named limit, not closed here:** the upgrade lane still runs on a schedule, still executes the
+target release's own upgrade logic before review, and still stages with `git add -A` — see the
+2026-07-27 "a version comparison is not a review" entry in `docs/decisions.md`.
+
+## Earlier milestone (2026-07-26): engine package, #57 stage 1 first slice (v0.13.0)
 
 The re-architecture of issue #57 is under way, sliced into issues #59–#77. Authoritative spec:
 the "Distilled decisions (grilling session, 2026-07-26)" comment on #57 (the issue body is a
@@ -19,8 +40,8 @@ Landed (#60): `plugins/doc-lifecycle/engine/` — the stdlib-only `doclifecycle`
 registry parser (globs → kind + set, fail-closed validation, meaning-based digest) and the
 closed-world inventory, plus thin `python3 -m doclifecycle` / `doc-lifecycle.py` entrypoints.
 Interface reference: `plugins/doc-lifecycle/engine/README.md`. Suites at `tests/engine/`, run by
-discovery in `release.yml`. The eight helper scripts are untouched — they are absorbed in later
-stages, so both generations coexist for now.
+discovery in `release.yml`. The eight helper scripts were untouched at this milestone — they are
+absorbed in later stages, so both generations coexisted then; #77 above ended that.
 
 **Next:** #61 (acceptance fixture) and #62 (report contract with lineage and the five result states) have both landed since; `gh issue list --label ready-for-agent` has the current sequence with its blocked-by edges.
 

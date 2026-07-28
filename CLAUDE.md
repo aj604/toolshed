@@ -3,59 +3,67 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture is absorbing the helper scripts into; see its `README.md`) plus thirteen skill
+re-architecture absorbed the helper scripts into; see its `README.md`) plus nine skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
 `.../detecting-doc-bloat/scripts/plan-chunks.py`, plus
-`scheduling-doc-sync`'s `scripts/sync-gate.py`, `scripts/upgrade-gate.py`, `scripts/render-report.py`,
-`scripts/plan-distill.py` (doc-bloat's distill-lane planner + deterministic patch merge),
-`scripts/authorize-paths.py` (the path authority the credentialed workflow jobs enforce over a
-model's edit set),
-`scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
-the upgrade lane, not vendored into installs), `scripts/render-audit-summary.py` (the new
-engine's read-only audit lane's run-surface rendering — #71),
-`scripts/render-apply-summary.py` (the new engine's apply lane's run surface — its refusals, its
+`scheduling-doc-sync`'s `scripts/upgrade-gate.py` (the upgrade lane's semver comparison),
+`scripts/render-report.py` (that lane's run surface, plus `detecting-doc-bloat`'s in-session
+`bloat-triage` rendering — its only two consumers since #77),
+`scripts/render-audit-summary.py` (the audit lane's run-surface rendering — #71),
+`scripts/render-apply-summary.py` (the apply lane's run surface — its refusals, its
 staged path list, and the PR title, body, and commit message that carry the approval set's digest
 and summary — #72),
 `scripts/probe-evidence-tool.py` (the audit lane's declared-tool probe — it renders
 `drift-audit --evidence-command` from `evidence-tools.json` and runs each declared tool only as
 a `--help`/`--version` read, under the model step's existing `Bash(python3 *)` grant rather than
 a wider one, #118), and
-`scripts/compare-shadow-lanes.py` (the shadow-mode parity comparison between the legacy lane
-and the new one, #76 — transitional, leaves with the legacy lane in #77), all `python3`, no deps)
-plus the GitHub Actions templates the scheduling skill installs
-(`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-sync.yml`, `doc-bloat.yml`, and
-`doc-sync-upgrade.yml`), `doc-audit.yml` (the new engine's audit lane template, landed by #71
-alongside the other three), and `doc-apply.yml` (the new engine's manual apply dispatch — the one
-lane that writes, #72); both are installed here as of #75, and Upgrade mode installs them only
-into a repo holding `.doc-lifecycle/registry.json`. The sample
-repos under `tests/fixtures/` are the only other runnable
-code, besides the dogfooded doc-sync install under `.github/` (`doc-sync/sync-gate.py`,
-`doc-sync/upgrade-gate.py`, `doc-sync/render-report.py`,
-`doc-sync/plan-chunks.py`, `doc-sync/plan-distill.py`, `doc-sync/authorize-paths.py`,
-`doc-sync/validate-drift-output.py`, `doc-sync/validate-bloat-output.py`,
-`doc-sync/render-audit-summary.py`, `doc-sync/render-apply-summary.py`,
-`doc-sync/probe-evidence-tool.py`,
+`scripts/apply-upgrade.py` (the deterministic upgrade engine — run from the pinned checkout by
+the upgrade lane, not vendored into installs) — all under `scheduling-doc-sync/scripts/`, not the
+skill's base directory, which holds only the templates; all `python3`, no deps)
+plus the three GitHub Actions templates the scheduling skill installs
+(`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml` — the read-only scheduled
+audit, #71; `doc-apply.yml` — the manual apply dispatch, the one lane that writes, #72; and
+`doc-sync-upgrade.yml` — the model-free version-bump PR lane). #77 removed the legacy
+`doc-sync.yml` / `doc-bloat.yml` write lanes and their gate/path-authority/distill-planner
+scripts, so an install is exactly those three templates; `apply-upgrade.py` installs the two
+engine lanes only into a repo holding `.doc-lifecycle/registry.json`, and the upgrade lane
+everywhere. The sample repos under `tests/fixtures/` are the other runnable
+code that matters, alongside the dogfooded install under `.github/` (`doc-sync/upgrade-gate.py`,
+`doc-sync/render-report.py`, `doc-sync/render-audit-summary.py`,
+`doc-sync/render-apply-summary.py`, `doc-sync/probe-evidence-tool.py`,
+`doc-sync/plan-chunks.py`, `doc-sync/validate-drift-output.py`,
+`doc-sync/validate-bloat-output.py`,
 `doc-sync/engine/` (the `doclifecycle` package vendored wholesale from
-`plugins/doc-lifecycle/engine/`, byte-identical to it — the only copy the new lanes run, never
+`plugins/doc-lifecycle/engine/`, byte-identical to it — the only copy the lanes run, never
 edited in place),
-`doc-sync/audit-scope.json` (doc-bloat full-audit scope config), `doc-sync/drift-waivers.json`
-(accepted-UNVERIFIABLE waivers the sync run surfaces consume),
+`doc-sync/audit-scope.json` (bloat-audit scope config, and one of Migration mode's inference
+inputs), `doc-sync/drift-waivers.json`
+(accepted-UNVERIFIABLE claims — `drift-audit --waivers` annotates against it, and Migration
+mode re-keys it; no installed lane passes that flag today),
 `doc-sync/evidence-tools.json` (the local tools the audit lane may cite — `gh` here),
 `doc-sync/installed-version`
-(the plugin-version lockfile the upgrade workflow reads), `workflows/doc-sync.yml`,
-`workflows/doc-bloat.yml`, `workflows/doc-sync-upgrade.yml`, `workflows/doc-audit.yml`,
-`workflows/doc-apply.yml`; the two legacy lanes are `if: false` at their entry job here,
-disabled by #75 ahead of #77 removing them from the templates), the classification registry
+(the plugin-version lockfile the upgrade workflow reads), `workflows/doc-audit.yml`,
+`workflows/doc-apply.yml`, `workflows/doc-sync-upgrade.yml`; `.github/doc-sync-marker` survives
+as legacy state no lane reads — Migration mode's dry run reports its digest among the consumer
+state it preserves), the classification registry
 (`.doc-lifecycle/registry.json` — five roots, closed-world), the ci+release workflow
 (`workflows/release.yml`), that workflow's own test-suite runner
 (`.github/scripts/run-script-suites.py`, #99 — discovery-driven, so a new
-`tests/scripts/*_test.py` suite needs no hand-wiring), the shadow-mode parity gate's harness
-(`tests/baselines/shadow-parity-gate/shadow-cycle.py`, #76 — recorded scaffolding, retired with
-the legacy lane in #77), and that gate's second-cycle worker orchestrator
+`tests/scripts/*_test.py` suite needs no hand-wiring), the release manifest guard
+(`.github/scripts/release-manifest.py`, #77 — it reads `release.yml` for the discovery steps CI
+actually runs, computes the suites those steps really execute, and fails when a suite in the tree
+is not among them: a `tests/engine` subdirectory missing `__init__.py`, a name the pattern
+misses, a directory nothing discovers, or a glob narrowed in `release.yml`. It also carries the
+release manifest mapping each of #77's gate criteria to the suites that discharge it, and
+declares `tests/baselines/` and `tests/fixtures/` non-gate roots — the RED/GREEN skill baselines
+are retained methodology, demonstrably outside the release gate), and the shadow-mode parity
+gate's second-cycle worker orchestrator
 (`tests/baselines/shadow-parity-gate-rerun/fanout.py`, #117 — kept because it carries the worker
-prompt the verdict makes claims about).
+prompt the verdict makes claims about). The rest of the tree's Python is one-off tooling wired
+into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's generator),
+`tests/docs-ab/` (the A/B harness), `tests/baselines/fixing-docs-merge-red/build_report.py`.
 
 ## Layout (pointers, not descriptions)
 
@@ -67,10 +75,13 @@ prompt the verdict makes claims about).
   document-model terms, each with an _Avoid_ list). Use its vocabulary in engine code and tests.
 - `docs/` — `plans/` (design docs + `HANDOFF.md`), `guides/` (narrative user guides). Not published.
 - `tests/` — `fixtures/` (runnable sample repos), `baselines/` (RED/GREEN skill-test records,
-  plus `shadow-parity-gate/`, the #76 gate's first-cycle run evidence and its harness, and
+  plus `shadow-parity-gate/`, the #76 gate's first-cycle run evidence, and
   `shadow-parity-gate-rerun/`, #117's second cycle — the FAIL both cycles reached is recorded in
-  `docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, which #77 cites),
-  `scripts/` (helper-script suites), `engine/` (engine suites). Not published.
+  `docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, which #77 cites; the gate's harness left
+  with the legacy lane in #77, the run evidence stayed),
+  `scripts/` (helper-script suites), `engine/` (engine suites), `docs-ab/` (the doc-form A/B
+  harness — tooling, not a suite). Neither `baselines/` nor
+  `fixtures/` gates a release — `release-manifest.py` declares both non-gate roots. Not published.
 
 ## Working on the plugin
 
@@ -104,23 +115,23 @@ prompt the verdict makes claims about).
   restated) by `fixing-docs` — the single fix door for drift and bloat records alike.
 - **The helper scripts have unit tests** (stdlib `unittest`, no deps) at
   `tests/scripts/<script-name>_test.py`; run the matching test after touching a script or its
-  output contract — `sync-gate_test.py`/`render-report_test.py` also cover `doc-bloat.yml`'s
-  gate/render wiring, since both workflows share the two scripts. `upgrade-gate_test.py` covers the
-  `doc-sync-upgrade.yml` version-comparison gate, and `apply-upgrade_test.py` covers that workflow's
+  output contract. `upgrade-gate_test.py` covers the
+  `doc-sync-upgrade.yml` version-comparison gate, `render-report_test.py` that lane's run-surface
+  strings (and `bloat-triage`, which `detecting-doc-bloat` renders in session), and
+  `apply-upgrade_test.py` that workflow's
   deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
-  unextractable knobs). `plan-distill_test.py` covers the distill lane's grouping, dispatch
-  rendering, sidecar seam, and patch-merge engine; `authorize-paths_test.py` covers the per-lane
-  path authority the credentialed jobs enforce over a model's edit set. Three suites cover the
+  unextractable knobs). Three suites cover the
   wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
-  token-free, write jobs model-free and staging explicit paths, and no `--allowedTools` grant
-  naming a Bash executable beyond `git`/`python3` — those patterns are prefix-matched, #118),
+  token-free, write jobs model-free and staging explicit paths — `doc-sync-upgrade.yml`'s
+  deterministic write job is the one recorded `git add -A` exemption — and no `--allowedTools`
+  grant naming a Bash executable beyond `git`/`python3`, since those patterns are prefix-matched,
+  #118),
   `install-parity_test.py`
   (the dogfooded `.github/` install is byte-identical to what `apply-upgrade.py` would lay down
-  from the plugin with this install's knobs, plus a whole-tree comparison of the vendored engine
-  and a recorded allowlist of this install's legacy-lane divergence, `LEGACY_LANES_DISABLED`),
+  from the plugin with this install's knobs, plus a whole-tree comparison of the vendored engine),
   and `engine-capability_test.py` (the engine's
-  applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the new
-  engine's audit lane's run-surface rendering (every report result state, plus the
+  applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the
+  audit lane's run-surface rendering (every report result state, plus the
   report-never-produced case, and cost/turn observability); `audit-workflow_test.py` adds
   `doc-audit.yml`-specific static checks (SHA-pinned third-party actions, no direct branch
   commits; no step reading `$?` or calling the engine CLI with later logic depending on it,
@@ -138,20 +149,20 @@ prompt the verdict makes claims about).
   run surface (every refusal, the staged path list, and the rendered PR body, title, and commit
   message), and `apply-workflow_test.py` adds `doc-apply.yml`'s static checks (three-job trust
   split, no dispatch input in any `run:` block, staging confined to the apply result's paths, a
-  real PR rather than a draft). `compare-shadow-lanes_test.py` covers the shadow-mode
-  parity comparison (assertion correspondence across two commits, coverage and cost deltas,
-  auto-apply-eligibility split, determinism), and `shadow-cycle_test.py` covers that gate's own
-  two instruments — `digest`'s content enumeration and its unconditional `.pyc`/`__pycache__`
-  exclusion (criterion G1b, re-registered by #117 after the first cycle changed the instrument
-  mid-measurement), and `merge`'s folding of #116's ordinal-keyed answers onto the digest key.
-  `release.yml`'s CI runs every `tests/scripts/*_test.py` suite.
+  real PR rather than a draft). `release-manifest_test.py` covers the release manifest guard by
+  mutation — synthetic repositories in which a suite is genuinely unwired, each of which the
+  guard must name — plus a run against this repository. `release.yml`'s CI runs every
+  `tests/scripts/*_test.py` suite, and the guard is what catches a suite discovery silently
+  stopped running.
 - **The engine's tests live at `tests/engine/*_test.py`** and are found by discovery
   (`python3 -m unittest discover -s tests/engine -p '*_test.py'`), which is how `release.yml`'s
   "Engine tests" step runs them — a new suite is wired by landing the file, with no list to
   update. They test only the two public seams (the library function, and `python3 -m
   doclifecycle` as a subprocess); confirm new seams before adding a suite at one.
-- Sync PR bodies/titles render via `render-report.py`'s `pr-body`/`pr-title` subcommands, never
-  inline YAML `jq` — keeping the logic unit-tested and the CI YAML allowlist thin.
+- Every run-surface string — job summaries, PR bodies, PR titles, commit messages — renders via
+  a tested script (`render-audit-summary.py` for the audit lane, `render-apply-summary.py` for
+  the apply lane, `render-report.py` for the upgrade lane), never inline YAML `jq` — keeping the
+  logic unit-tested and the CI YAML allowlist thin.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill — one door for both human and agent docs; it carries
   the agent-density bar inline and dispatches the `llm-doc-writer` agent for heavy agent-facing jobs).

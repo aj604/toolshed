@@ -55,7 +55,7 @@ Start with **[the principles](docs/guides/principles.md)** — one page on the m
 | No docs yet | "document this project" | [Starting docs from scratch](docs/guides/starting-docs-from-scratch.md) |
 | Docs exist — are they still true? | "is the README still accurate?" | the drift loop — demoed above, [dissected below](#what-an-audit-hands-you) |
 | Docs exist — accurate, but heavy | "audit the docs for bloat" | [Auditing and fixing bloat](docs/guides/auditing-doc-bloat.md) |
-| Loops feel routine — make them unattended | "set up doc sync" | [Turning on the nightly](docs/guides/scheduling-doc-sync.md) |
+| The drift loop feels routine — audit it unattended | "set up doc sync" | [Turning on the nightly](docs/guides/scheduling-doc-sync.md) |
 
 Two skills need no starting point because they trigger on the way: any edit to a README / runbook / `CLAUDE.md` invokes `writing-docs` (every line a verifiable claim), and "should we document X?" invokes `growing-docs` (demand signals grow docs; calendars don't).
 
@@ -95,7 +95,7 @@ Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum
 | `detecting-doc-drift` | skill | Auditing docs against the code for **accuracy** — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
 | `detecting-doc-bloat` | skill | Auditing docs for low-value content — redundant, verbose, duplicated, or past its useful form — emits a structured prune/condense/distill proposal. Read-only: it proposes, a human approves. |
 | `fixing-docs` | skill | Applying an audit report — drift and bloat records alike, through one door: the IDs you approve mint an approval set, which becomes an edit plan the applier (`python3 -m doclifecycle apply-plan`) lands, and you get the staged diff back. The approval set is the only authority; nothing the report didn't flag gets touched. |
-| `scheduling-doc-sync` | skill | Wiring a repo for unattended sync — installs the nightly drift Action (detect → gate → fix → evidence PR) and the weekly bloat sweep (draft PRs per lane), marker-idempotent, with a blast-radius stop. |
+| `scheduling-doc-sync` | skill | Wiring a repo for unattended auditing — installs the nightly **read-only** audit Action (it publishes a report and can write nothing), the manual apply dispatch that lands exactly the records you approve and opens a real PR, and the weekly self-upgrade check. |
 | `llm-doc-writer` | agent | A dispatchable subagent that produces LLM-optimized documentation with maximum context efficiency. |
 | `doc-distiller` | agent | Handles one approved DISTILL record — verifies each durable claim, then returns the edit-plan operations that put the extractions in their living docs and retire the planning artifact, landed by the same applier as every other approved record. Dispatched by `fixing-docs`. |
 
@@ -110,16 +110,16 @@ writing-docs          mandates verifiable claims
 detecting-doc-drift   audits those claims for accuracy   ┐
                                                          ├→ fixing-docs lands approved fixes
 detecting-doc-bloat   audits those claims for weight     ┘
-scheduling-doc-sync   installs the Actions that run both loops on a schedule and open evidence PRs
+scheduling-doc-sync   installs the Actions that run the drift loop on a schedule and open the PR you approve
 ```
 
-All of the above ships today. The automation layer — `scheduling-doc-sync` — installs a nightly GitHub Action that runs detect→fix unattended on the commits since the last sync and opens a docs-update PR with the evidence (PR-only; past the blast-radius cap it files an issue instead), and a weekly bloat sweep that only ever opens draft PRs; both are wiring on top of the contract, which lives in the detect skills and the one fix door.
+All of the above ships today. The automation layer — `scheduling-doc-sync` — installs a nightly GitHub Action that audits the whole documentation corpus unattended and publishes a report it has no permission to act on, plus a manual dispatch you hand the record digests you approve, which applies exactly those and opens a real pull request. The schedule can only ever propose; landing anything takes two deliberate acts from you. Both lanes are wiring on top of the contract, which lives in the detect skills, the one fix door, and the engine they share.
 
 ## How it was built
 
 Every skill was written test-first — RED (baseline agents fail) → GREEN (skill fixes it) → REFACTOR (pressure-test for loopholes). Rules target failures that actually showed up in baseline runs, not best-practice folklore. Test records live under [`tests/`](tests/). This README follows the plugin's own contract — every line above is a claim you can check against this repo.
 
-And the loop is closed in this repo's own history: on its first nightly run here (2026-07-02), `doc-sync` caught two stale claims in these very docs — one falsified by the commit that installed it — and opened [the evidence PR](https://github.com/aj604/toolshed/pull/5) that fixed them. Full record: [`tests/baselines/doc-sync-setup-red/DOGFOOD-first-catch.md`](tests/baselines/doc-sync-setup-red/DOGFOOD-first-catch.md).
+And the loop is closed in this repo's own history: on its first nightly run here (2026-07-02), the scheduled lane of the day caught two stale claims in these very docs — one falsified by the commit that installed it — and opened [the evidence PR](https://github.com/aj604/toolshed/pull/5) that fixed them. Full record: [`tests/baselines/doc-sync-setup-red/DOGFOOD-first-catch.md`](tests/baselines/doc-sync-setup-red/DOGFOOD-first-catch.md). That lane has since been replaced by the read-only audit and the manual apply dispatch this repo now runs on itself.
 
 ## About this repo
 
