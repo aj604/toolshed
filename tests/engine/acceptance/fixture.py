@@ -132,15 +132,21 @@ SYMLINK_PATHS = (SYMLINK_ABS_DOC, SYMLINK_REL_DOC, SYMLINK_DIR)
 # prompt-injection attempt, this time in a source comment rather than a doc.
 EVIDENCE_SOURCE = "src/payment_service.py"
 
-# Consumer-side state a scheduled install carries between runs. The first two
-# are live in this repo's own dogfooded install (`.github/doc-sync-marker`,
-# `.github/doc-sync/drift-waivers.json`); the third is the legacy write lanes'
+# Consumer-side state a scheduled install carries between runs, at the layout
+# aj604/toolshed#133 moved them to. The first two are live in this repo's own
+# dogfooded install (`.doc-lifecycle/state/sync-marker`,
+# `.doc-lifecycle/drift-waivers.json`); the third is the legacy write lanes'
 # recurrence state ("F4 — recurrence flag",
 # docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md), which
 # aj604/toolshed#77 retired here but which a consumer's install still carries
 # on disk — so the engine is held to leaving it alone either way.
-MARKER_PATH = ".github/doc-sync-marker"
-WAIVERS_PATH = ".github/doc-sync/drift-waivers.json"
+MARKER_PATH = ".doc-lifecycle/state/sync-marker"
+WAIVERS_PATH = ".doc-lifecycle/drift-waivers.json"
+# Kept at its pre-#133 spelling on purpose. The relocation carries a named set,
+# and this file is not in it — a consumer who still has one keeps it exactly
+# where it is, reported as a leftover. So `.github/doc-sync/last-stales.json` is
+# the only address this file ever has on disk, and inventing a `state/` spelling
+# for it would name a path no install produces.
 PREV_STALE_PATH = ".github/doc-sync/last-stales.json"
 
 _GIT_ENV_OVERRIDES = {

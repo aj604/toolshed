@@ -233,7 +233,7 @@ class MalformedConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             write(root, "README.md")
             write(root, "tests/x.md")
-            write(root, ".github/doc-sync/audit-scope.json",
+            write(root, ".doc-lifecycle/audit-scope.json",
                   json.dumps({"exclude": ["tests/**"]}))
             git_init(root)
             r = run(root)  # no --config
@@ -541,7 +541,7 @@ class EmitPrompt(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             for i in range(3):
                 write(root, f"docs/superpowers/plans/p{i}.md", "# e")
-            write(root, ".github/doc-sync/audit-scope.json",
+            write(root, ".doc-lifecycle/audit-scope.json",
                   json.dumps({"policy_scope": ["docs/superpowers"]}))
             git_init(root)
             path, m = self.plan_to_file(root)

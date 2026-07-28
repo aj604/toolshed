@@ -1,6 +1,6 @@
 # Turning on nightly automation with `scheduling-doc-sync`
 
-> As of 2026-07-27 (doc-lifecycle 0.38.0, engine-based audit and apply lanes; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-apply.yml`)
+> As of 2026-07-27 (doc-lifecycle 0.40.0, engine-based audit and apply lanes, install artifacts centralized under `.doc-lifecycle/`; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-apply.yml`)
 
 **You should already have:** run a drift audit by hand at least once, and landed a
 `.doc-lifecycle/registry.json` — the manifest that says which files are documentation
@@ -61,7 +61,14 @@ without passing through a diff you merged.
 
 **Proof it behaves:** this repo dogfoods the install — `.github/workflows/doc-audit.yml`,
 `doc-apply.yml`, and `doc-sync-upgrade.yml`, with the vendored wiring under
-`.github/doc-sync/`.
+`.doc-lifecycle/wiring/`.
+
+**Where it all lands.** Everything but the workflows lives under `.doc-lifecycle/`, split by who
+owns the bytes: the files you edit (`registry.json`, `audit-scope.json`, `drift-waivers.json`,
+`evidence-tools.json`) and the version lockfile sit at the root; `wiring/` holds the scripts and
+the vendored engine, which the upgrade lane regenerates wholesale — edit something there and the
+next upgrade reverts it; `state/` holds what the lanes wrote. Only the three workflow files stay
+in `.github/workflows/`, because GitHub reads workflows from nowhere else.
 
 ## Turning it on
 
@@ -71,9 +78,10 @@ The skill runs preflight first and reports anything missing rather than silently
 skipping: a GitHub remote, `gh auth status`, a model-auth secret
 (`CLAUDE_CODE_OAUTH_TOKEN` via `/install-github-app`, or `ANTHROPIC_API_KEY`), and the
 repo setting that lets Actions create PRs. It then confirms two knobs — the audit cron
-and the upgrade cron; defaults are fine — and stages fifteen files plus a vendored copy
-of the engine: the three workflows, eight scripts, three starter state files
-(`audit-scope.json`, `drift-waivers.json`, `evidence-tools.json`), and the version
+and the upgrade cron; defaults are fine — and stages sixteen files plus a vendored copy
+of the engine: the three workflows under `.github/workflows/`, nine scripts under
+`.doc-lifecycle/wiring/`, and — at `.doc-lifecycle/` — three starter state files
+(`audit-scope.json`, `drift-waivers.json`, `evidence-tools.json`) and the version
 lockfile.
 
 If you have no registry yet, the skill stops and sends you through its migration door
@@ -112,15 +120,20 @@ gh workflow run doc-apply \
 
 - **Scope:** `.doc-lifecycle/registry.json` decides what counts as documentation and what
   each kind owes. It's consumer judgment — the upgrade lane never touches it.
-- **Evidence tools:** `.github/doc-sync/evidence-tools.json` is empty by default. A
+- **Evidence tools:** `.doc-lifecycle/evidence-tools.json` is empty by default. A
   verdict may cite a command only for a program listed there, and only as a
   `--help`/`--version` read. Tool-free is the honest default; widen it deliberately.
-- **Waivers:** `.github/doc-sync/drift-waivers.json` records claims you've accepted as
+- **Waivers:** `.doc-lifecycle/drift-waivers.json` records claims you've accepted as
   unverifiable, matched by the text you quoted. Reword the line and the waiver stops
   applying — new authorship is a new decision.
 - **Upgrades:** they arrive as a PR from `doc-sync-upgrade.yml`. To force one, re-run the
   skill; your knobs and state files are preserved, and only the wiring, the pin, and the
   lockfile change.
+- **If you installed before 0.40.0:** your wiring is still at `.github/doc-sync/`, and the
+  upgrade lane cannot move it — that lane runs *your* installed copy of the path authority,
+  which predates the new layout and refuses the change set. Re-run the skill from a local
+  checkout to relocate; it carries your judgment files and the sync marker across byte-for-byte
+  and leaves anything else in the old directory where it is, naming it on the run surface.
 
 ## Pausing and leaving
 
@@ -128,6 +141,6 @@ Both are one command or one deletion, and neither loses state:
 
 - Pause: `gh workflow disable doc-audit` (and/or `doc-apply`, `doc-sync-upgrade`);
   `gh workflow enable` reverses it.
-- Remove: delete the three `doc-*` files under `.github/workflows/`. Leave
-  `.doc-lifecycle/registry.json` and the state files under `.github/doc-sync/` in place —
+- Remove: delete the three `doc-*` files under `.github/workflows/`, and `.doc-lifecycle/wiring/`
+  if you want the scripts gone too. Leave the judgment files at `.doc-lifecycle/` in place —
   they are your judgment, not the pipeline's, and a later reinstall resumes from them.

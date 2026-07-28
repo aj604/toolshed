@@ -453,7 +453,7 @@ class WhatThePolicyProvablyCannotMint(PolicyScenarioTestCase):
         self.assertEqual(self.status(repo), [])
 
     def test_the_waiver_the_install_carries_stops_the_policy_dead(self):
-        # The fixture's own `.github/doc-sync/drift-waivers.json` disputes the
+        # The fixture's own `.doc-lifecycle/drift-waivers.json` disputes the
         # living document's stale claim. A policy that applied it anyway would
         # overrule the only person who looked.
         repo = self.build_fixture()

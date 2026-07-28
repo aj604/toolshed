@@ -761,6 +761,48 @@ class UpgradeRender(unittest.TestCase):
         self.assertIn("git apply", s)
         self.assertIn("0.9.3", s)
 
+    def test_blocked_relocation_says_the_install_moved(self):
+        # A one-time move needs a summary a maintainer can tell apart from a
+        # routine template change (aj604/toolshed#133): it must name where the
+        # install went and say the configuration came with it.
+        r = self.run_script(
+            "upgrade-summary", "--status", "blocked-relocation",
+            "--current", "0.39.0", "--latest", "0.40.0",
+            "--files", ".github/workflows/doc-audit.yml,.doc-lifecycle/wiring/render-report.py")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn(".doc-lifecycle/", s)
+        self.assertIn(".github/doc-sync/", s)
+        self.assertIn("one-time", s)
+        self.assertIn("doc-sync-upgrade-patch", s)
+        self.assertIn("git apply", s)
+
+    def test_the_apply_instructions_stage_so_creations_land(self):
+        # `git apply` without --index leaves creations untracked, and
+        # `commit -am` would then miss them — a relocation patch is mostly
+        # creations, so the instructions have to index the patch.
+        for status in ("blocked-workflows", "blocked-relocation"):
+            with self.subTest(status=status):
+                r = self.run_script(
+                    "upgrade-summary", "--status", status,
+                    "--current", "0.39.0", "--latest", "0.40.0")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                s = self.summary()
+                self.assertIn("git apply --index", s)
+                self.assertNotIn("commit -am", s)
+
+    def test_the_refusal_points_a_pre_relocation_install_at_its_door(self):
+        # The lane runs the *installed* path authority, and a copy predating
+        # the new layout cannot authorize a move it has never heard of — so the
+        # refusal has to name the local door rather than leave a dead end.
+        r = self.run_script(
+            "upgrade-summary", "--status", "refused",
+            "--current", "0.39.0", "--latest", "0.40.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.summary()
+        self.assertIn(".doc-lifecycle/", s)
+        self.assertIn("Upgrade mode", s)
+
     def test_undeclared_paths_names_them_and_says_nothing_landed(self):
         # The upgrade lane stages apply-upgrade.py's declared set and refuses
         # anything left over; that refusal has to name what was left and be

@@ -15,7 +15,7 @@ This script is the narrow route instead (aj604/toolshed#118). It runs under the
 model job's *existing* `Bash(python3 *)` allowance, so no tool grant widens at
 all, and what it can reach is enumerable in two directions:
 
-  * **Which programs** — only those named in `.github/doc-sync/evidence-tools.json`,
+  * **Which programs** — only those named in `.doc-lifecycle/evidence-tools.json`,
     a consumer-owned file this repo's wiring never overwrites. Empty (or absent)
     means the lane stays tool-free, which is the default.
   * **How** — only as a `--help`/`--version` read. Every token between the tool
@@ -57,7 +57,7 @@ import sys
 # The consumer's declaration, owned by whoever installed the lane. Same status
 # as audit-scope.json and drift-waivers.json: seeded when absent, never
 # overwritten by an upgrade (see scheduling-doc-sync/scripts/apply-upgrade.py).
-DEFAULT_CONFIG = os.path.join(".github", "doc-sync", "evidence-tools.json")
+DEFAULT_CONFIG = os.path.join(".doc-lifecycle", "evidence-tools.json")
 
 # What the engine accepts in `evidence_boundary.commands`
 # (doclifecycle/report.py's EXECUTABLE_NAME). Checked here too, so a config

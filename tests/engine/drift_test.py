@@ -63,7 +63,7 @@ NARRATIVE = "docs/guides/tour.md"
 PLANNING = "docs/plans/next.md"
 UNRELATED = "docs/unrelated.md"
 SOURCE = "src/fees.py"
-WAIVERS = ".github/doc-sync/drift-waivers.json"
+WAIVERS = ".doc-lifecycle/drift-waivers.json"
 
 LIVING_CLAIM = "The fee is 2% of the amount, in `src/fees.py`."
 UNRELATED_CLAIM = "Support answers within one business day."

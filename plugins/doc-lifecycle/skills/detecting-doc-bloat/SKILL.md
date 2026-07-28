@@ -28,7 +28,7 @@ judgment one bounded chunk at a time. Three non-negotiables:
 - **planning** — designs/specs/plans describing an intended change. Rules:
   `references/planning-artifacts.md`.
 - A **policy chunk** (directory declared `policy_scope` in the repo's
-  `.github/doc-sync/audit-scope.json`) yields exactly one `POLICY` record.
+  `.doc-lifecycle/audit-scope.json`) yields exactly one `POLICY` record.
   Rules: `planning-artifacts.md`.
 
 ## Modes

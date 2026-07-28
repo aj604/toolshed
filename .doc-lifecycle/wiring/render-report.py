@@ -250,7 +250,7 @@ def render_no_drift_summary(args):
         waivers_path = getattr(args, "waivers", None)
         unwaived, _ = split_waived(records, load_waivers(waivers_path))
         if unwaived:
-            hint = waivers_path or ".github/doc-sync/drift-waivers.json"
+            hint = waivers_path or ".doc-lifecycle/drift-waivers.json"
             write_summary(
                 f"🔎 **{len(unwaived)} unverifiable claim(s) await disposition** — "
                 f"reword or cut the doc line, or waive it in `{hint}` to accept "
@@ -508,6 +508,17 @@ def render_bloat_skip_summary(lane, reason):
     return msgs[reason]
 
 
+def _upgrade_apply_instructions(latest):
+    # `git apply --index` so a patch that creates and deletes files lands whole;
+    # `commit -am` would miss both.
+    return ("```\n"
+            "git switch -c doc-sync/upgrade\n"
+            "git apply --index doc-sync-upgrade.patch\n"
+            f"git commit -m 'docs: upgrade doc-sync wiring to plugin v{latest}'\n"
+            "git push -u origin doc-sync/upgrade   # then open a PR\n"
+            "```\n\n")
+
+
 def render_upgrade_summary(status, current, latest, pr_url, files=""):
     if status == "blocked-workflows":
         changed = [f for f in files.split(",") if f]
@@ -519,14 +530,28 @@ def render_upgrade_summary(status, current, latest, pr_url, files=""):
             "`.github/workflows/` (the `workflows` permission is not grantable to it). The "
             "full diff is attached as the **`doc-sync-upgrade-patch`** run artifact. Apply it "
             "from a local checkout with a credential that has the `workflow` scope:\n\n"
-            "```\n"
-            "git switch -c doc-sync/upgrade\n"
-            "git apply doc-sync-upgrade.patch\n"
-            f"git commit -am 'docs: upgrade doc-sync wiring to plugin v{latest}'\n"
-            "git push -u origin doc-sync/upgrade   # then open a PR\n"
-            "```\n\n"
+            + _upgrade_apply_instructions(latest) +
             "Routine version-only upgrades don't hit this — they change only "
-            "`.github/doc-sync/installed-version`, which the token can push.")
+            "`.doc-lifecycle/installed-version`, which the token can push.")
+    if status == "blocked-relocation":
+        return (
+            f"📦 **Upgrade `{current}` → `{latest}` moves this install, and needs a manual "
+            "apply.** doc-lifecycle now keeps everything it owns under `.doc-lifecycle/` — "
+            "your judgment files (`registry.json`, `audit-scope.json`, `drift-waivers.json`, "
+            "`evidence-tools.json`) at its root, the regenerated machinery under "
+            "`.doc-lifecycle/wiring/`, and the sync marker under `.doc-lifecycle/state/`. "
+            "`.github/doc-sync/` and `.github/doc-sync-marker` go away; only the workflow "
+            "YAML stays in `.github/`.\n\n"
+            "This is a one-time move, not a routine version bump, and it needs your hands "
+            "for the same reason a template change does: it rewrites files under "
+            "`.github/workflows/`, which the Actions token may not push. The complete patch "
+            "— every creation, every deletion — is attached as the "
+            "**`doc-sync-upgrade-patch`** run artifact. Apply it from a local checkout with "
+            "a credential that has the `workflow` scope:\n\n"
+            + _upgrade_apply_instructions(latest) +
+            "Your configuration is carried across byte-for-byte; nothing in "
+            "`.github/doc-sync/` that this upgrade does not own was touched, and the step "
+            "log names anything it left behind.")
     if status == "current":
         return (f"✅ **doc-sync wiring is current.** Installed `{current}`, latest "
                 f"release `{latest}` — nothing to upgrade.")
@@ -538,7 +563,7 @@ def render_upgrade_summary(status, current, latest, pr_url, files=""):
                 f"produced no diff — the shipped wiring already matches.")
     if status == "opened":
         return (f"🔁 **Wiring upgrade ready.** `{current}` → `{latest}` regenerated — "
-                f"review {pr_url}. Merging advances `.github/doc-sync/installed-version` "
+                f"review {pr_url}. Merging advances `.doc-lifecycle/installed-version` "
                 f"and re-pins the workflows; closing it re-checks next run.")
     if status == "pending":
         return (f"⏭️ **Upgrade skipped — a `doc-sync/upgrade` PR is already open.** "
@@ -567,7 +592,14 @@ def render_upgrade_summary(status, current, latest, pr_url, files=""):
         return (f"🛑 **Upgrade refused — the regeneration reached outside the wiring.** "
                 f"Regenerating `{current}` → `{latest}` changed a path the upgrade engine "
                 f"does not own; the step log names every one. Nothing was staged and no "
-                f"pull request was opened. Review the release before retrying.")
+                f"pull request was opened. Review the release before retrying.\n\n"
+                f"If those paths are under `.doc-lifecycle/`, this is the one-time move of "
+                f"the install out of `.github/doc-sync/`: the path authority that refused "
+                f"is the copy *you* have installed, and it predates the new layout, so it "
+                f"cannot authorize a move it has never heard of — which is the trust split "
+                f"working, not failing. Relocate from a local checkout by re-running the "
+                f"`scheduling-doc-sync` skill in Upgrade mode; this lane resumes routine "
+                f"upgrades once the new layout is in place.")
     raise ValueError(f"unknown upgrade status: {status!r}")
 
 
@@ -590,7 +622,7 @@ def render_upgrade_notice_body(current, latest, repo, workflow):
     """
     return "\n".join([
         f"This install's doc-sync wiring is pinned to `{current}` "
-        f"(`.github/doc-sync/installed-version`). doc-lifecycle `{latest}` has shipped.",
+        f"(`.doc-lifecycle/installed-version`). doc-lifecycle `{latest}` has shipped.",
         "",
         "**Nothing has run.** The weekly check compares two version numbers and stops "
         "there; it does not clone the release and it does not execute its upgrade logic. "
@@ -636,10 +668,10 @@ def render_upgrade_pr_body(current, latest, files):
         f"doc-lifecycle `{latest}` has shipped. Regenerated the wiring at `{latest}` and "
         "re-pinned every workflow's marketplace checkout to it.",
         "",
-        "**Preserved unchanged:** the `.github/doc-sync-marker` (sync state), "
-        "`.github/doc-sync/audit-scope.json` and `drift-waivers.json` (tuned config and "
+        "**Preserved unchanged:** the `.doc-lifecycle/state/sync-marker` (sync state), "
+        "`.doc-lifecycle/audit-scope.json` and `drift-waivers.json` (tuned config and "
         "accepted waivers), and every install-time knob (the upgrade and audit crons). "
-        "Only the wiring and `.github/doc-sync/installed-version` change.",
+        "Only the wiring and `.doc-lifecycle/installed-version` change.",
     ]
     if files:
         changed = [f for f in files.split(",") if f]
