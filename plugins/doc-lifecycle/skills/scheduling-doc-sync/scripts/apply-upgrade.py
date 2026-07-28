@@ -102,12 +102,13 @@ TEMPLATE_PLACEHOLDERS = {
     "doc-sync-upgrade.yml": ["{{UPGRADE_CRON}}"],
 }
 
-# Vendored scripts and the skill dir each is copied from (the upgrade lane's three
-# from this skill, the planner + bloat validator from detecting-doc-bloat, the
-# drift validator from detecting-doc-drift). Mirror scheduling-doc-sync's install
-# steps 5-6. The last three are the detecting skills' own read-only tooling: they
-# are vendored for every install because a model running either skill reaches for
-# them whichever lane invoked it.
+# Vendored scripts and the skill dir each is copied from — the upgrade lane's
+# own three. Mirrors scheduling-doc-sync's install step 5. The detecting
+# skills' read-only tooling (plan-chunks.py, validate-bloat-output.py,
+# validate-drift-output.py) is deliberately NOT vendored here: both detecting
+# skills always dispatch their own scripts via ${CLAUDE_PLUGIN_ROOT}, never a
+# repo-relative path, so a vendored copy would have no reader (aj604/toolshed#77
+# follow-up).
 SCRIPTS = {
     "upgrade-gate.py": "scheduling-doc-sync/scripts",
     "render-report.py": "scheduling-doc-sync/scripts",
@@ -116,9 +117,6 @@ SCRIPTS = {
     # checkout: it is the code that decides what the target release's
     # regeneration is allowed to have written (aj604/toolshed#127).
     "stage-upgrade.py": "scheduling-doc-sync/scripts",
-    "plan-chunks.py": "detecting-doc-bloat/scripts",
-    "validate-bloat-output.py": "detecting-doc-bloat/scripts",
-    "validate-drift-output.py": "detecting-doc-drift/scripts",
 }
 
 # The new engine's lanes. Held apart from the base wiring above because they are
@@ -328,7 +326,35 @@ def copy_scripts(plugin_root, repo, new_lane=False):
             raise UpgradeError(f"required source script missing: {src}")
         shutil.copyfile(src, dest / name)
         written.append(f"{ROOT_DIR}/{WIRING_DIR}/{name}")
+    written += prune_orphaned_scripts(dest, scripts)
     return written
+
+
+def prune_orphaned_scripts(dest, scripts):
+    """Delete a vendored .py file this install carries that the current
+    release no longer wires up (a script dropped from SCRIPTS/NEW_LANE_SCRIPTS
+    between releases — e.g. aj604/toolshed#77's sync-gate.py). Otherwise a
+    consumer keeps a stale copy forever: copy_scripts only ever overwrote
+    what's still in the table, never removed what left it.
+
+    Scoped to top-level *.py files under `wiring/` only — engine/ is replaced
+    wholesale by copy_engine, and nothing else lives in that directory: since
+    aj604/toolshed#133 the consumer's judgment files, the lockfile and the
+    marker sit outside it, at the root and under state/. Deleting by that
+    wildcard is what stage-upgrade.py's `.doc-lifecycle/wiring/<name>.py`
+    pattern already authorizes, deletion included, so no consumer's
+    pre-upgrade copy can refuse the removal.
+
+    A relocating install reaches this with a wiring/ directory holding exactly
+    what copy_scripts just wrote, so the prune is a no-op there — the pre-#133
+    orphans are removed by the relocation's own named set instead.
+    """
+    removed = []
+    for path in sorted(dest.glob("*.py")):
+        if path.name not in scripts:
+            path.unlink()
+            removed.append(f"{ROOT_DIR}/{WIRING_DIR}/{path.name}")
+    return removed
 
 
 def copy_engine(plugin_root, repo):

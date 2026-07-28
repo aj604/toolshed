@@ -45,9 +45,10 @@ plugin-regenerated wiring under `wiring/`, machine-written state under `state/`)
 `wiring/upgrade-gate.py`,
 `wiring/stage-upgrade.py`,
 `wiring/render-report.py`, `wiring/render-audit-summary.py`,
-`wiring/render-apply-summary.py`, `wiring/probe-evidence-tool.py`,
-`wiring/plan-chunks.py`, `wiring/validate-drift-output.py`,
-`wiring/validate-bloat-output.py`,
+`wiring/render-apply-summary.py`, `wiring/probe-evidence-tool.py` — the chunk planner and the
+two output validators are NOT vendored here; both detecting skills always dispatch their own
+copy via `${CLAUDE_PLUGIN_ROOT}`, so a copy under `wiring/` would have no reader
+(aj604/toolshed#77 follow-up),
 `wiring/engine/` (the `doclifecycle` package vendored wholesale from
 `plugins/doc-lifecycle/engine/`, byte-identical to it — the only copy the lanes run, never
 edited in place),

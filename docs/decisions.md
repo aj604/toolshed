@@ -4,6 +4,54 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-27 — a vendored copy needs a reader, or it doesn't get vendored (#77 follow-up)
+- Evidence: `apply-upgrade.py`'s `SCRIPTS` table kept vendoring `plan-chunks.py`,
+  `validate-bloat-output.py`, and `validate-drift-output.py` into every install's
+  `.doc-lifecycle/wiring/`, on the stated rationale that "a model running either detecting skill
+  reaches for them whichever lane invoked it." That doesn't hold against the current wiring:
+  `doc-audit.yml` and `doc-apply.yml` call the engine CLI directly (never SKILL.md dispatch),
+  `doc-apply.yml` doesn't even allowlist the `Skill` tool, and both detecting skills always
+  resolve these scripts via `${CLAUDE_PLUGIN_ROOT}` — never a repo-relative path — so the
+  vendored copy has zero readers in every path checked.
+- Decided: stop vendoring them. Removed from `SCRIPTS`; this repo's own `.doc-lifecycle/wiring/`
+  copies deleted; `SKILL.md`'s install steps and `CLAUDE.md`'s inventory no longer list them. The
+  canonical scripts stay exactly where they were — owned by `detecting-doc-bloat` and
+  `detecting-doc-drift`, unaffected.
+- Closed here rather than deferred, because the deferral target went away: `copy_scripts()` only
+  ever overwrote what `SCRIPTS` names, so nothing deleted a script that left the table — which
+  would have stranded this decision's own three retired scripts in any repo that already vendored
+  them. `prune_orphaned_scripts()` now deletes a `.py` directly under `.doc-lifecycle/wiring/`
+  that the current wiring no longer names, and declares the deletion in `--report-written`.
+  `stage-upgrade.py`'s `wiring/<name>.py` pattern already authorizes those paths, deletions
+  included, so no consumer's pre-upgrade path authority refuses the prune.
+- Not the cleanup of #77's own orphans: those sit at the pre-#133 addresses, and every `.py` in
+  `.github/doc-sync/` leaves with the relocation's named set (#133 entry below). The prune is what
+  keeps a *future* retirement from stranding a copy. #130 proposed a version-keyed `RETIRED` table
+  for the same purpose and was closed as superseded — the relocation covers the paths it named,
+  and this covers the general case. The three artifacts no upgrade lane can remove
+  (`doc-sync.yml`, `doc-bloat.yml`, `last-stales.json`) are tracked as a manual cleanup in #139.
+- Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py`,
+  `tests/scripts/apply-upgrade_test.py`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `CLAUDE.md`,
+  `docs/guides/scheduling-doc-sync.md`
+
+## 2026-07-27 — render-report.py sheds its legacy-lane subcommands (#77 follow-up)
+- Evidence: #77 removed `doc-sync.yml` and `doc-bloat.yml` (and their gate/path-authority/distill-
+  planner scripts) but kept `render-report.py` wholesale, since `bloat-triage` and the upgrade lane
+  still call it — leaving 15 of its then-18 subcommands (`pre-summary`, `no-drift-summary`,
+  `issue-body`, `blast-summary`, `pr-body`/`--prev-stales`, `pr-title`, `pr-summary`,
+  `growth-backlog`, and the remaining `bloat-*`/`distill-merge-summary`) with no caller anywhere
+  but historical `docs/plans/` records and their own tests, pending a decision on whether the new
+  engine's lanes adopt any of them. (#127 later added a fourth live subcommand, `upgrade-notice` —
+  kept; not part of this decision.)
+- Decided: delete, adopt none. The new engine already owns this run surface under its own
+  contract — `render-apply-summary.py` the apply lane's PR title/body/refusals,
+  `render-audit-summary.py` the audit lane's — neither reuses `render-report.py`'s rendering, and
+  there is no functional gap the retired subcommands would fill; keeping them would be two
+  implementations of the same purpose, one of them dead.
+- Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/render-report.py` (and its
+  byte-identical `.doc-lifecycle/wiring/` copy), `tests/scripts/render-report_test.py`
+
 ## 2026-07-27 — the migration door reads both install layouts, and says which (#137)
 - Evidence: the named limit the #133 entry below recorded, measured not reasoned. `apply-upgrade.py`'s
   relocation branch fires for a registry-free install too, and afterwards `migration-draft` read its

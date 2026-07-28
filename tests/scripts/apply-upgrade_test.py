@@ -38,8 +38,6 @@ TPL_DOC_APPLY = "name: doc-apply\non:\n  workflow_dispatch: {}\n"
 SCRIPT_SOURCES = {
     "scheduling-doc-sync/scripts": ["upgrade-gate.py", "render-report.py",
                                    "stage-upgrade.py"],
-    "detecting-doc-bloat/scripts": ["plan-chunks.py", "validate-bloat-output.py"],
-    "detecting-doc-drift/scripts": ["validate-drift-output.py"],
 }
 
 # Wiring only an install that adopted `.doc-lifecycle/registry.json` receives.
@@ -381,6 +379,92 @@ class ApplyUpgrade(unittest.TestCase):
         # The human-readable summary is unchanged by the flag's absence.
         self.assertIn("regenerated wiring at v0.9.4", r.stdout)
 
+    # --- orphaned vendored scripts (left the SCRIPTS/NEW_LANE_SCRIPTS table) -
+    #
+    # copy_scripts only ever overwrote what's still in the table; a script
+    # dropped from a later release (e.g. aj604/toolshed#77's sync-gate.py,
+    # authorize-paths.py, plan-distill.py, and the follow-up's plan-chunks.py,
+    # validate-bloat-output.py, validate-drift-output.py) used to strand a
+    # stale copy in every consumer that had already vendored it. These pin
+    # the fix: a .py file directly under .doc-lifecycle/wiring/ that isn't in
+    # the current wiring gets deleted, declared in the written set (so the
+    # upgrade lane's undeclared-paths refusal doesn't choke on it), and
+    # nothing else in the install is touched.
+    #
+    # The pre-#133 spellings of these same orphans are removed by the
+    # relocation's own named set instead, not by this prune — see the
+    # relocation tests.
+
+    def test_orphaned_scripts_are_deleted(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base)
+        wiring = repo / ".doc-lifecycle" / "wiring"
+        stale = ["plan-chunks.py", "validate-bloat-output.py",
+                 "validate-drift-output.py", "sync-gate.py",
+                 "authorize-paths.py", "plan-distill.py"]
+        for name in stale:
+            (wiring / name).write_text(f"# stale {name}\n")
+        r = run(pr, repo, "0.9.4")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for name in stale:
+            self.assertFalse((wiring / name).exists(), name)
+
+    def test_orphan_deletion_leaves_current_scripts_and_state_alone(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        root = repo / ".doc-lifecycle"
+        wiring = root / "wiring"
+        (wiring / "plan-chunks.py").write_text("# stale\n")
+        r = run(pr, repo, "0.36.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((wiring / "render-report.py").is_file())
+        self.assertTrue((wiring / "upgrade-gate.py").is_file())
+        self.assertTrue((wiring / "stage-upgrade.py").is_file())
+        self.assertTrue((wiring / "render-audit-summary.py").is_file())
+        self.assertTrue((wiring / "engine").is_dir())
+        self.assertTrue((wiring / "engine" / "doclifecycle").is_dir())
+        # The tiers the prune must never reach into: judgment at the root,
+        # machine-written state under state/.
+        self.assertEqual((root / "audit-scope.json").read_text(), AUDIT_SCOPE)
+        self.assertTrue((root / "installed-version").is_file())
+        self.assertEqual((root / "state" / "sync-marker").read_text(), MARKER)
+
+    def test_orphan_deletions_are_declared_in_the_written_set(self):
+        repo = make_install(self.base)
+        wiring = repo / ".doc-lifecycle" / "wiring"
+        (wiring / "plan-chunks.py").write_text("# stale\n")
+        _, text = self.written(repo)
+        self.assertIn(".doc-lifecycle/wiring/plan-chunks.py", text.splitlines())
+        self.assertFalse((wiring / "plan-chunks.py").exists())
+
+    def test_no_orphans_declares_no_deletions(self):
+        repo = make_install(self.base)
+        _, text = self.written(repo)
+        expected = {".github/workflows/doc-sync-upgrade.yml",
+                    ".doc-lifecycle/installed-version",
+                    ".doc-lifecycle/drift-waivers.json"}
+        for names in SCRIPT_SOURCES.values():
+            expected |= {f".doc-lifecycle/wiring/{n}" for n in names}
+        self.assertEqual(set(text.splitlines()), expected)
+
+    def test_a_relocating_install_prunes_nothing_of_its_own(self):
+        """The new wiring/ holds exactly what copy_scripts just wrote, so the
+        prune has nothing to find — the old directory's orphans leave with the
+        relocation's named set, and never as a prune of a path that was never
+        under `wiring/`."""
+        pr = make_plugin_root(self.base)
+        repo = make_legacy_install(self.base)
+        (repo / ".github" / "doc-sync" / "sync-gate.py").write_text("# stale\n")
+        report = self.base / "written.txt"
+        r = run(pr, repo, "0.9.4", report=report)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        declared = set(report.read_text().splitlines())
+        self.assertIn(".github/doc-sync/sync-gate.py", declared)
+        self.assertFalse(
+            [p for p in declared
+             if p.startswith(".doc-lifecycle/wiring/")
+             and not (repo / p).exists()])
+
     # --- absent upgrade.yml (pre-self-upgrade install) ----------------------
 
     def test_absent_upgrade_yml_uses_default_cron_and_warns(self):
@@ -618,11 +702,11 @@ class ApplyUpgrade(unittest.TestCase):
 
     def test_missing_source_script_fails(self):
         pr = make_plugin_root(self.base)
-        (pr / "skills/detecting-doc-drift/scripts/validate-drift-output.py").unlink()
+        (pr / "skills/scheduling-doc-sync/scripts/stage-upgrade.py").unlink()
         repo = make_install(self.base)
         r = run(pr, repo, "0.9.4")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("validate-drift-output.py", r.stderr)
+        self.assertIn("stage-upgrade.py", r.stderr)
 
 
 if __name__ == "__main__":
