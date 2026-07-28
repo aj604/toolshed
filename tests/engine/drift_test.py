@@ -68,6 +68,29 @@ WAIVERS = ".doc-lifecycle/drift-waivers.json"
 LIVING_CLAIM = "The fee is 2% of the amount, in `src/fees.py`."
 UNRELATED_CLAIM = "Support answers within one business day."
 
+# DRIFT-021 from the second shadow-parity cycle (#126), replayed with its
+# audited two-line preimage and the corrected replacement wrapped to the
+# document's physical-line convention. The assertion unit is normalized prose;
+# the fix is the complete physical span fixing-docs places byte-verbatim.
+DRIFT_021_CLAIM = (
+    "**Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
+    "upgrade-cron knobs.** Real changes belong upstream in the plugin "
+    "(aj604/toolshed) so every install gets them on next upgrade."
+)
+DRIFT_021_PREIMAGE = (
+    "- **Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
+    "upgrade-cron knobs.** Real\n"
+    "  changes belong upstream in the plugin (aj604/toolshed) so every install "
+    "gets them on next upgrade."
+)
+DRIFT_021_FIX = (
+    "- **Don't customize the installed YAML beyond the cron/cap/bloat-cron/"
+    "upgrade-cron/audit-cron\n"
+    "  knobs.** Real changes belong upstream in the plugin (aj604/toolshed) so "
+    "every install gets them on\n"
+    "  next upgrade."
+)
+
 # A living document whose prose is not all of one kind: the four assertion
 # classes, in the one place they can be told apart.
 MIXED = "docs/mixed.md"
@@ -538,10 +561,48 @@ class VerdictDiscipline(DriftRepoTestCase):
         self.assertEqual([r.extra["code"] for r in report.records],
                          ["UNVERIFIABLE"])
 
-    def test_a_stale_verdict_without_a_replacement_line_is_refused(self):
+    def test_a_stale_verdict_without_replacement_text_is_refused(self):
         root = self.drift_repo()
 
         self.assertIn("drift-verdict-invalid-fix", self.gap_reason(root, fix=None))
+
+    def test_a_soft_wrapped_unit_carries_its_wrapped_replacement(self):
+        root = self.drift_repo(**{
+            LIVING: f"# Reference\n\n{DRIFT_021_PREIMAGE}\n",
+        })
+
+        report = self.audit(root, verdicts=self.verdicts_for(
+            root,
+            self.verdict(root, text=DRIFT_021_CLAIM, fix=DRIFT_021_FIX),
+        ))
+
+        self.assertEqual(report.status, STATE_FINDINGS, report.to_dict())
+        self.assertEqual(report.records[0].extra["fix"], DRIFT_021_FIX)
+
+    def test_a_single_line_unit_cannot_introduce_a_line_break(self):
+        root = self.drift_repo()
+
+        self.assertIn(
+            "drift-verdict-invalid-fix",
+            self.gap_reason(root, fix="The fee is\n2.5% of the amount."),
+        )
+
+    def test_a_wrapped_replacement_has_only_non_empty_lf_lines(self):
+        root = self.drift_repo(**{
+            LIVING: f"# Reference\n\n{DRIFT_021_PREIMAGE}\n",
+        })
+        malformed = (
+            "first line\rsecond line",
+            "first line\x00second line",
+            "first line\n\nthird line",
+        )
+
+        for fix in malformed:
+            with self.subTest(fix=repr(fix)):
+                self.assertIn(
+                    "drift-verdict-invalid-fix",
+                    self.gap_reason(root, text=DRIFT_021_CLAIM, fix=fix),
+                )
 
     def test_a_non_stale_verdict_carrying_a_fix_is_refused(self):
         root = self.drift_repo()
@@ -1026,7 +1087,7 @@ class EvidencePointers(DriftRepoTestCase):
         self.assertEqual(self.stale_record(root).extra["evidence"],
                          {"source": SOURCE, "line": 1, "observed": "RATE = 0.025"})
 
-    def test_a_finding_carries_the_replacement_line_for_a_stale_claim(self):
+    def test_a_finding_carries_the_replacement_text_for_a_stale_claim(self):
         root = self.drift_repo()
 
         self.assertIn("2.5%", self.stale_record(root).extra["fix"])

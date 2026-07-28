@@ -48,6 +48,13 @@ LIVING_FACTUAL = (
     "The payment service lives at `src/payment_service.py` and calculates fees "
     "at a flat 2% rate."
 )
+# The audit worker's writing-docs-compliant replacement for that assertion.
+# Unlike the normalized assertion identity above, `fix` is the exact physical
+# span fixing-docs places, so it preserves the source paragraph's soft wrap.
+LIVING_FACTUAL_FIX = (
+    "The payment service lives at `src/payment_service.py` and calculates fees "
+    "at a\nflat 2.5% rate."
+)
 LIVING_NORMATIVE = "New endpoints must include an integration test before merging."
 LIVING_RATIONALE = (
     "The flat rate exists because the upstream processor bills a single "

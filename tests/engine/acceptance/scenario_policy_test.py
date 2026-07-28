@@ -60,16 +60,13 @@ ENGINE = os.path.abspath(os.path.join(
     "plugins", "doc-lifecycle", "engine",
 ))
 
-# The two raw lines the fixture's living document hard-wraps its stale claim
-# across, and the single line the audit's own `fix` proposes instead.
+# The two raw lines the fixture's living document soft-wraps its stale claim
+# across, and the two physical lines the audit's own `fix` preserves.
 STALE_PREIMAGE = (
     "The payment service lives at `src/payment_service.py` and calculates fees "
     "at a\nflat 2% rate."
 )
-STALE_POSTIMAGE = (
-    "The payment service lives at `src/payment_service.py` and calculates fees "
-    "at a flat 2.5% rate."
-)
+STALE_POSTIMAGE = fixture.LIVING_FACTUAL_FIX
 STALE_FIRST_LINE, STALE_LAST_LINE = 3, 4
 
 # The narrative document's `> As of` line, and the refresh a remedy writes over

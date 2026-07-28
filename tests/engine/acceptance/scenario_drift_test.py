@@ -103,7 +103,7 @@ class DriftScenarioTestCase(fixture.AcceptanceFixtureTestCase):
                         "verdict": "STALE", "kind": "value", "tier": 3,
                         "evidence": {"source": fixture.EVIDENCE_SOURCE,
                                      "line": 7, "observed": OBSERVED_RATE},
-                        "fix": unit.text.replace("2% rate", "2.5% rate"),
+                        "fix": fixture.LIVING_FACTUAL_FIX,
                     })
                 else:
                     entries.append({
@@ -360,6 +360,13 @@ class FollowableEvidence(DriftScenarioTestCase):
 
         self.assertEqual(record.extra["location"], f"{fixture.LIVING_DOC}:3")
         self.assertEqual(record.extra["assertion"], fixture.LIVING_FACTUAL)
+
+    def test_its_fix_preserves_the_assertion_units_soft_wrap(self):
+        repo = self.build_fixture()
+
+        record = self.stale_record(self.full_report(repo))
+
+        self.assertEqual(record.extra["fix"], fixture.LIVING_FACTUAL_FIX)
 
     def test_it_names_the_source_line_and_the_fact_observed_there(self):
         repo = self.build_fixture()
