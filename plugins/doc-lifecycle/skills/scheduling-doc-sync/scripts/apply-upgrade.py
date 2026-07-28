@@ -45,6 +45,11 @@ Ownership (total on wiring, idempotent on state):
     .doc-lifecycle/registry.json is consumer judgment and is never touched here;
     the migration door (scheduling-doc-sync's Migration mode) is what produces it.
 
+    Total ownership of wiring also covers retirement: RETIRED lists paths this
+    script shipped in a past release and no longer does. Crossing one of its
+    version keys during an upgrade deletes the path if present — an install
+    already past that key, or one that never had the path, is untouched.
+
 Exit status: 0 on success; 1 on any error (missing source/installed file, a knob
 that can't be extracted, or a template placeholder the script doesn't know) —
 fail red, never default-guess a consumer's knob.
@@ -115,6 +120,27 @@ DEFAULT_AUDIT_CRON = "0 1 * * *"
 # whose `doc-lifecycle.py` is what both new lanes invoke.
 ENGINE_DIR = "engine"
 
+# Paths this script has shipped in the past but no longer owns, keyed by the
+# target version whose SCRIPTS/TEMPLATE_PLACEHOLDERS tables (above) stopped
+# carrying them. An install upgrading across one of these keys had a version
+# that laid the path down and one that doesn't — so it is stale on disk unless
+# this script deletes it too. Keyed by version rather than deleted unconditionally
+# so a same-named path a later template reintroduces is never caught by an
+# older entry here: apply_upgrade only fires an entry when the install's
+# installed-version is older than its key and the target reaches at least it.
+RETIRED = {
+    # #77/#128: the legacy write lanes and the scripts that existed only to
+    # serve them.
+    "0.38.0": [
+        ".github/workflows/doc-sync.yml",
+        ".github/workflows/doc-bloat.yml",
+        ".github/doc-sync/sync-gate.py",
+        ".github/doc-sync/authorize-paths.py",
+        ".github/doc-sync/plan-distill.py",
+        ".github/doc-sync/last-stales.json",
+    ],
+}
+
 
 class UpgradeError(Exception):
     """A precondition the upgrade can't proceed past — reported, never guessed around."""
@@ -131,6 +157,56 @@ def _extract(text, regex, what, path):
     if not m:
         raise UpgradeError(f"could not extract {what} from installed {path}")
     return m.group(1)
+
+
+def _semver(version):
+    # Bare X.Y.Z only — both installed-version and this table's own keys are
+    # written that way, never v-prefixed. Unlike upgrade-gate.py's parser this
+    # one never sees a release tag, so it stays this small on purpose.
+    return tuple(int(p) for p in version.split("."))
+
+
+def installed_version(repo):
+    """The install's current version, or "0.0.0" for one predating the lockfile.
+
+    Absence means an install old enough to predate self-upgrade entirely —
+    older than every entry RETIRED could ever carry — the same reasoning
+    read_knobs already applies to a missing doc-sync-upgrade.yml.
+    """
+    path = repo / ".github" / "doc-sync" / "installed-version"
+    if not path.is_file():
+        return "0.0.0"
+    return path.read_text().strip()
+
+
+def retired_paths(repo, target):
+    """Paths to delete: shipped before this install's current version, retired
+    at a version at or before the one being upgraded to."""
+    current = _semver(installed_version(repo))
+    tgt = _semver(target)
+    paths = []
+    for version, entries in RETIRED.items():
+        v = _semver(version)
+        if current < v <= tgt:
+            paths.extend(entries)
+    return paths
+
+
+def remove_retired(repo, target):
+    """Delete files this script no longer owns.
+
+    Idempotent: a path already absent (already upgraded past it, or never
+    installed) is silently skipped. Returns only what this run actually
+    removed — see seed_waivers for the same declare-only-what-you-did shape.
+    """
+    removed = []
+    for rel in retired_paths(repo, target):
+        path = repo / rel
+        if not path.is_file():
+            continue
+        path.unlink()
+        removed.append(rel)
+    return removed
 
 
 def adopted_registry(repo):
@@ -323,19 +399,24 @@ def apply_upgrade(plugin_root, repo, target):
     """
     new_lane = adopted_registry(repo)
     knobs = read_knobs(repo)
+    # Read before write_version below overwrites the file retired_paths reads to
+    # know this install's current version.
+    removed = remove_retired(repo, target)
     written = render_workflows(plugin_root, repo, knobs, new_lane=new_lane)
     written += copy_scripts(plugin_root, repo, new_lane=new_lane)
     if new_lane:
         written += copy_engine(plugin_root, repo)
         written += seed_evidence_tools(repo)
     written += seed_waivers(repo)
+    written += removed
     written += write_version(repo, target)
     workflows = len(_wiring(TEMPLATE_PLACEHOLDERS, NEW_LANE_PLACEHOLDERS, new_lane))
     scripts = len(_wiring(SCRIPTS, NEW_LANE_SCRIPTS, new_lane))
     engine = ", engine (vendored wholesale)" if new_lane else ""
+    retired = f", {len(removed)} retired path(s) removed" if removed else ""
     print(
         f"regenerated wiring at v{target}: {workflows} workflows (knobs "
-        f"preserved), {scripts} scripts{engine}, installed-version"
+        f"preserved), {scripts} scripts{engine}{retired}, installed-version"
     )
     return sorted(set(written))
 
