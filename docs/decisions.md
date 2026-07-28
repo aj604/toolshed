@@ -461,10 +461,12 @@
   verdicts. `detecting-doc-bloat/SKILL.md`, its `plan-chunks.py` (the `policy_scope` config key,
   the `POLICY_PROMPT` dispatch, the whole "policy chunk" mode), and
   `docs/guides/auditing-doc-bloat.md` (seven verdicts, a `POLICY` row) all still instruct and
-  document it. `HANDOFF.md`'s 2026-07-26 entry states the reason plainly: "The eight helper
-  scripts are untouched — they are absorbed in later stages, so both generations coexist for
-  now." No `bloat-audit` CLI command exists, and neither `bloat-plan` nor `context-index` is
-  wired into any workflow — `doc-audit.yml` has cut over drift, not bloat.
+  document it. No `bloat-audit` CLI command exists, and neither `bloat-plan` nor `context-index`
+  is wired into any workflow — `doc-audit.yml` has cut over drift, not bloat; #77 retired the
+  legacy *write* lanes (`doc-sync.yml`, `doc-bloat.yml`) but named `plan-chunks.py` and the bloat
+  output validator as surviving with "non-legacy owners" — the two detecting skills' own
+  read-only tooling (`HANDOFF.md`, 2026-07-27 entry) — not as migrated to the engine's verdict
+  set.
 - Decided (POLICY is retired in the target architecture, not in what ships today): the engine's
   scope mechanism (`enumerate_scope`, `bloat.SCOPE_VERDICTS` — an enumerable `set`/`glob`/`kind`
   rule on `RETIRE-DOC`, resolved from the corpus-wide context index) is the one correct successor
