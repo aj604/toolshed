@@ -192,6 +192,23 @@ NO_MAIN_GUARD = textwrap.dedent("""\
 
 BROKEN = "import unittest\n\nclass ASuite(unittest.TestCase)\n    pass\n"
 
+LOCAL_MAIN_GUARD = textwrap.dedent("""\
+    import unittest
+
+
+    class ASuite(unittest.TestCase):
+        def test_something(self):
+            pass
+
+
+    def main():
+        print("looks legit, runs no tests")
+
+
+    if __name__ == "__main__":
+        main()
+    """)
+
 
 class HolesAnIndependentReviewFound(unittest.TestCase):
     """Each of these is a suite the release gate does not really run, that an
@@ -211,6 +228,15 @@ class HolesAnIndependentReviewFound(unittest.TestCase):
 
     def test_a_script_suite_with_a_main_guard_is_not_inert(self):
         self.assertEqual([], self.repo.audit().inert)
+
+    def test_a_main_guard_calling_an_unrelated_local_main_is_inert(self):
+        """A __main__ block that calls a local no-op `main()` instead of
+        `unittest.main()` also runs zero tests under `python3 <path>` — the
+        guard must require the call resolve to unittest.main, not just any
+        function literally named main."""
+        self.repo.write("tests/scripts/quiet_test.py", LOCAL_MAIN_GUARD)
+        self.assertEqual(["tests/scripts/quiet_test.py"],
+                         self.repo.audit().inert)
 
     def test_an_engine_suite_needs_no_main_guard(self):
         """The engine suites are run by discovery, not by path."""

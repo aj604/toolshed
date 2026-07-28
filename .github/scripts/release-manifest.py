@@ -148,18 +148,54 @@ def _test_classes(tree):
     return [classes[name] for name in known]
 
 
+def _unittest_main_bindings(tree):
+    """Names this file's imports bind to the `unittest` module, and names
+    bound to `unittest.main` itself via `from unittest import main`."""
+    unittest_names, main_names = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "unittest":
+                    unittest_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "unittest":
+            for alias in node.names:
+                if alias.name == "main":
+                    main_names.add(alias.asname or alias.name)
+    return unittest_names, main_names
+
+
+def _calls_unittest_main(node, unittest_names, main_names):
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        if isinstance(func, ast.Attribute) and func.attr == "main" \
+                and isinstance(func.value, ast.Name) \
+                and func.value.id in unittest_names:
+            return True
+        if isinstance(func, ast.Name) and func.id in main_names:
+            return True
+    return False
+
+
 def _has_main_guard(tree):
-    """`if __name__ == "__main__": unittest.main()`, however it is spelled.
+    """`if __name__ == "__main__": unittest.main()`, however it is spelled
+    (`unittest.main(verbosity=2)`, `sys.exit(unittest.main())`, an aliased
+    `import unittest`, or `from unittest import main`).
 
     Only the script-runner's suites need one: it runs each as `python3
-    <path>`, so a suite without it runs zero tests and exits 0.
+    <path>`, so a suite without it runs zero tests and exits 0. The call
+    must resolve to unittest.main specifically — a `__main__` block that
+    calls an unrelated local `main()` also runs zero tests.
     """
+    unittest_names, main_names = _unittest_main_bindings(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.If):
             continue
         if "__name__" not in ast.unparse(node.test):
             continue
-        if "main(" in ast.unparse(ast.Module(body=node.body, type_ignores=[])):
+        if any(_calls_unittest_main(stmt, unittest_names, main_names)
+               for stmt in node.body):
             return True
     return False
 
