@@ -102,12 +102,13 @@ TEMPLATE_PLACEHOLDERS = {
     "doc-sync-upgrade.yml": ["{{UPGRADE_CRON}}"],
 }
 
-# Vendored scripts and the skill dir each is copied from (the upgrade lane's three
-# from this skill, the planner + bloat validator from detecting-doc-bloat, the
-# drift validator from detecting-doc-drift). Mirror scheduling-doc-sync's install
-# steps 5-6. The last three are the detecting skills' own read-only tooling: they
-# are vendored for every install because a model running either skill reaches for
-# them whichever lane invoked it.
+# Vendored scripts and the skill dir each is copied from — the upgrade lane's
+# own three. Mirrors scheduling-doc-sync's install step 5. The detecting
+# skills' read-only tooling (plan-chunks.py, validate-bloat-output.py,
+# validate-drift-output.py) is deliberately NOT vendored here: both detecting
+# skills always dispatch their own scripts via ${CLAUDE_PLUGIN_ROOT}, never a
+# repo-relative path, so a vendored copy would have no reader (aj604/toolshed#77
+# follow-up).
 SCRIPTS = {
     "upgrade-gate.py": "scheduling-doc-sync/scripts",
     "render-report.py": "scheduling-doc-sync/scripts",
@@ -116,9 +117,6 @@ SCRIPTS = {
     # checkout: it is the code that decides what the target release's
     # regeneration is allowed to have written (aj604/toolshed#127).
     "stage-upgrade.py": "scheduling-doc-sync/scripts",
-    "plan-chunks.py": "detecting-doc-bloat/scripts",
-    "validate-bloat-output.py": "detecting-doc-bloat/scripts",
-    "validate-drift-output.py": "detecting-doc-drift/scripts",
 }
 
 # The new engine's lanes. Held apart from the base wiring above because they are

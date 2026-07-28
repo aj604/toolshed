@@ -38,8 +38,6 @@ TPL_DOC_APPLY = "name: doc-apply\non:\n  workflow_dispatch: {}\n"
 SCRIPT_SOURCES = {
     "scheduling-doc-sync/scripts": ["upgrade-gate.py", "render-report.py",
                                    "stage-upgrade.py"],
-    "detecting-doc-bloat/scripts": ["plan-chunks.py", "validate-bloat-output.py"],
-    "detecting-doc-drift/scripts": ["validate-drift-output.py"],
 }
 
 # Wiring only an install that adopted `.doc-lifecycle/registry.json` receives.
@@ -618,11 +616,11 @@ class ApplyUpgrade(unittest.TestCase):
 
     def test_missing_source_script_fails(self):
         pr = make_plugin_root(self.base)
-        (pr / "skills/detecting-doc-drift/scripts/validate-drift-output.py").unlink()
+        (pr / "skills/scheduling-doc-sync/scripts/stage-upgrade.py").unlink()
         repo = make_install(self.base)
         r = run(pr, repo, "0.9.4")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("validate-drift-output.py", r.stderr)
+        self.assertIn("stage-upgrade.py", r.stderr)
 
 
 if __name__ == "__main__":

@@ -65,11 +65,14 @@ The `plugins:` selector stays bare `doc-lifecycle@toolshed` (`claude-code-action
 The three workflow templates are in this skill's base directory (announced when the skill
 loads), and its own scripts one level down in `scripts/` — `upgrade-gate.py`,
 `stage-upgrade.py`, `render-report.py`, `render-audit-summary.py`, `render-apply-summary.py`,
-`probe-evidence-tool.py`. The chunk planner and the two output validators are copied from the
-sibling skills that own them (install step 6). `scripts/apply-upgrade.py` is the deterministic
-upgrade engine — the *target release's* copy of it is what the upgrade lane runs, so it is never
-vendored into the install; `stage-upgrade.py` is vendored for the mirror-image reason, because it
-is the code that bounds what that run may have written (see Upgrade mode).
+`probe-evidence-tool.py`. The chunk planner and the two output validators stay in the sibling
+skills that own them (`detecting-doc-bloat`, `detecting-doc-drift`) and are never vendored here
+— both always dispatch their own copy via `${CLAUDE_PLUGIN_ROOT}`, so a copy under
+`.doc-lifecycle/wiring/` would have no reader (aj604/toolshed#77 follow-up).
+`scripts/apply-upgrade.py` is the deterministic upgrade engine — the *target release's* copy of
+it is what the upgrade lane runs, so it is never vendored into the install; `stage-upgrade.py` is
+vendored for the mirror-image reason, because it is the code that bounds what that run may have
+written (see Upgrade mode).
 
 ## The audit lane (`doc-audit.yml`)
 
@@ -143,8 +146,7 @@ the bytes:
       installed-version                                                          version lockfile
       wiring/    upgrade-gate.py stage-upgrade.py render-report.py               plugin-owned
                  render-audit-summary.py render-apply-summary.py
-                 probe-evidence-tool.py plan-chunks.py
-                 validate-drift-output.py validate-bloat-output.py
+                 probe-evidence-tool.py
                  engine/                                                         vendored wholesale
       state/     sync-marker                                                     machine-written
 
@@ -195,30 +197,30 @@ and are the only doc-lifecycle content left under `.github/`.
    - `doc-apply.yml` → `.github/workflows/doc-apply.yml`: no placeholder to replace.
    - `doc-sync-upgrade.yml` → `.github/workflows/doc-sync-upgrade.yml`: `{{UPGRADE_CRON}}`.
    The workflow YAML carries NO version placeholder — each `Pin plugin marketplace` step reads
-   `.doc-lifecycle/installed-version` at runtime (written in step 11) and clones that tag, so
+   `.doc-lifecycle/installed-version` at runtime (written in step 10) and clones that tag, so
    the workflow files are version-agnostic (Overview). The version from step 2 lands only in
    that lockfile.
 5. Copy this skill's scripts into `.doc-lifecycle/wiring/`: `scripts/upgrade-gate.py`,
    `scripts/stage-upgrade.py`, `scripts/render-report.py`, `scripts/render-audit-summary.py`,
    `scripts/render-apply-summary.py`, `scripts/probe-evidence-tool.py` (the version-comparison
    gate, the upgrade lane's path authority, and each lane's run-surface rendering — run from the
-   repo, unit-tested upstream).
-6. Copy the sibling skills' scripts into `.doc-lifecycle/wiring/`:
-   `../detecting-doc-bloat/scripts/plan-chunks.py`,
-   `../detecting-doc-bloat/scripts/validate-bloat-output.py`, and
-   `../detecting-doc-drift/scripts/validate-drift-output.py`.
-7. Vendor the engine: copy `$CLAUDE_PLUGIN_ROOT/engine/` wholesale to `.doc-lifecycle/wiring/engine/`.
+   repo, unit-tested upstream). The chunk planner and the two output validators stay in the
+   sibling skills that own them (`detecting-doc-bloat`, `detecting-doc-drift`) and are never
+   vendored here — both always dispatch their own copy via `${CLAUDE_PLUGIN_ROOT}`, so a copy
+   under `.doc-lifecycle/wiring/` would have no reader (aj604/toolshed#77 follow-up).
+6. Vendor the engine: copy `$CLAUDE_PLUGIN_ROOT/engine/` wholesale to `.doc-lifecycle/wiring/engine/`.
    It is one package whose modules import each other, so a partially-refreshed tree is a version
    that was never tested — copy all of it, never a subset. `.doc-lifecycle/wiring/engine/doc-lifecycle.py`
    is what both lanes invoke.
-8. Seed the audit scope — **only if absent**: write `.doc-lifecycle/audit-scope.json` with the
+7. Seed the audit scope — **only if absent**: write `.doc-lifecycle/audit-scope.json` with the
    starter `{"exclude": [], "include": []}` (empty arrays — a valid no-op default the human
-   tunes). `plan-chunks.py` reads it to pick which docs a large bloat audit covers (exclude/
-   include globs) and how to chunk them — the optional `policy_scope` (directories of ephemeral
-   artifacts, each swept as one POLICY record) and `chunking` (`max_docs` / `max_lines` /
-   `max_chunks`) keys are documented in that script's docstring; Migration mode reads the same
-   file to infer documentation roots. An existing file is a tuned config — never overwrite it.
-9. Seed the drift waivers — **only if absent**: write `.doc-lifecycle/drift-waivers.json`
+   tunes). `plan-chunks.py` (the sibling `detecting-doc-bloat` skill's own copy) reads it to pick
+   which docs a large bloat audit covers (exclude/include globs) and how to chunk them — the
+   optional `policy_scope` (directories of ephemeral artifacts, each swept as one POLICY record)
+   and `chunking` (`max_docs` / `max_lines` / `max_chunks`) keys are documented in that script's
+   docstring; Migration mode reads the same file to infer documentation roots. An existing file
+   is a tuned config — never overwrite it.
+8. Seed the drift waivers — **only if absent**: write `.doc-lifecycle/drift-waivers.json`
    with the starter `{"waivers": []}`. This is the UNVERIFIABLE disposition record: an entry
    `{"file": <doc>, "claim": <quoted claim text>, "reason": ..., "date": ...}` annotates the
    matching assertion as accepted when the engine is given `drift-audit --waivers`, and
@@ -227,21 +229,20 @@ and are the only doc-lifecycle content left under `.github/`.
    `doclifecycle/drift.py`), so rewording a waived line puts it back on the surface — new
    authorship is a new decision. An existing file is accumulated human judgment — never
    overwrite it.
-10. Seed the declared evidence tools — **only if absent**: write
+9. Seed the declared evidence tools — **only if absent**: write
     `.doc-lifecycle/evidence-tools.json` with `{"tools": []}`. Tool-free is the honest default;
     a consumer adds the bare executable names the audit lane's verdicts may cite (audit lane,
     above). An existing file is a declared boundary — never overwrite it.
-11. Write the version lockfile: `.doc-lifecycle/installed-version` = the bare version from
+10. Write the version lockfile: `.doc-lifecycle/installed-version` = the bare version from
     step 2. Unlike the seeded state files, this tracks the wiring version and must equal the pin,
     so on a fresh install always write it. `doc-sync-upgrade.yml` reads it to decide whether a
     newer release exists; it advances only when an upgrade PR merges.
-12. Tell the user, concretely:
-    - the sixteen files to commit, plus the vendored `engine/` tree: the three workflows under
-      `.github/workflows/` (`doc-audit.yml`, `doc-apply.yml`, `doc-sync-upgrade.yml`); the nine
+11. Tell the user, concretely:
+    - the thirteen files to commit, plus the vendored `engine/` tree: the three workflows under
+      `.github/workflows/` (`doc-audit.yml`, `doc-apply.yml`, `doc-sync-upgrade.yml`); the six
       scripts under `.doc-lifecycle/wiring/` (`upgrade-gate.py`, `stage-upgrade.py`,
       `render-report.py`, `render-audit-summary.py`,
-      `render-apply-summary.py`, `probe-evidence-tool.py`, `plan-chunks.py`,
-      `validate-drift-output.py`, `validate-bloat-output.py`); and, at `.doc-lifecycle/`, the
+      `render-apply-summary.py`, `probe-evidence-tool.py`); and, at `.doc-lifecycle/`, the
       three seeded state files (`audit-scope.json`, `drift-waivers.json`, `evidence-tools.json`)
       and `installed-version`. `.doc-lifecycle/state/` stays empty on a fresh install — the
       marker it holds arrives only from a relocation;
@@ -307,7 +308,7 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | File | Owner | Upgrade behavior |
 |------|-------|------------------|
 | `doc-sync-upgrade.yml` | plugin (wiring) | **Regenerate** from the new template, re-injecting the consumer's existing knob (below), not the template default. No version to re-pin — the Pin steps read `installed-version` at runtime. |
-| `.doc-lifecycle/wiring/*.py` (the six always-installed scripts) | plugin (wiring) | **Overwrite** from the new version. |
+| `.doc-lifecycle/wiring/*.py` (the three always-installed scripts: `upgrade-gate.py`, `render-report.py`, `stage-upgrade.py`) | plugin (wiring) | **Overwrite** from the new version. |
 | `.doc-lifecycle/installed-version` | version state | **Set** to `<target>` (bare semver). This is what advances the pin; on a version-only release it's the *only* file that changes. |
 | `.doc-lifecycle/audit-scope.json` | consumer (tuned config) | **Never touch.** A relocation carries it to this path once, and no upgrade rewrites it afterwards. |
 | `.doc-lifecycle/drift-waivers.json` | consumer (accepted-claim record) | **Never touch.** Seed `{"waivers": []}` only if absent (pre-0.11 installs lack it). |

@@ -78,8 +78,8 @@ The skill runs preflight first and reports anything missing rather than silently
 skipping: a GitHub remote, `gh auth status`, a model-auth secret
 (`CLAUDE_CODE_OAUTH_TOKEN` via `/install-github-app`, or `ANTHROPIC_API_KEY`), and the
 repo setting that lets Actions create PRs. It then confirms two knobs — the audit cron
-and the upgrade cron; defaults are fine — and stages sixteen files plus a vendored copy
-of the engine: the three workflows under `.github/workflows/`, nine scripts under
+and the upgrade cron; defaults are fine — and stages thirteen files plus a vendored copy
+of the engine: the three workflows under `.github/workflows/`, six scripts under
 `.doc-lifecycle/wiring/`, and — at `.doc-lifecycle/` — three starter state files
 (`audit-scope.json`, `drift-waivers.json`, `evidence-tools.json`) and the version
 lockfile.
