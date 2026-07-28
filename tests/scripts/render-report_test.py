@@ -838,18 +838,13 @@ class UpgradeRender(unittest.TestCase):
 
     # -- upgrade-notice ----------------------------------------------------
 
-    def notice(self, issues, latest="0.8.0"):
-        issues_path = os.path.join(self.tmp.name, "issues.json")
-        with open(issues_path, "w") as f:
-            json.dump(issues, f)
-        paths = {k: os.path.join(self.tmp.name, k) for k in
-                 ("title.txt", "body.md", "gh-output.txt")}
+    def notice(self, latest="0.8.0"):
+        paths = {k: os.path.join(self.tmp.name, k)
+                 for k in ("title.txt", "body.md")}
         r = self.run_script("upgrade-notice", "--current", "0.7.0",
                             "--latest", latest, "--repo", "acme/widgets",
-                            "--issues", issues_path,
                             "--title-out", paths["title.txt"],
-                            "--body-out", paths["body.md"],
-                            "--out", paths["gh-output.txt"])
+                            "--body-out", paths["body.md"])
         read = {}
         for key, path in paths.items():
             if not os.path.exists(path):
@@ -859,36 +854,26 @@ class UpgradeRender(unittest.TestCase):
                 read[key] = f.read()
         return r, read
 
-    def test_notice_opens_when_no_issue_names_the_release(self):
-        r, out = self.notice([])
+    def test_the_notice_title_names_the_release(self):
+        r, out = self.notice()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.strip(), "open")
-        self.assertIn("notice=open", out["gh-output.txt"])
         self.assertIn("0.8.0", out["title.txt"])
-
-    def test_notice_dedupes_on_the_exact_title(self):
-        _, first = self.notice([])
-        title = first["title.txt"].strip()
-        r, out = self.notice([{"number": 4, "title": title}])
-        self.assertEqual(r.stdout.strip(), "exists")
-        self.assertIn("notice=exists", out["gh-output.txt"])
-
-    def test_an_issue_for_another_release_does_not_suppress_the_notice(self):
-        r, out = self.notice(
-            [{"number": 4, "title": "doc-sync: doc-lifecycle 0.7.9 is available"}])
-        self.assertEqual(r.stdout.strip(), "open")
+        # The title is the gate's dedupe key, so it travels on stdout too.
+        self.assertEqual(r.stdout.strip(), out["title.txt"].strip())
 
     def test_the_notice_body_routes_the_reader_to_the_release_and_dispatch(self):
-        _, out = self.notice([])
+        _, out = self.notice()
         body = out["body.md"]
         self.assertIn("https://github.com/acme/widgets/releases/tag/v0.8.0", body)
         self.assertIn("target: 0.8.0", body)
         # It must not read as if an upgrade already happened.
         self.assertIn("Nothing has run.", body)
 
-    def test_a_non_array_issue_payload_exits_2(self):
-        r, _ = self.notice({"issues": []})
-        self.assertEqual(r.returncode, 2)
+    def test_the_renderer_decides_nothing(self):
+        # aj604/toolshed#127 review: gate decisions live in upgrade-gate.py, and
+        # every run-surface string here. This subcommand writes no decision.
+        r, _ = self.notice()
+        self.assertNotIn("notice=", r.stdout)
 
 
 class DistillMergeRender(unittest.TestCase):

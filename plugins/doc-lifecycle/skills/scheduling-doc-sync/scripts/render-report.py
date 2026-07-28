@@ -615,28 +615,19 @@ def render_upgrade_notice_body(current, latest, repo, workflow):
     ])
 
 
-def render_upgrade_notice(current, latest, repo, workflow, issues_path,
-                          title_out, body_out, out):
-    """Decide whether to file the notice, and render it. Prints the decision."""
+def render_upgrade_notice(current, latest, repo, workflow, title_out, body_out):
+    """Render the notice issue. Whether to file it is `upgrade-gate.py notice`.
+
+    Strings only, like every other subcommand here: the gate owns decisions and
+    this file owns what a human reads. The title it writes is what the gate
+    dedupes on, so the two travel through a file rather than a shared literal.
+    """
     title = render_upgrade_notice_title(latest)
-    try:
-        with open(issues_path, encoding="utf-8") as f:
-            issues = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        raise ValueError(f"cannot read --issues {issues_path}: {e}")
-    if not isinstance(issues, list):
-        raise ValueError(f"--issues {issues_path} must be a JSON array "
-                         f"(gh issue list --json number,title)")
-    existing = [i for i in issues
-                if isinstance(i, dict) and i.get("title") == title]
-    decision = "exists" if existing else "open"
     with open(title_out, "w", encoding="utf-8") as f:
         f.write(title + "\n")
     with open(body_out, "w", encoding="utf-8") as f:
         f.write(render_upgrade_notice_body(current, latest, repo, workflow) + "\n")
-    with open(out, "a", encoding="utf-8") as f:
-        f.write(f"notice={decision}\n")
-    return decision
+    return title
 
 
 def render_upgrade_pr_body(current, latest, files):
@@ -760,11 +751,8 @@ def main():
     unot.add_argument("--latest", required=True)
     unot.add_argument("--repo", required=True)
     unot.add_argument("--workflow", default="doc-sync-upgrade")
-    unot.add_argument("--issues", required=True,
-                      help="gh issue list --json number,title output")
     unot.add_argument("--title-out", required=True)
     unot.add_argument("--body-out", required=True)
-    unot.add_argument("--out", required=True, help="$GITHUB_OUTPUT")
 
     bgaps = sub.add_parser("bloat-unswept-summary")
     bgaps.add_argument("--report", required=True)
@@ -791,7 +779,7 @@ def main():
         elif args.mode == "upgrade-notice":
             print(render_upgrade_notice(
                 args.current, args.latest, args.repo, args.workflow,
-                args.issues, args.title_out, args.body_out, args.out))
+                args.title_out, args.body_out))
         elif args.mode == "distill-merge-summary":
             write_summary(render_distill_merge_summary(load_merge(args.merge)))
         elif args.mode == "growth-backlog":

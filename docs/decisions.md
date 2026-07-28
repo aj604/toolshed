@@ -26,8 +26,17 @@
   no secret, `contents: read`, a checkout persisting no credential — and it runs `apply-upgrade.py`
   against a scratch copy of the wiring roots rather than the work tree. `land` holds the
   credentials and executes none of the release's code: every byte the release produced reaches it
-  as data inside an artifact, and every program it invokes is `.github/doc-sync/*` from its own
-  checkout.
+  as data inside an artifact.
+- Decided (and this is where the first draft was wrong, caught in review): both jobs copy
+  `.github/doc-sync/*.py` out to `$RUNNER_TEMP/trusted/` before anything writes, and run every
+  wiring script from there. The regeneration produces the release's own `stage-upgrade.py` and
+  `render-report.py`, and `land`'s transfer legitimately lands them in `.github/doc-sync/` — so
+  "the credentialed job runs only the install's own scripts" was true of the paths and false of
+  the bytes: two steps after the transfer, `land` was invoking the release's code with the push
+  token, which is the property this whole entry exists to establish. The claim is about *when* the
+  copy was taken, never about which directory it sits in, and
+  `upgrade-workflow_test.py::test_no_program_it_runs_can_have_been_overwritten_by_the_transfer` is
+  what keeps it that way.
 - Decided (what bounds the write): a new vendored script, `stage-upgrade.py`, is the upgrade lane's
   path authority — the inverse of `authorize-paths.py`, which denies exactly the wiring this one
   is about. It compares the scratch tree against the install, refuses the whole run if any
@@ -60,6 +69,9 @@
 - Named limit: `land` copies bytes the unreviewed release produced. That is what an upgrade is —
   the guarantee is that nothing from the release *executes* with credentials, that what lands is
   confined to the wiring, and that a person reads the diff as a pull request before it is merged.
+- Supersedes, once it lands: #77's entry naming this as a "Known gap" is still on that issue's
+  unmerged branch, so there is nothing here to mark yet. Whoever merges #77 should mark that
+  paragraph superseded by this entry rather than leaving both standing as live gaps.
 - Verified: `tests/scripts/stage-upgrade_test.py` (the authority, both directions — the manifest
   step's refusals, and the credentialed step re-deriving them from a manifest edited in between);
   `tests/scripts/upgrade-workflow_test.py` (the three-job split, dispatch-gated execution, no

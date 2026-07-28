@@ -247,8 +247,9 @@ re-seed the state files.
 **A version comparison detects; it never authorizes execution.** Upgrading means running the
 *target release's* own `apply-upgrade.py`, which nobody in the consumer repository has read at the
 moment it runs, so the schedule reaches only the `detect` job: it compares two numbers, files one
-notice issue naming the release (`render-report.py upgrade-notice`, deduped on that title so a
-repeat check keeps quiet), and stops — cloning nothing, running none of the release's code, and
+notice issue naming the release (`render-report.py upgrade-notice` renders its title and body and
+decides nothing; `upgrade-gate.py notice` reads that title back and dedupes on it, so a repeat
+check keeps quiet), and stops — cloning nothing, running none of the release's code, and
 holding `issues: write` as its whole write scope. Execution happens only under
 `workflow_dispatch` carrying a `target`, and `upgrade-gate.py` both shape-checks that input to
 strict X.Y.Z before it names a git ref and refuses a target that is not strictly newer than the
@@ -485,10 +486,11 @@ landing a file, never the door.
   land unattended", or moving that execution into the credentialed `land` job → that is
   pre-review execution of unreviewed code, which the three-job split exists to close. The
   schedule detects; a dispatch authorizes.
-- Running `stage-upgrade.py` (or any other check) out of the clone or `$RUNNER_TEMP/scratch`, or
-  landing the bundle with a trusting `cp -a` + `git add -A` → the boundary is only worth what the
-  code drawing it is, so it runs from the installed checkout and `apply` re-derives the authority
-  from the manifest instead of trusting `manifest` already did.
+- Running `stage-upgrade.py` (or any other check) out of the clone, out of `$RUNNER_TEMP/scratch`,
+  or out of `.github/doc-sync/` after `land`'s transfer, or landing the bundle with a trusting
+  `cp -a` + `git add -A` → the boundary is only worth what the code drawing it is, so both jobs
+  run every wiring script from the copy taken before anything wrote, and `apply` re-derives the
+  authority from the manifest instead of trusting `manifest` already did.
 - Staging an upgrade from `apply-upgrade.py --report-written` inside the lane → that is the
   release being landed declaring what it wrote, which is not evidence about that release. Derive
   the set with `stage-upgrade.py manifest`, from trees the lane controls; the flag is for a human

@@ -33,7 +33,7 @@ Two duties:
    names every offending path.
 
 2. Transfer exactly that path set into the credentialed job's checkout:
-       stage-upgrade.py apply --bundle DIR --repo DIR --out FILE
+       stage-upgrade.py apply --bundle DIR --repo DIR --target X.Y.Z --out FILE
    Re-derives the authority from the manifest (never trusting that `manifest`
    already checked it — the two run in different trust domains, with an artifact
    in between), verifies every bundled file against its recorded digest, then
@@ -97,6 +97,8 @@ FILES = "files"
 ARTIFACT = "upgrade-bundle"
 SCHEMA_VERSION = 1
 
+WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
 
 def die(msg):
     """Self-explaining bad-input exit (code 2)."""
@@ -114,14 +116,22 @@ def refuse(errors):
 
 
 def safety_error(path):
-    """Why this path may never name a file in the install — or None."""
+    """Why this path may never name a file in the install — or None.
+
+    A near-twin of `authorize-paths.py`'s function of the same name, and
+    deliberately not shared with it: that one ends by denying `.github/workflows/`
+    and `.github/doc-sync/` outright, which is exactly the set this script exists
+    to admit. Only the path-shape half is common, and a helper that took the deny
+    list as a parameter would make the two lanes' opposite answers look like one
+    rule with a flag. Keep them in step by hand; each is unit-tested on its own.
+    """
     if not isinstance(path, str) or not path.strip():
         return "empty path"
     if path != path.strip():
         return "leading or trailing whitespace"
     if "\\" in path or "\n" in path or "\t" in path or "\0" in path:
         return "backslash or control character in path"
-    if path.startswith("/") or re.match(r"^[A-Za-z]:", path):
+    if path.startswith("/") or WINDOWS_DRIVE_RE.match(path):
         return "absolute path"
     if posixpath.normpath(path) != path:
         return (f"not a normalized repo-relative path "
@@ -151,15 +161,15 @@ def digest(path):
     return h.hexdigest()
 
 
-def walk(root):
-    """{repo-relative path: absolute path} for every regular file under root.
+def walk(root, tops=None):
+    """({repo-relative path: absolute path}, [symlinked paths]) under root.
 
-    Symlinks are reported rather than followed: a bundle entry that is a link is
-    a path the transfer would resolve somewhere this script never checked.
+    `tops` limits the walk to those subdirectories (the wiring roots); None walks
+    root itself. Symlinks are reported rather than followed: a link is a path the
+    transfer would resolve somewhere this script never checked.
     """
     found, links = {}, []
-    for base in WIRING_ROOTS:
-        top = os.path.join(root, base)
+    for top in ([os.path.join(root, t) for t in tops] if tops else [root]):
         if not os.path.isdir(top):
             continue
         for dirpath, dirnames, filenames in os.walk(top):
@@ -195,8 +205,8 @@ def run_manifest(args):
         errors.append(f"{name}: the regeneration wrote outside the wiring roots "
                       f"({', '.join(WIRING_ROOTS)})")
 
-    after, after_links = walk(args.scratch)
-    before, _ = walk(args.repo)
+    after, after_links = walk(args.scratch, WIRING_ROOTS)
+    before, _ = walk(args.repo, WIRING_ROOTS)
     for rel in after_links:
         errors.append(f"{rel}: the regeneration wrote a symlink")
 
@@ -257,7 +267,7 @@ def load_manifest(bundle):
 
 def run_apply(args):
     data = load_manifest(args.bundle)
-    if args.target is not None and data.get("target") != args.target:
+    if data.get("target") != args.target:
         die(f"the bundle regenerates v{data.get('target')!r}, but this job was "
             f"dispatched for v{args.target!r}")
 
@@ -298,7 +308,7 @@ def run_apply(args):
     # transferring the subset that happens to check out.
     named = {p for _, p, _ in plan}
     if os.path.isdir(files_root):
-        carried, links = walk_bundle(files_root)
+        carried, links = walk(files_root)
         for rel in sorted(set(carried) | set(links)):
             if rel not in named:
                 errors.append(f"{rel}: the bundle carries a file the manifest "
@@ -356,18 +366,6 @@ def run_verify(args):
     return 0
 
 
-def walk_bundle(root):
-    """Every path the bundle actually carries, and every symlink among them."""
-    found, links = [], []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
-        for name in sorted(filenames):
-            full = os.path.join(dirpath, name)
-            rel = os.path.relpath(full, root).replace(os.sep, "/")
-            (links if os.path.islink(full) else found).append(rel)
-    return found, links
-
-
 def main():
     ap = argparse.ArgumentParser(
         description="Confine a doc-sync upgrade to the wiring it may write.")
@@ -383,7 +381,8 @@ def main():
     app = sub.add_parser("apply", help="transfer exactly that path set")
     app.add_argument("--bundle", required=True)
     app.add_argument("--repo", required=True)
-    app.add_argument("--target", help="refuse a bundle for a different version")
+    app.add_argument("--target", required=True,
+                     help="refuse a bundle regenerating a different version")
     app.add_argument("--out", required=True,
                      help="NUL-separated staging list for git add")
 

@@ -27,12 +27,17 @@
 #     scratch tree, runs the clone's `apply-upgrade.py` against that copy, and
 #     `stage-upgrade.py manifest` reports exactly which paths changed — refusing
 #     the whole run if any difference lies outside the wiring the upgrade engine
-#     owns. It cannot write to this repository, and it never touches the checkout
-#     the next job trusts.
-#   land        Credentialed, and it executes nothing from the clone: every byte
-#     the release produced reaches it as data inside an artifact. It re-derives
-#     the same path authority from the manifest, transfers exactly that path set,
-#     stages exactly it, and opens the pull request whose merge is the review.
+#     owns. It cannot write to this repository.
+#   land        Credentialed, and it executes nothing the release wrote: every
+#     byte the release produced reaches it as data inside an artifact. It
+#     re-derives the same path authority from the manifest against its own fresh
+#     checkout, transfers exactly that path set, stages exactly it, and opens the
+#     pull request whose merge is the review.
+#
+# Both jobs that run wiring scripts copy them out of the work tree first and run
+# them from there. The regeneration writes the release's own copies of those very
+# scripts, so "run the install's tooling, not the release's" is a claim about
+# *when* the copy was taken, not about which directory it sits in.
 #
 # The lane runs no model at all, so its write scopes never sit behind a model
 # process — the 2026-07-07 deterministic-upgrade decision, still binding.
@@ -104,24 +109,34 @@ jobs:
               --status "${DECISION}" --current "$CURRENT" --latest "$LATEST"
           fi
 
-      # One open notice per release: a weekly check that keeps finding the same
-      # unreviewed release keeps quiet rather than filing a duplicate every week.
-      - name: Decide whether to file the notice
-        id: notice
+      - name: Render the notice
         if: steps.gate.outputs.decision == 'upgrade'
         env:
           CURRENT: ${{ steps.versions.outputs.current }}
           LATEST: ${{ steps.versions.outputs.latest }}
         run: |
           set -euo pipefail
-          gh issue list --state open --limit 200 --json number,title \
-            > "${RUNNER_TEMP}/open-issues.json"
           python3 .github/doc-sync/render-report.py upgrade-notice \
             --current "$CURRENT" --latest "$LATEST" \
             --repo "${GITHUB_REPOSITORY}" --workflow doc-sync-upgrade \
-            --issues "${RUNNER_TEMP}/open-issues.json" \
             --title-out "${RUNNER_TEMP}/notice-title.txt" \
-            --body-out "${RUNNER_TEMP}/notice-body.md" \
+            --body-out "${RUNNER_TEMP}/notice-body.md"
+
+      # One open notice per release: a weekly check that keeps finding the same
+      # unreviewed release keeps quiet rather than filing a duplicate every week.
+      # `--limit 200` is the dedupe's reach — past 200 open issues a standing
+      # notice can fall off the page and a second one is filed, which is a
+      # duplicate issue and never a duplicate upgrade.
+      - name: Decide whether to file it
+        id: notice
+        if: steps.gate.outputs.decision == 'upgrade'
+        run: |
+          set -euo pipefail
+          gh issue list --state open --limit 200 --json number,title \
+            > "${RUNNER_TEMP}/open-issues.json"
+          python3 .github/doc-sync/upgrade-gate.py notice \
+            --issues "${RUNNER_TEMP}/open-issues.json" \
+            --title "${RUNNER_TEMP}/notice-title.txt" \
             --out "$GITHUB_OUTPUT"
 
       - name: File the notice
@@ -186,9 +201,20 @@ jobs:
             exit 1
           fi
 
-      # Into a scratch copy, never the checkout: the next steps read the checkout
-      # to decide what changed, and the tooling that decides it must be the code
-      # this repository already reviewed — not whatever the clone just wrote.
+      # Every program this job runs after this point comes from here. The clone's
+      # code runs as the runner user and can write anywhere the runner can,
+      # `$GITHUB_WORKSPACE` included — so the tooling that decides what it wrote
+      # is taken out of the work tree first, while the checkout is still exactly
+      # what was reviewed.
+      - name: Copy the install's own tooling out of the work tree
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/trusted"
+          mkdir -p "${RUNNER_TEMP}/trusted"
+          cp .github/doc-sync/*.py "${RUNNER_TEMP}/trusted/"
+
+      # Into a scratch copy, never the checkout: the regeneration writes only
+      # where this job can afford it to.
       - name: Copy the wiring roots into a scratch tree
         run: |
           set -euo pipefail
@@ -222,25 +248,33 @@ jobs:
             --repo "${RUNNER_TEMP}/scratch" \
             --target "${TARGET}"
 
-      # Run from the checkout — the tree the regeneration never touched — so the
-      # code drawing the boundary is code a human reviewed. A difference outside
-      # the wiring the upgrade engine owns fails here, with every offending path
-      # named, and no bundle is produced for the credentialed job to land.
+      # Run from the pre-clone copy, so the code drawing the boundary is code a
+      # human reviewed. A difference outside the wiring the upgrade engine owns
+      # fails here, with every offending path named, and no bundle is produced
+      # for the credentialed job to land. `land` re-derives the same authority
+      # from its own fresh checkout, so this refusal is the early one, not the
+      # only one.
       - name: Report exactly what the regeneration wrote
         env:
           TARGET: ${{ steps.target.outputs.target }}
           CURRENT: ${{ steps.target.outputs.current }}
         run: |
+          # No -e: the runner's shell is `bash -e`, and `set -uo pipefail` does
+          # not clear that, so the refusal is captured inline with `||` rather
+          # than read from a bare `$?` the abort would already have skipped.
           set -uo pipefail
           code=0
-          python3 .github/doc-sync/stage-upgrade.py manifest \
+          python3 "${RUNNER_TEMP}/trusted/stage-upgrade.py" manifest \
             --scratch "${RUNNER_TEMP}/scratch" --repo . \
             --target "${TARGET}" --bundle "${RUNNER_TEMP}/upgrade-bundle" || code=$?
-          if [ "${code}" -ne 0 ]; then
-            python3 .github/doc-sync/render-report.py upgrade-summary \
+          # 1 is the authority's own refusal, and the only outcome with something
+          # to say on the run surface; 2 is bad input, which fails on the step log
+          # rather than claiming the release reached outside the wiring.
+          if [ "${code}" -eq 1 ]; then
+            python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-summary \
               --status refused --current "$CURRENT" --latest "${TARGET}"
-            exit "${code}"
           fi
+          exit "${code}"
 
       - name: Upload the regenerated wiring
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -263,6 +297,20 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # Before anything is transferred, and this is the load-bearing step of the
+      # whole job: the bundle legitimately carries the target release's own
+      # `.github/doc-sync/*.py` — `stage-upgrade.py` and `render-report.py`
+      # included — so a later step invoking one out of the work tree would be
+      # running the release's code with this job's push token, which is exactly
+      # what the split exists to prevent. Every program below runs from this
+      # copy, taken while the checkout is still only what was reviewed.
+      - name: Copy the install's own tooling out of the work tree
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/trusted"
+          mkdir -p "${RUNNER_TEMP}/trusted"
+          cp .github/doc-sync/*.py "${RUNNER_TEMP}/trusted/"
+
       # An already-open upgrade PR awaits a human — don't stack a second one.
       - name: Refuse to stack on an open upgrade PR
         id: pending
@@ -275,7 +323,7 @@ jobs:
           echo "open_prs=${OPEN_PRS}" >> "$GITHUB_OUTPUT"
           if [ "${OPEN_PRS}" -gt 0 ]; then
             PR_URL=$(gh pr list --head doc-sync/upgrade --state open --json url --jq '.[0].url')
-            python3 .github/doc-sync/render-report.py upgrade-summary \
+            python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-summary \
               --status pending --current "$CURRENT" --latest "$TARGET" --pr-url "${PR_URL}"
           fi
 
@@ -299,7 +347,7 @@ jobs:
           TARGET: ${{ needs.regenerate.outputs.target }}
         run: |
           set -euo pipefail
-          python3 .github/doc-sync/stage-upgrade.py apply \
+          python3 "${RUNNER_TEMP}/trusted/stage-upgrade.py" apply \
             --bundle "${RUNNER_TEMP}/upgrade-bundle" --repo . \
             --target "${TARGET}" --out "${RUNNER_TEMP}/staged-paths.txt"
 
@@ -313,7 +361,7 @@ jobs:
           { git diff --name-only -z; \
             git ls-files --others --exclude-standard -z; } \
             > "${RUNNER_TEMP}/unstaged.txt"
-          python3 .github/doc-sync/stage-upgrade.py verify \
+          python3 "${RUNNER_TEMP}/trusted/stage-upgrade.py" verify \
             --paths "${RUNNER_TEMP}/staged-paths.txt" \
             --staged "${RUNNER_TEMP}/staged.txt" \
             --unstaged "${RUNNER_TEMP}/unstaged.txt"
@@ -327,7 +375,7 @@ jobs:
           set -euo pipefail
           if git diff --cached --quiet; then
             # Version advanced but the regenerated wiring is byte-identical — nothing to land.
-            python3 .github/doc-sync/render-report.py upgrade-summary \
+            python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-summary \
               --status noop --current "$CURRENT" --latest "$TARGET"
             exit 0
           fi
@@ -340,12 +388,12 @@ jobs:
           # artifact and fail loud with apply instructions, not a cryptic push rejection.
           if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
             git diff --cached > "$RUNNER_TEMP/doc-sync-upgrade.patch"
-            python3 .github/doc-sync/render-report.py upgrade-summary \
+            python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-summary \
               --status blocked-workflows --current "$CURRENT" \
               --latest "$TARGET" --files "${CHANGED}"
             exit 1
           fi
-          python3 .github/doc-sync/render-report.py upgrade-pr-body \
+          python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-pr-body \
             --current "$CURRENT" --latest "$TARGET" \
             --files "${CHANGED}" > "$RUNNER_TEMP/upgrade-pr-body.md"
           git config user.name "doc-sync"
@@ -358,7 +406,7 @@ jobs:
             --body-file "$RUNNER_TEMP/upgrade-pr-body.md" \
             --head doc-sync/upgrade \
             --base "${{ github.ref_name }}")
-          python3 .github/doc-sync/render-report.py upgrade-summary \
+          python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-summary \
             --status opened --current "$CURRENT" --latest "$TARGET" --pr-url "${PR_URL}"
 
       # When the upgrade regenerated workflow files, the step above wrote the diff here

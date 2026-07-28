@@ -5,6 +5,7 @@ Tests the script as a subprocess: real argv, real exit codes, real stdout.
 Run: python3 tests/scripts/upgrade-gate_test.py
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -124,6 +125,59 @@ class Normalize(unittest.TestCase):
                 self.assertEqual(r.returncode, 2, hostile)
                 self.assertFalse(os.path.exists(self.out)
                                  and "target=" in self.written())
+
+
+class Notice(unittest.TestCase):
+    """One open notice per release (aj604/toolshed#127).
+
+    The decision lives here rather than in `render-report.py`, which owns the
+    strings: the gate owns every decision this lane makes. The dedupe key is the
+    exact title the renderer wrote, read from the file it wrote it to.
+    """
+
+    TITLE = "doc-sync: doc-lifecycle 0.8.0 is available"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out = os.path.join(self.tmp.name, "github-output.txt")
+
+    def notice(self, issues, title=TITLE):
+        issues_path = os.path.join(self.tmp.name, "issues.json")
+        with open(issues_path, "w", encoding="utf-8") as f:
+            json.dump(issues, f)
+        title_path = os.path.join(self.tmp.name, "title.txt")
+        with open(title_path, "w", encoding="utf-8") as f:
+            f.write(title + "\n")
+        return run("notice", "--issues", issues_path, "--title", title_path,
+                   "--out", self.out)
+
+    def written(self):
+        with open(self.out, encoding="utf-8") as f:
+            return f.read()
+
+    def test_no_standing_notice_opens_one(self):
+        r = self.notice([])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "open")
+        self.assertEqual(self.written(), "notice=open\n")
+
+    def test_a_standing_notice_for_this_release_suppresses_it(self):
+        r = self.notice([{"number": 4, "title": self.TITLE}])
+        self.assertEqual(r.stdout.strip(), "exists")
+        self.assertEqual(self.written(), "notice=exists\n")
+
+    def test_a_notice_for_another_release_does_not_suppress_it(self):
+        r = self.notice(
+            [{"number": 4, "title": "doc-sync: doc-lifecycle 0.7.9 is available"}])
+        self.assertEqual(r.stdout.strip(), "open")
+
+    def test_a_non_array_issue_payload_is_bad_input(self):
+        self.assertEqual(self.notice({"issues": []}).returncode, 2)
+
+    def test_an_empty_title_is_bad_input(self):
+        # An empty dedupe key would match nothing and re-file every week.
+        self.assertEqual(self.notice([], title="").returncode, 2)
 
 
 if __name__ == "__main__":

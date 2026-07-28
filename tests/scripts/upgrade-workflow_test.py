@@ -234,13 +234,34 @@ class TheCredentialedJobRunsNothingUntrusted(unittest.TestCase):
                     root, line,
                     f"the credentialed job reaches into {root}: {line.strip()}")
 
-    def test_every_program_it_runs_comes_from_the_installed_checkout(self):
-        for line in code_lines(self.jobs["land"]):
-            for call in re.findall(r"python3 (\S+)", line):
-                self.assertTrue(
-                    call.startswith(".github/doc-sync/"),
-                    f"the credentialed job runs {call}, which is not the "
-                    f"install's own reviewed wiring")
+    # The bug this replaced a weaker check for: the bundle legitimately carries
+    # the target release's own `.github/doc-sync/*.py`, so a credentialed step
+    # invoking one out of the work tree *after* the transfer runs the release's
+    # code with the push token — the split defeated two steps later.
+    def test_no_program_it_runs_can_have_been_overwritten_by_the_transfer(self):
+        for job in ("regenerate", "land"):
+            body = code_lines(self.jobs[job])
+            copy = next(i for i, ln in enumerate(body)
+                        if "cp .github/doc-sync/*.py" in ln)
+            for i, line in enumerate(body[copy:], copy):
+                for call in re.findall(r'python3 "?([^\s"]+)', line):
+                    self.assertNotIn(
+                        ".github/doc-sync/", call,
+                        f"job '{job}' runs {call} out of the work tree after "
+                        f"the trusted copy was taken — the regeneration "
+                        f"overwrites that path with the release's own copy, so "
+                        f"run it from ${{RUNNER_TEMP}}/trusted instead")
+
+    def test_both_jobs_copy_their_tooling_out_before_anything_writes(self):
+        for job, writer in (("regenerate", "apply-upgrade.py"),
+                            ("land", "stage-upgrade.py\" apply")):
+            body = code_lines(self.jobs[job])
+            copy = next(i for i, ln in enumerate(body)
+                        if "cp .github/doc-sync/*.py" in ln)
+            write = next(i for i, ln in enumerate(body) if writer in ln)
+            self.assertLess(
+                copy, write,
+                f"job '{job}' takes its trusted copy after {writer} ran")
 
     def test_it_stages_the_manifest_path_set_and_nothing_else(self):
         body = code_lines(self.jobs["land"])
@@ -253,7 +274,7 @@ class TheCredentialedJobRunsNothingUntrusted(unittest.TestCase):
     def test_the_staged_set_is_verified_before_the_commit(self):
         body = code_lines(self.jobs["land"])
         verify = next(i for i, ln in enumerate(body)
-                      if "stage-upgrade.py verify" in ln)
+                      if 'stage-upgrade.py" verify' in ln)
         commit = next(i for i, ln in enumerate(body) if "git commit" in ln)
         self.assertLess(verify, commit,
                         "the staged set must be verified before it is committed")
@@ -264,7 +285,7 @@ class TheCredentialedJobRunsNothingUntrusted(unittest.TestCase):
 
     def test_the_bundle_is_bound_to_the_dispatched_version(self):
         joined = "\n".join(code_lines(self.jobs["land"]))
-        self.assertRegex(joined, r'stage-upgrade\.py apply[\s\S]*--target')
+        self.assertRegex(joined, r'stage-upgrade\.py"? apply[\s\S]*--target')
 
     def test_no_other_job_pushes_or_opens_a_pull_request(self):
         for name in ("detect", "regenerate"):
@@ -297,13 +318,31 @@ class RefusalsReachTheRunSurface(unittest.TestCase):
     def setUp(self):
         self.jobs = jobs()
 
-    def test_the_manifest_refusal_is_captured_not_inherited(self):
-        # The runner's shell is `bash -e`: a bare call would abort the step
-        # before the summary could say why (aj604/toolshed#107).
+    def test_no_dead_exit_code_reads(self):
+        # The runner's shell is `bash -e`, and `set -uo pipefail` does not clear
+        # that: a bare `$?` read only ever runs after the previous command
+        # already succeeded, so it is unreachable dead code. The one shape that
+        # survives is `cmd || var=$?` (aj604/toolshed#107).
+        captured = re.compile(r"\|\|\s*[A-Za-z_][A-Za-z0-9_]*=\$\?")
+        offenders = []
+        for number, line in enumerate(lines(), 1):
+            if line.strip().startswith("#") or "$?" not in line:
+                continue
+            if captured.search(line):
+                continue
+            # Reading a captured variable back is fine; writing one is not.
+            if re.search(r"=\$\?", line):
+                offenders.append(f"{number}: {line.strip()}")
+        self.assertEqual(offenders, [],
+                         "a $? read outside a `|| var=$?` capture is dead code")
+
+    def test_the_manifest_refusal_reaches_the_run_surface(self):
         body = "\n".join(code_lines(self.jobs["regenerate"]))
         self.assertIn("|| code=$?", body)
-        self.assertNotIn("code=$?\n", body.replace("|| code=$?", ""))
         self.assertIn("--status refused", body)
+        # Only the authority's own refusal (1) claims the release reached
+        # outside the wiring; bad input (2) must not be laundered as that.
+        self.assertIn('"${code}" -eq 1', body)
 
     def test_every_terminal_state_renders_a_summary(self):
         joined = "\n".join("\n".join(code_lines(body))
