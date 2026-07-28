@@ -137,6 +137,9 @@ jobs:
             that wrapper. Put that line in literally: evidence.command is one command line, not
             a shell program, and any of ;&|<>()$`\ in it is refused — no chaining, no pipes, no
             redirection, no command substitution, and no pattern that needs a quote or an escape.
+            A "command" citation is {"command": ..., "observed": ...} and nothing else: drop the
+            "line" the shape above pairs with "source", because a line number points into a file
+            and a tool's output is not one.
             Nothing else is reachable: the probe refuses an undeclared tool and
             any invocation that is not a --help/--version read. A claim no declared tool can
             settle is genuinely UNVERIFIABLE here, and the report's evidence boundary says why.
