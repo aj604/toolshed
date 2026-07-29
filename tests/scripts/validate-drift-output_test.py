@@ -452,6 +452,110 @@ class EvidenceRules(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("source", r.stderr)
 
+    def test_empty_command_rejected(self):
+        entry = doc(verdicts=[rec(evidence={
+            "command": "", "observed": "needs-triage exists"})])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("command", r.stderr)
+
+    def test_multiline_command_rejected(self):
+        # A citation is the one line a reader re-runs, not a script.
+        entry = doc(verdicts=[rec(evidence={
+            "command": "gh label list\ngh issue list",
+            "observed": "needs-triage exists"})])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("command", r.stderr)
+
+    def test_float_line_rejected(self):
+        # `3.0 == 3`, so a membership or equality check would wave it through.
+        entry = doc(verdicts=[rec(evidence={
+            "source": "Makefile", "line": 3.0,
+            "observed": "has a test target"})])
+        r = run(json.dumps(payload(entry)))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("line", r.stderr)
+
+
+class SourceSpelling(unittest.TestCase):
+    """`evidence.source` must be a canonical repository-relative path.
+
+    The engine applies `paths.repository_relative_problem` to every source and
+    drops the whole document when it fails, so a spelling it refuses must be
+    refused here too — reaching the same answer a second earlier is the only
+    reason this pre-flight exists.
+    """
+
+    def reject(self, source):
+        entry = doc(verdicts=[rec(evidence={
+            "source": source, "observed": "has a test target"})])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1, f"{source!r} should be refused")
+        self.assertIn("source", r.stderr)
+
+    def test_absolute_source_rejected(self):
+        self.reject("/etc/passwd")
+
+    def test_home_relative_source_rejected(self):
+        self.reject("~/notes.md")
+
+    def test_drive_letter_source_rejected(self):
+        self.reject("C:/repo/Makefile")
+
+    def test_traversing_source_rejected(self):
+        self.reject("../secrets.txt")
+
+    def test_dot_slash_source_rejected(self):
+        self.reject("./Makefile")
+
+    def test_double_slash_source_rejected(self):
+        self.reject("docs//guide.md")
+
+    def test_trailing_slash_source_rejected(self):
+        self.reject("Makefile/")
+
+    def test_whitespace_source_rejected(self):
+        self.reject("my docs/guide.md")
+
+    def test_tab_source_rejected(self):
+        self.reject("docs/gui\tde.md")
+
+    def test_backslash_separator_source_rejected(self):
+        self.reject("docs\\guide.md")
+
+    def test_leading_dash_component_source_rejected(self):
+        # Such a path is read as an option by the tools that would act on it.
+        self.reject("-rf.md")
+
+    def test_leading_dash_nested_component_source_rejected(self):
+        self.reject("docs/-rf.md")
+
+    def test_control_character_source_rejected(self):
+        # U+202E renders a filename as something other than what it is.
+        self.reject("docs/gpn\u202esm.md")
+
+    def test_non_nfc_source_rejected(self):
+        # Decomposed 'e' + combining acute: one file under two identities.
+        self.reject("docs/caf\u0065\u0301.md")
+
+    def test_canonical_nested_source_passes(self):
+        entry = doc(verdicts=[rec(evidence={
+            "source": "docs/guides/taskflow.md",
+            "observed": "has a test target"})])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_source_naming_a_deleted_file_passes(self):
+        # Existence is deliberately not checked, here or in the engine: a
+        # pointer at a file a commit deleted is what a STALE verdict reports.
+        entry = doc(verdicts=[rec(
+            verdict="STALE", fix="Run tests with `make check`.",
+            evidence={"source": "removed/gone.md",
+                      "observed": "the file no longer exists"})])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
 
 class FixRule(unittest.TestCase):
     def test_stale_without_fix_rejected(self):

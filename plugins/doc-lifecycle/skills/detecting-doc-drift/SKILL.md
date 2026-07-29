@@ -68,10 +68,12 @@ directory on `PYTHONPATH` (`plugins/doc-lifecycle/engine/README.md` covers both 
    the audit: pipe it through
    `${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-drift/scripts/validate-drift-output.py`
    (reads the JSON on stdin or as a file arg). It enforces the enum, field-set, `evidence`, and
-   `fix` rules and exits nonzero on any violation. Run it — a shape violation the engine catches
-   is not a loud failure there: it drops that whole document to an unexamined coverage gap
-   (`the verdicts returned for this document did not validate: <code>`) and the run still exits
-   with a report. The validator checks *shape*, not whether a verdict is *right*; that judgment
+   `fix` rules and exits nonzero on any violation. Run it — neither thing the engine does with a
+   shape violation is a loud failure. A violation inside a document's `verdicts` drops that
+   whole document to an unexamined coverage gap (`the verdicts returned for this document did
+   not validate: <code>`), and the run still exits with a report; a violation in the *entry* — a
+   bad `status`, an unexpected field, a duplicate `path`, a document the plan never declared —
+   refuses the whole run instead. The validator checks *shape*, not whether a verdict is *right*; that judgment
    is still yours, and `drift-audit` is the authority on everything the shape check cannot see
    (whether an ordinal names a real unit, whether a multi-line `fix` owns its span).
 6. **Run the audit.** `python3 -m doclifecycle drift-audit --repo . --mode full --verdicts
