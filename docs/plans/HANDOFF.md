@@ -1,10 +1,30 @@
 # Documentation Skills Suite — Handoff
 
-**Last updated:** 2026-07-27
-**HEAD at handoff:** the legacy write lanes removed; the engine is the only writer — see `git log`
+**Last updated:** 2026-07-29
+**HEAD at handoff:** issue #57 review remediation under way — many workers landing tasks
+against `docs/plans/2026-07-28-issue-57-review-remediation.md` concurrently; see `git log`
 **Repo:** `toolshed` (git)
 
-## Latest milestone (2026-07-27): legacy write lanes removed, release gate guarded (#77)
+## Latest milestone (2026-07-29, in progress): issue #57 review remediation
+
+Closing the seven P1 and six Standards findings from the issue #57 release review: three
+approval/applier authority holes, the skill→engine schema migration (both detecting
+skills cut over to the engine document model), a file-bound lifecycle-state contract for
+planning documents, and documentation/dedup cleanups — with the auto-apply lane and a
+scheduled bloat cadence explicitly descoped by the authoritative issue comment. Full task
+list, interfaces, and step-by-step instructions:
+`docs/plans/2026-07-28-issue-57-review-remediation.md` — its own `> Status:` marker and
+14 numbered tasks are the live tracker; this entry does not duplicate per-task status
+because tasks are landing concurrently as this file is written.
+
+**How to resume:** read the plan doc's `> Status:` marker, then walk its numbered tasks
+top to bottom — a task whose described code/test/doc change is not yet in the tree is the
+next one to pick up (`git log --oneline` since the previous milestone's HEAD, below, shows
+what has already landed). After any engine edit, re-vendor before treating a task as done:
+`rsync -a --delete plugins/doc-lifecycle/engine/ .doc-lifecycle/wiring/engine/`, then
+`python3 tests/scripts/install-parity_test.py`.
+
+## Earlier milestone (2026-07-27): legacy write lanes removed, release gate guarded (#77)
 
 The endgame of #57. The legacy fix lanes are gone from the templates and from this repo's own
 install: `doc-sync.yml`, `doc-bloat.yml`, and the scripts that existed only to serve them
@@ -105,7 +125,10 @@ Full writing-skills TDD as a new skill: RED `tests/baselines/bloat-rearch-red/`
 inline mega-sweeps; runners recovered only via validator archaeology), GREEN
 `tests/baselines/bloat-rearch-green/`. Contract is now v2 (`"schema": 2`, POLICY
 verdict, `files` provenance, no payloads — the doc-distiller authors residue
-post-approval). `list-docs.py` retired, absorbed by `plan-chunks.py`.
+post-approval). `list-docs.py` retired, absorbed by `plan-chunks.py`. **Superseded
+2026-07-29:** the bloat contract migrated again, to the engine's verdict envelope
+(`{"schema_version": 1, "verdicts": [...]}`, six verdicts, no POLICY) — see the issue
+#57 review remediation milestone above. `files` is now a **forbidden** key on a verdict.
 **Pending follow-up (post-release):** re-install scheduling-doc-sync on
 career-compass (`claude plugin update doc-lifecycle@toolshed`, re-run the
 scheduling skill to refresh `.github/doc-sync/` + workflows), then a

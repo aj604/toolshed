@@ -75,7 +75,7 @@ A standing, consumer-configured declaration of which finding classes may have ap
 _Avoid_: auto-fix, autonomous mode
 
 **Change approval**:
-A person accepting the actual produced diff — merging the pull request the apply lane opens (a real PR, never a draft), or committing the staged interactive change. The only approval that lands anything.
+A person accepting the actual produced diff — merging the pull request the apply lane opens (a real PR, never a draft), or committing the working-tree diff the applier left for an interactive change (the applier never stages). The only approval that lands anything.
 _Avoid_: merge (as if it approved the model's judgment)
 
 ### Substrate

@@ -43,6 +43,18 @@ line it restates, the quoted overlap, the grep. "Feels redundant" is not admissi
 | `MERGE-DOC` / `RETIRE-DOC` | a doc is a near-duplicate of another — fold the remainder in, or delete it |
 | `DISTILL` | a design doc whose implementation landed — approving it sends the artifact to the distiller, which extracts the durable residue and retires the scaffolding |
 
+For example, a repo with a small caching library and a stale design doc might triage to
+three records like these (trimmed from the skill's own [output contract's worked
+example](../../plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md), which
+carries the full JSON for these plus a fourth, `B4`, a `RETIRE-DOC` scope record):
+
+- **`B1`** `CONDENSE` — `README.md` — seven lines of eviction narrative carry one fact
+  (`CACHE_TTL_S`, `src/cache.py:5`)
+- **`B2`** `EXTRACT-AND-MOVE` → `RUNBOOK.md` — a cold-start gotcha buried in the README,
+  not the runbook its audience actually reads
+- **`B3`** `DISTILL(ready)` — `docs/plans/2025-11-02-cache-layer-design.md` — the
+  implementation landed; `src/cache.py:5` and `:14` match the design
+
 A directory of ephemeral artifacts — ten dated plan/spec files for work that merged — is
 not a seventh verdict. It is one `RETIRE-DOC` naming an **inclusion rule** (a doc set, a
 glob, a kind), which the engine expands from its index into one record per member. You
