@@ -128,13 +128,40 @@ RECORD_REMEDIES = {
 # whose code is a key here must see every listed operation among its own
 # operations, or the plan lands a different, unapproved change (a retirement
 # with no move is a deletion; a move with no retirement is a duplication).
-# MERGE-DOC is the whole vocabulary's only composite remedy today — one move
-# and one retirement, together, are the one merge a reviewer approved — so it
-# is the only entry; a plan may still use any subset of `DISTILL`'s five-op
-# remedy, since which span edits a given residue needs is chosen per record
-# rather than required whole.
+#
+# MERGE-DOC's requirement is unconditional — one move and one retirement,
+# together, are the one merge a reviewer approved. DISTILL's is not, and the
+# record's own `destination` is what decides it: see
+# `DESTINATION_CONDITIONAL_CODES`. Only the creation is required of a
+# distillation, never DISTILL's three span operations, since which span edits
+# a given residue needs is chosen per record rather than required whole.
 REQUIRED_REMEDY_OPERATIONS = {
     MERGE_DOC: (OP_MOVE, OP_RETIRE),
+    DISTILL: (OP_CREATE,),
+}
+
+# Codes whose requirement above applies only to a record that names a
+# destination. A DISTILL record carrying one was approved as "author the
+# residue there, then retire the planning artifact", and a plan carrying only
+# the retirement is the MERGE-DOC shape reached through a different code — the
+# source destroyed, nothing written, and the run reporting success. A
+# destination-less DISTILL proposed no residue at all, and retiring the
+# planning artifact alone is the whole approved remedy; that stays exempt.
+DESTINATION_CONDITIONAL_CODES = (DISTILL,)
+
+# Why each composite remedy is one act, in that code's own terms — the sentence
+# a `plan-remedy-incomplete` refusal ends on. A code with a requirement and no
+# reason here would refuse without saying what the missing leg was for.
+REMEDY_INCOMPLETE_REASON = {
+    MERGE_DOC: (
+        "MERGE-DOC is one composite act — a move and a retirement; either leg "
+        "alone is a different, unapproved change"
+    ),
+    DISTILL: (
+        "this distillation was approved to author its residue at "
+        "{destination} and then retire the planning artifact; a retirement "
+        "with no creation destroys the artifact and writes nothing"
+    ),
 }
 
 # The operations that name a line span in an existing document.
@@ -430,7 +457,9 @@ def _completeness_problems(usable, by_digest, bad):
     name the record and still execute only part of what was approved.
     MERGE-DOC is the case this closes — a retirement with no move destroys
     the source and moves nothing; a move with no retirement leaves the
-    duplicate that was supposed to go away.
+    duplicate that was supposed to go away — and a DISTILL record naming a
+    destination is that same shape: retiring the planning artifact without
+    authoring the residue destroys the source and writes nothing.
     """
     ops_by_record = {}
     for _, operation in usable:
@@ -450,14 +479,17 @@ def _completeness_problems(usable, by_digest, bad):
         required = REQUIRED_REMEDY_OPERATIONS.get(record.code)
         if required is None:
             continue
+        if record.code in DESTINATION_CONDITIONAL_CODES and (
+                record.destination is None):
+            continue
         missing = [op for op in required if op not in ops]
         if missing:
             bad("plan-remedy-incomplete",
                 f"approved record {record.record_id} ({record.code!r} at "
                 f"{record.path!r}) carries {sorted(set(ops))} and is missing "
-                f"{missing} — MERGE-DOC is one composite act — a move and a "
-                f"retirement; either leg alone is a different, unapproved "
-                f"change",
+                f"{missing} — "
+                + REMEDY_INCOMPLETE_REASON[record.code].format(
+                    destination=record.destination),
                 "operations")
 
 
