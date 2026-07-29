@@ -123,6 +123,22 @@ class MintCommand(ApprovalCommandTestCase):
         self.assertEqual(json.loads(result.stdout)["minter"],
                          {"kind": "policy", "id": "avery@example.com"})
 
+    def test_a_policy_brand_on_a_bloat_record_is_refused(self):
+        # The generic door, from the CLI seam: a policy minter can never
+        # select a bloat record, whichever way the caller reaches minting.
+        unit = self.units(self.repo, DOC_A)[0]
+        cut = self.finding("R-1", "CUT", DOC_A, [unit])
+        report_path = self.json_file("cut-report.json", self.report([cut]).to_dict())
+
+        result = run_command(
+            "mint-approval", "--report", report_path, "--repo", self.repo,
+            "--minter", "nightly-policy", "--minter-kind", "policy",
+            "--audit-config-digest", CONFIG_DIGEST, "--record", cut["digest"],
+        )
+
+        self.assertEqual(result.returncode, EXIT_INVALID)
+        self.assertIn("approval-policy-ineligible-record", result.stderr)
+
     def test_an_unknown_minter_kind_is_a_usage_error(self):
         result = self.mint_command(
             "--minter-kind", "the-workflow", records=[self.one["digest"]]
