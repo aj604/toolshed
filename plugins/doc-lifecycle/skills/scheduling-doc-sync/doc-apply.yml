@@ -315,11 +315,15 @@ jobs:
       #   1. `DISTILL` is not applyable end to end today. A DISTILL record can never carry a
       #      `destination` (`bloat.DESTINATION_VERDICTS` is EXTRACT-AND-MOVE and MERGE-DOC
       #      only), and the applier resolves `create-document`'s allowed targets from exactly
-      #      that field — so the residue half of the remedy refuses as
-      #      `plan-target-not-record-target` while the `retire-document` half would execute.
-      #      Deferring to the distiller before that is fixed buys a lossy retirement: the
-      #      planning artifact deleted and its residue stranded. Refusing the plan is the safe
-      #      outcome, and is what happens today.
+      #      that field — so a plan that *attempts* the residue half refuses that operation as
+      #      `plan-target-not-record-target`. That is not a backstop against a lossy retirement,
+      #      though: DISTILL is deliberately absent from `REQUIRED_REMEDY_OPERATIONS` (the
+      #      composite-remedy completeness check MERGE-DOC uses), so a plan that authors only
+      #      `retire-document` for a DISTILL record — never attempting the residue at all — is
+      #      not caught by that check or any other, and applies cleanly: the planning artifact
+      #      deleted, its residue never authored. Deferring to the distiller (or authoring this
+      #      prompt carelessly) before that gap is closed can produce exactly that outcome; it
+      #      is not refused today.
       #   2. The edit-plan contract has a single owner — `fixing-docs/SKILL.md` (aj604/toolshed#70,
       #      landed) carries the worked edit-plan example and is authoritative for its shape,
       #      including the trailing-newline rule below. This prompt is reconciled against that
@@ -350,7 +354,10 @@ jobs:
              "operations": [ ... ], "postimages": {<path>: <sha256 of the file after the plan,
              or null for a retired document>}, "digest": <see below>}
 
-            One operation per approved remedy, each an object with:
+            One or more operations per approved remedy — most remedies are a single operation,
+            but MERGE-DOC is composite and requires both a "move-with-provenance" and a
+            "retire-document" operation for the same record together; either leg alone is
+            refused as plan-remedy-incomplete. Each operation is an object with:
               "op": "replace" | "delete" | "insert" | "create-document" | "retire-document" |
                     "move-with-provenance"
               "record": the approved record's digest (from the approval set's "records")
@@ -372,16 +379,24 @@ jobs:
             may only
             be one of the operations that record's finding code authorizes; a positioned
             operation must lie within the approved units' own passage; every preimage must be
-            the exact current text; and every written path must be in the approval set's
-            "scope"."paths". Read each target with Read before you write its preimage.
+            the exact current text; every written path must be in the approval set's
+            "scope"."paths"; every approved record must be executed by at least one operation
+            (a record naming none is refused as plan-record-not-executed); and MERGE-DOC's move
+            and retirement must both appear, together, for the same record (plan-remedy-incomplete
+            otherwise). Read each target with Read before you write its preimage.
 
             Finally stamp the plan's digest with the engine's own canonical digest, which is
             what binds the plan to review:
             python3 -c 'import json,sys; sys.path.insert(0,".doc-lifecycle/wiring/engine"); from doclifecycle.digest import sha256_canonical as d; p=json.load(open("edit-plan.json")); p.pop("digest",None); p["digest"]=d(p); json.dump(p,open("edit-plan.json","w"))'
 
-            If you cannot author a correct operation for an approved record, write the plan
-            without it and say so — a partial plan is refused honestly; a guessed preimage is
-            not.
+            If you cannot author a correct operation for every approved record, do not write a
+            partial plan: the applier refuses wholesale a plan that names an approved record but
+            executes none of it (plan-record-not-executed), and the edit-plan shape above carries
+            no field to explain why one is missing — there is no channel to "say so" in the
+            output. Stop instead — do not write edit-plan.json at all, so the run fails loudly at
+            the upload step rather than proposing a plan you know is incomplete. A guessed
+            preimage and a silently dropped record are both wrong in the same way; refuse to
+            write either.
           claude_args: --allowedTools "Read,Grep,Glob,Write,Bash(python3 *)"
 
       - name: Upload the edit plan
