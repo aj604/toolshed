@@ -1050,17 +1050,29 @@ def _anchor_references(text):
 
     Backticked tokens only. An anchor writes its references in code spans, and
     reading unbackticked prose as filenames would open paths a sentence merely
-    mentioned.
+    mentioned. Whether what is left looks like a repository-relative path is
+    `paths.py`'s question, not this one's — the same principle drift.py:701-705
+    states for `evidence.source` — so a token with any spelling problem is
+    skipped here as prose the extractor never claimed, not refused: this is a
+    candidate extractor, and a token it drops silently is simply not a
+    reference.
     """
     references = []
     for token in BACKTICKED.findall(text):
         token = LINE_SUFFIX.sub("", token.strip())
-        if not token or " " in token:
+        if not token:
             continue
-        if token.startswith(("/", "~")) or ".." in token.split("/"):
-            continue                       # not a repository-relative path
         if "/" not in token and not FILE_EXTENSION.search(token):
             continue                       # a commit id or a bare word
+        candidate = token
+        if token.endswith("/") and not FILE_EXTENSION.search(token[:-1]):
+            # A directory anchor spells itself with one trailing '/' (#93):
+            # that slash means "everything beneath", the directory's own
+            # canonical form here, not a non-canonical file spelling — so the
+            # canonical check reads the directory name underneath it.
+            candidate = token[:-1]
+        if repository_relative_problem(candidate) is not None:
+            continue                       # not a repository-relative path
         if token not in references:
             references.append(token)
     return references

@@ -42,7 +42,8 @@ from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
-from .digest import sha256_canonical
+from .bloat import CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC
+from .digest import load_strict_json, sha256_canonical
 from .finding import finding_digest
 from .inventory import DEFAULT_REGISTRY_PATH, load_registry
 from .paths import DOCUMENTATION, authorize_path, write_target_problem
@@ -81,6 +82,17 @@ ARTIFACT_KIND = "approval-set"
 MINTER_HUMAN = "human"
 MINTER_POLICY = "policy"
 MINTER_KINDS = (MINTER_HUMAN, MINTER_POLICY)
+
+# The bloat verdict codes a policy minter may never select, whichever door it
+# is reached through. `policy.py`'s restricted `NEVER_ELIGIBLE_CODES` is an
+# alias of this tuple — one owner, so a class the eligibility table forgets to
+# name and a selection built by hand around the generic minter are refused by
+# the same rule. Every one of the six is a judgment that a passage or a whole
+# document should stop existing or move; approving that is what a person is
+# for, and no standing policy performs semantic review.
+POLICY_NEVER_ELIGIBLE_CODES = (
+    CUT, CONDENSE, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC, DISTILL,
+)
 
 # The report states a selection can rest on. `clean` has nothing to approve;
 # `stale` describes a repository state that no longer exists, and `invalid`
@@ -405,6 +417,33 @@ def _group_problems(selected, reconciliation):
     return problems
 
 
+def _policy_eligibility_problems(minter, records):
+    """Every selected record a policy minter may never approve.
+
+    A pure function of the artifact's own fields — the minter's kind and each
+    record's code — so unlike the reconciliation and preimage refusals above
+    it needs no report and no repository, and runs identically at mint time
+    and in validation's unconditional structural layer. Only a `policy`
+    minter is restricted: a human approving a bloat record is exactly what
+    bloat review is for.
+    """
+    if minter is None or minter.kind != MINTER_POLICY:
+        return []
+    return [
+        Problem(
+            code="approval-policy-ineligible-record",
+            message=(
+                f"a policy minter may never approve a {record.code} record — "
+                f"bloat judgments are semantic review a standing policy cannot "
+                f"perform; only a human approves value judgments"
+            ),
+            location=f"records[{i}]",
+        )
+        for i, record in enumerate(records)
+        if record.code in POLICY_NEVER_ELIGIBLE_CODES
+    ]
+
+
 def _destination(record):
     """Where a report record's remedy writes what it moves, or None.
 
@@ -565,6 +604,10 @@ def mint_approval_set(report, selected, *, repo_root, minter,
         units=tuple(sorted(set(record.extra["units"]))),
         destination=_destination(record),
     ) for record in chosen)
+
+    problems = _policy_eligibility_problems(minter, records)
+    if problems:
+        return Invalid(tuple(problems))
 
     scope, problems, refused = _scope(records, repo_root, registry.roots)
     # Only records whose targets authorized: a path the applier may not write
@@ -1100,6 +1143,12 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
                 f"nobody approved",
                 "scope.paths")
 
+    if minter is not None and records is not None:
+        # The minter-restriction door, re-run on the artifact: the same rule
+        # `mint_approval_set` applies, so a hand-edited minter field cannot
+        # brand a bloat selection `policy` after the fact.
+        problems.extend(_policy_eligibility_problems(minter, records))
+
     if problems:
         return Invalid(tuple(problems))
 
@@ -1360,52 +1409,18 @@ def _report_reasons(payload, records, skipped, report, approval_lineage):
     return reasons, problems
 
 
-def _reject_constant(name):
-    raise ValueError(
-        f"{name} is not JSON — an approval set must survive a strict parser "
-        f"and its own digest, which are taken over the same encoding"
-    )
-
-
 def load_approval_set(path, *, report=None, repo_root=None,
                       registry_path=DEFAULT_REGISTRY_PATH,
                       audit_config_digest=None, expected_digest=None):
     """Read an approval-set file and validate it. `ApprovalSet` or `Invalid`."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError as exc:
-        return Invalid((Problem(
-            code="approval-unreadable",
-            message=f"cannot read the approval set at {path}: {exc.strerror}",
-            location=path,
-        ),))
-    except UnicodeDecodeError as exc:
-        return Invalid((Problem(
-            code="approval-unreadable",
-            message=(
-                f"the approval set at {path} is not valid UTF-8 ({exc.reason} "
-                f"at byte {exc.start}) — re-encode it; JSON is a text format"
-            ),
-            location=path,
-        ),))
-    try:
-        payload = json.loads(text, parse_constant=_reject_constant)
-    except (json.JSONDecodeError, ValueError) as exc:
-        return Invalid((Problem(
-            code="approval-unparseable",
-            message=f"the approval set is not valid JSON: {exc}",
-            location=path,
-        ),))
-    except RecursionError:
-        return Invalid((Problem(
-            code="approval-unparseable",
-            message=(
-                "the approval set nests too deeply to parse — an approval set "
-                "is a selection of digests, not a document"
-            ),
-            location=path,
-        ),))
+    payload, problem = load_strict_json(
+        path,
+        unreadable_code="approval-unreadable",
+        unparseable_code="approval-unparseable",
+        nesting_code="approval-nesting-too-deep",
+    )
+    if problem is not None:
+        return Invalid((problem,))
     return validate_approval_set(
         payload, report=report, repo_root=repo_root,
         registry_path=registry_path, audit_config_digest=audit_config_digest,

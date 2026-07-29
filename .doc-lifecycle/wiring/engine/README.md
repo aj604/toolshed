@@ -4,7 +4,7 @@ Stdlib-only Python package (`doclifecycle`) behind the plugin's skills and workf
 third-party dependencies. Library functions are the implementation; the commands wrap them and
 add nothing, so an import and a command cannot disagree. The one external program it runs is
 `git`, and only to read: a repository's identity and HEAD, which paths a commit range changed,
-and when a path last changed. Nothing here writes to a repository.
+and when a path last changed. Git is read-only here; the applier — below — is the one component that writes, and it writes the working tree directly, never the index.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
 contract, the lineage-keyed cache, the segmenter, finding identity, the context index, the
@@ -33,7 +33,7 @@ applier — the only component that writes.
 | `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()`, `worktree_changes()`, `head_bytes()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the five result states, the `ok`/`invalid` status strings |
-| `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
+| `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, `load_strict_json()` — the canonical JSON form digests are taken over, and the one strict-JSON reader `load_report()`, `load_edit_plan()`, `load_approval_payload()`, and `load_approval_set()` each call with their own problem codes |
 | `doclifecycle/cli.py`, `__main__.py`, `doc-lifecycle.py` | argv parsing and exit codes only |
 
 `__init__.py` holds the three versions lineage pins: `ARTIFACT_SCHEMA_VERSION` (the shape of

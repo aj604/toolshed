@@ -18,7 +18,6 @@ fix the report.
 an interactive check and a CI check cannot reach different verdicts.
 """
 
-import json
 import math
 import re
 from dataclasses import dataclass
@@ -26,7 +25,7 @@ from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION, PLUGIN_VERSION, RULESET_VERSION
 from . import repository as repository_mod
-from .digest import canonical, sha256_canonical
+from .digest import canonical, load_strict_json, sha256_canonical
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .results import (
     DECLARABLE_STATES,
@@ -1397,13 +1396,6 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     )
 
 
-def _reject_constant(name):
-    raise ValueError(
-        f"{name} is not JSON — a report must survive a strict parser and its "
-        f"own digest, which are taken over the same encoding"
-    )
-
-
 def load_report(path, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH,
                 audit_config_digest=None):
     """Read a report file and validate it. Returns a `Report` or `Invalid`.
@@ -1412,47 +1404,15 @@ def load_report(path, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH,
     so a file checked by hand and the same file checked in CI reach the same
     verdict.
     """
-    try:
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError as exc:
-        return Invalid((Problem(
-            code="report-unreadable",
-            message=f"cannot read the report at {path}: {exc.strerror}",
-            location=path,
-        ),))
-    except UnicodeDecodeError as exc:
-        # A `ValueError`, not an `OSError`: without this the CLI would answer a
-        # malformed file with a traceback instead of a verdict.
-        return Invalid((Problem(
-            code="report-unreadable",
-            message=(
-                f"the report at {path} is not valid UTF-8 ({exc.reason} at byte "
-                f"{exc.start}) — re-encode it; JSON is a text format"
-            ),
-            location=path,
-        ),))
-    try:
-        # JSON has no NaN or Infinity, whatever Python's decoder will accept:
-        # letting one in would make the engine's own output unparseable.
-        payload = json.loads(text, parse_constant=_reject_constant)
-    except (json.JSONDecodeError, ValueError) as exc:
-        return Invalid((Problem(
-            code="report-unparseable",
-            message=f"the report is not valid JSON: {exc}",
-            location=path,
-        ),))
-    except RecursionError:
-        # The decoder recurses, and a `RecursionError` is not a `ValueError`.
-        # A few kilobytes of nested brackets must be a verdict, not a traceback.
-        return Invalid((Problem(
-            code="report-nesting-too-deep",
-            message=(
-                f"the report nests too deeply to parse — a record describes a "
-                f"finding, and this engine reads at most {MAX_NESTING} levels"
-            ),
-            location=path,
-        ),))
+    payload, problem = load_strict_json(
+        path,
+        unreadable_code="report-unreadable",
+        unparseable_code="report-unparseable",
+        nesting_code="report-nesting-too-deep",
+        max_nesting=MAX_NESTING,
+    )
+    if problem is not None:
+        return Invalid((problem,))
     return validate_report(
         payload,
         repo_root=repo_root,

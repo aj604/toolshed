@@ -44,8 +44,6 @@ one external program in the whole flow is git — run read-only, behind
 module.
 """
 
-import hashlib
-import json
 import os
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -56,7 +54,7 @@ from .bloat import (
     CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC,
     residue_destination_ineligibility,
 )
-from .digest import sha256_canonical
+from .digest import load_strict_json, sha256_bytes, sha256_canonical
 from .drift import CODE_ANCHOR_STALE, VERDICT_STALE, VERDICT_UNVERIFIABLE
 from .inventory import DEFAULT_REGISTRY_PATH, load_registry
 from .paths import DECLARABLE_TARGET_CLASSES, write_target_problem
@@ -124,6 +122,19 @@ RECORD_REMEDIES = {
     # Distillation authors the durable residue and then retires the planning
     # artifact — the one remedy that legitimately brings a document into being.
     DISTILL: (OP_CREATE, OP_REPLACE, OP_INSERT, OP_DELETE, OP_RETIRE),
+}
+
+# Composite remedies whose legs are not substitutes for one another: a record
+# whose code is a key here must see every listed operation among its own
+# operations, or the plan lands a different, unapproved change (a retirement
+# with no move is a deletion; a move with no retirement is a duplication).
+# MERGE-DOC is the whole vocabulary's only composite remedy today — one move
+# and one retirement, together, are the one merge a reviewer approved — so it
+# is the only entry; a plan may still use any subset of `DISTILL`'s five-op
+# remedy, since which span edits a given residue needs is chosen per record
+# rather than required whole.
+REQUIRED_REMEDY_OPERATIONS = {
+    MERGE_DOC: (OP_MOVE, OP_RETIRE),
 }
 
 # The operations that name a line span in an existing document.
@@ -206,45 +217,17 @@ class ApplyResult:
         return payload
 
 
-def _sha256(data):
-    return hashlib.sha256(data).hexdigest()
-
-
-def _reject_constant(name):
-    raise ValueError(
-        f"{name} is not JSON — an edit plan must survive a strict parser and "
-        f"its own digest, which are taken over the same encoding"
-    )
-
-
-def _read_payload(path, prefix, noun):
+def _read_payload(path, prefix):
     """A JSON payload off disk, or `Invalid` with `<prefix>-*` codes."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError as exc:
-        return Invalid((Problem(
-            code=f"{prefix}-unreadable",
-            message=f"cannot read the {noun} at {path}: {exc.strerror}",
-            location=path,
-        ),))
-    except UnicodeDecodeError as exc:
-        return Invalid((Problem(
-            code=f"{prefix}-unreadable",
-            message=(
-                f"the {noun} at {path} is not valid UTF-8 ({exc.reason} at "
-                f"byte {exc.start}) — re-encode it; JSON is a text format"
-            ),
-            location=path,
-        ),))
-    try:
-        return json.loads(text, parse_constant=_reject_constant)
-    except (json.JSONDecodeError, ValueError, RecursionError) as exc:
-        return Invalid((Problem(
-            code=f"{prefix}-unparseable",
-            message=f"the {noun} is not valid JSON: {exc}",
-            location=path,
-        ),))
+    payload, problem = load_strict_json(
+        path,
+        unreadable_code=f"{prefix}-unreadable",
+        unparseable_code=f"{prefix}-unparseable",
+        nesting_code=f"{prefix}-nesting-too-deep",
+    )
+    if problem is not None:
+        return Invalid((problem,))
+    return payload
 
 
 def load_edit_plan(path):
@@ -253,7 +236,7 @@ def load_edit_plan(path):
     Reading only: validation needs the approval set the plan binds to, so it
     happens inside `apply_edit_plan`, where that authority is in hand.
     """
-    return _read_payload(path, "plan", "edit plan")
+    return _read_payload(path, "plan")
 
 
 def load_approval_payload(path):
@@ -263,7 +246,7 @@ def load_approval_payload(path):
     against the report and the repository, so a caller cannot accidentally
     hand it a weaker (structural-only) verdict.
     """
-    return _read_payload(path, "approval", "approval set")
+    return _read_payload(path, "approval")
 
 
 def _span_position(operation):
@@ -429,6 +412,53 @@ def _binding_problems(i, operation, by_digest, bad):
             f"an operation writes only its own record's targets, so a "
             f"borrowed path is a document nobody approved this edit for",
             where)
+
+
+def _completeness_problems(usable, by_digest, bad):
+    """Every approved record, against what the plan actually executes.
+
+    `_binding_problems` checks each operation against its record; this is the
+    reverse direction — each record against its operations — and it is not
+    redundant with that check, since an operation can bind cleanly to every
+    record it names while a *different* approved record names none at all.
+    An approval set is the whole mandate: a plan that silently drops one of
+    its records would let the run report work it did not do, exactly as if
+    it had invented an operation the approval never saw.
+
+    A record whose code is in `REQUIRED_REMEDY_OPERATIONS` is a composite
+    remedy, and the same silent drop can happen one leg at a time: a plan can
+    name the record and still execute only part of what was approved.
+    MERGE-DOC is the case this closes — a retirement with no move destroys
+    the source and moves nothing; a move with no retirement leaves the
+    duplicate that was supposed to go away.
+    """
+    ops_by_record = {}
+    for _, operation in usable:
+        ops_by_record.setdefault(operation["record"], []).append(operation["op"])
+
+    for digest, record in by_digest.items():
+        ops = ops_by_record.get(digest)
+        if not ops:
+            bad("plan-record-not-executed",
+                f"approved record {record.record_id} ({record.code!r} at "
+                f"{record.path!r}) names no usable operation in this plan — "
+                f"an approval set is the whole mandate: a plan that silently "
+                f"drops an approved record would let the run report work it "
+                f"did not do",
+                "operations")
+            continue
+        required = REQUIRED_REMEDY_OPERATIONS.get(record.code)
+        if required is None:
+            continue
+        missing = [op for op in required if op not in ops]
+        if missing:
+            bad("plan-remedy-incomplete",
+                f"approved record {record.record_id} ({record.code!r} at "
+                f"{record.path!r}) carries {sorted(set(ops))} and is missing "
+                f"{missing} — MERGE-DOC is one composite act — a move and a "
+                f"retirement; either leg alone is a different, unapproved "
+                f"change",
+                "operations")
 
 
 def _approved_hull(repo_root, record):
@@ -633,7 +663,32 @@ def _conflict_problems(operations, bad):
 
     for path, entries in by_path.items():
         whole = [i for i, op in entries if op["op"] in WHOLE_DOCUMENT_OPS]
-        if whole and (len(entries) > 1 or path in destinations):
+        # One pairing is not a race even though it is two operations claiming
+        # the same path with one of them whole: the *same approved record's*
+        # own move and retirement, together — the exact shape
+        # `REQUIRED_REMEDY_OPERATIONS` requires a MERGE-DOC plan to carry
+        # (`RECORD_REMEDIES` makes MERGE-DOC the only code whose remedy is
+        # both `OP_MOVE` and `OP_RETIRE`, so the same-record test below is
+        # equivalent to, and cheaper than, re-deriving the record's code
+        # here). `_compute_postimages` always lets the retirement decide this
+        # path's final content, unconditionally and regardless of list order
+        # — the move's only other effect is its append to a *different* path
+        # (its destination) — so those two operations never race. Two
+        # operations from *different* records that happen to be a move and a
+        # retirement of the same path are not this shape: nothing approved
+        # them as one act, so they keep the ordinary whole-document refusal
+        # below (`plan-record-not-executed`/`plan-remedy-incomplete` in
+        # `_completeness_problems` police the record-level MERGE-DOC
+        # contract; this check polices only whether the two operations that
+        # do claim the path may coexist at all).
+        paired_move_and_retire = (
+            len(entries) == 2 and path not in destinations
+            and {op["op"] for _, op in entries} == {OP_MOVE, OP_RETIRE}
+            and len({op["record"] for _, op in entries}) == 1
+        )
+        if whole and not paired_move_and_retire and (
+            len(entries) > 1 or path in destinations
+        ):
             bad("plan-conflicting-operations",
                 f"operations {sorted(i for i, _ in entries)} all touch {path}, "
                 f"which operations[{whole[0]}] claims whole — a created or "
@@ -803,6 +858,8 @@ def _validate_plan(payload, approval):
     for i, operation in usable:
         _binding_problems(i, operation, by_digest, bad)
 
+    _completeness_problems(usable, by_digest, bad)
+
     if len(usable) == len(operations):
         _conflict_problems(operations, bad)
         _postimage_problems(payload, operations, bad)
@@ -879,7 +936,7 @@ def _already_applied(repo_root, operations, postimages):
             continue
         if data is None or data.decode("utf-8", "replace") != expected:
             return False
-        if _sha256(data) != digest:
+        if sha256_bytes(data) != digest:
             return False
     return True
 
@@ -1298,7 +1355,7 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
         text = new_texts[path]
         if digest is None:
             continue
-        if _sha256(text.encode("utf-8")) != digest:
+        if sha256_bytes(text.encode("utf-8")) != digest:
             problems.append(Problem(
                 code="apply-postimage-mismatch",
                 message=(
@@ -1318,6 +1375,19 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
     changed, problem = _confinement_problem(
         repo_root, approval.scope, "apply-unconfined-change"
     )
+    if problem is None:
+        # The scope check above is path-granular against the whole approval,
+        # not this plan's operations — a record with a destination puts both
+        # ends in scope (`derived_scope_paths`), but not every remedy for one
+        # writes both: a DISTILL record's `create-document` writes only the
+        # destination, leaving its source in scope but unwritten by this
+        # plan. A concurrent change landing there is inside the approval's
+        # scope and so would pass the check above, then ride into the diff
+        # this run certifies as its own. Same exact-path comparison the
+        # already-applied branch above makes.
+        problem = _unaccounted_problem(
+            sorted(set(changed) - _written_paths(operations))
+        )
     if problem is not None:
         # An unaccounted change surfaced after the write — roll this run's own
         # writes back to the snapshotted bytes and refuse; whatever else moved

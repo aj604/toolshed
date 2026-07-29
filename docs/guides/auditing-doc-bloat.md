@@ -1,6 +1,6 @@
 # Auditing and fixing bloat with `detecting-doc-bloat` and `fixing-docs`
 
-> As of 2026-07-29 (doc-lifecycle 0.43.0, engine verdict contract; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/engine/doclifecycle/bloat.py`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`)
+> As of 2026-07-29 (doc-lifecycle 0.44.0, engine verdict contract; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/engine/doclifecycle/bloat.py`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`)
 
 **You should already have:** the plugin installed and [the principles](principles.md)
 read — especially §3, because this loop *is* the propose → approve → apply contract.

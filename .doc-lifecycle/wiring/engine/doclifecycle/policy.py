@@ -61,7 +61,6 @@ from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from . import approval as approval_mod
-from .bloat import CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC
 from .drift import CODE_ANCHOR_STALE, VERDICT_STALE
 from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import path_references
@@ -111,9 +110,12 @@ CLASS_CODES = {
 # contradiction two lines apart. Every one is a bloat verdict, and every bloat
 # verdict is a judgment that a passage or a whole document should stop existing
 # or move — approving that is what a person is for.
-NEVER_ELIGIBLE_CODES = (
-    CUT, CONDENSE, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC, DISTILL,
-)
+#
+# An alias, not a second declaration: `approval.py` owns the tuple, because it
+# is also the artifact-side check that re-runs this restriction on a
+# hand-edited minter field, where this module's eligibility table never runs
+# at all. One owner, so the two doors cannot drift apart.
+NEVER_ELIGIBLE_CODES = approval_mod.POLICY_NEVER_ELIGIBLE_CODES
 
 # What a consumer gets by configuring a policy without narrowing it: the
 # spec's defaults, which are every class that exists.
