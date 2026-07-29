@@ -1,16 +1,16 @@
 # Verdict lenses — living and narrative docs
 
 Reference for `detecting-doc-bloat` chunk executors whose chunk carries
-`living` or `narrative` hints. Record shapes: `output-contract.md`.
+`living` or `narrative` hints. Verdict shapes: `output-contract.md`.
 
 ## The three passage questions (living claim-style docs)
 
 Walk every passage of every doc in scope — paragraph by paragraph, not a skim
 for highlights — and ask **three questions of each passage, in order**,
-emitting a record for every yes. **Do not stop at a doc's first finding: bloat
-clusters** — a multi-section living doc commonly yields several records. A
-zero for a verdict class means you asked its question of every passage and got
-no yes, not that you never asked.
+emitting a verdict for every yes. **Do not stop at a doc's first finding:
+bloat clusters** — a multi-section living doc commonly yields several
+verdicts. A zero for a verdict class means you asked its question of every
+passage and got no yes, not that you never asked.
 
 - **Does it restate what the code shows on its face?** → `CUT`: a signature, a
   name, a fact self-evident from the adjacent code or example, adding no
@@ -33,24 +33,24 @@ no yes, not that you never asked.
   plainly narrow-scope (one file, one task) AND a natural on-demand target
   already exists; it moves out leaving at most a when-to-read line. A
   broad-scope gotcha most sessions need stays put however short, and a
-  borderline call yields **no record** — placement churn on the always-loaded
+  borderline call yields **no verdict** — placement churn on the always-loaded
   file costs more than the line it would relocate. **Value is not placement** —
   a high-value line can still be misplaced; do not "keep" it where it is, and
-  do not delete it. `proposal`: `{"target": <right doc>, "text": <the line>}`.
+  do not delete it. `destination`: the right doc; `proposal`: the line to land.
 
-**Evidence format for all three passage verdicts:** the "Evidence:" hints above
-name *what proof to cite* — but every passage record's `evidence` must first
-**open with the passage's full extent**, `file:start-end` (`file:start` if one
-line), starting on the same line as `location`, and *then* the proof. That
-leading span is normative — it is the exact text `fixing-docs` deletes or
-replaces — and the validator rejects any passage evidence that omits it
-(`output-contract.md`).
+**What a passage verdict names:** the **unit digests** of the passage, from
+`python3 -m doclifecycle segment --repo . --path <path>`, copied verbatim into
+`units`. That group is normative — it is the exact text `fixing-docs` deletes
+or replaces — so a verdict covering three sentences names three digests, and
+one covering a table row names that row's. The "Evidence:" hints above name
+what proof to cite *on top of* that: the code line, the quoted overlap, the
+grep.
 
 And a *doc* against its neighbors is bloat when it is a **near-duplicate of
-another doc** → `MERGE-DOC` (fold the unique remainder into the survivor,
-`proposal: {"target": <survivor>}`) or `RETIRE-DOC` (the doc carries nothing
-the other lacks — delete it). Evidence: quote or cite the overlapping passage
-in *both* docs.
+another doc** → `MERGE-DOC` (fold the unique remainder into the survivor —
+`destination`, which the engine derives from the index for content that occurs
+elsewhere) or `RETIRE-DOC` (the doc carries nothing the other lacks — delete
+it). Evidence: quote or cite the overlapping passage in *both* docs.
 
 ## The three-lens re-pass (before emitting)
 
@@ -108,4 +108,4 @@ yardstick for where a claim belongs.
 - Stopping a doc's sweep at its first finding, or emitting without the
   three-lens re-pass → bloat clusters; run the re-pass on every living doc.
 - Emitting only findings that resemble the contract's worked example → it
-  shows record *shape*, not an inventory of what to look for.
+  shows verdict *shape*, not an inventory of what to look for.

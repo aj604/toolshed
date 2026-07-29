@@ -1,226 +1,266 @@
 #!/usr/bin/env python3
-"""Validate detecting-doc-bloat output — final reports, chunk seams, assembly.
+"""Validate detecting-doc-bloat verdicts — envelope, chunk seams, assembly.
 
-The contract (v2) lives in ../output-contract.md. This script enforces the
-mechanical rules an agent self-checks unreliably: enum values, per-verdict
-proposal/location/status/files rules, unique ids, mandatory evidence (for
-passage verdicts, evidence must open with the passage span 'file:start-end'
-anchored at location), and summary counts. It does NOT judge whether a
-verdict is *correct*. Three duties:
+The contract is the engine's (`doclifecycle.bloat`), written up for authors in
+../output-contract.md. This script enforces only what a *shape* check can see:
+the verdict enum, the field set (including the fields a model may never
+supply), per-verdict field requirements, the DISTILL status enum, and
+scope-verdict exclusivity. It does not judge whether a verdict is *correct*,
+and it cannot: every check that needs the corpus — that a path is a document,
+that a unit occurs in it, that a destination is the index's owner, that a
+DISTILL status equals the planning document's own file-bound marker, that a
+scope enumerates to a non-empty member list — belongs to
+`python3 -m doclifecycle bloat-audit`, which is the authority. Running this
+first is how a worker catches a malformed verdict where it was produced,
+instead of at the audit.
 
-1. Final report (default):
+Three duties:
+
+1. Final verdicts artifact (default):
        validate-bloat-output.py [FILE]          # FILE, or stdin if omitted
-   Input must be the wrapped v2 object
-       {"schema": 2, "records": [...], "summary": {...seven counts...}}
-   (summary optional; recomputed and printed on success). A v1-shaped input
-   — a bare records array, or a wrapped object without "schema": 2 — fails
-   with one legible error: regenerate with the current skill.
+   Input must be the envelope `bloat-audit --verdicts` reads:
+       {"schema_version": 1, "verdicts": [...]}
+   `schema_version` is optional and must be 1 when present; no other key is
+   allowed, because the engine refuses one. A bare array — the legacy
+   contract's report shape — fails with one legible error.
 
 2. Chunk seam:
        validate-bloat-output.py --chunk FILE [--manifest FILE]
-   Validates one chunk result {"chunk": "<id>", "records": [...]} where it
-   is produced. With --manifest (plan-chunks.py output), also cross-checks
-   the slice: a sweep chunk's records may only name docs the chunk lists
-   (and never POLICY); a policy chunk's result is exactly one POLICY record
-   whose doc is the chunk's dir and whose files equal the chunk's file list.
+   Validates one chunk result {"chunk": "<id>", "verdicts": [...]} where it is
+   produced. With --manifest (plan-chunks.py output), also cross-checks the
+   slice: a single-document verdict may only name a document the chunk lists.
+   A bulk `scope` verdict is deliberately not slice-bound — its subject is the
+   whole corpus, and the engine enumerates its members from the index.
 
 3. Assembly:
        validate-bloat-output.py --assemble DIR --manifest FILE --out FILE
-                                [--allow-partial]
+                                [--allow-partial] [--unswept-out FILE]
    Reads DIR/<id>.json for every chunk in the manifest, seam-validates each,
-   renumbers ids B1..Bn in manifest order, and writes the final wrapped v2
-   report to --out. A missing or invalid chunk fails the assembly naming the
-   chunk; --allow-partial (what CI passes, so one dead chunk cannot hold the
-   report hostage) instead skips MISSING chunks with a stderr note and
-   records them in the report's "unswept" list ({chunk, docs} entries —
-   the loud gap the PR banner renders; the next run's resume sweeps them) —
-   an invalid chunk still fails.
+   renumbers ids B1..Bn in manifest order (unique ids are the engine's rule,
+   and approval binds a record's digest, never this label), and writes the
+   envelope to --out. A missing or invalid chunk fails the assembly naming the
+   chunk; --allow-partial instead skips MISSING chunks loudly — each is named
+   on stderr with its documents, and --unswept-out writes the same gap list as
+   JSON ({chunk, docs} entries) for a caller to render. The gap stays out of
+   the envelope itself: bloat-audit refuses an envelope carrying any key but
+   `schema_version` and `verdicts`. An invalid chunk always fails.
 
 Exit status: 0 valid; 1 contract violation; 2 bad input/usage.
-On success prints the authoritative summary (recomputed from the records).
+On success prints a summary recomputed from the verdicts.
 """
 
 import argparse
 import json
 import os
-import re
 import sys
 
-PASSAGE = {"CUT", "CONDENSE", "EXTRACT-AND-MOVE"}
-DOCLEVEL = {"RETIRE-DOC", "MERGE-DOC", "DISTILL", "POLICY"}
-VERDICTS = PASSAGE | DOCLEVEL
-STATUSES = {"pending-implementation", "ready"}
-REQUIRED = ("id", "doc", "location", "verdict", "evidence",
-            "proposal", "status", "files")
-SUMMARY_KEYS = ("cut", "condense", "extract_and_move",
-                "retire_doc", "merge_doc", "distill", "policy")
-LOCATION_RE = re.compile(r"^.+:[1-9]\d*$")
-SPAN_RE = re.compile(r"^(\S+):([1-9]\d*)(?:-([1-9]\d*))?")
+CUT = "CUT"
+CONDENSE = "CONDENSE"
+EXTRACT_AND_MOVE = "EXTRACT-AND-MOVE"
+MERGE_DOC = "MERGE-DOC"
+RETIRE_DOC = "RETIRE-DOC"
+DISTILL = "DISTILL"
 
-V1_ERROR = ('schema v1 report: regenerate with the current skill — the '
-            'contract is now {"schema": 2, "records": [...], "summary": '
-            '{...}} with no DISTILL payloads')
+VERDICTS = (CUT, CONDENSE, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC, DISTILL)
+
+# Mirrors of the engine's own tuples (bloat.py); the framing of each refusal is
+# the engine's too, so a worker reads one explanation, not two.
+VERDICT_FIELDS = ("id", "verdict", "path", "units", "evidence",
+                  "destination", "proposal", "status", "scope", "sample")
+FORBIDDEN_VERDICT_FIELDS = ("files", "members", "occurrences", "contention")
+SCOPE_SELECTORS = ("set", "glob", "kind")
+SCOPE_VERDICTS = (RETIRE_DOC,)
+DESTINATION_VERDICTS = (EXTRACT_AND_MOVE, MERGE_DOC)
+RESIDUE_VERDICTS = (DISTILL,)
+PROPOSAL_VERDICTS = (CONDENSE, EXTRACT_AND_MOVE)
+DISTILL_STATUSES = ("pending-implementation", "ready")
+
+# The legacy record's own fields. Naming them is worth a line each: a report
+# regenerated by an old skill copy fails on its first field rather than on ten.
+LEGACY_FIELDS = {
+    "doc": "the engine's verdict names its document in 'path'",
+    "location": "the engine's verdict names its content in 'units' (unit "
+                "digests from `doclifecycle segment`), not a file:line",
+    "payload": "distillation content is the doc-distiller's post-approval job",
+}
+
+SCHEMA_VERSION = 1
+SUMMARY_KEYS = ("cut", "condense", "extract_and_move",
+                "merge_doc", "retire_doc", "distill")
+SUMMARY_OF = {CUT: "cut", CONDENSE: "condense",
+              EXTRACT_AND_MOVE: "extract_and_move", MERGE_DOC: "merge_doc",
+              RETIRE_DOC: "retire_doc", DISTILL: "distill"}
 
 
 def nonempty_str(v):
     return isinstance(v, str) and v.strip() != ""
 
 
-def real_int(v):
-    return isinstance(v, int) and not isinstance(v, bool)
+def path_list(v):
+    return isinstance(v, list) and v and all(nonempty_str(p) for p in v)
 
 
-def check_proposal(where, verdict, proposal, errs):
-    if verdict == "CONDENSE":
-        if not nonempty_str(proposal):
-            errs.append(f"{where}: CONDENSE requires proposal = replacement text")
-    elif verdict == "EXTRACT-AND-MOVE":
-        ok = (isinstance(proposal, dict) and set(proposal) == {"target", "text"}
-              and nonempty_str(proposal.get("target"))
-              and nonempty_str(proposal.get("text")))
-        if not ok:
-            errs.append(f"{where}: EXTRACT-AND-MOVE proposal must be "
-                        f"{{'target': doc, 'text': text}}, both non-empty")
-    elif verdict == "MERGE-DOC":
-        ok = (isinstance(proposal, dict) and set(proposal) == {"target"}
-              and nonempty_str(proposal.get("target")))
-        if not ok:
-            errs.append(f"{where}: MERGE-DOC proposal must be {{'target': doc}}")
-    elif verdict == "POLICY":
-        if not nonempty_str(proposal):
-            errs.append(f"{where}: POLICY requires proposal = the policy text")
-    else:  # CUT / RETIRE-DOC / DISTILL
-        if proposal is not None:
-            errs.append(f"{where}: proposal must be null for {verdict}")
+# --------------------------------------------------------------------------
+# One verdict
+# --------------------------------------------------------------------------
+
+def check_fields(where, verdict, errs):
+    for name in sorted(set(verdict) - set(VERDICT_FIELDS)):
+        if name in FORBIDDEN_VERDICT_FIELDS:
+            errs.append(f"{where}: {name!r} is not a field a verdict may carry "
+                        f"— a bulk finding's members are enumerated from the "
+                        f"index, never asserted by the model, so a list of "
+                        f"files supplied here could authorize a mutation "
+                        f"nobody enumerated")
+        elif name in LEGACY_FIELDS:
+            errs.append(f"{where}: {name!r} is a legacy record field — "
+                        f"{LEGACY_FIELDS[name]}; regenerate with the current "
+                        f"skill")
+        else:
+            errs.append(f"{where}: {name!r} is not a verdict field; expected "
+                        f"{list(VERDICT_FIELDS)}")
 
 
-def check_files(where, verdict, files, errs):
-    if verdict == "POLICY":
-        ok = (isinstance(files, list) and len(files) > 0
-              and all(nonempty_str(f) for f in files))
-        if not ok:
-            errs.append(f"{where}: POLICY requires files = a non-empty list of "
-                        f"every covered path — a bulk record that cannot name "
-                        f"its files is unfalsifiable")
-    elif files is not None:
-        errs.append(f"{where}: files must be null unless verdict is POLICY")
-
-
-def check_evidence_span(where, verdict, location, evidence, errs):
-    """Passage-verdict evidence must open with the passage's extent —
-    'file:start-end' ('file:start' if one line) — anchored at location."""
-    m = SPAN_RE.match(evidence.strip())
-    if not m:
-        errs.append(f"{where}: {verdict} evidence must open with the passage "
-                    f"span 'file:start-end' ('file:start' if one line)")
+def check_bulk(where, verdict, code, errs):
+    """A judgment whose subject is a scope, not a document."""
+    if code not in SCOPE_VERDICTS:
+        errs.append(f"{where}: {code} cannot be a bulk judgment — only "
+                    f"{list(SCOPE_VERDICTS)} applies uniformly to every member "
+                    f"of a scope; anything else needs a per-document judgment "
+                    f"nobody made")
         return
-    file, start, end = m.group(1), int(m.group(2)), m.group(3)
-    if f"{file}:{start}" != location.strip():
-        errs.append(f"{where}: evidence span opens {file}:{start} but the "
-                    f"passage's anchor (location) is {location!r} — the span "
-                    f"must start at location")
-    if end is not None and int(end) < start:
-        errs.append(f"{where}: evidence span end {end} precedes start {start}")
+    for name in ("path", "units", "destination", "proposal", "status"):
+        if verdict.get(name) is not None:
+            errs.append(f"{where}: {name!r} does not apply to a bulk {code} — "
+                        f"its subject is the scope, and its members come from "
+                        f"the enumeration")
+
+    scope = verdict["scope"]
+    if not (isinstance(scope, dict) and len(scope) == 1
+            and set(scope) <= set(SCOPE_SELECTORS)
+            and nonempty_str(next(iter(scope.values())))):
+        errs.append(f"{where}: a bulk scope must be exactly one of "
+                    f"{list(SCOPE_SELECTORS)} naming a non-empty value, not "
+                    f"{scope!r} — a scope nobody can expand into a file list "
+                    f"cannot be reviewed or applied")
+
+    sample = verdict.get("sample")
+    if sample is not None and not path_list(sample):
+        errs.append(f"{where}: sample must be a list of paths — it records "
+                    f"which members were read, and never stands in for the "
+                    f"enumeration")
 
 
-def validate_record(i, r):
-    where = f"record[{i}]"
-    if not isinstance(r, dict):
-        return [f"{where}: not a JSON object"]
-    if nonempty_str(r.get("id")):
-        where += f" ({r['id']})"
+def check_one_document(where, verdict, code, errs):
+    if not nonempty_str(verdict.get("path")):
+        errs.append(f"{where}: needs a path — the document this verdict judges")
+    units = verdict.get("units")
+    if not path_list(units):
+        errs.append(f"{where}: must name at least one assertion unit — the "
+                    f"unit digests `doclifecycle segment --repo . --path "
+                    f"<path>` prints for that document")
+
+    if verdict.get("sample") is not None:
+        errs.append(f"{where}: is a judgment about one document, so a sample "
+                    f"says nothing — sampling prioritizes review of a bulk "
+                    f"scope and never stands in for reading the subject")
+
+    destination = verdict.get("destination")
+    if code in DESTINATION_VERDICTS + RESIDUE_VERDICTS:
+        # Optional: the index derives a move's destination for content it finds
+        # elsewhere, and a retire-only distillation names none.
+        if destination is not None and not nonempty_str(destination):
+            errs.append(f"{where}: {code}'s destination must be a document "
+                        f"path, or absent")
+    elif destination is not None:
+        errs.append(f"{where}: {code} moves nothing, so it names no "
+                    f"destination — only "
+                    f"{list(DESTINATION_VERDICTS + RESIDUE_VERDICTS)} do")
+
+    proposal = verdict.get("proposal")
+    if code in PROPOSAL_VERDICTS:
+        if not nonempty_str(proposal):
+            errs.append(f"{where}: {code} replaces text, so it must carry the "
+                        f"replacement")
+    elif proposal is not None:
+        errs.append(f"{where}: {code} writes no replacement text, so it "
+                    f"carries no proposal")
+
+    status = verdict.get("status")
+    if code == DISTILL:
+        if status not in DISTILL_STATUSES:
+            errs.append(f"{where}: a {DISTILL} verdict's status must be one of "
+                        f"{list(DISTILL_STATUSES)}, not {status!r} — copied "
+                        f"from the planning document's own '> Status:' marker, "
+                        f"which bloat-audit checks it against")
+    elif status is not None:
+        errs.append(f"{where}: only {DISTILL} carries a lifecycle status")
+
+
+def validate_verdict(i, verdict):
+    where = f"verdicts[{i}]"
+    if not isinstance(verdict, dict):
+        return [f"{where}: must be an object"]
+    if nonempty_str(verdict.get("id")):
+        where += f" ({verdict['id']})"
 
     errs = []
-    missing = set()
-    for field in REQUIRED:
-        if field not in r:
-            missing.add(field)
-            errs.append(f"{where}: missing required field '{field}'")
-    for field in r:
-        if field not in REQUIRED:
-            if field == "payload":
-                errs.append(f"{where}: unexpected field 'payload' — contract v2 "
-                            f"removed DISTILL payloads (the doc-distiller "
-                            f"authors them post-approval)")
-            else:
-                errs.append(f"{where}: unexpected field '{field}'")
+    check_fields(where, verdict, errs)
+    if not nonempty_str(verdict.get("id")):
+        errs.append(f"{where}: needs a non-empty id")
 
-    if "id" not in missing and not nonempty_str(r.get("id")):
-        errs.append(f"{where}: id must be a non-empty string")
-    if "doc" not in missing and not nonempty_str(r.get("doc")):
-        errs.append(f"{where}: doc must be a non-empty string")
-    verdict = r.get("verdict")
-    if "verdict" not in missing and verdict not in VERDICTS:
-        errs.append(f"{where}: verdict {verdict!r} not in {sorted(VERDICTS)}")
-    if "evidence" not in missing and not nonempty_str(r.get("evidence")):
-        errs.append(f"{where}: evidence is mandatory for every verdict")
+    code = verdict.get("verdict")
+    if code not in VERDICTS:
+        errs.append(f"{where}: {code!r} is not a bloat verdict — expected one "
+                    f"of {list(VERDICTS)}")
+        return errs
 
-    if verdict in VERDICTS:
-        loc = r.get("location")
-        if verdict in PASSAGE:
-            if not (isinstance(loc, str) and LOCATION_RE.match(loc.strip())):
-                errs.append(f"{where}: {verdict} requires location 'file:line' "
-                            f"(single line, no ranges); got {loc!r}")
-            elif nonempty_str(r.get("evidence")):
-                check_evidence_span(where, verdict, loc, r["evidence"], errs)
-        elif loc is not None:
-            errs.append(f"{where}: location must be null for doc-level {verdict}")
+    if not nonempty_str(verdict.get("evidence")):
+        errs.append(f"{where}: states no evidence — a bloat verdict is a value "
+                    f"judgment, and one that does not say why is not "
+                    f"reviewable")
 
-        if "proposal" not in missing:
-            check_proposal(where, verdict, r.get("proposal"), errs)
-        if "files" not in missing:
-            check_files(where, verdict, r.get("files"), errs)
-
-        if verdict == "DISTILL":
-            if r.get("status") not in STATUSES:
-                errs.append(f"{where}: DISTILL requires status in {sorted(STATUSES)}")
-        elif r.get("status") is not None:
-            errs.append(f"{where}: status must be null unless verdict is DISTILL")
+    if verdict.get("scope") is not None:
+        check_bulk(where, verdict, code, errs)
+    else:
+        check_one_document(where, verdict, code, errs)
     return errs
 
 
-def check_unique_ids(records):
+def check_unique_ids(verdicts):
     errs, seen = [], {}
-    for i, r in enumerate(records):
-        if isinstance(r, dict) and nonempty_str(r.get("id")):
-            rid = r["id"]
-            if rid in seen:
-                errs.append(f"record[{i}]: duplicate id {rid!r} "
-                            f"(first at record[{seen[rid]}])")
+    for i, v in enumerate(verdicts):
+        if isinstance(v, dict) and nonempty_str(v.get("id")):
+            vid = v["id"]
+            if vid in seen:
+                errs.append(f"verdicts[{i}]: id {vid!r} is used by more than "
+                            f"one verdict (first at verdicts[{seen[vid]}]) — "
+                            f"two records a reviewer cannot tell apart cannot "
+                            f"be approved apart")
             else:
-                seen[rid] = i
+                seen[vid] = i
     return errs
 
 
-def validate_records(records):
+def validate_verdicts(verdicts):
     errs = []
-    for i, r in enumerate(records):
-        errs.extend(validate_record(i, r))
-    errs.extend(check_unique_ids(records))
+    for i, v in enumerate(verdicts):
+        errs.extend(validate_verdict(i, v))
+    errs.extend(check_unique_ids(verdicts))
     return errs
 
 
-def count_verdicts(records):
+# --------------------------------------------------------------------------
+# Reporting
+# --------------------------------------------------------------------------
+
+def count_verdicts(verdicts):
     counts = dict.fromkeys(SUMMARY_KEYS, 0)
-    key = {"CUT": "cut", "CONDENSE": "condense",
-           "EXTRACT-AND-MOVE": "extract_and_move", "RETIRE-DOC": "retire_doc",
-           "MERGE-DOC": "merge_doc", "DISTILL": "distill", "POLICY": "policy"}
-    for r in records:
-        v = r.get("verdict") if isinstance(r, dict) else None
-        if v in key:
-            counts[key[v]] += 1
+    for v in verdicts:
+        code = v.get("verdict") if isinstance(v, dict) else None
+        if code in SUMMARY_OF:
+            counts[SUMMARY_OF[code]] += 1
     return counts
-
-
-def summary_errors(summary, counts):
-    if summary is None:
-        return []
-    if (not isinstance(summary, dict)
-            or not all(real_int(summary.get(k)) for k in SUMMARY_KEYS)):
-        return [f"summary {summary} must have integer counts for {list(SUMMARY_KEYS)}"]
-    if summary != counts:
-        return [f"summary {summary} does not match record counts {counts}"]
-    return []
 
 
 def fail(errs):
@@ -230,10 +270,9 @@ def fail(errs):
     return 1
 
 
-def ok(records):
-    counts = count_verdicts(records)
-    print(f"OK: {len(records)} record(s) valid")
-    print(f"summary: {json.dumps(counts)}")
+def ok(verdicts):
+    print(f"OK: {len(verdicts)} verdict(s) valid")
+    print(f"summary: {json.dumps(count_verdicts(verdicts))}")
     return 0
 
 
@@ -242,24 +281,31 @@ def read_json(src):
     return json.loads(raw)
 
 
-def chunk_doc_paths(chunk):
-    """The doc paths a chunk covers: sweep doc list or policy files."""
-    if chunk.get("kind") == "policy":
-        return list(chunk.get("files", []))
-    return [d.get("path") for d in chunk.get("docs", []) if isinstance(d, dict)]
+# --------------------------------------------------------------------------
+# Duty 1: the envelope
+# --------------------------------------------------------------------------
+
+ENVELOPE = ('the verdicts artifact is the envelope bloat-audit reads — '
+            '{"schema_version": 1, "verdicts": [...]}')
 
 
-def unswept_errors(unswept):
-    """Shape-check a report's optional 'unswept' gap list."""
-    if unswept is None:
-        return []
-    if not (isinstance(unswept, list) and all(
-            isinstance(u, dict) and nonempty_str(u.get("chunk"))
-            and isinstance(u.get("docs"), list)
-            and all(isinstance(p, str) for p in u["docs"])
-            for u in unswept)):
-        return ["'unswept' must be a list of {chunk, docs} gap entries"]
-    return []
+def envelope_errors(data):
+    if isinstance(data, list):
+        return [f"{ENVELOPE}, not a bare array — regenerate with the current "
+                f"skill"]
+    if not isinstance(data, dict):
+        return [f"{ENVELOPE}; got {type(data).__name__}"]
+    errs = []
+    for name in sorted(set(data) - {"schema_version", "verdicts"}):
+        errs.append(f"{name!r} is not an envelope key — {ENVELOPE}, and the "
+                    f"engine refuses any other key")
+    version = data.get("schema_version", SCHEMA_VERSION)
+    if version != SCHEMA_VERSION:
+        errs.append(f"schema_version {version!r} is not supported; this "
+                    f"contract is integer version {SCHEMA_VERSION}")
+    if not isinstance(data.get("verdicts"), list):
+        errs.append(f"{ENVELOPE}; 'verdicts' must be an array")
+    return errs
 
 
 def run_final(src):
@@ -268,22 +314,17 @@ def run_final(src):
     except (OSError, json.JSONDecodeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    if isinstance(data, list):
-        return fail([V1_ERROR + " (got a bare records array)"])
-    if not isinstance(data, dict):
-        print("error: input must be a JSON object", file=sys.stderr)
-        return 2
-    if data.get("schema") != 2:
-        return fail([V1_ERROR])
-    if not isinstance(data.get("records"), list):
-        print("error: report must carry a 'records' array", file=sys.stderr)
-        return 2
-    records = data["records"]
-    errs = validate_records(records)
-    errs.extend(summary_errors(data.get("summary"), count_verdicts(records)))
-    errs.extend(unswept_errors(data.get("unswept")))
-    return fail(errs) if errs else ok(records)
+    errs = envelope_errors(data)
+    if errs:
+        return fail(errs)
+    verdicts = data["verdicts"]
+    errs = validate_verdicts(verdicts)
+    return fail(errs) if errs else ok(verdicts)
 
+
+# --------------------------------------------------------------------------
+# Duty 2: the chunk seam
+# --------------------------------------------------------------------------
 
 def load_manifest(path):
     with open(path, encoding="utf-8") as f:
@@ -295,40 +336,31 @@ def load_manifest(path):
     return chunks
 
 
+def chunk_doc_paths(chunk):
+    return [d.get("path") for d in chunk.get("docs", []) if isinstance(d, dict)]
+
+
 def chunk_shape_errors(data):
-    if not (isinstance(data, dict) and set(data) == {"chunk", "records"}
+    if not (isinstance(data, dict) and set(data) == {"chunk", "verdicts"}
             and nonempty_str(data.get("chunk"))
-            and isinstance(data.get("records"), list)):
-        return ['chunk result must be exactly {"chunk": "<id>", "records": [...]}']
+            and isinstance(data.get("verdicts"), list)):
+        return ['chunk result must be exactly {"chunk": "<id>", '
+                '"verdicts": [...]}']
     return []
 
 
 def slice_errors(data, chunk):
-    """Cross-check a chunk result against its manifest slice."""
+    """A single-document verdict names a document the chunk was given."""
+    allowed = set(chunk_doc_paths(chunk))
     errs = []
-    records = [r for r in data["records"] if isinstance(r, dict)]
-    if chunk.get("kind") == "policy":
-        if len(records) != 1 or records[0].get("verdict") != "POLICY":
-            return [f"policy chunk {chunk['id']}: result must be exactly one "
-                    f"POLICY record covering {chunk.get('dir')!r} — never a "
-                    f"file-by-file walk"]
-        r = records[0]
-        if r.get("doc") != chunk.get("dir"):
-            errs.append(f"policy chunk {chunk['id']}: record doc must be the "
-                        f"covered dir {chunk.get('dir')!r}, got {r.get('doc')!r}")
-        files = r.get("files")
-        if isinstance(files, list) and sorted(files) != sorted(chunk.get("files", [])):
-            errs.append(f"policy chunk {chunk['id']}: files must enumerate "
-                        f"exactly the chunk's covered paths (provenance)")
-    else:
-        allowed = {d.get("path") for d in chunk.get("docs", [])
-                   if isinstance(d, dict)}
-        for i, r in enumerate(records):
-            if r.get("verdict") == "POLICY":
-                errs.append(f"record[{i}]: sweep chunks never emit POLICY")
-            if r.get("doc") not in allowed:
-                errs.append(f"record[{i}]: doc {r.get('doc')!r} is outside this "
-                            f"chunk's slice")
+    for i, v in enumerate(data["verdicts"]):
+        if not isinstance(v, dict) or v.get("scope") is not None:
+            continue
+        path = v.get("path")
+        if nonempty_str(path) and path not in allowed:
+            errs.append(f"verdicts[{i}]: {path} is outside this chunk's slice "
+                        f"— a worker judges the documents it was given, and "
+                        f"the index answers everything else")
     return errs
 
 
@@ -336,7 +368,7 @@ def validate_chunk_result(data, chunk):
     errs = chunk_shape_errors(data)
     if errs:
         return errs
-    errs = validate_records(data["records"])
+    errs = validate_verdicts(data["verdicts"])
     if chunk is not None:
         if data["chunk"] != chunk["id"]:
             errs.append(f"result names chunk {data['chunk']!r} but was matched "
@@ -363,24 +395,29 @@ def run_chunk(path, manifest_path):
             if chunk is None:
                 return fail([f"chunk {data['chunk']!r} is not in the manifest"])
     errs = validate_chunk_result(data, chunk)
-    return fail(errs) if errs else ok(data["records"])
+    return fail(errs) if errs else ok(data["verdicts"])
 
 
-def run_assemble(dir_, manifest_path, out, allow_partial):
+# --------------------------------------------------------------------------
+# Duty 3: assembly
+# --------------------------------------------------------------------------
+
+def run_assemble(dir_, manifest_path, out, allow_partial, unswept_out):
     try:
         chunks = load_manifest(manifest_path)
     except (OSError, ValueError, json.JSONDecodeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    errs, records, unswept = [], [], []
+    errs, verdicts, unswept = [], [], []
     for chunk in chunks:
         path = os.path.join(dir_, chunk["id"] + ".json")
         if not os.path.exists(path):
             if allow_partial:
-                print(f"note: --allow-partial: skipping chunk {chunk['id']} "
-                      f"(no result file)", file=sys.stderr)
-                unswept.append({"chunk": chunk["id"],
-                                "docs": chunk_doc_paths(chunk)})
+                docs = chunk_doc_paths(chunk)
+                print(f"note: --allow-partial: chunk {chunk['id']} has no "
+                      f"result file — UNSWEPT, and these documents were not "
+                      f"audited this run: {', '.join(docs)}", file=sys.stderr)
+                unswept.append({"chunk": chunk["id"], "docs": docs})
                 continue
             errs.append(f"chunk {chunk['id']}: no result file at {path} — "
                         f"partial assembly refused")
@@ -395,34 +432,44 @@ def run_assemble(dir_, manifest_path, out, allow_partial):
         if chunk_errs:
             errs.extend(f"chunk {chunk['id']}: {e}" for e in chunk_errs)
             continue
-        records.extend(data["records"])
+        verdicts.extend(data["verdicts"])
     if errs:
         return fail(errs)
-    for n, r in enumerate(records, 1):
-        r["id"] = f"B{n}"
-    report = {"schema": 2, "records": records, "summary": count_verdicts(records)}
-    if unswept:
-        report["unswept"] = unswept
+
+    for n, v in enumerate(verdicts, 1):
+        v["id"] = f"B{n}"
     with open(out, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
+        json.dump({"schema_version": SCHEMA_VERSION, "verdicts": verdicts},
+                  f, indent=2)
         f.write("\n")
-    return ok(records)
+    if unswept_out:
+        with open(unswept_out, "w", encoding="utf-8") as f:
+            json.dump(unswept, f, indent=2)
+            f.write("\n")
+    if unswept:
+        print(f"note: {len(unswept)} chunk(s) unswept — the next plan's "
+              f"content-addressed resume sweeps exactly them", file=sys.stderr)
+    return ok(verdicts)
 
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Validate detecting-doc-bloat output (final / seam / assembly).")
+        description="Validate detecting-doc-bloat verdicts "
+                    "(envelope / seam / assembly).")
     ap.add_argument("file", nargs="?",
-                    help="final wrapped v2 report (default: stdin)")
+                    help="final verdicts envelope (default: stdin)")
     ap.add_argument("--chunk", help="validate one chunk result file at the seam")
     ap.add_argument("--manifest",
                     help="plan-chunks.py manifest for slice cross-checks")
     ap.add_argument("--assemble", metavar="DIR",
                     help="assemble every manifest chunk's DIR/<id>.json into --out")
-    ap.add_argument("--out", help="where --assemble writes the final report")
+    ap.add_argument("--out", help="where --assemble writes the verdicts envelope")
     ap.add_argument("--allow-partial", action="store_true",
-                    help="--assemble only: skip missing chunks loudly, recording "
-                         "them in the report's 'unswept' list (CI passes this)")
+                    help="--assemble only: skip missing chunks loudly, naming "
+                         "each and its documents on stderr")
+    ap.add_argument("--unswept-out", metavar="FILE",
+                    help="--assemble only: write the skipped chunks as a JSON "
+                         "[{chunk, docs}] gap list (empty when none)")
     args = ap.parse_args()
 
     if args.chunk and args.assemble:
@@ -433,15 +480,19 @@ def main():
             print("usage: --assemble requires --manifest and --out", file=sys.stderr)
             return 2
         return run_assemble(args.assemble, args.manifest, args.out,
-                            args.allow_partial)
+                            args.allow_partial, args.unswept_out)
     if args.chunk:
         if args.file:
-            print("usage: --chunk takes no positional report", file=sys.stderr)
+            print("usage: --chunk takes no positional artifact", file=sys.stderr)
+            return 2
+        if args.allow_partial or args.unswept_out:
+            print("usage: --allow-partial/--unswept-out apply only to "
+                  "--assemble", file=sys.stderr)
             return 2
         return run_chunk(args.chunk, args.manifest)
-    if args.allow_partial or args.manifest or args.out:
-        print("usage: --manifest/--out/--allow-partial apply only to "
-              "--chunk/--assemble", file=sys.stderr)
+    if args.allow_partial or args.manifest or args.out or args.unswept_out:
+        print("usage: --manifest/--out/--allow-partial/--unswept-out apply "
+              "only to --chunk/--assemble", file=sys.stderr)
         return 2
     return run_final(args.file)
 

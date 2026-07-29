@@ -1,181 +1,139 @@
-# Output contract v2 — field rules + worked example
+# Output contract — verdict fields + worked example
 
 Reference for `detecting-doc-bloat`. This file is the contract's one home: the
-field table, a worked example, and the chunk-result seam shape. Validate every
-artifact with `scripts/validate-bloat-output.py` before any handoff.
+field table, a worked example, and the chunk-result seam shape. The artifact
+you emit is the **verdicts envelope** `python3 -m doclifecycle bloat-audit`
+reads; the engine turns it into the report. Shape-check every artifact with
+`scripts/validate-bloat-output.py` before any handoff — and remember what that
+check cannot see: `bloat-audit` is the authority on every fact about the
+corpus (see *What the engine decides* below).
 
-## Record fields
+## Verdict fields
 
-Each record uses exactly these eight fields (no extras — `payload` no longer
-exists; the doc-distiller authors distillation content post-approval):
-`id`, `doc`, `location`, `verdict`, `evidence`, `proposal`, `status`, `files`.
-Approval is **by `id`** — the human returns a subset of IDs and
-`fixing-docs` applies exactly those.
+A verdict carries only these ten keys, all optional except as ruled below:
+`id`, `verdict`, `path`, `units`, `evidence`, `destination`, `proposal`,
+`status`, `scope`, `sample`.
 
 | Field | Rule |
 |---|---|
-| `id` | non-empty string, unique within the report (e.g. `"B1"`) — approval is by ID |
-| `doc` | path of the judged doc; for `POLICY`, the covered directory. Non-empty string |
-| `location` | passage verdicts (`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`): `file:line`, single line, no ranges — the **first line of the passage** (its anchor; the full extent opens `evidence`). Doc-level verdicts (`RETIRE-DOC`/`MERGE-DOC`/`DISTILL`/`POLICY`): must be `null` |
-| `verdict` | one of `CUT` / `CONDENSE` / `EXTRACT-AND-MOVE` / `RETIRE-DOC` / `MERGE-DOC` / `DISTILL` / `POLICY` — literal enum, no invented values |
-| `evidence` | mandatory non-empty string for **every** verdict. Passage verdicts: must **open with the passage's full extent** — `file:start-end` (`file:start` if one line), where `file:start` equals `location` — then the proof. The span is normative: it is what `fixing-docs` deletes or replaces. `DISTILL`: the landed-code proof (or the grep-returns-nothing proof) plus at most brief classification framing — never the doc's substance (no claims, insights, or decision content) |
-| `proposal` | `CONDENSE`: non-empty string, the complete replacement line. `EXTRACT-AND-MOVE`: `{"target": <doc>, "text": <text to land>}`, both non-empty. `MERGE-DOC`: `{"target": <survivor doc>}`. `POLICY`: non-empty string, the policy text. All others (`CUT`/`RETIRE-DOC`/`DISTILL`): `null` |
-| `status` | `DISTILL` only: `"pending-implementation"` or `"ready"`. All other verdicts: `null` |
-| `files` | `POLICY` only: non-empty array enumerating **every covered path** (provenance — a bulk record that cannot name its files is unfalsifiable; in a chunked run this is the manifest chunk's file list, verbatim). All other verdicts: `null` |
+| `id` | non-empty string, unique across the envelope (e.g. `"B1"`). A label the report may renumber — approval binds a record's **digest** |
+| `verdict` | one of `CUT` / `CONDENSE` / `EXTRACT-AND-MOVE` / `MERGE-DOC` / `RETIRE-DOC` / `DISTILL` — literal enum, no invented values |
+| `path` | the document judged; required unless the verdict carries `scope` |
+| `units` | non-empty array of **unit digests** — the `digest` values `python3 -m doclifecycle segment --repo . --path <path>` prints for that document, copied verbatim. This is what the verdict is *about*, and what the applier's span is bounded by. Required unless the verdict carries `scope` |
+| `evidence` | mandatory non-empty string for **every** verdict — why this content does not earn its tokens. `DISTILL`: the landed-code proof (or the grep-returns-nothing proof) plus at most brief classification framing — never the doc's substance |
+| `destination` | where content goes. `EXTRACT-AND-MOVE` / `MERGE-DOC`: the target document — **optional**, because for content that occurs elsewhere the engine derives the destination from the index and refuses a disagreeing one. `DISTILL`: optional, and a path **nobody has written yet** (the residue's home); absent means a retire-only distillation. Any other verdict: absent |
+| `proposal` | `CONDENSE` / `EXTRACT-AND-MOVE`: non-empty string, the complete replacement or the text to land (writing-docs bar; placed byte-verbatim). Any other verdict: absent |
+| `status` | `DISTILL` only: `"pending-implementation"` or `"ready"`, **copied from the planning document's own `> Status:` marker** — the engine checks the two match (`bloat-status-not-file-bound`) |
+| `scope` | a bulk judgment's subject: exactly one of `{"set": <doc set>}`, `{"glob": <pattern>}`, `{"kind": <living\|narrative\|planning>}`. `RETIRE-DOC` only |
+| `sample` | `scope` verdicts only: the in-scope paths you actually read. Review prioritization, recorded as such — it never stands in for the enumeration |
+
+**Fields a verdict may never carry:** `files`, `members`, `occurrences`,
+`contention`. A bulk finding's members are enumerated from the index, never
+asserted by the model — asserted membership is exactly what an enumeration
+replaces, and a file list supplied here could authorize a mutation nobody
+enumerated.
+
+## What the engine decides, and you do not
+
+Supply judgment — is this worth keeping, and what should replace it. Every
+fact comes from the whole-repository context index, and disagreeing with it is
+refused, not preferred:
+
+- **Membership of a scope.** `{"set": "ephemeral"}` expands to one finding per
+  member (`B4.0`, `B4.1`, …), each with its own digest to approve.
+- **A move's destination** for content that occurs elsewhere: the index's
+  owner. Naming a different one is `bloat-destination-contradicts-index`.
+- **Whether a unit is in the document** you claimed it against, and whether
+  the path is a document at all.
+- **A `DISTILL` status**, against the file's own marker.
+- **Whether a chunk verdict stayed in its slice** — for single-document
+  verdicts only; a `scope` judgment is corpus-wide by construction.
 
 ## Worked example
 
-Seven records covering the shapes that trip agents up. **This is an example of
-record shape, not an inventory of findings** — these records are from an
-invented repo (a small caching library plus an ephemeral-artifact swarm); your
-audit sweeps for all seven verdicts.
-
-```json
-[
-  {
-    "id": "B1",
-    "doc": "README.md",
-    "location": "README.md:22",
-    "verdict": "CONDENSE",
-    "evidence": "README.md:22-28 — seven lines of narrative carry one fact: entries expire after a TTL and are evicted LRU past a cap",
-    "proposal": "Cache entries expire after `CACHE_TTL_S` (300s); beyond `MAX_ENTRIES` (1024) the least-recently-used entry is evicted (`src/cache.py:5-6`).",
-    "status": null,
-    "files": null
-  },
-  {
-    "id": "B2",
-    "doc": "INSTALL.md",
-    "location": null,
-    "verdict": "MERGE-DOC",
-    "evidence": "INSTALL.md:1-11 duplicates README.md:5-15 near-verbatim (same `pip install -e .` block, same 'requires Redis 7+ for the shared backend tests' line); no standalone reason for two install docs",
-    "proposal": { "target": "README.md" },
-    "status": null,
-    "files": null
-  },
-  {
-    "id": "B3",
-    "doc": "docs/plans/2025-11-02-cache-layer-design.md",
-    "location": null,
-    "verdict": "DISTILL",
-    "evidence": "implementation landed: src/cache.py:5 `CACHE_TTL_S = 300`, cache.py:6 `MAX_ENTRIES = 1024`, cache.py:14 `get_or_fill` match the design; Problem/Sketch sections are superseded scaffolding",
-    "proposal": null,
-    "status": "ready",
-    "files": null
-  },
-  {
-    "id": "B4",
-    "doc": "docs/plans/2026-03-15-sharding-design.md",
-    "location": null,
-    "verdict": "DISTILL",
-    "evidence": "no implementation: `grep -rn 'shard' src/` returns nothing; the `shard_key`/`ShardMap` symbols the design describes exist nowhere in the repo — design describes unbuilt code",
-    "proposal": null,
-    "status": "pending-implementation",
-    "files": null
-  },
-  {
-    "id": "B5",
-    "doc": "docs/superpowers",
-    "location": null,
-    "verdict": "POLICY",
-    "evidence": "2 dated plan/spec artifacts, both for work already merged (git log confirms); one class of ephemeral process artifact, not 2 findings",
-    "proposal": "Ephemeral process artifacts; retire after the work merges.",
-    "status": null,
-    "files": [
-      "docs/superpowers/plans/2026-06-01-batching-plan.md",
-      "docs/superpowers/specs/2026-06-01-batching-spec.md"
-    ]
-  },
-  {
-    "id": "B6",
-    "doc": "README.md",
-    "location": "README.md:34",
-    "verdict": "CUT",
-    "evidence": "README.md:34 — the sentence 'get_or_fill(key, fill) returns the cached value or computes it via fill' restates the signature and docstring shown verbatim in the fenced example directly below (README.md:36-39); it adds nothing the code doesn't",
-    "proposal": null,
-    "status": null,
-    "files": null
-  },
-  {
-    "id": "B7",
-    "doc": "README.md",
-    "location": "README.md:52",
-    "verdict": "EXTRACT-AND-MOVE",
-    "evidence": "README.md:52-55 — a four-line operator caveat ('note that swarm workers silently exit if `.cache-state.json` is missing; run `make migrate` first') sits in the user-facing README; it is an on-demand operational gotcha for operators, and a runbook already exists to hold it",
-    "proposal": {
-      "target": "docs/runbook.md",
-      "text": "Swarm workers exit silently when `.cache-state.json` is absent — run `make migrate` before `make dev` (`src/worker.py:9`)."
-    },
-    "status": null,
-    "files": null
-  }
-]
-```
-
-B6 (`CUT`) and B7 (`EXTRACT-AND-MOVE`) are the two passage shapes the earlier
-records omit. Both open `evidence` with the passage span, starting on
-`location`'s line — `file:start-end`, collapsed to `file:start` for a
-single-line passage like B6. B6's `proposal` is `null`, B7's is the
-`{"target", "text"}` object. Note B7's `target` (`docs/runbook.md`) is a
-**different doc than the one judged** — a passage verdict's target may point at
-any doc, in or out of the executor's chunk slice. Only the `doc` field is
-slice-bound; a target never is.
-
-B3 (`ready`) carries **no payload of any kind** — its `evidence` is the
-landed-code proof, full stop. The residue (claims, insights, decision entry) is
-the `doc-distiller`'s post-approval job; the rationale lives once in
-`references/planning-artifacts.md`, not here. B4 (`pending-implementation`)
-exists to *say* the design is pending — never propose deleting it. B5's `files`
-must name every covered path; in a chunked run it is the dispatched chunk's list
-verbatim.
-
-## The emitted artifact: a schema-2 wrapped report
+Four verdicts covering the shapes that trip agents up. **This is an example of
+verdict shape, not an inventory of findings** — these come from an invented
+repo (a small caching library plus an ephemeral-artifact swarm); your audit
+sweeps for all six verdicts.
 
 ```json
 {
-  "schema": 2,
-  "records": [ /* the records above */ ],
-  "summary": {
-    "cut": 1,
-    "condense": 1,
-    "extract_and_move": 1,
-    "retire_doc": 0,
-    "merge_doc": 1,
-    "distill": 2,
-    "policy": 1
-  }
+  "schema_version": 1,
+  "verdicts": [
+    {
+      "id": "B1",
+      "verdict": "CONDENSE",
+      "path": "README.md",
+      "units": ["3a046defbf36f4949d1f2e36240836a3b263d164a96b7a04955b15fc70cedf0d"],
+      "evidence": "one checkable fact spread over a narrative line; src/cache.py:5-6 names both constants",
+      "proposal": "Entries expire after `CACHE_TTL_S` (300s); past `MAX_ENTRIES` (1024) the least-recently-used entry is evicted."
+    },
+    {
+      "id": "B2",
+      "verdict": "EXTRACT-AND-MOVE",
+      "path": "README.md",
+      "units": ["bf98a9f5ed71d4703bc8e31805b7a7f5d5ddd823d9cebae582bcfe0a30d9feae"],
+      "evidence": "an operator gotcha ('workers silently exit') in a user-facing README; RUNBOOK.md is the doc its audience reads on demand",
+      "destination": "RUNBOOK.md",
+      "proposal": "Swarm workers exit silently when `.cache-state.json` is absent — run `make migrate` before `make dev` (`src/worker.py:9`)."
+    },
+    {
+      "id": "B3",
+      "verdict": "DISTILL",
+      "path": "docs/plans/2025-11-02-cache-layer-design.md",
+      "units": ["87abd4c8ec4a2bfeca8ef02bbaebb9c46e0738e58fb8e4b5082979402000fdc8"],
+      "evidence": "implementation landed: src/cache.py:5 `CACHE_TTL_S = 300`, :14 `get_or_fill` match the design; the file's own marker reads ready",
+      "status": "ready"
+    },
+    {
+      "id": "B4",
+      "verdict": "RETIRE-DOC",
+      "scope": { "set": "ephemeral" },
+      "evidence": "every member is a dated plan/spec artifact for work already merged (git log confirms) — one class of ephemeral process artifact, not N findings",
+      "sample": ["docs/superpowers/plans/2026-06-01-batching-plan.md"]
+    }
+  ]
 }
 ```
 
-`"schema": 2` is mandatory — the validator rejects a bare array or an
-unversioned wrapper with a single "regenerate with the current skill" error.
-A zero in the summary means the sweep for that verdict class ran and found
-nothing — not that the class was skipped. On success the validator prints the
-authoritative summary recomputed from the records.
+`B1` and `B2` are the passage shapes: both name the unit digests they cover,
+and `B2` carries both a `destination` (where the text lands) and a `proposal`
+(the text). `B2`'s destination is a **different document than the one judged**,
+and may sit outside a chunk's slice — only `path` is slice-bound.
+
+`B3` carries **no residue of any kind** — its `evidence` is the landed-code
+proof, full stop. The claims, insights, and decision entry are the
+`doc-distiller`'s post-approval job; the rationale lives once in
+`references/planning-artifacts.md`. Its `status` is transcribed from the file,
+never decided by the grep.
+
+`B4` is bulk retirement — the replacement for the retired `POLICY` verdict. It
+names an **inclusion rule**, not files: the engine expands `{"set":
+"ephemeral"}` into one `RETIRE-DOC` finding per member, so a reviewer can
+re-derive the list and approve (or refuse) member by member. `sample` records
+which members were actually read, and authorizes nothing.
 
 ## Chunk results (the seam artifact)
 
-A chunk executor (interactive dispatch or the headless workflow matrix) never
-emits the wrapped report. It emits exactly:
+A chunk executor never emits the envelope. It emits exactly:
 
 ```json
-{"chunk": "<dispatched chunk id>", "records": [ /* v2 records */ ]}
+{"chunk": "<dispatched chunk id>", "verdicts": [ /* verdicts as above */ ]}
 ```
 
 Rules the seam validator enforces (`--chunk <file> --manifest <manifest>`):
 
-- A **sweep** chunk's records may only name docs in that chunk's slice, and a
-  sweep chunk never emits `POLICY`. This binds the `doc` field only — an
-  `EXTRACT-AND-MOVE`/`MERGE-DOC` `proposal` target may point at any doc, in or
-  out of slice (its destination is often outside the audited slice by design).
-- A **policy** chunk's result is exactly one `POLICY` record: `doc` = the
-  chunk's `dir`, `files` = the chunk's file list verbatim. Never a
-  file-by-file walk.
-- Empty `records` is valid — a clean chunk says so.
+- A single-document verdict's `path` must be a document the chunk lists. This
+  binds `path` only — a `destination` may point anywhere, in or out of slice.
+- A `scope` verdict is **not** slice-bound: its subject is the corpus, and the
+  index enumerates its members.
+- Empty `verdicts` is valid — a clean chunk says so.
 
-Assembly (`--assemble <dir> --manifest <manifest> --out bloat-report.json`)
-seam-validates every chunk, renumbers ids `B1..Bn`, and writes the wrapped
-schema-2 report. Missing chunks fail the assembly by name, unless
-`--allow-partial` (what CI passes): then they are skipped **loudly** — each
-lands in the report's optional `unswept` list (`[{"chunk": id, "docs":
-[paths]}]`, rendered as a PR-body banner), and the next run's
+Assembly (`--assemble <dir> --manifest <manifest> --out bloat-verdicts.json`)
+seam-validates every chunk, renumbers ids `B1..Bn`, and writes the envelope.
+Missing chunks fail the assembly by name, unless `--allow-partial`: then each
+is skipped **loudly** — named on stderr with its documents, and written to
+`--unswept-out` as a `[{"chunk", "docs"}]` gap list — and the next plan's
 content-addressed resume sweeps exactly them. An invalid chunk always fails.
+The gap list stays *outside* the envelope: `bloat-audit` refuses an envelope
+carrying any key but `schema_version` and `verdicts`.

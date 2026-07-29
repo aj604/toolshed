@@ -6,25 +6,22 @@ Absorbs list-docs.py: enumerates the in-scope docs (git ls-files under
 globs, whitelist wins), then groups them into bounded chunks a single
 detection invocation can hold.
 
-Policy-scope directories (config "policy_scope") become one 'policy' chunk
-each — a single POLICY record covers them; they are never walked
-file-by-file. Every other doc gets a deterministic doc-kind hint (narrative
-if it opens with '> As of' — the file's first line, or the first non-blank
-line under a leading title; planning if a 'plans' or 'specs'
-path segment contains it; else living — a hint the model may override only
-with stated evidence), is grouped by (directory, hint), packed under the
-caps (chunking.max_docs, default 8; chunking.max_lines, default 1200), and
-consecutive underfull chunks with the same hint are coalesced while the
-caps hold. A single doc larger than max_lines gets its own chunk.
+Every doc gets a deterministic doc-kind hint (narrative if it opens with
+'> As of' — the file's first line, or the first non-blank line under a
+leading title; planning if a 'plans' or 'specs' path segment contains it;
+else living — a hint the model may override only with stated evidence), is
+grouped by (directory, hint), packed under the caps (chunking.max_docs,
+default 8; chunking.max_lines, default 1200), and consecutive underfull
+chunks with the same hint are coalesced while the caps hold. A single doc
+larger than max_lines gets its own chunk.
 
-`policy_scope` and the `POLICY` record it yields are this skill's own bulk-verdict
-shape, pending migration to the engine: `doclifecycle.bloat` already replaces
-directory-declared policy scope with enumerable `RETIRE-DOC` scopes
-(`enumerate_scope`, `bloat.SCOPE_VERDICTS`) resolved from the corpus-wide context
-index rather than from config, and does not carry `POLICY` at all. This planner
-stays on the legacy contract until that migration reaches the skill (not yet
-scheduled); see `docs/decisions.md` (2026-07-27, "POLICY stays legacy pending
-skill migration").
+`policy_scope` is retired, with the `POLICY` verdict it fed: bulk retirement
+is now an enumerable-scope `RETIRE-DOC` verdict, whose members the engine
+expands from the corpus-wide context index (`bloat.enumerate_scope`,
+`bloat.SCOPE_VERDICTS`) rather than from a hand-declared directory. A config
+still declaring the key plans normally — its docs are swept like any other,
+and the run says so on stderr — because a consumer's audit-scope.json is
+never rewritten for them.
 
 Chunk ids are content-addressed (sha256 over member (path, content-sha256)
 pairs, the content hash computed during the same read that counts lines), so
@@ -36,34 +33,33 @@ a stale or garbage prior result is never reused.
 
 Every chunk carries a "turns" budget for the model invocation that will sweep
 it: 12 + 2 per doc (4 per planning doc) + 1 per full 600 lines, clamped to
-[20, 40]; policy chunks get a flat 20. The workflow passes it to --max-turns;
-retry escalation above it is the workflow's job, not the planner's.
+[20, 40]. A dispatcher passes it to --max-turns; retry escalation above it is
+the dispatcher's job, not the planner's.
 
 Usage:
     plan-chunks.py [--config PATH] [--root DIR] [--out FILE] [--results-dir DIR]
     plan-chunks.py --emit-prompt ID --manifest FILE   # print dispatch prompt
     plan-chunks.py --emit-turns ID --manifest FILE    # print turn budget
 
---emit-prompt renders the full headless dispatch prompt for one chunk — the
-doc list (or policy dir + files) verbatim, the output path chunks/<id>.json,
-and the definition of done — so prompt templating lives here, unit-tested,
-never in workflow YAML. The executor is handed its slice; it never opens the
-manifest.
+--emit-prompt renders the full dispatch prompt for one chunk — the doc list
+verbatim, where the unit digests a verdict names come from, the output path
+chunks/<id>.json, and the definition of done — so prompt templating lives
+here, unit-tested, never in a caller's YAML or prose. The executor is handed
+its slice; it never opens the manifest.
 
 Output (plan mode): manifest JSON {"schema": 1, "chunks": [...], "pending":
-[ids]} to --out (stdout if omitted). Sweep chunks are
-{"id", "kind": "sweep", "turns": N, "docs": [{"path", "lines", "hint"}]};
-policy chunks are {"id", "kind": "policy", "turns": N, "dir", "files"}. The
-run-surface report (doc count, chunk count, projected invocations, resume
-skips) always prints to stderr.
+[ids]} to --out (stdout if omitted). A chunk is
+{"id", "turns": N, "docs": [{"path", "lines", "hint"}]}. The run-surface
+report (doc count, chunk count, projected invocations, resume skips) always
+prints to stderr.
 
 Config discovery: --config if given, else <root>/.doc-lifecycle/audit-scope.json.
 All keys optional; an absent file is pure defaults:
     exclude / include: glob lists ('*' stays within a path segment, '**'
         crosses segments; include re-adds anything it matches — whitelist wins)
-    policy_scope: ["docs/superpowers", ...]   directories, prefix match,
-        longest declared prefix wins for nested scopes
     chunking: {"max_docs": 8, "max_lines": 1200, "max_chunks": null}
+A retired key (`policy_scope`) is noted on stderr and otherwise ignored,
+whatever shape it holds — see above.
 max_chunks non-null is a hard run ceiling: planning more chunks than that
 exits 2 naming the count and the knob (default off — big first runs are
 legitimate; the protections are structural).
@@ -81,6 +77,17 @@ import sys
 
 DEFAULT_MAX_DOCS = 8
 DEFAULT_MAX_LINES = 1200
+
+# Keys a config may still carry from the legacy contract. Noted, never read:
+# `policy_scope` declared the directories one POLICY record covered, and both
+# retired together when bulk retirement became an enumerable engine scope.
+RETIRED_KEYS = ("policy_scope",)
+RETIRED_NOTE = {
+    "policy_scope": "declared directories swept as one POLICY record; POLICY "
+                    "is retired — bulk retirement is now a RETIRE-DOC verdict "
+                    "over an enumerable scope the engine expands from the "
+                    "index. These docs are planned like any other.",
+}
 
 
 def die(msg):
@@ -123,8 +130,12 @@ def matches_any(path, patterns):
 
 
 def load_config(path):
-    """Return the effective config dict; SystemExit(2) on any malformed key."""
-    defaults = {"exclude": [], "include": [], "policy_scope": [],
+    """Return the effective config dict; SystemExit(2) on any malformed key.
+
+    A retired key is collected under "retired" and never validated: the knob
+    is dead, so no shape of it may fail a run that would otherwise plan.
+    """
+    defaults = {"exclude": [], "include": [], "retired": [],
                 "max_docs": DEFAULT_MAX_DOCS, "max_lines": DEFAULT_MAX_LINES,
                 "max_chunks": None}
     try:
@@ -142,11 +153,12 @@ def load_config(path):
     if not isinstance(data, dict):
         die(f"error: config {path} must be a JSON object, got {type(data).__name__}")
 
-    for key in ("exclude", "include", "policy_scope"):
+    for key in ("exclude", "include"):
         val = data.get(key, [])
         if not (isinstance(val, list) and all(isinstance(g, str) for g in val)):
             die(f"error: config {path}: '{key}' must be a list of strings")
         defaults[key] = val
+    defaults["retired"] = [k for k in RETIRED_KEYS if k in data]
 
     chunking = data.get("chunking", {})
     if not isinstance(chunking, dict):
@@ -166,7 +178,6 @@ def load_config(path):
 
     defaults["exclude"] = [glob_to_regex(g) for g in defaults["exclude"]]
     defaults["include"] = [glob_to_regex(g) for g in defaults["include"]]
-    defaults["policy_scope"] = [d.strip("/") for d in defaults["policy_scope"]]
     return defaults
 
 
@@ -243,15 +254,6 @@ def doc_hint(root, path):
     return "living"
 
 
-def policy_dir_of(path, policy_dirs):
-    """Longest declared dir that is a proper path prefix of path, else None."""
-    best = None
-    for d in policy_dirs:
-        if path.startswith(d + "/") and (best is None or len(d) > len(best)):
-            best = d
-    return best
-
-
 def chunk_id(prefix, members):
     """Content-address a chunk by its members' (path, content-sha) pairs."""
     digest = hashlib.sha256("\n".join(
@@ -263,11 +265,10 @@ TURNS_BASE = 12
 TURNS_PER_DOC = {"planning": 4}          # every other hint costs 2
 TURNS_PER_LINES = 600
 TURNS_FLOOR, TURNS_CEIL = 20, 40
-TURNS_POLICY = 20
 
 
 def turn_budget(docs):
-    """Deterministic per-chunk model-invocation budget for a sweep chunk."""
+    """Deterministic per-chunk model-invocation budget."""
     turns = TURNS_BASE
     turns += sum(TURNS_PER_DOC.get(d["hint"], 2) for d in docs)
     turns += sum(d["lines"] for d in docs) // TURNS_PER_LINES
@@ -311,24 +312,12 @@ def plan(root, cfg):
         sized.append({"path": p, "lines": lines})
         shas[p] = sha
 
-    policy_files, sweep = {}, []
     for d in sized:
-        pdir = policy_dir_of(d["path"], cfg["policy_scope"])
-        if pdir is not None:
-            policy_files.setdefault(pdir, []).append(d["path"])
-        else:
-            d["hint"] = doc_hint(root, d["path"])
-            sweep.append(d)
+        d["hint"] = doc_hint(root, d["path"])
 
     chunks = []
-    for pdir in sorted(policy_files):
-        files = sorted(policy_files[pdir])
-        chunks.append({"id": chunk_id("p", [(f, shas[f]) for f in files]),
-                       "kind": "policy", "turns": TURNS_POLICY,
-                       "dir": pdir, "files": files})
-
     groups = {}
-    for d in sweep:
+    for d in sized:
         groups.setdefault((os.path.dirname(d["path"]), d["hint"]), []).append(d)
     packed = []
     for key in sorted(groups):
@@ -338,40 +327,28 @@ def plan(root, cfg):
     for c in coalesce(packed, cfg["max_docs"], cfg["max_lines"]):
         chunks.append({"id": chunk_id("c", [(d["path"], shas[d["path"]])
                                             for d in c]),
-                       "kind": "sweep", "turns": turn_budget(c), "docs": c})
+                       "turns": turn_budget(c), "docs": c})
     return len(sized), chunks
 
 
 SWEEP_PROMPT = """\
-You are a headless chunk executor. Invoke the doc-lifecycle:detecting-doc-bloat
+You are a chunk executor. Invoke the doc-lifecycle:detecting-doc-bloat
 skill for the verdict rules and output contract, then audit exactly the docs
 listed below — no others. This list is your entire scope; do not enumerate or
 open anything outside it.
 
-Chunk {id} (sweep):
+Chunk {id}:
 {doc_lines}
 
 The kind hints are the planner's; override one only with stated evidence, per
-the skill. Write the chunk result object {{"chunk": "{id}", "records": [...]}}
-to chunks/{id}.json — an empty records array if nothing is bloated. Done means
-exactly that file, in the chunk-result shape the skill's contract defines;
-then stop. Orchestration, retries, and assembly belong to the workflow.
-"""
-
-POLICY_PROMPT = """\
-You are a headless chunk executor. Invoke the doc-lifecycle:detecting-doc-bloat
-skill for the POLICY rules. Directory {dir} is declared policy scope: emit
-exactly one POLICY record covering it — never walk its files individually —
-and copy this files list verbatim into the record's files field:
-{file_lines}
-
-This list is your entire scope; do not enumerate the tree or open anything
-outside it (sampling a few of the listed files for the evidence field is the
-audit, per the skill).
-
-Write the chunk result object {{"chunk": "{id}", "records": [<the one POLICY
-record>]}} to chunks/{id}.json. Done means exactly that file, in the
-chunk-result shape the skill's contract defines; then stop.
+the skill. Every verdict about one document names the assertion units it
+covers: read them with `python3 -m doclifecycle segment --repo . --path
+<path>` and copy the unit digests verbatim — never invent, abbreviate, or
+paraphrase one. Write the chunk result object
+{{"chunk": "{id}", "verdicts": [...]}} to chunks/{id}.json — an empty verdicts
+array if nothing is bloated. Done means exactly that file, in the chunk-result
+shape the skill's contract defines; then stop. Orchestration, retries, and
+assembly belong to whoever dispatched you.
 """
 
 
@@ -403,10 +380,6 @@ def find_chunk(man, cid):
 
 
 def emit_prompt(chunk):
-    if chunk["kind"] == "policy":
-        return POLICY_PROMPT.format(
-            id=chunk["id"], dir=chunk["dir"],
-            file_lines="\n".join(f"  - {f}" for f in chunk["files"]))
     return SWEEP_PROMPT.format(
         id=chunk["id"],
         doc_lines="\n".join(
@@ -447,10 +420,9 @@ def main():
     cfg = load_config(config)
     ndocs, chunks = plan(args.root, cfg)
 
-    for d in cfg["policy_scope"]:
-        if not any(c["kind"] == "policy" and c["dir"] == d for c in chunks):
-            print(f"note: policy-scope dir {d!r} matches no in-scope docs",
-                  file=sys.stderr)
+    for key in cfg["retired"]:
+        print(f"note: config {config} declares {key!r}, a retired key — "
+              f"{RETIRED_NOTE[key]}", file=sys.stderr)
 
     if cfg["max_chunks"] is not None and len(chunks) > cfg["max_chunks"]:
         die(f"error: planned {len(chunks)} chunks, over "
@@ -462,9 +434,7 @@ def main():
         pending = [c["id"] for c in chunks
                    if not usable_result(args.results_dir, c["id"])]
 
-    nsweep = sum(1 for c in chunks if c["kind"] == "sweep")
-    report = (f"{ndocs} doc(s) -> {len(chunks)} chunk(s) "
-              f"({nsweep} sweep + {len(chunks) - nsweep} policy); "
+    report = (f"{ndocs} doc(s) -> {len(chunks)} chunk(s); "
               f"projected invocations: {len(pending)}")
     if len(pending) < len(chunks):
         report += f" (resume: {len(chunks) - len(pending)} already have results)"
