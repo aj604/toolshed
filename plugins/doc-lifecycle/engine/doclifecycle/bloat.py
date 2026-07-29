@@ -40,6 +40,7 @@ index, and for duplicated content it is *derived* from the index — so two chun
 that never see each other reach the same answer.
 """
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
@@ -52,7 +53,7 @@ from .finding import Finding, build_finding
 from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import DOCUMENTATION, authorize_path
 from .registry import compile_glob
-from .report import state_from_content
+from .report import EvidenceBoundary, Lineage, current_lineage, state_from_content, validate_report
 from .results import STATUS_OK, Invalid, Problem
 
 # The verdicts, carried over from the skill this absorbs so a reviewer reading
@@ -255,6 +256,120 @@ def plan_repository_chunks(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
     if isinstance(index, Invalid):
         return index
     return plan_chunks(index, max_documents=max_documents, max_units=max_units)
+
+
+# --------------------------------------------------------------------------
+# The audit: verdicts in, a validated report out
+# --------------------------------------------------------------------------
+
+def load_bloat_verdicts(path):
+    """Read a lane's bloat verdicts file. Returns the verdict list, or `Invalid`.
+
+    The file/payload split `drift.load_verdicts` draws — reading is a separate
+    failure from what the payload says — plus the top-level shape check drift
+    leaves to `_verdict_entries`: an object, no extra keys, carrying a
+    `verdicts` list (optionally a `schema_version`, which must equal
+    `ARTIFACT_SCHEMA_VERSION` if present). `record_verdicts` checks each entry
+    in that list; this only checks the envelope around it.
+
+    Returns the `verdicts` list itself, not the envelope, so the result feeds
+    straight into `audit_bloat` — the composition stays one call in the
+    command, exactly as `record_verdicts` already expects a bare list.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return Invalid((Problem(
+            code="bloat-verdicts-unreadable",
+            message=f"cannot read the verdicts at {path}: {exc}",
+            location=path,
+        ),))
+
+    if (not isinstance(payload, dict)
+            or set(payload) - {"schema_version", "verdicts"}
+            or "verdicts" not in payload
+            or not isinstance(payload["verdicts"], list)):
+        return Invalid((Problem(
+            code="bloat-verdicts-invalid-shape",
+            message=(
+                f"verdicts must be an object shaped {{'verdicts': [...]}} "
+                f"(optionally with 'schema_version'), not {payload!r}"
+            ),
+            location="verdicts",
+        ),))
+
+    version = payload.get("schema_version", ARTIFACT_SCHEMA_VERSION)
+    if version != ARTIFACT_SCHEMA_VERSION:
+        return Invalid((Problem(
+            code="bloat-verdicts-invalid-shape",
+            message=(
+                f"verdicts schema_version {version!r} is not supported; this "
+                f"engine reads integer version {ARTIFACT_SCHEMA_VERSION}"
+            ),
+            location="verdicts.schema_version",
+        ),))
+
+    return payload["verdicts"]
+
+
+# Every bloat verdict is checked against the whole-repository context index,
+# never a document-scoped glob, so the evidence boundary a run declares is
+# always "everything" — and, per the brief, no local tool: bloat cites no
+# command the way drift's `--evidence-command` lets a claim be settled by one.
+EVIDENCE_BOUNDARY = EvidenceBoundary(sources=("**",), excluded=(), commands=())
+
+
+def _audit_config_digest(boundary):
+    """The consumer configuration this bloat audit ran under.
+
+    `drift._audit_config_digest`'s reasoning, carried over: what a consumer
+    can set that could change a verdict. Bloat's boundary is fixed
+    (`EVIDENCE_BOUNDARY`) rather than consumer-configurable, so this digest
+    only has to be stable and distinct from drift's, never re-derived from
+    argv the way drift's is.
+    """
+    return sha256_canonical({
+        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "audit": "bloat",
+        "evidence_boundary": boundary.to_dict(),
+    })
+
+
+def audit_bloat(repo_root, verdicts, registry_path=DEFAULT_REGISTRY_PATH):
+    """Run a bloat audit. Returns a validated `Report`, or `Invalid`.
+
+    The repository-level entrypoint, on `plan_repository_chunks`'s pattern (the
+    composition lives here rather than in the command, so the command stays a
+    call to one library function): index the repository, build the lineage the
+    run carries (mirroring `drift.audit_drift`'s construction), check the
+    verdicts against the index, and validate what results through the same
+    `report.validate_report` every other lane runs through.
+
+    `verdicts` is required — there is no planless bloat audit the way a drift
+    run can leave living documents unexamined; a value judgment about the
+    corpus has to have been made by someone.
+    """
+    index = build_context_index(repo_root, registry_path)
+    if isinstance(index, Invalid):
+        return index
+
+    state, problems = current_lineage(
+        repo_root, registry_path, _audit_config_digest(EVIDENCE_BOUNDARY)
+    )
+    if problems:
+        return Invalid(tuple(problems))
+    lineage = Lineage(
+        audit_mode="full", evidence_boundary=EVIDENCE_BOUNDARY, **state
+    )
+
+    result = record_verdicts(index, lineage, verdicts)
+    if isinstance(result, Invalid):
+        return result
+
+    return validate_report(
+        result.report_payload(lineage), registry_path=registry_path
+    )
 
 
 # --------------------------------------------------------------------------
