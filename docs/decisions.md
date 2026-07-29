@@ -997,11 +997,18 @@
   the applier is the only writer — an interactive skill has no exemption from either. Superseded:
   the 2026-07-03 entry below names `references/apply-discipline.md` as the owner of apply-only
   discipline; that owner is now the applier contract in `plugins/doc-lifecycle/engine/README.md`.
-- Known gap, filed not fixed: `bloat.DESTINATION_VERDICTS` excludes `DISTILL`, so no record the
-  bloat audit mints can carry a `destination` — `create-document` refuses
-  `plan-target-not-record-target` and only the lossy `retire-document` half executes. A residue
-  destination has to be its own concept, since bloat's destination check refuses any path the
-  inventory does not already hold. Recorded in `tests/baselines/fixing-docs-merge-green/GREEN-results.md`.
+- Known gap, filed not fixed [superseded — see the 2026-07-29 "an approval set is the whole
+  mandate; a plan may not silently under-cover it" entry below]: `bloat.DESTINATION_VERDICTS`
+  excludes `DISTILL`, so no record the bloat audit mints can carry a `destination` —
+  `create-document` refuses `plan-target-not-record-target` and only the lossy `retire-document`
+  half executes. A residue destination has to be its own concept, since bloat's destination check
+  refuses any path the inventory does not already hold. Recorded in
+  `tests/baselines/fixing-docs-merge-green/GREEN-results.md`. Superseded: `bloat.RESIDUE_VERDICTS`
+  already let a DISTILL record carry an optional residue destination, checked as an unwritten path
+  rather than looked up in the inventory (this passage's premise was already stale), and the
+  "approval set is the whole mandate" entry closed the actual gap — `create-document` is now
+  required whenever such a record's destination is present, via `REQUIRED_REMEDY_OPERATIONS` and
+  `DESTINATION_CONDITIONAL_CODES`, so the residue half can no longer be silently skipped.
 - Code: `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
   `plugins/doc-lifecycle/agents/doc-distiller.md`,
   `plugins/doc-lifecycle/engine/doclifecycle/applier.py`

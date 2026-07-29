@@ -20,13 +20,13 @@ is the explicit opt-in.
 
 Three GitHub Actions, installed by the skill (never hand-rolled YAML). The split between
 them is the whole design: **nothing that runs on a schedule can touch your default branch
-or your wiring, and the jobs that can start only when you dispatch them.** Two of the
+or your wiring — only a job you dispatch yourself can.** Two of the
 three lanes run on a schedule — the nightly audit and the weekly upgrade check — and each
 holds only the narrowest write scope its job needs: the audit lane holds no write
 permission at all, and the upgrade lane's scheduled job holds only `issues: write`, enough
 to file one notice issue naming a newer release. The jobs that can commit, push, or open a
-pull request — the apply lane's `apply` job and the upgrade lane's `regenerate`/`land`
-jobs — are gated `workflow_dispatch` only and unreachable from either schedule.
+pull request — the apply lane's `apply` job and the upgrade lane's `land`
+job — are gated `workflow_dispatch` only and unreachable from either schedule.
 
 **Nightly audit** (`doc-audit.yml`, default `0 1 * * *`) — read-only, every night:
 

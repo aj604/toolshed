@@ -779,7 +779,10 @@ python3 -m doclifecycle context-index --repo .
 ```
 
 Real output, fully reproducible — every digest below is re-derivable by building this exact
-fixture and running the command above. `registry.json` at the repo root:
+fixture and running the command above. Neither command passes `--registry`, so the registry has
+to sit at the default path, `.doc-lifecycle/registry.json`, relative to `--repo`; the fenced file
+bodies below each end with a trailing newline, since the document digests are computed over that
+exact byte content. `.doc-lifecycle/registry.json`:
 
 ```json
 {
