@@ -1,6 +1,12 @@
 # Turning on nightly automation with `scheduling-doc-sync`
 
-> As of 2026-07-27 (doc-lifecycle 0.40.0, engine-based audit and apply lanes, install artifacts centralized under `.doc-lifecycle/`; `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-apply.yml`)
+> As of 2026-07-28 (doc-lifecycle 0.42.2, engine-based audit and apply lanes, install artifacts
+> centralized under `.doc-lifecycle/`, and legacy upgrade cleanup;
+> `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`,
+> `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml`,
+> `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-apply.yml`,
+> `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py`,
+> `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/stage-upgrade.py`)
 
 **You should already have:** run a drift audit by hand at least once, and landed a
 `.doc-lifecycle/registry.json` — the manifest that says which files are documentation
@@ -134,6 +140,26 @@ gh workflow run doc-apply \
   which predates the new layout and refuses the change set. Re-run the skill from a local
   checkout to relocate; it carries your judgment files and the sync marker across byte-for-byte
   and leaves anything else in the old directory where it is, naming it on the run surface.
+
+## One-time cleanup after upgrading past 0.41.0
+
+If your install used the legacy write lanes, an upgrade past 0.41.0 can leave three legacy
+artifacts behind. After the upgrade succeeds, they are safe to remove:
+
+```
+git rm --ignore-unmatch \
+  .github/workflows/doc-sync.yml \
+  .github/workflows/doc-bloat.yml \
+  .github/doc-sync/last-stales.json
+```
+
+The upgrade lane deliberately leaves the workflow files because its `GITHUB_TOKEN` cannot push
+deletions under `.github/workflows/`. It also leaves `last-stales.json` because the installed
+pre-upgrade path authority never owned that file; during relocation, `apply-upgrade.py` reports
+it as `left in place (not the plugin's to move): .github/doc-sync/last-stales.json`. No current
+lane depends on these artifacts. Leaving them in place does not break the current lanes, but keeps
+the legacy workflow entries in the Actions tab and may keep the old `.github/doc-sync/` directory
+alive.
 
 ## Pausing and leaving
 
