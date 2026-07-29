@@ -58,12 +58,14 @@ line("", 0.2)
 line(f"  {BOLD}{FG}drift report — CLAUDE.md{R}", 0.8)
 rec = [
     ('  {', 0.06),
-    (f'    {DIM}"claim":{R}    {FG}"Reset state = `make reset`"{R},', 0.06),
-    (f'    {DIM}"location":{R} {FG}"CLAUDE.md:18"{R},', 0.06),
-    (f'    {DIM}"kind":{R}     {FG}"command"{R},  {DIM}"tier":{R} {FG}1{R},', 0.06),
-    (f'    {DIM}"verdict":{R}  {RED}"STALE"{R},', 0.35),
-    (f'    {DIM}"evidence":{R} {FG}"Makefile has `clean:`, no `reset` target"{R},', 0.2),
-    (f'    {DIM}"fix":{R}      {GREEN}"Reset state = `make clean`"{R}', 0.2),
+    (f'    {DIM}"unit":{R} {FG}12{R},  {DIM}"kind":{R} {FG}"command"{R},  {DIM}"tier":{R} {FG}1{R},', 0.06),
+    (f'    {DIM}"assertion_class":{R} {FG}"factual"{R},', 0.06),
+    (f'    {DIM}"verdict":{R} {RED}"STALE"{R},', 0.35),
+    (f'    {DIM}"evidence":{R} {{', 0.06),
+    (f'      {DIM}"source":{R} {FG}"Makefile"{R}, {DIM}"line":{R} {FG}9{R},', 0.06),
+    (f'      {DIM}"observed":{R} {FG}"the target is `clean:`; no `reset` target is defined"{R}', 0.2),
+    ('    },', 0.06),
+    (f'    {DIM}"fix":{R} {GREEN}"Reset state = `make clean`"{R}', 0.2),
     ('  }', 0.06),
 ]
 for txt, dt in rec:

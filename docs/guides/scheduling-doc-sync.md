@@ -1,6 +1,6 @@
 # Turning on nightly automation with `scheduling-doc-sync`
 
-> As of 2026-07-28 (doc-lifecycle 0.42.2, engine-based audit and apply lanes, install artifacts
+> As of 2026-07-29 (doc-lifecycle 0.44.0, engine-based audit and apply lanes, install artifacts
 > centralized under `.doc-lifecycle/`, and legacy upgrade cleanup;
 > `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`,
 > `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml`,
