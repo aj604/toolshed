@@ -18,6 +18,7 @@ from approval_test import (
     DOC_A_TEXT,
     DOC_B,
     DOC_B_TEXT,
+    FILES,
     HUMAN,
     PLAN_DOC,
     PLAN_DOC_TEXT,
@@ -1549,10 +1550,17 @@ class DistillationLandsItsResidue(ApplierTestCase):
         "(`docs/a.md`).\n"
     )
 
+    # `audited_record()` below submits `status: "ready"`, which after #57's
+    # review remediation must equal the planning document's own file-bound
+    # marker — the shared `PLAN_DOC_TEXT` fixture carries none, so this class
+    # writes its own variant rather than mutating the constant every other
+    # `approval_test`/`applier_test` fixture also reads.
+    PLAN_DOC_TEXT_READY = "> Status: ready\n\n" + PLAN_DOC_TEXT
+
     def setUp(self):
-        super().setUp()
-        # The lineage a bloat chunk runs under: the record's digest commits to
-        # it, so the report it travels in is validated under the same one.
+        self.repo = self.git_repo(
+            files={**FILES, PLAN_DOC: self.PLAN_DOC_TEXT_READY}
+        )
         self.lineage = self.lineage_for(
             self.repo, audit_mode="chunk",
             evidence_boundary=EvidenceBoundary(("docs/**",)),
@@ -1591,7 +1599,7 @@ class DistillationLandsItsResidue(ApplierTestCase):
                 "record": record["digest"],
                 "target_class": "documentation",
                 "path": PLAN_DOC,
-                "preimage": PLAN_DOC_TEXT,
+                "preimage": self.PLAN_DOC_TEXT_READY,
             },
         ]
         plan = self.plan(approval, ops, {

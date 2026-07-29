@@ -431,7 +431,10 @@ class ResidueDestinationsAreAuthorizedNotInventoried(RepoTestCase):
             ".doc-lifecycle/registry.json": REGISTRY,
             "docs/a.md": f"# A\n\n{SHARED}\n",
             "docs/guides/g.md": "# G\n\nGuide prose.\n",
-            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+            # `> Status: ready`, since `distill()` below defaults its verdict's
+            # own status to `ready` and, since #57's review remediation, that
+            # must equal the file's own marker or the recorder refuses it.
+            "docs/plans/p.md": f"> Status: ready\n\n# P\n\n{SHARED}\n",
             "docs/plans/other.md": "# Other\n\nA second plan.\n",
         })
         self.index = build_context_index(self.root)
@@ -585,7 +588,9 @@ class ResidueClassificationHasThreeLegs(RepoTestCase):
     def setUp(self):
         self.root = self.repo({
             ".doc-lifecycle/registry.json": self.REGISTRY,
-            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+            # `distill()` below always asserts `status: "ready"`, so the file
+            # must carry that marker or the file-bound cross-check refuses it.
+            "docs/plans/p.md": f"> Status: ready\n\n# P\n\n{SHARED}\n",
         })
         self.index = build_context_index(self.root)
         self.lineage = lineage()
@@ -704,6 +709,77 @@ class BulkJudgmentsAreEnumerated(RepoTestCase):
         result = self.record(verdict=bloat.CONDENSE)
 
         self.assertEqual(problem_codes(result), ["bloat-scope-verdict-ineligible"])
+
+
+class LifecycleStateIsFileBound(RecorderTestCase):
+    """A DISTILL verdict's `status` is checked against the file, not trusted.
+
+    The file is the authority; the model is a reporter. Three planning-
+    document variants replace `RecorderTestCase`'s single `docs/plans/p.md`:
+    one whose own `> Status:` marker says `ready`, one that says
+    `pending-implementation`, and one carrying no marker at all (the
+    fail-safe default). A verdict's `status` must equal whichever of those
+    the file actually states.
+    """
+
+    def setUp(self):
+        self.index = build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/guides/g.md": "# G\n\nGuide prose.\n",
+            "docs/plans/ready.md": f"> Status: ready\n\n# P\n\n{SHARED}\n",
+            "docs/plans/pending.md": (
+                f"> Status: pending-implementation\n\n# P\n\n{SHARED}\n"
+            ),
+            "docs/plans/none.md": f"# P\n\n{SHARED}\n",
+        }))
+        self.lineage = lineage()
+
+    def distill(self, path, **overrides):
+        entry = {
+            "id": "BLOAT-D1",
+            "verdict": bloat.DISTILL,
+            "path": path,
+            "units": [self.unit(path, SHARED)],
+            "evidence": "The design landed: src/fees.py:12 states the rate.",
+        }
+        entry.update(overrides)
+        return self.record([entry])
+
+    def test_ready_verdict_against_pending_marker_is_refused(self):
+        result = self.distill("docs/plans/pending.md", status="ready")
+
+        self.assertIn("bloat-status-not-file-bound", problem_codes(result))
+
+    def test_ready_verdict_against_absent_marker_is_refused(self):
+        # No marker reads as pending-implementation, so the model reporting
+        # `ready` is the same mismatch as reporting it against an explicit
+        # pending marker.
+        result = self.distill("docs/plans/none.md", status="ready")
+
+        self.assertIn("bloat-status-not-file-bound", problem_codes(result))
+
+    def test_ready_verdict_against_ready_marker_records(self):
+        # The honest path: the file says ready, the verdict says ready.
+        result = self.distill("docs/plans/ready.md", status="ready")
+
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        self.assertEqual(result.records()[0]["status"], "ready")
+
+    def test_pending_verdict_against_absent_marker_records(self):
+        # The fail-safe default: no marker == pending-implementation, and a
+        # verdict that honestly reports that is recorded, not refused.
+        result = self.distill("docs/plans/none.md", status="pending-implementation")
+
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        self.assertEqual(result.records()[0]["status"], "pending-implementation")
+
+    def test_pending_verdict_against_ready_marker_is_refused(self):
+        # Symmetry: the model may not hold a plan back either — the record
+        # must state what the file states, in both directions.
+        result = self.distill("docs/plans/ready.md", status="pending-implementation")
+
+        self.assertIn("bloat-status-not-file-bound", problem_codes(result))
 
 
 class RefusalsAreExhaustive(RecorderTestCase):

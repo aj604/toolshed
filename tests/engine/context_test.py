@@ -248,6 +248,58 @@ class Determinism(RepoTestCase):
         self.assertNotEqual(before.digest, after.digest)
 
 
+class LifecycleState(RepoTestCase):
+    """A planning document's `> Status:` marker is the file-bound authority.
+
+    Extraction mirrors drift.py's `> As of` narrative anchor: the first
+    block-quote unit whose normalized text starts with the prefix, found via
+    the segmenter. Absent or malformed (not `pending-implementation` or
+    `ready`) both read as the fail-safe default.
+    """
+
+    def index(self, files):
+        return build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY, **files
+        }))
+
+    def test_a_ready_marker_reports_ready(self):
+        index = self.index({
+            "docs/plans/p.md": "> Status: ready\n\n# P\n\nDelta.\n",
+        })
+
+        self.assertEqual(index.lifecycle_status("docs/plans/p.md"), "ready")
+
+    def test_a_pending_marker_reports_pending(self):
+        index = self.index({
+            "docs/plans/p.md": "> Status: pending-implementation\n\n# P\n\nDelta.\n",
+        })
+
+        self.assertEqual(
+            index.lifecycle_status("docs/plans/p.md"), "pending-implementation"
+        )
+
+    def test_an_absent_marker_defaults_to_pending(self):
+        index = self.index({"docs/plans/p.md": "# P\n\nDelta.\n"})
+
+        self.assertEqual(
+            index.lifecycle_status("docs/plans/p.md"), "pending-implementation"
+        )
+
+    def test_a_malformed_marker_value_defaults_to_pending(self):
+        index = self.index({
+            "docs/plans/p.md": "> Status: shipped\n\n# P\n\nDelta.\n",
+        })
+
+        self.assertEqual(
+            index.lifecycle_status("docs/plans/p.md"), "pending-implementation"
+        )
+
+    def test_a_non_planning_document_has_no_lifecycle_status(self):
+        index = self.index({"docs/a.md": "# A\n\nAlpha holds.\n"})
+
+        self.assertIsNone(index.lifecycle_status("docs/a.md"))
+
+
 class InvalidRegistry(RepoTestCase):
     def test_an_unparseable_registry_invalidates_the_index(self):
         repo = self.repo({
