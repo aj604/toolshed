@@ -31,8 +31,14 @@ The engine owns scope, segmentation, and validation; this skill owns the judgmen
 middle. Every command below is `python3 -m doclifecycle …` with the plugin's `engine/`
 directory on `PYTHONPATH` (`plugins/doc-lifecycle/engine/README.md` covers both spellings).
 
+Every artifact this audit writes — the plan, the verdicts, the report — goes to
+`${TMPDIR:-/tmp}/`, never the work tree: `fixing-docs`' applier confines a run to its
+approval set's paths, so an audit artifact sitting in the tree reads as an unaccounted
+change and the apply refuses (`apply-working-tree-not-confined`). The steps below reuse
+that same destination; only the filename changes per artifact.
+
 1. **Plan the scope.** `python3 -m doclifecycle drift-plan --repo . --mode full >
-   drift-plan.json` (diff-scoped: `--mode incremental --since <commit>`). Deterministic — no
+   "${TMPDIR:-/tmp}/drift-plan.json"` (diff-scoped: `--mode incremental --since <commit>`). Deterministic — no
    model — so the scope is re-derivable rather than trusted. Each `documents[]` entry carries a
    `path` and an `obligation`: `assertions` is a living document whose claims you judge;
    `anchor` is a narrative document whose `As of` line the engine checks itself, and for which
@@ -64,8 +70,8 @@ directory on `PYTHONPATH` (`plugins/doc-lifecycle/engine/README.md` covers both 
    the repo now makes them checkable.
    Each judgment is `VERIFIED` / `STALE` / `UNVERIFIABLE`, and carries its `kind`, its `tier`,
    and its `evidence`.
-5. **Write `verdicts.json`** in the contract below, then **validate it mechanically** before
-   the audit: pipe it through
+5. **Write `"${TMPDIR:-/tmp}/verdicts.json"`** in the contract below, then **validate it
+   mechanically** before the audit: pipe it through
    `${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-drift/scripts/validate-drift-output.py`
    (reads the JSON on stdin or as a file arg). It enforces the enum, field-set, `evidence`, and
    `fix` rules and exits nonzero on any violation. Run it — neither thing the engine does with a
@@ -77,7 +83,7 @@ directory on `PYTHONPATH` (`plugins/doc-lifecycle/engine/README.md` covers both 
    is still yours, and `drift-audit` is the authority on everything the shape check cannot see
    (whether an ordinal names a real unit, whether a multi-line `fix` owns its span).
 6. **Run the audit.** `python3 -m doclifecycle drift-audit --repo . --mode full --verdicts
-   verdicts.json > drift-report.json` writes the validated report: your STALE and UNVERIFIABLE
+   "${TMPDIR:-/tmp}/verdicts.json" > "${TMPDIR:-/tmp}/drift-report.json"` writes the validated report: your STALE and UNVERIFIABLE
    judgments as records with digests, your VERIFIED ones as coverage, and the narrative
    documents' anchors checked engine-side. Exit 0 is a complete report, 4 partial (something
    was not examined), 1 refused (e.g. a document the plan never declared).

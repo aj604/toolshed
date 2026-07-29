@@ -41,8 +41,15 @@ key plans normally, and the planner says so.
 
 ## The audit (run these steps, in order)
 
+Every artifact this audit writes — the plan, the verdicts, the report — goes to
+`${TMPDIR:-/tmp}/`, never the work tree: `fixing-docs`' applier confines a run to its
+approval set's paths, so an audit artifact sitting in the tree reads as an unaccounted
+change and the apply refuses (`apply-working-tree-not-confined`). The steps and the
+invocation templates below reuse that same destination; only the filename changes per
+artifact.
+
 1. **Plan the chunks.** `python3 -m doclifecycle bloat-plan --repo . >
-   bloat-plan.json` partitions every indexed document into bounded chunks
+   "${TMPDIR:-/tmp}/bloat-plan.json"` partitions every indexed document into bounded chunks
    (`--max-documents`, `--max-units`), content-addressed so an unchanged chunk
    keeps its id. For a dispatched sweep, `scripts/plan-chunks.py` plans from
    the repository's `.md` files and `.doc-lifecycle/audit-scope.json` instead,
@@ -68,7 +75,7 @@ key plans normally, and the planner says so.
    assembled envelope. A failing chunk is re-dispatched fresh **once**, then
    you stop and name it.
 5. **Run the audit.** `python3 -m doclifecycle bloat-audit --repo . --verdicts
-   bloat-verdicts.json > bloat-report.json` checks every verdict against the
+   "${TMPDIR:-/tmp}/bloat-verdicts.json" > "${TMPDIR:-/tmp}/bloat-report.json"` checks every verdict against the
    whole-repository context index — membership, destinations, units,
    file-bound `DISTILL` status — expands each `scope` into one finding per
    member, and writes the validated report. It fails closed: any problem
@@ -98,6 +105,8 @@ the workflow's, not yours.
 # it matches); the chunking keys are documented in the script docstring.
 # Chunk ids are content-addressed, so --results-dir resume skips only chunks
 # whose docs are unchanged; each chunk carries its model-invocation turn budget.
+# <dir> is outside the work tree (e.g. "${TMPDIR:-/tmp}/bloat") — same confinement
+# reason as the plan/verdicts/report artifacts above.
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
   --out <dir>/manifest.json --results-dir <dir>/chunks
 
@@ -115,13 +124,13 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-
 # assemble every chunk result into the verdicts envelope (refuses partial
 # assembly; --allow-partial skips missing chunks loudly)
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py \
-  --assemble <dir>/chunks --manifest <dir>/manifest.json --out bloat-verdicts.json
+  --assemble <dir>/chunks --manifest <dir>/manifest.json --out <dir>/bloat-verdicts.json
 
 # shape-check the envelope, then audit it
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py \
-  bloat-verdicts.json
-python3 -m doclifecycle bloat-audit --repo . --verdicts bloat-verdicts.json \
-  > bloat-report.json
+  <dir>/bloat-verdicts.json
+python3 -m doclifecycle bloat-audit --repo . --verdicts <dir>/bloat-verdicts.json \
+  > <dir>/bloat-report.json
 ```
 
 ## The contract
