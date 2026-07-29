@@ -21,6 +21,7 @@ from approval_test import (
 )
 
 from doclifecycle import approval as approval_mod
+from doclifecycle import bloat
 from doclifecycle.applier import (
     OP_CREATE,
     OP_MOVE,
@@ -383,11 +384,12 @@ class WhatAPolicyMayNeverMint(PolicyTestCase):
         self.assertIn("approval-policy-ineligible-record", codes(result))
 
     def test_the_never_eligible_codes_are_every_bloat_operation(self):
-        self.assertEqual(
-            set(NEVER_ELIGIBLE_CODES),
-            {"CUT", "CONDENSE", "EXTRACT-AND-MOVE", "MERGE-DOC", "RETIRE-DOC",
-             "DISTILL"},
-        )
+        # Issue #57 review: this asserted the same six literals the tuple was
+        # hand-written from, so a seventh bloat verdict would have been
+        # policy-approvable through the generic door with the guard still
+        # green. The property is the *derivation* — every bloat verdict, by
+        # construction — so that is what is asserted.
+        self.assertEqual(tuple(NEVER_ELIGIBLE_CODES), bloat.VERDICTS)
 
     def test_no_eligible_code_may_be_planned_as_a_create_move_or_retire(self):
         # The operation half of the restriction, and the applier owns it: a

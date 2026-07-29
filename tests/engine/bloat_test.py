@@ -210,6 +210,22 @@ class ScopeEnumeration(RepoTestCase):
         self.assertIsInstance(result, Invalid)
         self.assertEqual(problem_codes(result), ["bloat-scope-not-enumerable"])
 
+    def test_a_selector_whose_value_is_not_a_string_is_refused(self):
+        # Issue #57 review (parity audit): `{"glob": 123}` reached
+        # `registry.compile_glob` and raised `TypeError` out of a public seam,
+        # so bloat-audit produced a traceback and no report at all. `set` and
+        # `kind` degraded to `bloat-scope-empty`, which is a true statement
+        # about a rule nobody could have written on purpose; all three name the
+        # same fault now.
+        for rule in ({"glob": 123}, {"set": 123}, {"kind": None},
+                     {"glob": ""}, {"glob": ["docs/*.md"]}):
+            with self.subTest(rule=rule):
+                result = bloat.enumerate_scope(self.index(), rule)
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertEqual(problem_codes(result),
+                                 ["bloat-scope-not-enumerable"])
+
     def test_a_rule_matching_nothing_is_refused(self):
         result = bloat.enumerate_scope(self.index(), {"set": "adr"})
 

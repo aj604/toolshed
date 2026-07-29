@@ -326,6 +326,30 @@ class FieldRules(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("unit", r.stderr)
 
+    def test_digest_unit_with_a_trailing_newline_rejected(self):
+        # Regex `$` also matches just before a trailing LF, so a `match()`
+        # would wave this through; the engine's digest lookup is exact, and
+        # refuses it as `classification-unknown-unit` — losing the whole
+        # document after the audit has already been paid for.
+        r = run(payload(doc(verdicts=[rec(unit="a" * 64 + "\n")])))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unit", r.stderr)
+
+    def test_digest_unit_with_a_leading_space_rejected(self):
+        r = run(payload(doc(verdicts=[rec(unit=" " + "a" * 64)])))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unit", r.stderr)
+
+    def test_digest_unit_with_a_trailing_space_rejected(self):
+        r = run(payload(doc(verdicts=[rec(unit="a" * 64 + " ")])))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unit", r.stderr)
+
+    def test_digest_unit_with_trailing_text_after_a_newline_rejected(self):
+        r = run(payload(doc(verdicts=[rec(unit="a" * 64 + "\nb")])))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unit", r.stderr)
+
     def test_factual_unit_without_a_verdict_rejected(self):
         entry = doc(verdicts=[{"unit": 1, "assertion_class": "factual"}])
         r = run(payload(entry))
@@ -348,6 +372,79 @@ class FieldRules(unittest.TestCase):
         r = run(payload(doc(verdicts=["VERIFIED"])))
         self.assertEqual(r.returncode, 1)
         self.assertIn("verdicts[0]", r.stderr)
+
+
+class UnitUniqueness(unittest.TestCase):
+    """One answer per unit, within one document.
+
+    `finding.record_classifications` refuses a unit answered twice
+    (`classification-duplicate`) and fails the document closed, so the audit
+    reaches zero records. An OK here would promise a summary the run never
+    produces — and SKILL.md says automation may gate on that summary line.
+    """
+
+    def test_duplicate_ordinal_unit_rejected(self):
+        entry = doc(verdicts=[rec(unit=1),
+                              rec(unit=1, verdict="STALE", fix="use `make check`")])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unit", r.stderr)
+
+    def test_duplicate_digest_unit_rejected(self):
+        digest = "b" * 64
+        r = run(payload(doc(verdicts=[rec(unit=digest), rec(unit=digest)])))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unit", r.stderr)
+
+    def test_duplicate_names_the_repeat_and_the_earlier_verdict(self):
+        entry = doc("docs/api.md",
+                    verdicts=[rec(unit=0), rec(unit=7), rec(unit=7)])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("docs/api.md:verdicts[2]", r.stderr)
+        self.assertIn("verdicts[1]", r.stderr)
+
+    def test_duplicate_counts_as_exactly_one_violation(self):
+        entry = doc(verdicts=[rec(unit=1), rec(unit=1)])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("FAILED: 1 contract violation(s)", r.stderr)
+
+    def test_an_unjudged_duplicate_is_still_a_duplicate(self):
+        # Two classes for one unit is what the engine refuses; whether either
+        # carries a verdict is a different rule.
+        entry = doc(verdicts=[{"unit": 3, "assertion_class": "non-assertive"},
+                              {"unit": 3, "assertion_class": "normative"}])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unit", r.stderr)
+
+    def test_the_same_unit_in_two_documents_passes(self):
+        # Ordinals are per-document; two documents both have a unit 1.
+        a = doc("README.md", verdicts=[rec(unit=1)])
+        b = doc("CLAUDE.md", verdicts=[rec(unit=1)])
+        r = run(payload(a, b))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_an_ordinal_and_a_digest_do_not_collide_here(self):
+        # Whether ordinal 1 and this digest name one unit is the segmentation's
+        # answer, and this script has no segmentation — `drift-audit` decides.
+        entry = doc(verdicts=[rec(unit=1), rec(unit="c" * 64)])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_malformed_unit_is_not_also_reported_as_a_duplicate(self):
+        # Two shape violations, and no third error about the pair: a unit the
+        # contract does not recognize names nothing to be a duplicate of.
+        entry = doc(verdicts=[rec(unit=-1), rec(unit=-1)])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("FAILED: 2 contract violation(s)", r.stderr)
+
+    def test_distinct_units_pass(self):
+        entry = doc(verdicts=[rec(unit=1), rec(unit=2), rec(unit=3)])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class EvidenceRules(unittest.TestCase):
@@ -683,7 +780,9 @@ class FailureReporting(unittest.TestCase):
         self.assertIn("docs/api.md:verdicts[0]", r.stderr)
 
     def test_all_violations_reported_in_one_pass(self):
-        entry = doc(verdicts=[rec(tier=4), rec(verdict="MAYBE")])
+        # Distinct units: two verdicts on one unit is a third violation of its
+        # own, which is not what this case is measuring.
+        entry = doc(verdicts=[rec(unit=1, tier=4), rec(unit=2, verdict="MAYBE")])
         r = run(payload(entry))
         self.assertEqual(r.returncode, 1)
         self.assertIn("FAILED: 2 contract violation(s)", r.stderr)

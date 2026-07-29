@@ -477,13 +477,21 @@ def enumerate_scope(index, rule):
     are both refused: a bulk judgment over an unknown or empty set is
     unfalsifiable.
     """
-    if not isinstance(rule, dict) or len(rule) != 1 or not set(rule) <= set(SCOPE_SELECTORS):
+    # The selector's *value* is checked here alongside its name, not left to
+    # each branch: a rule is model-supplied, and `{"glob": 123}` reached
+    # `compile_glob` and raised out of a public seam — no report, no Problem, a
+    # traceback. A selector naming something that is not a non-empty string
+    # names no set of documents whatever the selector is, so all three read the
+    # same refusal.
+    if not isinstance(rule, dict) or len(rule) != 1 or not set(rule) <= set(SCOPE_SELECTORS) or not all(
+            isinstance(v, str) and v != "" for v in rule.values()):
         return Invalid((Problem(
             code="bloat-scope-not-enumerable",
             message=(
                 f"a bulk scope must be exactly one of "
-                f"{list(SCOPE_SELECTORS)}, not {rule!r} — a scope nobody can "
-                f"expand into a file list cannot be reviewed or applied"
+                f"{list(SCOPE_SELECTORS)} naming a non-empty string, not "
+                f"{rule!r} — a scope nobody can expand into a file list cannot "
+                f"be reviewed or applied"
             ),
             location="scope",
         ),))

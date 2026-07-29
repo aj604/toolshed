@@ -1093,6 +1093,86 @@ class PlanCompleteness(ApplierTestCase):
         result = self.apply(plan, approval, report=report)
         self.assert_untouched(before, result, ["plan-remedy-incomplete"])
 
+    def test_distill_plan_that_creates_no_residue_is_refused(self):
+        # Issue #57 review: the same shape as the MERGE-DOC reproduction
+        # above, reached through DISTILL. A DISTILL record naming a
+        # destination was approved as "author the residue there, then retire
+        # the plan"; a plan carrying only the retirement destroys the planning
+        # artifact and writes nothing — and reported `clean`.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-012", "DISTILL", PLAN_DOC, units,
+            destination={"path": "docs/residue.md"},
+        )
+        report, approval = self.approve([record])
+        op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op], {PLAN_DOC: None})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-remedy-incomplete"])
+        problem = next(
+            p for p in result.problems if p.code == "plan-remedy-incomplete"
+        )
+        self.assertIn("docs/residue.md", problem.message)
+
+    def test_distill_plan_that_creates_the_residue_applies(self):
+        # The honest path the refusal above must not close: the residue is
+        # authored at the destination and the planning artifact retires.
+        residue = "docs/residue.md"
+        content = "# Flat fees\n\nWe charge a flat rate.\n"
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-013", "DISTILL", PLAN_DOC, units,
+            destination={"path": residue},
+        )
+        report, approval = self.approve([record])
+        create_op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": residue,
+            "text": content,
+        }
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [create_op, retire_op], {
+            PLAN_DOC: None, residue: sha256_text(content),
+        })
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertEqual(self.read(self.repo, residue), content)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, PLAN_DOC)))
+
+    def test_destination_less_distill_may_retire_and_create_nothing(self):
+        # The exemption the conditional requirement must keep: a distillation
+        # that named no destination proposed no residue, so retiring the
+        # planning artifact alone is the whole approved remedy.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding("BLOAT-014", "DISTILL", PLAN_DOC, units)
+        report, approval = self.approve([record])
+        op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op], {PLAN_DOC: None})
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, PLAN_DOC)))
+
     def test_merge_doc_plan_with_both_legs_applies(self):
         # The honest path: a move and its paired retirement, together, are
         # the one merge a reviewer approved, and land clean.
