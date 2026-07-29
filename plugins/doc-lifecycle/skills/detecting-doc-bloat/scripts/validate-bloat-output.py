@@ -27,8 +27,9 @@ Three duties:
 2. Chunk seam:
        validate-bloat-output.py --chunk FILE [--manifest FILE]
    Validates one chunk result {"chunk": "<id>", "verdicts": [...]} where it is
-   produced. With --manifest (plan-chunks.py output), also cross-checks the
-   slice: a single-document verdict may only name a document the chunk lists.
+   produced. With --manifest — either planner's, plan-chunks.py's or
+   `doclifecycle bloat-plan`'s — also cross-checks the slice: a
+   single-document verdict may only name a document the chunk lists.
    A bulk `scope` verdict is deliberately not slice-bound — its subject is the
    whole corpus, and the engine enumerates its members from the index.
 
@@ -52,7 +53,14 @@ On success prints a summary recomputed from the verdicts.
 import argparse
 import json
 import os
+import re
 import sys
+
+# `report.DIGEST`, mirrored: a unit is a sha256 of its content, so anything
+# else — a file:line, a paraphrase, a truncated digest — is refusable on sight.
+# The engine refuses it too (`finding-invalid-unit`); catching it here is the
+# whole point of a seam check where the verdict was produced.
+UNIT_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 CUT = "CUT"
 CONDENSE = "CONDENSE"
@@ -159,6 +167,14 @@ def check_one_document(where, verdict, code, errs):
         errs.append(f"{where}: must name at least one assertion unit — the "
                     f"unit digests `doclifecycle segment --repo . --path "
                     f"<path>` prints for that document")
+    else:
+        for unit in units:
+            if not UNIT_DIGEST.match(unit.strip()):
+                errs.append(f"{where}: {unit!r} is not an assertion unit — a "
+                            f"unit is the 64-character sha256 digest `segment` "
+                            f"prints, copied verbatim; a line number, a quote, "
+                            f"or a truncated digest names no content the "
+                            f"engine can bind an edit to")
 
     if verdict.get("sample") is not None:
         errs.append(f"{where}: is a judgment about one document, so a sample "
@@ -337,7 +353,20 @@ def load_manifest(path):
 
 
 def chunk_doc_paths(chunk):
-    return [d.get("path") for d in chunk.get("docs", []) if isinstance(d, dict)]
+    """The documents a chunk covers, from either planner's manifest.
+
+    plan-chunks.py writes `docs: [{"path", "lines", "hint"}]`; the engine's
+    `bloat-plan` writes `documents: [path]`. Both are legitimate work orders
+    for the same seam, and reading only one of them would silently empty the
+    slice — refusing every verdict in a chunk as "outside" it.
+    """
+    docs = chunk.get("docs")
+    if isinstance(docs, list):
+        return [d.get("path") for d in docs if isinstance(d, dict)]
+    documents = chunk.get("documents")
+    if isinstance(documents, list):
+        return [p for p in documents if isinstance(p, str)]
+    return []
 
 
 def chunk_shape_errors(data):

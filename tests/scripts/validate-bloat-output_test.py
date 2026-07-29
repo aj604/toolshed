@@ -25,8 +25,8 @@ SCRIPT = os.path.join(
     "scripts", "validate-bloat-output.py",
 )
 
-UNIT = "u-" + "a" * 8
-UNIT2 = "u-" + "b" * 8
+UNIT = "a" * 64          # a unit is the sha256 digest `segment` prints
+UNIT2 = "b" * 64
 
 
 def cut(**over):
@@ -192,7 +192,21 @@ class VerdictShape(unittest.TestCase):
 
     def test_units_required_and_nonempty(self):
         self.assert_fails([cut(units=[])], "unit")
-        self.assert_fails([cut(units="u-aaaaaaaa")], "unit")
+        self.assert_fails([cut(units=UNIT)], "unit")   # a string, not a list
+
+    def test_a_unit_must_be_a_sha256_digest(self):
+        # The likeliest worker error, and purely shape-visible: the engine
+        # refuses anything but 64 lowercase hex (finding-invalid-unit).
+        for bad in ("README.md:12-15", "the intro paragraph", UNIT[:16],
+                    UNIT.upper(), UNIT + "0"):
+            r = run(envelope([cut(units=[bad])]))
+            self.assertEqual(r.returncode, 1, f"{bad!r}: {r.stdout}{r.stderr}")
+            self.assertIn("digest", r.stderr)
+
+    def test_one_bad_unit_among_good_ones_is_named(self):
+        r = run(envelope([cut(units=[UNIT, "README.md:12"])]))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("README.md:12", r.stderr)
 
     def test_condense_requires_proposal(self):
         self.assert_fails([cut(verdict="CONDENSE")], "must carry the replacement")
@@ -399,6 +413,36 @@ class ChunkSeam(SeamFixture):
         r = self.check_m({"chunk": "c-zzz", "verdicts": []})
         self.assertEqual(r.returncode, 1)
         self.assertIn("not in the manifest", r.stderr)
+
+    def engine_manifest(self):
+        """`python3 -m doclifecycle bloat-plan`'s shape: bare path lists."""
+        path = os.path.join(self.tmp.name, "bloat-plan.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({
+                "status": "ok",
+                "schema_version": 1,
+                "index_digest": "c" * 64,
+                "digest": "d" * 64,
+                "chunks": [
+                    {"id": "c-aaa",
+                     "documents": ["README.md", "RUNBOOK.md"],
+                     "unit_count": 6},
+                ],
+            }, f)
+        return path
+
+    def test_engine_plan_manifest_slice_is_read(self):
+        # bloat-plan writes `documents: [path]` where plan-chunks.py writes
+        # `docs: [{path}]`; reading only one empties the slice and refuses
+        # every verdict in the chunk.
+        r = self.check(self.first_result(), "--manifest", self.engine_manifest())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_engine_plan_manifest_still_binds_the_slice(self):
+        r = self.check(self.first_result([cut(path="OTHER.md")]),
+                       "--manifest", self.engine_manifest())
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("outside this chunk's slice", r.stderr)
 
     def test_without_manifest_verdict_rules_still_apply(self):
         good = self.check(self.first_result())
