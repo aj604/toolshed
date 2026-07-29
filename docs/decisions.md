@@ -1,8 +1,196 @@
 # Decisions
 
-> As of 2026-07-28 — entries are dated and appended, newest first; a superseded decision stays
+> As of 2026-07-29 — entries are dated and appended, newest first; a superseded decision stays
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
+
+## 2026-07-29 — the auto-apply lane and a scheduled bloat cadence are descoped, not implied (#57)
+- Evidence: issue #73 ("Auto-apply policy for mechanical remedies") is `CLOSED` `COMPLETED`, closed by
+  PR #114 merging — but PR #114 delivered only the engine half: `policy.py`'s
+  `policy-eligibility`/`policy-mint` CLI commands and `approval.py`'s minter machinery (the doors the
+  2026-07-29 "policy provenance" entry below hardens). No shipped workflow (`doc-audit.yml`,
+  `doc-apply.yml`, `doc-sync-upgrade.yml`) invokes either command, and no repo — including this one —
+  configures a policy file for either to read. Nothing recorded that gap; closing #73 as completed
+  reads as "the lane runs," when what exists is a tested library nothing calls unattended.
+- Decided (the lane): the autonomous auto-apply lane is explicitly descoped rather than left to be
+  inferred from an absent workflow. Wiring it up — a scheduled or triggered job that calls
+  `policy-eligibility`/`policy-mint` and lands the result — is future work for a successor issue, not
+  a silent gap in what #73 claimed to deliver.
+- Decided (the cadence): the same applies to a scheduled bloat cadence. #77 removed `doc-bloat.yml`,
+  the only workflow that ever ran `detecting-doc-bloat` unattended, and nothing replaced it —
+  `doc-audit.yml` runs drift only. A recurring bloat sweep is not running today; this is recorded as a
+  descope rather than left implied by #77's removal alone.
+- Still binds: the mint-time/artifact-side policy-eligibility check and the bloat-audit seam described
+  in the 2026-07-29 entries below are real, tested library code — this entry is only about what
+  invokes either lane on a schedule, which today is nothing.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/policy.py,
+  plugins/doc-lifecycle/engine/doclifecycle/approval.py,
+  plugins/doc-lifecycle/engine/doclifecycle/cli.py
+
+## 2026-07-29 — both detecting skills move to the engine verdict contract; `POLICY` and `policy_scope` retire (#57)
+- Evidence: the 2026-07-27 entry below, "POLICY stays legacy pending skill migration (#77 follow-up)",
+  left `detecting-doc-bloat` on its own legacy report shape (seven verdicts, a bulk `POLICY` verdict,
+  hand-declared `policy_scope` directories) and `detecting-doc-drift` on a wrapped `{records, summary}`
+  shape no consumer took, both pending a migration to `doclifecycle`'s own verdict contract that #57's
+  review found still undone.
+- Decided (bloat): `detecting-doc-bloat` now emits `doclifecycle.bloat` verdicts and hands them to a
+  new `bloat-audit` CLI / `audit_bloat()` seam (verdicts in, a validated engine `Report` out, on
+  `plan_repository_chunks`'s composition-lives-in-the-library pattern). `POLICY` and `policy_scope`
+  retire together from `plan-chunks.py`, `validate-bloat-output.py`, `SKILL.md`, and the guide, because
+  bulk directory retirement finally has a working replacement: an enumerable-scope `RETIRE-DOC`
+  verdict the engine expands from the context index into one finding per member
+  (`bloat.SCOPE_VERDICTS`, `enumerate_scope`) — the successor the superseded entry below named and
+  left unbuilt.
+- Decided (drift): `detecting-doc-drift` moves to the per-unit verdicts shape
+  (`{schema_version, documents[]}`) the CI lane (`doc-audit.yml`) already used, retiring the legacy
+  wrapped shape no consumer took. `validate-drift-output.py` gains the engine's own repository-relative
+  source rule in preflight — a ported, differentially-tested `source_spelling_problem` (zero divergence
+  over 1013 spellings against the engine's own predicate) — so an ordinary bad path spelling in
+  `evidence.source` is refused before the run instead of silently costing a document's coverage once
+  it reaches the engine.
+- Decided (fixing-docs cites, not restates): `fixing-docs/SKILL.md` now points at the engine README's
+  "Approval sets" and "The applier" sections instead of restating the operation vocabulary, the remedy
+  table, per-op field sets, and preimage/postimage mechanics — the closed table gets one owner instead
+  of two.
+- Decided (the run surface follows): `doc-audit.yml` and `doc-apply.yml`'s model prompts, which had
+  drifted from the moved contract (the audit prompt told a model to omit verdict-only fields and to
+  classify every unit — both silently drop a document's coverage today; the apply prompt claimed "one
+  operation per approved remedy" and omitted the two completeness refusals from the 2026-07-29 entry
+  below on approval-set coverage), are reconciled to match. Prompt text and comments only — no
+  `run:`/permissions/`allowedTools` change.
+- Superseded: the 2026-07-27 entry below, "POLICY stays legacy pending skill migration (#77
+  follow-up)" — **marked superseded in place**, standing as the record of what was true then. Its
+  "Still binds" clause is discharged by this entry: `POLICY` and `policy_scope` retired from
+  `plan-chunks.py`, `validate-bloat-output.py`, `SKILL.md`, and the guide together, in the same change
+  that gave bulk directory retirement its working replacement.
+- Verified: the release gate re-ran clean at `PLUGIN_VERSION` 0.44.0 / `RULESET_VERSION` 7 — the
+  engine suite, every `tests/scripts/*_test.py` suite, `release-manifest.py`, `claude plugin
+  validate`, and the whitespace/JSON checks.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/bloat.py,
+  plugins/doc-lifecycle/engine/doclifecycle/cli.py,
+  plugins/doc-lifecycle/skills/detecting-doc-bloat/ (SKILL.md, output-contract.md,
+  references/{planning-artifacts,verdict-lenses}.md, scripts/{plan-chunks,validate-bloat-output}.py),
+  docs/guides/auditing-doc-bloat.md,
+  plugins/doc-lifecycle/skills/detecting-doc-drift/ (SKILL.md, output-contract.md,
+  scripts/validate-drift-output.py),
+  plugins/doc-lifecycle/skills/fixing-docs/SKILL.md,
+  .github/workflows/{doc-audit,doc-apply}.yml,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/{doc-audit,doc-apply}.yml,
+  tests/engine/{bloat,bloat_cli}_test.py,
+  tests/scripts/{plan-chunks,validate-bloat-output,validate-drift-output}_test.py
+
+## 2026-07-29 — interactive audit artifacts belong outside the work tree (#57)
+- Evidence: found by independent auditors executing both detecting loops end to end rather than
+  reading the skills — `detecting-doc-drift` and `detecting-doc-bloat` both instructed the interactive
+  executor to write `drift-plan.json`/`verdicts.json`/`drift-report.json` (and the bloat equivalents)
+  into the repo root. `fixing-docs`' `apply-plan` then refuses on the very first audit
+  (`apply-working-tree-not-confined`), and its own prescribed recovery livelocks: committing the
+  artifacts moves `base_commit` and stales the approval just minted (`approval-base-commit-changed`),
+  and re-running the audit re-dirties the tree. The CI lane had already solved this —
+  `doc-apply.yml` routes through `RUNNER_TEMP` — only the interactive path regressed.
+- Decided: both detecting skills write their artifacts to `${TMPDIR:-/tmp}/`, matching what the
+  automated lane already does. `fixing-docs`' placement rule widens from the approval set alone to the
+  whole artifact set it carries (plan, verdicts, report), and gains a refusals-table row for an
+  in-tree audit artifact: relocate it, never commit it.
+- Still binds (method, not mechanism): a green unit suite could not have found this — only running the
+  advertised interactive flow, start to finish, did. Recorded as a reason to keep doing that for this
+  class of loop.
+- Code: plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md,
+  plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md,
+  plugins/doc-lifecycle/skills/fixing-docs/SKILL.md
+
+## 2026-07-29 — planning lifecycle state is file-bound; a verdict reports it, never asserts it (#57)
+- Evidence: `bloat.py`'s `_status()` only enum-checked a DISTILL verdict's model-supplied `status`
+  field against `{"pending-implementation", "ready"}` — nothing tied it to the document itself, so a
+  model could label an in-progress plan `ready` and unlock DISTILL's widest remedy set on its own
+  say-so.
+- Decided (the marker is the authority): a planning document carries its own lifecycle state as a
+  `> Status: pending-implementation|ready` block-quote marker, found by segmentation exactly the way
+  `context.py`/`drift.py` already find the narrative `> As of` anchor — never a literal line-1 read.
+  Absent or malformed reads as `pending-implementation`, fail-safe, so flipping to `ready` requires a
+  human's git-approved edit to the file, not a model's claim about it.
+- Decided (the verdict reports, never asserts): `ContextIndex.lifecycle_status(path)` is the one
+  reader; `_status()` cross-checks a DISTILL verdict's claimed `status` against it and refuses a
+  mismatch as `bloat-status-not-file-bound`.
+- Decided (DISTILL against a non-planning document is refused): `_status()` guards on
+  `document.kind != "planning"` before the status-enum check, refusing with `bloat-distill-not-planning`
+  and naming the document's actual registered kind, rather than letting the mismatch reach the
+  status-enum check and blame a status of `None` that reads as a broken marker rather than a
+  wrong-kind verdict target.
+- Decided (this amends #57's comment): #57's distilled-decisions comment says a planning document
+  "carries lifecycle state" without saying where; this entry names the physical location.
+- Rejected: deriving status from code evidence instead of the marker. That conflates two different
+  facts — the grep evidence in a DISTILL record proves whether the marker is *current* (whether the
+  described implementation state still matches reality), not what the marker says; the marker is the
+  human claim being checked against that evidence, not a fact the evidence could stand in for.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/bloat.py,
+  plugins/doc-lifecycle/engine/doclifecycle/context.py, CONTEXT.md,
+  plugins/doc-lifecycle/skills/detecting-doc-bloat/references/planning-artifacts.md,
+  tests/engine/applier_test.py, tests/engine/bloat_test.py, tests/engine/context_test.py
+
+## 2026-07-29 — post-write confinement compares the diff to the plan's written paths, not the approval's whole scope (#57)
+- Evidence: reproduced end to end — the post-write confinement check compared the working-tree diff
+  only against the approval's whole mutation scope, never against this plan's actual operations. A
+  DISTILL record carrying a `destination` puts both the source and destination in scope, but its
+  create-document remedy writes only the destination — the source stays in scope but unwritten. A
+  concurrent, out-of-band edit to that unwritten source path was inside scope and rode into the diff
+  the run then certified as the approved change.
+- Decided: mirror the exact-path check the already-applied branch already makes —
+  `_unaccounted_problem(sorted(set(changed) - _written_paths(operations)))` — with the same rollback
+  on violation the scope-violation path already takes. Confinement is now against what this plan
+  actually wrote, a strict subset of what the approval scoped.
+- Verified: `tests/engine/applier_test.py` covers the reproduction — an approved-but-unplanned path
+  edited concurrently, previously certified clean, now refused and rolled back.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/applier.py, tests/engine/applier_test.py
+
+## 2026-07-29 — an approval set is the whole mandate; a plan may not silently under-cover it (#57)
+- Evidence: reproduced end to end — `_validate_plan` checked every plan operation against the record
+  it claims but never the reverse, so a plan for a two-record approval (A+B) could execute only A's
+  remedy while the PR reported both applied, and a MERGE-DOC record's remedy (move-with-provenance +
+  retire-document) could be satisfied by either leg alone, landing a retire-only reproduction that
+  destroyed the source document and moved nothing.
+- Decided: `_completeness_problems` adds two refusals — `plan-record-not-executed` (an approved record
+  with no usable operation in the plan) and `plan-remedy-incomplete` (a composite record missing a
+  required leg) — checked against a new `REQUIRED_REMEDY_OPERATIONS` table declaring MERGE-DOC's two
+  legs (move-with-provenance, retire-document) both required. DISTILL is deliberately exempt: its
+  remedy is a single create-or-retire operation, never a composite one.
+- Decided (a pre-existing bug found en route): landing the completeness check exposed that the blanket
+  whole-document conflict rule refused every valid both-legs MERGE-DOC plan outright — a retired
+  document tolerated no other edit, including its own paired move. The move+retire conflict exemption
+  in `_conflict_problems` was scoped only by op-type and path, so an unrelated EXTRACT-AND-MOVE and
+  RETIRE-DOC from two different approved records targeting the same document could pass the same
+  exemption meant for one MERGE-DOC record's own paired legs. Scoped the exemption to a single record
+  (`RECORD_REMEDIES` makes MERGE-DOC the only code whose remedy is both ops, so a same-record check is
+  equivalent to, and cheaper than, re-deriving the record's code).
+- Verified: `tests/engine/applier_test.py` covers both new refusals, the cross-record regression (two
+  records, one shared path, wrong exemption applied), and MERGE-DOC's own paired legs plus a stray
+  third operation on the source path.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/applier.py, tests/engine/applier_test.py
+
+## 2026-07-29 — policy provenance is checked on the artifact, not only at the producer (#57)
+- Evidence: reproduced end to end — the generic `mint-approval --minter-kind policy` minted an
+  approval set selecting a bloat CUT record, `validate-approval` passed it clean, and the applier
+  executed it: a policy-branded CUT minted, validated, and deleted the passage. The restricted
+  `policy-mint` door (`policy.py`) already refused this selection; the generic door and the artifact
+  itself did not.
+- Decided: the check now runs at mint *and* in `validate_approval_set`'s unconditional structural
+  layer (`approval-policy-ineligible-record`), because an approval set is an untracked file and a
+  defense living only in the producer is not a defense — the same argument the file already makes for
+  `approval-report-not-approvable` and `approval-scope-not-derived`. `approval.py`'s
+  `POLICY_NEVER_ELIGIBLE_CODES` is now the single owner of the six bloat verdict codes (CUT, CONDENSE,
+  EXTRACT-AND-MOVE, MERGE-DOC, RETIRE-DOC, DISTILL) a policy minter may never approve; `policy.py`'s
+  `NEVER_ELIGIBLE_CODES` becomes an alias so existing callers keep working. A hand-edited `minter`
+  field on an otherwise-legitimate approval set is refused too, since the check reads the artifact's
+  own fields rather than trusting how it was produced.
+- Still binds: the release-gate criterion "policy provably cannot mint for a bloat finding" is now
+  proven against both doors — the restricted `policy-mint` CLI and a hand-built artifact bearing
+  `minter.kind: "policy"` alike — where before it was proven only against the door most callers use.
+- Verified: `tests/engine/approval_test.py`, `tests/engine/approval_cli_test.py`, and
+  `tests/engine/policy_test.py` cover the mint-time refusal, the artifact-side structural refusal
+  against a hand-edited minter field, and the alias.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/approval.py,
+  plugins/doc-lifecycle/engine/doclifecycle/policy.py, tests/engine/approval_test.py,
+  tests/engine/approval_cli_test.py, tests/engine/policy_test.py
 
 ## 2026-07-28 — a STALE fix preserves a soft-wrapped unit's physical shape (#126)
 - Evidence: DRIFT-021 and DRIFT-022 in
@@ -572,10 +760,12 @@
   reads as "make all four agree" on its face, but the engine's bulk-scope mechanism was never
   wired into `plan-chunks.py`, so agreement-by-deletion would ship a real capability loss, not a
   documentation fix.
-- Still binds: when the bloat skill migrates to `doclifecycle.bloat` (not yet scheduled), `POLICY`
-  and `policy_scope` retire from `plan-chunks.py`, `validate-bloat-output.py`, `SKILL.md`, and the
-  guide together, in the same change that gives the skill a working replacement for bulk directory
-  retirement.
+- Still binds — **superseded by the 2026-07-29 entry "both detecting skills move to the engine
+  verdict contract; `POLICY` and `policy_scope` retire (#57)" above, which discharged it**: when the
+  bloat skill migrates to `doclifecycle.bloat` (not yet scheduled), `POLICY` and `policy_scope` retire
+  from `plan-chunks.py`, `validate-bloat-output.py`, `SKILL.md`, and the guide together, in the same
+  change that gives the skill a working replacement for bulk directory retirement. Left standing as
+  the record of what was true then.
 - Code: `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`,
   `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py`,
   `docs/guides/auditing-doc-bloat.md`
