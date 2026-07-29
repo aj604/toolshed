@@ -33,7 +33,7 @@ applier — the only component that writes.
 | `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()`, `worktree_changes()`, `head_bytes()` — everything read from git |
 | `doclifecycle/cache.py` | `cache_key()`, `put()`, `get()` — the lineage-keyed cache and its payload revalidation |
 | `doclifecycle/results.py` | `Problem`, `Invalid`, the five result states, the `ok`/`invalid` status strings |
-| `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, the canonical JSON form digests are taken over |
+| `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, `load_strict_json()` — the canonical JSON form digests are taken over, and the one strict-JSON reader `load_report()`, `load_edit_plan()`, `load_approval_payload()`, and `load_approval_set()` each call with their own problem codes |
 | `doclifecycle/cli.py`, `__main__.py`, `doc-lifecycle.py` | argv parsing and exit codes only |
 
 `__init__.py` holds the three versions lineage pins: `ARTIFACT_SCHEMA_VERSION` (the shape of

@@ -44,8 +44,6 @@ one external program in the whole flow is git — run read-only, behind
 module.
 """
 
-import hashlib
-import json
 import os
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -56,7 +54,7 @@ from .bloat import (
     CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC,
     residue_destination_ineligibility,
 )
-from .digest import sha256_canonical
+from .digest import load_strict_json, sha256_bytes, sha256_canonical
 from .drift import CODE_ANCHOR_STALE, VERDICT_STALE, VERDICT_UNVERIFIABLE
 from .inventory import DEFAULT_REGISTRY_PATH, load_registry
 from .paths import DECLARABLE_TARGET_CLASSES, write_target_problem
@@ -219,45 +217,17 @@ class ApplyResult:
         return payload
 
 
-def _sha256(data):
-    return hashlib.sha256(data).hexdigest()
-
-
-def _reject_constant(name):
-    raise ValueError(
-        f"{name} is not JSON — an edit plan must survive a strict parser and "
-        f"its own digest, which are taken over the same encoding"
-    )
-
-
-def _read_payload(path, prefix, noun):
+def _read_payload(path, prefix):
     """A JSON payload off disk, or `Invalid` with `<prefix>-*` codes."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError as exc:
-        return Invalid((Problem(
-            code=f"{prefix}-unreadable",
-            message=f"cannot read the {noun} at {path}: {exc.strerror}",
-            location=path,
-        ),))
-    except UnicodeDecodeError as exc:
-        return Invalid((Problem(
-            code=f"{prefix}-unreadable",
-            message=(
-                f"the {noun} at {path} is not valid UTF-8 ({exc.reason} at "
-                f"byte {exc.start}) — re-encode it; JSON is a text format"
-            ),
-            location=path,
-        ),))
-    try:
-        return json.loads(text, parse_constant=_reject_constant)
-    except (json.JSONDecodeError, ValueError, RecursionError) as exc:
-        return Invalid((Problem(
-            code=f"{prefix}-unparseable",
-            message=f"the {noun} is not valid JSON: {exc}",
-            location=path,
-        ),))
+    payload, problem = load_strict_json(
+        path,
+        unreadable_code=f"{prefix}-unreadable",
+        unparseable_code=f"{prefix}-unparseable",
+        nesting_code=f"{prefix}-nesting-too-deep",
+    )
+    if problem is not None:
+        return Invalid((problem,))
+    return payload
 
 
 def load_edit_plan(path):
@@ -266,7 +236,7 @@ def load_edit_plan(path):
     Reading only: validation needs the approval set the plan binds to, so it
     happens inside `apply_edit_plan`, where that authority is in hand.
     """
-    return _read_payload(path, "plan", "edit plan")
+    return _read_payload(path, "plan")
 
 
 def load_approval_payload(path):
@@ -276,7 +246,7 @@ def load_approval_payload(path):
     against the report and the repository, so a caller cannot accidentally
     hand it a weaker (structural-only) verdict.
     """
-    return _read_payload(path, "approval", "approval set")
+    return _read_payload(path, "approval")
 
 
 def _span_position(operation):
@@ -966,7 +936,7 @@ def _already_applied(repo_root, operations, postimages):
             continue
         if data is None or data.decode("utf-8", "replace") != expected:
             return False
-        if _sha256(data) != digest:
+        if sha256_bytes(data) != digest:
             return False
     return True
 
@@ -1385,7 +1355,7 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
         text = new_texts[path]
         if digest is None:
             continue
-        if _sha256(text.encode("utf-8")) != digest:
+        if sha256_bytes(text.encode("utf-8")) != digest:
             problems.append(Problem(
                 code="apply-postimage-mismatch",
                 message=(
