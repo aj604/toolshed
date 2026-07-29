@@ -38,14 +38,28 @@ the dispatcher's job, not the planner's.
 
 Usage:
     plan-chunks.py [--config PATH] [--root DIR] [--out FILE] [--results-dir DIR]
-    plan-chunks.py --emit-prompt ID --manifest FILE   # print dispatch prompt
-    plan-chunks.py --emit-turns ID --manifest FILE    # print turn budget
+    plan-chunks.py --emit-prompt ID --manifest FILE --results-dir DIR  # dispatch prompt
+    plan-chunks.py --emit-turns ID --manifest FILE     # print turn budget
 
 --emit-prompt renders the full dispatch prompt for one chunk — the doc list
-verbatim, where the unit digests a verdict names come from, the output path
-chunks/<id>.json, and the definition of done — so prompt templating lives
-here, unit-tested, never in a caller's YAML or prose. The executor is handed
-its slice; it never opens the manifest.
+verbatim, where the unit digests a verdict names come from, the output path,
+and the definition of done — so prompt templating lives here, unit-tested,
+never in a caller's YAML or prose. The output path is always absolute:
+`--results-dir`'s value, resolved with `os.path.abspath` and joined with the
+chunk id, so the rendered prompt tells the executor to write outside the work
+tree (the confinement rule every other audit artifact already follows — see
+detecting-doc-bloat/SKILL.md) rather than the bare `chunks/<id>.json` a
+work-tree-rooted executor would resolve into the tree itself. The executor is
+handed its slice; it never opens the manifest.
+
+Both `--emit-prompt` and `--emit-turns` accept a manifest from either
+planner: this script's own (`{"docs": [{"path","lines","hint"}, ...]}` per
+chunk) or the engine's `bloat-plan` (`{"documents": [<path>, ...]}`, no
+per-doc lines/hint and no per-chunk `turns`). `--emit-prompt` renders
+whichever fields a chunk's dialect actually carries; `--emit-turns` returns
+the stamped `turns` when present, the floor for a pre-`turns` manifest of
+this script's own dialect (`docs` present), and fails loudly (exit 2) for a
+`bloat-plan` manifest, which was never sized by this script's turn formula.
 
 Output (plan mode): manifest JSON {"schema": 1, "chunks": [...], "pending":
 [ids]} to --out (stdout if omitted). A chunk is
@@ -345,10 +359,11 @@ the skill. Every verdict about one document names the assertion units it
 covers: read them with `python3 -m doclifecycle segment --repo . --path
 <path>` and copy the unit digests verbatim — never invent, abbreviate, or
 paraphrase one. Write the chunk result object
-{{"chunk": "{id}", "verdicts": [...]}} to chunks/{id}.json — an empty verdicts
-array if nothing is bloated. Done means exactly that file, in the chunk-result
-shape the skill's contract defines; then stop. Orchestration, retries, and
-assembly belong to whoever dispatched you.
+{{"chunk": "{id}", "verdicts": [...]}} to {out_path} — an empty verdicts
+array if nothing is bloated. That path is outside the work tree; do not
+write it, or anything else, into the repository. Done means exactly that
+file, in the chunk-result shape the skill's contract defines; then stop.
+Orchestration, retries, and assembly belong to whoever dispatched you.
 """
 
 
@@ -379,12 +394,59 @@ def find_chunk(man, cid):
     die(f"error: chunk {cid} not found in manifest")
 
 
-def emit_prompt(chunk):
+def chunk_doc_lines(chunk):
+    """Render each document's dispatch-prompt line, for either planner's manifest.
+
+    This script's own manifest carries "docs": [{"path", "lines", "hint"}];
+    the engine's `bloat-plan` carries "documents": [<path>, ...] — a bare
+    path, no per-doc lines or hint, because bloat-plan sizes chunks by
+    assertion-unit count, not lines, and does not hint doc-kind at all.
+    validate-bloat-output.py's chunk_doc_paths() reads the same two dialects
+    for the same reason: both are legitimate work orders for this seam, and
+    reading only one would silently narrow the rendered scope. Render
+    whichever fields the chunk actually has rather than assume the first
+    sender's shape.
+    """
+    docs = chunk.get("docs")
+    if isinstance(docs, list):
+        return [f"  - {d['path']} ({d['lines']} lines, hint: {d['hint']})"
+                for d in docs]
+    documents = chunk.get("documents")
+    if isinstance(documents, list):
+        return [f"  - {p}" for p in documents]
+    die(f"error: chunk {chunk.get('id')!r} carries neither 'docs' nor "
+        "'documents' — not a recognized chunk-manifest dialect")
+
+
+def emit_prompt(chunk, results_dir):
+    out_path = os.path.join(os.path.abspath(results_dir), chunk["id"] + ".json")
     return SWEEP_PROMPT.format(
         id=chunk["id"],
-        doc_lines="\n".join(
-            f"  - {d['path']} ({d['lines']} lines, hint: {d['hint']})"
-            for d in chunk["docs"]))
+        doc_lines="\n".join(chunk_doc_lines(chunk)),
+        out_path=out_path)
+
+
+def emit_turns(chunk):
+    """This chunk's model-invocation turn budget, for either planner's manifest.
+
+    This script's own manifest stamps "turns" on every chunk it plans; a
+    v0.7.0 manifest of that same dialect ("docs" present) predates the field,
+    and the floor is the safe default there. The engine's `bloat-plan`
+    manifest ("documents", no "docs") never carries "turns" at all: it sizes
+    chunks by assertion-unit count, an axis this script's per-doc
+    lines/hint formula (turn_budget(), above) was never fit to, so guessing
+    the floor for it would be silent, not safe. Fail loudly instead.
+    """
+    if "turns" in chunk:
+        return chunk["turns"]
+    if isinstance(chunk.get("docs"), list):
+        # v0.7.0 manifests of this script's own dialect predate 'turns'.
+        return TURNS_FLOOR
+    die(f"error: chunk {chunk.get('id')!r} carries no 'turns' budget and is "
+        "not this script's own manifest dialect (no 'docs') — it looks like "
+        "an engine bloat-plan manifest, which this script's turn formula was "
+        "never fit to (bloat-plan sizes chunks by unit_count, not lines); "
+        "pass --max-turns explicitly for a bloat-plan-dispatched chunk")
 
 
 def main():
@@ -394,10 +456,14 @@ def main():
     ap.add_argument("--root", default=os.getcwd(),
                     help="repo root to enumerate (default: cwd)")
     ap.add_argument("--out", help="write the manifest here (default: stdout)")
-    ap.add_argument("--results-dir", help="existing chunk-result dir; chunks "
-                    "with a <id>.json there stay in 'chunks' but leave 'pending'")
+    ap.add_argument("--results-dir", help="in plan mode: existing chunk-result "
+                    "dir; chunks with a <id>.json there stay in 'chunks' but "
+                    "leave 'pending'. With --emit-prompt: required — the "
+                    "out-of-work-tree dir the rendered prompt tells the "
+                    "executor to write its result into")
     ap.add_argument("--emit-prompt", metavar="ID",
-                    help="print the dispatch prompt for one manifest chunk")
+                    help="print the dispatch prompt for one manifest chunk "
+                    "(requires --results-dir)")
     ap.add_argument("--emit-turns", metavar="ID",
                     help="print the turn budget for one manifest chunk")
     ap.add_argument("--manifest", help="manifest JSON for --emit-prompt/"
@@ -408,11 +474,15 @@ def main():
         if not args.manifest:
             die("error: --emit-prompt/--emit-turns require --manifest")
         man = load_manifest(args.manifest)
+        chunk = find_chunk(man, args.emit_prompt or args.emit_turns)
         if args.emit_prompt:
-            print(emit_prompt(find_chunk(man, args.emit_prompt)), end="")
+            if not args.results_dir:
+                die("error: --emit-prompt requires --results-dir — the "
+                    "out-of-work-tree directory the rendered prompt tells "
+                    "the executor to write its result into")
+            print(emit_prompt(chunk, args.results_dir), end="")
         else:
-            # v0.7.0 manifests predate 'turns'; the floor is the safe default.
-            print(find_chunk(man, args.emit_turns).get("turns", TURNS_FLOOR))
+            print(emit_turns(chunk))
         return 0
 
     config = args.config or os.path.join(

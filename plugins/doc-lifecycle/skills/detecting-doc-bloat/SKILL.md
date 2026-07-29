@@ -67,17 +67,26 @@ artifact.
    dispatching a sweep with it, or every chunk's model invocation is spent
    before `bloat-audit` refuses at the end. Either
    way `bloat-audit` re-derives every fact from the registry, so a chunk plan
-   is a work order, never an authority.
+   is a work order, never an authority. `plan-chunks.py --emit-prompt`/
+   `--emit-turns` read a `bloat-plan` manifest too (its chunks carry
+   `documents`, bare paths, rather than `plan-chunks.py`'s own per-doc
+   `docs: [{"path","lines","hint"}]`) — the dispatch prompt renders whichever
+   fields a chunk's dialect supplies; the turn budget falls back to the floor
+   only for `plan-chunks.py`'s own dialect; a `bloat-plan` chunk has no
+   `turns` to fall back from and the script says so rather than guessing.
 2. **Judge each chunk.** Small scope (≲2 chunks): sweep inline with the
    reference rules. Large scope: never sweep inline — the manifest is your
    work order as orchestrator (do not enumerate or read the corpus yourself),
    and you dispatch **one subagent per pending chunk, in concurrent waves of
    several, never serially** (chunks are independent; a serial walk of a
    bootstrap-scale manifest is hours of avoidable wall-clock). Render each
-   dispatch with `--emit-prompt` and point the subagent at (i)
-   `output-contract.md` and (ii) only the reference file(s) its chunk's kinds
-   need. Each subagent writes `{"chunk": "<id>", "verdicts": [...]}` to
-   `chunks/<id>.json`.
+   dispatch with `--emit-prompt` (which requires `--results-dir`, the same
+   out-of-work-tree directory `plan-chunks.py` was planned with — the
+   rendered prompt names an absolute path under it, never a bare relative
+   one) and point the subagent at (i) `output-contract.md` and (ii) only the
+   reference file(s) its chunk's kinds need. Each subagent writes
+   `{"chunk": "<id>", "verdicts": [...]}` to the out-of-tree path the prompt
+   names, e.g. `<dir>/chunks/<id>.json` — never a path inside the repository.
 3. **Name the content.** A verdict about one document names the **unit
    digests** it covers, from `python3 -m doclifecycle segment --repo . --path
    <path>` — copied verbatim, never invented or abbreviated. A bulk
@@ -122,9 +131,12 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py 
   --out <dir>/manifest.json --results-dir <dir>/chunks
 
 # render one chunk's dispatch prompt / turn budget (slice verbatim — the
-# executor never opens the manifest)
+# executor never opens the manifest). --results-dir is required for
+# --emit-prompt: the rendered prompt names an absolute path under it as the
+# write destination, not the bare "chunks/<id>.json" a work-tree-rooted
+# executor would resolve straight into the repository.
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
-  --emit-prompt <id> --manifest <dir>/manifest.json
+  --emit-prompt <id> --manifest <dir>/manifest.json --results-dir <dir>/chunks
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
   --emit-turns <id> --manifest <dir>/manifest.json
 

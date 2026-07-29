@@ -37,6 +37,22 @@ approval set's paths, so an audit artifact sitting in the tree reads as an unacc
 change and the apply refuses (`apply-working-tree-not-confined`). The steps below reuse
 that same destination; only the filename changes per artifact.
 
+**Exception — the scheduled headless audit lane (`doc-audit.yml`).** That job's checkout is
+throwaway (`persist-credentials: false`, no write-capable credential reaches it at all) and
+`fixing-docs`' applier never runs against it — the job ends and the checkout is discarded
+before any apply could see it, so a stray artifact there can never trip
+`apply-working-tree-not-confined`. That workflow's own deterministic steps already write
+`drift-plan.json` and `drift-report.json` to the repository root outside the model's turn, and
+its model step's prompt is this lane's own restated copy of the output contract (a headless run
+states its own contract rather than depending on a plugin version resolved at run time — see
+that prompt's comment) — it names `verdicts.json` in the repository root to match. When this
+skill is invoked from `doc-audit.yml`, follow *that prompt's* file destination, not the
+`${TMPDIR:-/tmp}/` rule above: the workflow's own instructions are authoritative for that lane,
+and its deterministic steps read `verdicts.json` from the root. Every other invocation —
+interactive, local, or a future lane whose checkout an apply might run against — keeps the
+out-of-tree rule above; it exists to protect exactly the checkout an apply could later touch,
+which this one structurally is not.
+
 1. **Plan the scope.** `python3 -m doclifecycle drift-plan --repo . --mode full >
    "${TMPDIR:-/tmp}/drift-plan.json"` (diff-scoped: `--mode incremental --since <commit>`). Deterministic — no
    model — so the scope is re-derivable rather than trusted. Each `documents[]` entry carries a
@@ -82,11 +98,21 @@ that same destination; only the filename changes per artifact.
    refuses the whole run instead. The validator checks *shape*, not whether a verdict is *right*; that judgment
    is still yours, and `drift-audit` is the authority on everything the shape check cannot see
    (whether an ordinal names a real unit, whether a multi-line `fix` owns its span).
-6. **Run the audit.** `python3 -m doclifecycle drift-audit --repo . --mode full --verdicts
-   "${TMPDIR:-/tmp}/verdicts.json" > "${TMPDIR:-/tmp}/drift-report.json"` writes the validated report: your STALE and UNVERIFIABLE
-   judgments as records with digests, your VERIFIED ones as coverage, and the narrative
-   documents' anchors checked engine-side. Exit 0 is a complete report, 4 partial (something
-   was not examined), 1 refused (e.g. a document the plan never declared).
+6. **Run the audit.** The run's evidence boundary is **empty unless you declare it**: a
+   verdict citing `evidence.command` is refused (`drift-evidence-outside-boundary`) — which
+   discards that *whole document's* verdicts, STALE and UNVERIFIABLE records included —
+   unless the tool it names was passed to `--evidence-command`. Before running, check for
+   `.doc-lifecycle/evidence-tools.json` (`scheduling-doc-sync` owns the file; a repo without
+   it, or with `{"tools": []}`, declares none): pass one `--evidence-command <tool>` per
+   name it lists. No declared tools means the run is tool-free — cite `source` only, never
+   `command`; a claim only a command could settle becomes `UNVERIFIABLE`, with what you tried
+   in `evidence.observed`, not a `command` citation nothing declared permits.
+   `python3 -m doclifecycle drift-audit --repo . --mode full --verdicts
+   "${TMPDIR:-/tmp}/verdicts.json" [--evidence-command <tool> ...] >
+   "${TMPDIR:-/tmp}/drift-report.json"` writes the validated report: your STALE and
+   UNVERIFIABLE judgments as records with digests, your VERIFIED ones as coverage, and the
+   narrative documents' anchors checked engine-side. Exit 0 is a complete report, 4 partial
+   (something was not examined), 1 refused (e.g. a document the plan never declared).
 
 ### Verification tiers + escalation rule
 
@@ -95,6 +121,11 @@ that same destination; only the filename changes per artifact.
 | 1 STATIC | seconds | grep/glob: path/symbol exists, command exists in Makefile/package.json, link resolves | renames, moves, deletions |
 | 2 SHALLOW | moderate | read the cited line; run safe `--help`/`--version`/dry-run | changed flags, values, signatures |
 | 3 DEEP | expensive | read implementing code; run the documented workflow where safe | behavior drift |
+
+Running a Tier 2 `--help`/`--version`/dry-run only earns a `command` citation when that
+tool is declared per step 6 above; against an undeclared or tool-free run it is still a
+legitimate read, but the verdict it settles cites `source` (or, if nothing repository-side
+settles it either, stays `UNVERIFIABLE`) rather than a `command` the audit would refuse.
 
 **Every claim starts at Tier 1.** Escalate a claim only when (a) Tier 1 flags suspicion,
 (b) the claim's subject is in the diff (diff-scoped mode), or (c) a deep audit was
@@ -213,3 +244,7 @@ unit citing a command, a `non-assertive` unit, and a `failed` document entry.
   not what it contains. Open the target; assert only what it shows.
 - Evidence that tells a story — prior fixes, what re-staled the line, pasted command output →
   one line, pointer + fact. History lives in git; the evidence proves, it doesn't narrate.
+- Citing `evidence.command` without first declaring it to `drift-audit` — the boundary is
+  empty by default, so this discards the whole document's verdicts, not just the one citation.
+  Check `.doc-lifecycle/evidence-tools.json` and pass `--evidence-command` per step 6 before
+  writing a single `command` citation, or use `source` instead.

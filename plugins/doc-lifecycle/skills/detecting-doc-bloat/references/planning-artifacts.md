@@ -81,7 +81,9 @@ exactly one `DISTILL` verdict:
 In diff-scoped runs, **a landing planning artifact is not an objection** — a
 PR that adds a design doc for unbuilt code is *correct*; emit
 `DISTILL pending-implementation` for it, not a complaint. Every planning
-artifact in scope yields exactly one `DISTILL` verdict.
+artifact judged individually this way yields exactly one `DISTILL` verdict —
+except a swarm of ephemeral artifacts, next section: that class yields one
+bulk `RETIRE-DOC` over a `scope`, never one `DISTILL` walk per file.
 
 ## A swarm of ephemeral artifacts: one scope, never N walks
 

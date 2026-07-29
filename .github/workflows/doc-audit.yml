@@ -102,7 +102,13 @@ jobs:
       # this lane. The prompt still spells the shape out in full for the same reason every
       # other terminal state of this lane states itself: a headless run states its own output
       # contract rather than depending on a plugin version resolved at run time, so a reader of
-      # the log can see what was asked for without resolving the skill that was loaded.
+      # the log can see what was asked for without resolving the skill that was loaded. The
+      # prompt below tells the model to write verdicts.json in the repository root — that is a
+      # deliberate exception to the skill's own "every artifact goes to ${TMPDIR:-/tmp}/, never
+      # the work tree" rule (detecting-doc-drift/SKILL.md's "The audit" section documents the
+      # carve-out and why: this checkout is throwaway and no apply ever runs against it, unlike
+      # the interactive sessions that rule protects). The step below that runs `drift-audit`
+      # reads verdicts.json from the same root path, so the two must keep agreeing.
       - name: Audit documentation drift (headless, full corpus)
         if: steps.plan.outcome == 'success'
         id: model
