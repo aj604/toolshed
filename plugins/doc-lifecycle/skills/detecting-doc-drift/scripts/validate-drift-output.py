@@ -29,6 +29,7 @@ rely on a hand-counted one.
 import json
 import re
 import sys
+import unicodedata
 
 ASSERTION_CLASSES = ("factual", "normative", "rationale", "non-assertive")
 # Only `factual` owes a verdict; `non-assertive` prose may not carry one.
@@ -77,6 +78,69 @@ def one_line(v):
         and v.strip() != ""
         and not any(c in v for c in "\n\r\x00")
     )
+
+
+def is_control(char):
+    """Control and format characters, including the invisible reordering ones.
+
+    U+202E and friends are category Cf: they render a filename as something
+    other than what it is, which is the whole trick.
+    """
+    return unicodedata.category(char) in ("Cc", "Cf", "Cs", "Co", "Cn")
+
+
+def source_spelling_problem(path):
+    """Why `path` is not a canonical repository-relative spelling, or None.
+
+    A faithful port of the engine's `paths.repository_relative_problem`
+    (`doclifecycle/paths.py`), which `drift.py` applies to every
+    `evidence.source`. Ported rather than imported so this script stays
+    standalone and dependency-free — `paths.py` is the rule's owner, and this
+    copy exists only to reach the same refusal a second earlier. The order is
+    the engine's: the most specific diagnosis wins, so a tab reads as a control
+    character rather than as whitespace, and `..` as traversal rather than as a
+    non-canonical component.
+
+    Existence is deliberately not checked, there as here: a pointer at a file a
+    commit deleted is exactly what a STALE finding reports.
+    """
+    if not isinstance(path, str) or path.strip() == "":
+        return "is empty or blank — a path names the file that settled the claim"
+    bad = next((c for c in path if is_control(c)), None)
+    if bad is not None:
+        return (f"contains the control character U+{ord(bad):04X} — a path is "
+                f"plain printable text, so it reads the same to a shell, to "
+                f"git, and to a person")
+    if path.startswith("/") or path.startswith("~"):
+        return ("is absolute — name the file repository-relative, so the same "
+                "verdict means the same file in every checkout")
+    if len(path) >= 2 and path[1] == ":" and path[0].isascii() and path[0].isalpha():
+        return ("carries a drive letter — name the file repository-relative, so "
+                "the same verdict means the same file in every checkout")
+    if "\\" in path:
+        return ("uses '\\' as a separator — repository paths use '/', and a "
+                "backslash is a literal filename character on posix")
+    bad = next((c for c in path if c.isspace() or unicodedata.category(c) == "Zs"),
+               None)
+    if bad is not None:
+        return (f"contains whitespace (U+{ord(bad):04X}) — whitespace makes a "
+                f"path ambiguous to quote and impossible to distinguish by eye")
+    if unicodedata.normalize("NFC", path) != path:
+        return ("is not in Unicode NFC form — two spellings that normalize "
+                "together would name one file under two identities; use the "
+                "composed form")
+    components = path.split("/")
+    if ".." in components:
+        return ("traverses with '..' — a repository-relative path names a "
+                "location inside the repository and never walks out of one")
+    if any(c in ("", ".") for c in components):
+        return ("is not canonical — drop './', '//', and any trailing '/' so "
+                "one file has exactly one spelling")
+    bad = next((c for c in components if c.startswith("-")), None)
+    if bad is not None:
+        return (f"has a component starting with '-' ({bad!r}) — such a path is "
+                f"read as an option by the tools that would act on it")
+    return None
 
 
 def load(src):
@@ -155,11 +219,17 @@ def validate_evidence(raw, verdict, where, errs):
             )
         return
 
-    if raw.get("source") is not None and not one_line(raw["source"]):
-        errs.append(
-            f"{where}: evidence.source must be a repository-relative path to "
-            f"the file that settled the claim"
-        )
+    if raw.get("source") is not None:
+        # The engine runs this same predicate on every source and drops the
+        # whole document when it fails, so a spelling it refuses must not pass
+        # here — that gap is what this pre-flight exists to close.
+        fault = source_spelling_problem(raw["source"])
+        if fault:
+            errs.append(
+                f"{where}: evidence.source must be a repository-relative path "
+                f"to the file that settled the claim, and {raw['source']!r} "
+                f"{fault}"
+            )
     if line is not None and (not real_int(line) or line < 1):
         errs.append(f"{where}: evidence.line must be a line number counted from 1")
 
