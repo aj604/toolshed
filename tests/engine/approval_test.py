@@ -88,6 +88,7 @@ FILES = {
 }
 
 HUMAN = Minter(kind="human", id="avery@example.com")
+POLICY = Minter(kind="policy", id="nightly-policy")
 
 
 def codes(result):
@@ -377,6 +378,52 @@ class MintRefusals(ApprovalTestCase):
     def test_minting_takes_a_validated_report(self):
         with self.assertRaises(TypeError):
             self.mint({"status": "findings"}, ["a" * 64])
+
+
+class PolicyBrandEligibility(ApprovalTestCase):
+    """A policy-branded approval set may never select a bloat record.
+
+    The restricted policy-mint door (`policy.mint_policy_approval_set`)
+    already refuses this; these tests close the generic door
+    (`mint_approval_set` itself, reachable by any caller) and the artifact
+    (a hand-edited minter field validation must catch on its own) — issue
+    #57 review, P1.
+    """
+
+    def test_generic_mint_refuses_policy_brand_on_bloat_record(self):
+        unit = self.units(self.repo, DOC_A)[0]
+        cut = self.finding("R-1", "CUT", DOC_A, [unit])
+
+        result = self.mint(self.report([cut]), [cut["digest"]], minter=POLICY)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertIn("approval-policy-ineligible-record",
+                      [p.code for p in result.problems])
+
+    def test_validate_refuses_hand_forged_policy_brand(self):
+        # Mint legitimately as a human, then rewrite the minter field on the
+        # artifact — the hand-edit a producer-side check cannot see.
+        unit = self.units(self.repo, DOC_A)[0]
+        cut = self.finding("R-1", "CUT", DOC_A, [unit])
+        approval = self.mint(self.report([cut]), [cut["digest"]])
+        self.assertIsInstance(approval, ApprovalSet, approval)
+
+        payload = approval.to_dict()
+        payload["minter"] = {"kind": "policy", "id": "forged-policy"}
+
+        result = validate_approval_set(payload)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertIn("approval-policy-ineligible-record",
+                      [p.code for p in result.problems])
+
+    def test_policy_brand_on_drift_stale_record_still_mints(self):
+        # The honest path stays open (honest-path probe): STALE is eligible.
+        one, _ = self.two_findings()
+
+        result = self.mint(self.report([one]), [one["digest"]], minter=POLICY)
+
+        self.assertNotIsInstance(result, Invalid, result)
 
 
 class ReconciledSelection(ApprovalTestCase):

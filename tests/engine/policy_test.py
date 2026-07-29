@@ -367,6 +367,21 @@ class WhatAPolicyMayNeverMint(PolicyTestCase):
     def test_a_bloat_finding_produces_no_approval_set(self):
         self.assertNotIsInstance(self.mint([self.bloat()]), ApprovalSet)
 
+    def test_the_generic_minter_refuses_a_bloat_record_too(self):
+        # The release-gate criterion — "provably cannot mint for a bloat
+        # finding" — has to hold against both doors: the restricted
+        # policy-mint door above, and the generic `mint_approval_set` any
+        # caller can reach directly with a policy `Minter`.
+        record = self.bloat()
+
+        result = approval_mod.mint_approval_set(
+            self.report([record]), [record["digest"]], repo_root=self.repo,
+            minter=approval_mod.Minter(kind=MINTER_POLICY, id=POLICY_ID),
+        )
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertIn("approval-policy-ineligible-record", codes(result))
+
     def test_the_never_eligible_codes_are_every_bloat_operation(self):
         self.assertEqual(
             set(NEVER_ELIGIBLE_CODES),
