@@ -1,6 +1,6 @@
 # Auditing and fixing bloat with `detecting-doc-bloat` and `fixing-docs`
 
-> As of 2026-07-27 (doc-lifecycle 0.38.0, detector contract v2; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`)
+> As of 2026-07-29 (doc-lifecycle 0.43.0, engine verdict contract; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/engine/doclifecycle/bloat.py`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`)
 
 **You should already have:** the plugin installed and [the principles](principles.md)
 read — especially §3, because this loop *is* the propose → approve → apply contract.
@@ -17,26 +17,22 @@ already moved into the code: all of it costs a reader attention it doesn't repay
 
 `detecting-doc-bloat` walks every passage of every doc in scope. It is **read-only**: it
 will not fix "just the small one" — every finding becomes a record, and it stops. On a
-large scope it first plans bounded chunks (a deterministic script) and audits one chunk
-per subagent, validating each result mechanically before assembling the report.
+large scope it first plans bounded chunks and audits one chunk per subagent,
+shape-checking each result before assembling them. The assembled judgments then go
+through the engine (`doclifecycle bloat-audit`), which checks every one of them against
+an index of the whole repository and writes the report.
+
+That last step is what makes a bloat verdict trustworthy: "this is redundant" is a claim
+about the *corpus*, and no subagent reading eight files can settle it. The engine
+supplies every fact — which documents exist, where a passage also occurs, which document
+owns it, exactly which files a bulk scope covers — and refuses a judgment that
+contradicts them.
 
 ## Step 2 — read the proposal
 
-You get a human summary grouped by doc, one line per finding, backed by a structured
-JSON report. The summary is rendered by a script (`render-report.py bloat-triage` —
-the skill never pastes raw JSON at you) and looks like:
-
-```
-README.md
-  [B1] CONDENSE       README.md:22 — README.md:22-28 — seven lines of eviction narrative carry one fact (CACHE_TTL_S, src/cache.py:5)
-  [B2] EXTRACT-AND-MOVE README.md:31 — README.md:31-32 — cold-start latency gotcha belongs in RUNBOOK.md
-docs/plans/2025-11-02-cache-layer-design.md
-  [B3] DISTILL(ready)  — implementation landed: src/cache.py:5 CACHE_TTL_S, :14 get_or_fill match the design
-docs/superpowers
-  [B4] POLICY          (10 files) — 10 dated plan/spec artifacts for merged work; one class, not 10 findings
-```
-
-Every record carries an **ID**, one of seven verdicts, and **cited evidence** — the code
+You get a human summary grouped by document, one line per finding, backed by the
+structured report — the skill never pastes raw JSON at you. Each record carries an
+**id**, one of six verdicts, the passage it covers, and **cited evidence** — the code
 line it restates, the quoted overlap, the grep. "Feels redundant" is not admissible.
 
 | Verdict | Means |
@@ -46,15 +42,21 @@ line it restates, the quoted overlap, the grep. "Feels redundant" is not admissi
 | `EXTRACT-AND-MOVE` | right content, wrong doc (an operator gotcha buried in a README) |
 | `MERGE-DOC` / `RETIRE-DOC` | a doc is a near-duplicate of another — fold the remainder in, or delete it |
 | `DISTILL` | a design doc whose implementation landed — approving it sends the artifact to the distiller, which extracts the durable residue and retires the scaffolding |
-| `POLICY` | a directory you declared as one class of ephemeral artifact (scope config) — one bulk record naming every covered file; approving it applies the stated policy (typically retirement) to exactly those files. Legacy: this skill's own bulk-verdict shape, pending migration to the engine (`doclifecycle.bloat`), which already replaces it with enumerable-scope `RETIRE-DOC` records — see `docs/decisions.md` (2026-07-27) |
 
-## Step 3 — approve by ID (this is the only mandate there is)
+A directory of ephemeral artifacts — ten dated plan/spec files for work that merged — is
+not a seventh verdict. It is one `RETIRE-DOC` naming an **inclusion rule** (a doc set, a
+glob, a kind), which the engine expands from its index into one record per member. You
+approve or refuse them member by member, and the list is re-derivable rather than
+something the auditor asserted. (The older `POLICY` record, whose file list the model
+echoed back from your scope config, is gone — with its `policy_scope` knob.)
+
+## Step 3 — approve the records you want (this is the only mandate there is)
 
 > apply B1 and B3
 
 `fixing-docs` — the same door drift fixes go through — applies **exactly the approved
-records**; your ID list is minted into the approval set the applier will not write without.
-B2 above stays untouched —
+records**; the ids are how you say it, and each record's digest is what gets minted into
+the approval set the applier will not write without. B2 above stays untouched —
 even if it's obviously right, even if B1's edit lands one paragraph away. `CONDENSE`
 replacement text lands byte-verbatim; nothing gets reworded, blended, or "rounded out."
 
@@ -76,7 +78,10 @@ Two special cases worth knowing before your first approval:
   the scaffolding is in git history either way, but the decisions are not.
 - **`DISTILL` (pending-implementation)** — a design doc for code that *hasn't* landed —
   is never actionable, even if you approve it. A pending design is accurate about the
-  future; the record exists to say so, not to propose an edit.
+  future; the record exists to say so, not to propose an edit. Which of the two a record
+  says is not the auditor's call: the status is transcribed from the artifact's own
+  `> Status:` marker, and the engine refuses a record that disagrees with the file. When
+  the work lands, *you* flip the marker; the next audit reads `ready`.
 
 ## What this loop will never do
 
