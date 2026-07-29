@@ -31,6 +31,8 @@ from .approval import (
 from .bloat import (
     DEFAULT_MAX_DOCUMENTS,
     DEFAULT_MAX_UNITS,
+    audit_bloat,
+    load_bloat_verdicts,
     plan_repository_chunks,
 )
 from .context import build_context_index
@@ -334,6 +336,14 @@ def _positive(value):
     return number
 
 
+def _bloat_audit(args):
+    """The bloat audit command's one call, plus reading its verdicts file."""
+    verdicts = load_bloat_verdicts(args.verdicts)
+    if isinstance(verdicts, Invalid):
+        return verdicts
+    return audit_bloat(args.repo, verdicts, registry_path=args.registry)
+
+
 def _drift_audit(args):
     """The audit command's one call, plus reading the verdicts file it names."""
     verdicts = None
@@ -443,6 +453,25 @@ def _parser():
         ),
         render=None,
     )
+
+    bloat_audit = commands.add_parser(
+        "bloat-audit",
+        help="check a model's bloat verdicts against the index, and report",
+        description=(
+            "Emit a validated bloat report as JSON: every verdict in "
+            "--verdicts checked against the whole-repository context index, "
+            "expanded into findings, and validated against the report "
+            "contract every lane shares. There is no planless run — a bloat "
+            "verdict is a value judgment, and --verdicts is required. Exits 1 "
+            "if the registry or the verdicts do not validate."
+        ),
+    )
+    _add_corpus_arguments(bloat_audit)
+    bloat_audit.add_argument(
+        "--verdicts", required=True,
+        help="path to the verdicts a bloat lane returned for the corpus",
+    )
+    bloat_audit.set_defaults(run=_bloat_audit, render=None)
 
     drift_plan = commands.add_parser(
         "drift-plan",

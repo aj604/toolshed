@@ -2,8 +2,9 @@
 """The bloat lane's deterministic machinery (issue #66).
 
 Seams under test: `bloat.plan_chunks()`, `bloat.merge_contention()`,
-`bloat.enumerate_scope()`, `bloat.record_verdicts()`, and the chunk cache
-seam (`bloat.load_chunk()` / `bloat.store_chunk()`) as library calls.
+`bloat.enumerate_scope()`, `bloat.record_verdicts()`, `bloat.audit_bloat()`,
+`bloat.load_bloat_verdicts()`, and the chunk cache seam (`bloat.load_chunk()` /
+`bloat.store_chunk()`) as library calls.
 
 Run: python3 tests/engine/bloat_test.py
 """
@@ -25,9 +26,15 @@ from support import (  # noqa: E402  (also puts the engine on sys.path)
 from finding_test import lineage as finding_lineage  # noqa: E402
 from report_test import GitRepoTestCase  # noqa: E402  (a real git repository)
 
-from doclifecycle import RULESET_VERSION, bloat  # noqa: E402
+from doclifecycle import ARTIFACT_SCHEMA_VERSION, RULESET_VERSION, bloat  # noqa: E402
+from doclifecycle.approval import (  # noqa: E402
+    MINTER_HUMAN,
+    ApprovalSet,
+    Minter,
+    mint_approval_set,
+)
 from doclifecycle.context import build_context_index  # noqa: E402
-from doclifecycle.report import EvidenceBoundary, current_lineage  # noqa: E402
+from doclifecycle.report import EvidenceBoundary, Report, current_lineage  # noqa: E402
 from doclifecycle.results import Invalid  # noqa: E402
 
 
@@ -866,6 +873,174 @@ class CoverageIsDeclared(RepoTestCase):
         self.assertEqual(
             [i["scope"] for i in result.incomplete], ["docs/notes/stray.md"]
         )
+
+
+class LoadingBloatVerdicts(RepoTestCase):
+    """`load_bloat_verdicts`'s envelope check, mirroring `drift.load_verdicts`
+    plus the top-level shape discipline `drift._verdict_entries` applies."""
+
+    def path(self, text):
+        root = self.repo({"verdicts.json": text})
+        return os.path.join(root, "verdicts.json")
+
+    def test_a_missing_file_is_unreadable(self):
+        result = bloat.load_bloat_verdicts(
+            os.path.join(tempfile.mkdtemp(), "absent.json")
+        )
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(
+            [p.code for p in result.problems], ["bloat-verdicts-unreadable"]
+        )
+
+    def test_unparseable_json_is_unreadable(self):
+        result = bloat.load_bloat_verdicts(self.path("{ not json"))
+
+        self.assertEqual(
+            [p.code for p in result.problems], ["bloat-verdicts-unreadable"]
+        )
+
+    def test_a_bare_list_is_the_wrong_shape(self):
+        result = bloat.load_bloat_verdicts(self.path("[]"))
+
+        self.assertEqual(
+            [p.code for p in result.problems], ["bloat-verdicts-invalid-shape"]
+        )
+
+    def test_a_verdicts_value_that_is_not_a_list_is_the_wrong_shape(self):
+        result = bloat.load_bloat_verdicts(self.path('{"verdicts": "nope"}'))
+
+        self.assertEqual(
+            [p.code for p in result.problems], ["bloat-verdicts-invalid-shape"]
+        )
+
+    def test_an_unexpected_top_level_key_is_the_wrong_shape(self):
+        result = bloat.load_bloat_verdicts(
+            self.path('{"verdicts": [], "extra": true}')
+        )
+
+        self.assertEqual(
+            [p.code for p in result.problems], ["bloat-verdicts-invalid-shape"]
+        )
+
+    def test_an_unsupported_schema_version_is_the_wrong_shape(self):
+        result = bloat.load_bloat_verdicts(
+            self.path('{"schema_version": 99, "verdicts": []}')
+        )
+
+        self.assertEqual(
+            [p.code for p in result.problems], ["bloat-verdicts-invalid-shape"]
+        )
+
+    def test_a_well_shaped_file_returns_the_verdicts_list(self):
+        result = bloat.load_bloat_verdicts(
+            self.path('{"schema_version": 1, "verdicts": [{"id": "B-1"}]}')
+        )
+
+        self.assertEqual(result, [{"id": "B-1"}])
+
+    def test_schema_version_is_optional(self):
+        result = bloat.load_bloat_verdicts(self.path('{"verdicts": []}'))
+
+        self.assertEqual(result, [])
+
+
+class AuditBloatComposesTheReport(GitRepoTestCase):
+    """`audit_bloat`'s one-call composition: index, lineage, verdicts, report.
+
+    A real git repository, exactly as `TheChunkCache` below uses — lineage
+    construction reads the repository's actual base commit, and a mocked one
+    would prove nothing about it.
+    """
+
+    def corpus(self):
+        return self.git_repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        })
+
+    def verdict(self, repo, **overrides):
+        index = build_context_index(repo)
+        by_text = {u.text: u.digest for u in index.units}
+        entry = {
+            "id": "BLOAT-001",
+            "verdict": bloat.CUT,
+            "path": "docs/plans/p.md",
+            "units": [by_text[SHARED]],
+            "evidence": "The living document already states this.",
+        }
+        entry.update(overrides)
+        return entry
+
+    def test_a_valid_verdict_list_yields_a_report_with_its_code(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, [self.verdict(repo)])
+
+        self.assertIsInstance(result, Report, result)
+        self.assertEqual(result.records[0].to_dict()["code"], bloat.CUT)
+
+    def test_the_lineage_carries_the_registry_digest(self):
+        repo = self.corpus()
+        index = build_context_index(repo)
+
+        result = bloat.audit_bloat(repo, [self.verdict(repo)])
+
+        self.assertEqual(result.lineage.registry_digest, index.registry_digest)
+
+    def test_the_report_validates_with_schema_version_and_hex_digests(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, [self.verdict(repo)])
+
+        payload = result.to_dict()
+        self.assertEqual(payload["schema_version"], ARTIFACT_SCHEMA_VERSION)
+        digest = payload["records"][0]["digest"]
+        self.assertEqual(len(digest), 64)
+        int(digest, 16)  # raises ValueError if not hex
+
+    def test_invalid_verdicts_return_invalid_preserving_recorder_codes(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, [self.verdict(repo, evidence="")])
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn("bloat-missing-evidence", [p.code for p in result.problems])
+
+    def test_a_non_list_verdicts_argument_is_invalid(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, {"not": "a list"})
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn("bloat-invalid-shape", [p.code for p in result.problems])
+
+    def test_an_invalid_registry_invalidates_the_run(self):
+        repo = self.git_repo({
+            ".doc-lifecycle/registry.json": "{ not json",
+            "docs/a.md": "# A\n\nAlpha.\n",
+        })
+
+        result = bloat.audit_bloat(repo, [])
+
+        self.assertIsInstance(result, Invalid)
+
+    def test_a_cut_records_digest_is_mintable_by_a_human(self):
+        """End-to-end mintability: this is what makes fixing-docs' step 1 real
+        for bloat, exactly as it already is for drift."""
+        repo = self.corpus()
+        report = bloat.audit_bloat(repo, [self.verdict(repo)])
+        self.assertIsInstance(report, Report, report)
+        digest = report.records[0].digest
+
+        approval = mint_approval_set(
+            report, [digest], repo_root=repo,
+            minter=Minter(kind=MINTER_HUMAN, id="reviewer@example.com"),
+        )
+
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        self.assertEqual([r.digest for r in approval.records], [digest])
 
 
 class TheChunkCache(GitRepoTestCase):
