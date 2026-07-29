@@ -843,6 +843,63 @@ class Confinement(ApplierTestCase):
         self.assertEqual(self.staged_paths(self.repo), [])
         self.assertIn("rolled back", result.problems[0].message)
 
+    def test_concurrent_write_to_an_unwritten_scope_path_fails_and_rolls_back(self):
+        # A DISTILL record's scope is its source and its destination
+        # (`derived_scope_paths` puts both of `record.targets()` in scope),
+        # but the remedy this plan carries — `create-document` — writes only
+        # the destination; the source stays in scope without this plan ever
+        # writing it (`_binding_problems` requires a `create-document` op to
+        # target `record.destination`, never `record.path`). That gap is
+        # exactly what the post-write confinement check must close: a
+        # concurrent change landing on the source is inside the approval's
+        # scope, so the scope-only check would wave it through, and only a
+        # comparison against what this plan's operations actually wrote
+        # catches it — same as the already-applied branch already does.
+        from unittest import mock
+        from doclifecycle.repository import worktree_changes as real
+
+        new_doc = "docs/adr-fees.md"
+        content = "# ADR: flat fees\n\nWe charge a flat rate.\n"
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-002", "DISTILL", PLAN_DOC, units,
+            destination={"path": new_doc},
+        )
+        report, approval = self.approve([record])
+        self.assertIn(PLAN_DOC, approval.scope.paths)
+        op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": new_doc,
+            "text": content,
+        }
+        plan = self.plan(approval, [op], {new_doc: sha256_text(content)})
+        before = self.tree(self.repo)
+        calls = []
+
+        def racing(repo_root):
+            changed, problem = real(repo_root)
+            calls.append(changed)
+            if len(calls) < 2 or problem is not None:
+                return changed, problem
+            # PLAN_DOC is in `approval.scope.paths` (the record's source)
+            # but not in `_written_paths` for this plan's operations — the
+            # concurrent writer lands unapproved content there.
+            return tuple(sorted(set(changed) | {PLAN_DOC})), None
+
+        with mock.patch(
+            "doclifecycle.applier.worktree_changes", side_effect=racing
+        ):
+            result = self.apply(plan, approval, report=report)
+        self.assertIsInstance(result, Invalid, result)
+        self.assertIn("apply-working-tree-not-clean", codes(result))
+        # This run's own write (the new document) was rolled back: the tree
+        # is exactly as it was found, and nothing rode into a certified diff.
+        self.assertEqual(before, self.tree(self.repo))
+        self.assertEqual(self.staged_paths(self.repo), [])
+        self.assertIn("rolled back", result.problems[0].message)
+
     def test_preexisting_change_outside_the_scope_refuses_the_run(self):
         report, approval, plan, _ = self.replace_fixture()
         self.write(self.repo, DOC_B, DOC_B_TEXT + "dirty\n")
