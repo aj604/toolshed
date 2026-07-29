@@ -96,13 +96,13 @@ jobs:
       # absent, so ANTHROPIC_API_KEY alone also works. The allowedTools list is ergonomics, not
       # the boundary — the job's read-only permissions and credential-free checkout are.
       #
-      # The output contract here is the *new* engine's per-unit verdicts shape
-      # (doclifecycle/drift.py's `load_verdicts`), not the legacy detecting-doc-drift skill's
-      # wrapped claim/location/fix records — the skill has not been migrated to the new
-      # document model yet (issue #57's tree has no ticket for that), so the shape is spelled
-      # out here in full rather than left to a skill whose stated contract would be wrong for
-      # this lane. The skill is still useful for verification method (tiers, escalation), which
-      # is why it is invoked for procedure and overridden for output shape.
+      # The output contract here is the engine's per-unit verdicts shape
+      # (doclifecycle/drift.py's `load_verdicts`), which the detecting-doc-drift skill now
+      # carries natively — it is no longer an override of a skill whose contract was wrong for
+      # this lane. The prompt still spells the shape out in full for the same reason every
+      # other terminal state of this lane states itself: a headless run states its own output
+      # contract rather than depending on a plugin version resolved at run time, so a reader of
+      # the log can see what was asked for without resolving the skill that was loaded.
       - name: Audit documentation drift (headless, full corpus)
         if: steps.plan.outcome == 'success'
         id: model
