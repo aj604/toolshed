@@ -1117,6 +1117,28 @@ class NotAnApprovalSet(ApprovedTestCase):
         self.assertEqual(codes(load_approval_set(path)),
                          ["approval-unparseable"])
 
+    def test_a_deeply_nested_file_is_a_verdict_not_a_traceback(self):
+        # A RecursionError is not a ValueError. On this interpreter, no
+        # bomb text and no lowered recursion limit reliably makes the C
+        # accelerated decoder raise one (report_test.py's equivalent
+        # "decoder itself cannot survive" case only passes today via a
+        # separate post-parse scan report.py has and this loader does not)
+        # — so the exception is forced directly, the same way this file
+        # mocks other otherwise-unreachable branches. Before this loader
+        # owned a dedicated nesting code, a RecursionError here reused the
+        # generic `approval-unparseable`.
+        from unittest import mock
+
+        path = os.path.join(self.repo, "shallow.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{}")
+
+        with mock.patch("doclifecycle.digest.json.loads",
+                         side_effect=RecursionError):
+            result = load_approval_set(path)
+
+        self.assertEqual(codes(result), ["approval-nesting-too-deep"])
+
     def test_a_minted_approval_set_round_trips_through_a_file(self):
         path = os.path.join(self.repo, "..", "approval.json")
         with open(path, "w", encoding="utf-8") as fh:

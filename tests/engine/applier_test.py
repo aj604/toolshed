@@ -1476,6 +1476,32 @@ class LoadEditPlan(ApplierTestCase):
         self.assertIsInstance(result, Invalid)
         self.assertEqual(codes(result), ["plan-unparseable"])
 
+    def test_a_deeply_nested_plan_is_a_verdict_not_a_traceback(self):
+        # A RecursionError is not a ValueError. On this interpreter, no
+        # bomb text and no lowered recursion limit reliably makes the C
+        # accelerated decoder raise one (report_test.py's equivalent
+        # "decoder itself cannot survive" case only passes today via a
+        # separate post-parse scan report.py has and this loader does not)
+        # — so the exception is forced directly, the same way
+        # `worktree_changes` is mocked elsewhere in this suite to reach an
+        # otherwise-unreachable branch. Before this loader owned a
+        # dedicated nesting code, a RecursionError here fell into the same
+        # except tuple as a syntax error and came back mislabeled
+        # `plan-unparseable`.
+        from unittest import mock
+
+        path = os.path.join(self.repo, "..", "plan.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{}")
+        self.addCleanup(os.remove, path)
+
+        with mock.patch("doclifecycle.digest.json.loads",
+                         side_effect=RecursionError):
+            result = load_edit_plan(path)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["plan-nesting-too-deep"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -43,7 +43,7 @@ from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .bloat import CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC
-from .digest import sha256_canonical
+from .digest import load_strict_json, sha256_canonical
 from .finding import finding_digest
 from .inventory import DEFAULT_REGISTRY_PATH, load_registry
 from .paths import DOCUMENTATION, authorize_path, write_target_problem
@@ -1409,52 +1409,18 @@ def _report_reasons(payload, records, skipped, report, approval_lineage):
     return reasons, problems
 
 
-def _reject_constant(name):
-    raise ValueError(
-        f"{name} is not JSON — an approval set must survive a strict parser "
-        f"and its own digest, which are taken over the same encoding"
-    )
-
-
 def load_approval_set(path, *, report=None, repo_root=None,
                       registry_path=DEFAULT_REGISTRY_PATH,
                       audit_config_digest=None, expected_digest=None):
     """Read an approval-set file and validate it. `ApprovalSet` or `Invalid`."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError as exc:
-        return Invalid((Problem(
-            code="approval-unreadable",
-            message=f"cannot read the approval set at {path}: {exc.strerror}",
-            location=path,
-        ),))
-    except UnicodeDecodeError as exc:
-        return Invalid((Problem(
-            code="approval-unreadable",
-            message=(
-                f"the approval set at {path} is not valid UTF-8 ({exc.reason} "
-                f"at byte {exc.start}) — re-encode it; JSON is a text format"
-            ),
-            location=path,
-        ),))
-    try:
-        payload = json.loads(text, parse_constant=_reject_constant)
-    except (json.JSONDecodeError, ValueError) as exc:
-        return Invalid((Problem(
-            code="approval-unparseable",
-            message=f"the approval set is not valid JSON: {exc}",
-            location=path,
-        ),))
-    except RecursionError:
-        return Invalid((Problem(
-            code="approval-unparseable",
-            message=(
-                "the approval set nests too deeply to parse — an approval set "
-                "is a selection of digests, not a document"
-            ),
-            location=path,
-        ),))
+    payload, problem = load_strict_json(
+        path,
+        unreadable_code="approval-unreadable",
+        unparseable_code="approval-unparseable",
+        nesting_code="approval-nesting-too-deep",
+    )
+    if problem is not None:
+        return Invalid((problem,))
     return validate_approval_set(
         payload, report=report, repo_root=repo_root,
         registry_path=registry_path, audit_config_digest=audit_config_digest,
