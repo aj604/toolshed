@@ -808,6 +808,22 @@ class RefusalsAreExhaustive(RecorderTestCase):
 
         self.assertEqual(problem_codes(result), ["bloat-unknown-status"])
 
+    def test_a_distill_verdict_against_a_non_planning_document_is_refused(self):
+        # DISTILL is the planning-artifact verdict — nothing else validated
+        # that a source path is actually planning-kind, so a verdict naming a
+        # living document must be refused before its status is even checked
+        # (docs/a.md carries no `> Status:` marker of its own; a
+        # bloat-status-not-file-bound refusal here would misreport a living
+        # document as if it were an unmarked plan).
+        result = self.record([self.verdict(
+            verdict=bloat.DISTILL,
+            path="docs/a.md",
+            units=[self.unit("docs/a.md", SHARED)],
+            status="ready",
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-distill-not-planning"])
+
     def test_a_condense_verdict_needs_its_replacement_line(self):
         result = self.record([self.verdict(verdict=bloat.CONDENSE)])
 

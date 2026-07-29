@@ -559,7 +559,7 @@ class _Recorder:
             "duplicate_search": self._duplicate_search(path, units),
             "destination": destination,
             "proposal": self._proposal(raw, where, verdict),
-            "status": self._status(raw, where, verdict, path),
+            "status": self._status(raw, where, verdict, path, document),
         }
         self._reject_sample(raw, where, scoped=False)
         if destination is not None:
@@ -892,9 +892,16 @@ class _Recorder:
                      f"proposal", where)
         return None
 
-    def _status(self, raw, where, verdict, path):
+    def _status(self, raw, where, verdict, path, document):
         status = raw.get("status")
         if verdict == DISTILL:
+            if document.kind != "planning":
+                self.bad("bloat-distill-not-planning",
+                         f"{DISTILL} classifies a planning document, and "
+                         f"{path} is registered as {document.kind!r} — a "
+                         f"lifecycle status is not a fact about any other "
+                         f"kind", where)
+                return None
             if status not in DISTILL_STATUSES:
                 self.bad("bloat-unknown-status",
                          f"a {DISTILL} verdict's status must be one of "
