@@ -15,19 +15,37 @@ Two non-negotiables make the output usable by automation:
 
 1. **A verdict requires evidence.** Never mark a claim VERIFIED because doc and code "seem
    consistent." Verified means you ran the command, opened the line, or matched the grep.
-2. **The result is structured, not prose.** Emit the declared record shape below. A human
-   summary on top is fine; the structured block is the contract downstream tooling parses.
+2. **The result is structured, not prose.** Answer in the verdicts shape below. A human
+   summary on top is fine; the artifact is what the engine reads and downstream tooling parses.
 
 **REQUIRED SUB-SKILL:** Use **writing-docs** for any fix you propose — every `fix` must meet
 its bar (real output, no aspirational claims, marked+anchored rationale). This skill finds
 and classifies drift; writing-docs governs how the correction reads. **`fixing-docs`**
-consumes this skill's records and applies the approved fixes (an optional auto-trigger layer, designed
-and shipped as the `scheduling-doc-sync` skill, wires detect→fix to cron/PR).
+consumes the engine report this skill's audit writes — record digests are the handoff, and
+`mint-approval` takes them (an optional auto-trigger layer, designed and shipped as the
+`scheduling-doc-sync` skill, wires detect→fix to cron/PR).
 
-## The engine (run these four steps, in order)
+## The audit (run these steps, in order)
 
-1. **Extract** each checkable claim from the doc, tagged by `kind` — one of exactly:
-   `command`, `path`, `symbol`, `behavior`, `structure`, `value` (use these strings
+The engine owns scope, segmentation, and validation; this skill owns the judgment in the
+middle. Every command below is `python3 -m doclifecycle …` with the plugin's `engine/`
+directory on `PYTHONPATH` (`plugins/doc-lifecycle/engine/README.md` covers both spellings).
+
+1. **Plan the scope.** `python3 -m doclifecycle drift-plan --repo . --mode full >
+   drift-plan.json` (diff-scoped: `--mode incremental --since <commit>`). Deterministic — no
+   model — so the scope is re-derivable rather than trusted. Each `documents[]` entry carries a
+   `path` and an `obligation`: `assertions` is a living document whose claims you judge;
+   `anchor` is a narrative document whose `As of` line the engine checks itself, and for which
+   it refuses claim verdicts outright (`drift-verdict-on-narrative-document`). Write none.
+2. **Segment each `assertions` document.** `python3 -m doclifecycle segment --repo . --path
+   <path>` returns its assertion units — one per sentence, list item, or table row — each with
+   an `ordinal`, its source `line`, and `assertion_capable`. The `ordinal` is how you answer for
+   a unit. The parser is fixed and model-free, so the same bytes always yield the same units.
+3. **Classify every assertion-capable unit** — `factual`, `normative`, `rationale`, or
+   `non-assertive`. Leaving one out is refused (`classification-missing`): an unclassified unit
+   is indistinguishable from one nobody found a claim in. Only `factual` owes a verdict.
+4. **Judge each factual unit** at the appropriate tier (below), tagged by `kind` — one of
+   exactly: `command`, `path`, `symbol`, `behavior`, `structure`, `value` (use these strings
    verbatim; automation switches on them). Pure prose is not a claim — **except** lines that
    *sound* factual but name no checkable thing ("robust", "production-ready", "reasonably
    fast", "handles most workloads"). Extract those too, kind `value`: they become
@@ -44,14 +62,23 @@ and shipped as the `scheduling-doc-sync` skill, wires detect→fix to cron/PR).
    already marked `> UNVERIFIED: <claim>` (the marker
    llm-doc-writer writes) are extracted like any claim and default to `UNVERIFIABLE` unless
    the repo now makes them checkable.
-2. **Verify** each claim against the repo at the appropriate tier (below).
-3. **Classify** each: `VERIFIED` / `STALE` / `UNVERIFIABLE`.
-4. **Emit** the drift report (the contract below), then **validate it mechanically**
-   before handing it off: pipe it through
+   Each judgment is `VERIFIED` / `STALE` / `UNVERIFIABLE`, and carries its `kind`, its `tier`,
+   and its `evidence`.
+5. **Write `verdicts.json`** in the contract below, then **validate it mechanically** before
+   the audit: pipe it through
    `${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-drift/scripts/validate-drift-output.py`
-   (reads the JSON on stdin or as a file arg). It enforces the enum/`fix`/`evidence`/summary rules and exits
-   nonzero on any violation — don't emit a result it rejects. It checks *shape*, not whether a
-   verdict is *right*; that judgment is still yours.
+   (reads the JSON on stdin or as a file arg). It enforces the enum, field-set, `evidence`, and
+   `fix` rules and exits nonzero on any violation. Run it — a shape violation the engine catches
+   is not a loud failure there: it drops that whole document to an unexamined coverage gap
+   (`the verdicts returned for this document did not validate: <code>`) and the run still exits
+   with a report. The validator checks *shape*, not whether a verdict is *right*; that judgment
+   is still yours, and `drift-audit` is the authority on everything the shape check cannot see
+   (whether an ordinal names a real unit, whether a multi-line `fix` owns its span).
+6. **Run the audit.** `python3 -m doclifecycle drift-audit --repo . --mode full --verdicts
+   verdicts.json > drift-report.json` writes the validated report: your STALE and UNVERIFIABLE
+   judgments as records with digests, your VERIFIED ones as coverage, and the narrative
+   documents' anchors checked engine-side. Exit 0 is a complete report, 4 partial (something
+   was not examined), 1 refused (e.g. a document the plan never declared).
 
 ### Verification tiers + escalation rule
 
@@ -67,11 +94,11 @@ requested. This concentrates cost where drift is likely.
 
 **Anchors: open the line, but judge the claim, not the line number.** A `file:line` anchor
 is not evidence — open it. But the anchor is *metadata on a claim, never its own claim*: do
-not extract "the exit is at line 14" as a separate record and grade its precision. Classify
+not extract "the exit is at line 14" as a separate verdict and grade its precision. Classify
 the underlying claim on whether the *referenced construct* is there and the *stated value* is
 right. An anchor that lands a few lines off the exact statement (points at the guard instead
 of the `exit()` it guards) but still locates the right code is `VERIFIED`. **Never emit a
-STALE record whose `fix` only changes a line number** — a line-number-only correction is not
+STALE verdict whose `fix` only changes a line number** — a line-number-only correction is not
 drift. Mark `STALE` only when the value/behavior/symbol is wrong or the anchor points to a
 construct that moved or no longer exists.
 
@@ -80,22 +107,39 @@ asserts of another document — that it exists, that it carries a section, that 
 live one — is read there first. A `Supersedes:` header, a filename, or a commit message says a
 file replaced another, never what the replacement contains. Assert only what you read: if the
 target does not carry it yet, the fix says what the target actually shows, and if nothing in
-the repository settles it, the record is `UNVERIFIABLE` with the pointer in `evidence` rather
+the repository settles it, the verdict is `UNVERIFIABLE` with the pointer in `evidence` rather
 than a `STALE` with a drafted replacement. This is the rule that makes a repointing fix safe to
 land, and the auto-apply policy refuses one anyway (`policy-fix-names-other-document`) — a fix
 that changes which files the line names is a person's to approve.
 
 ## The output contract (this is the "shape")
 
-The drift report holds one record per extracted claim — STALE records drive fixes;
-UNVERIFIABLE records are surfaced for human review, not edit targets; VERIFIED records prove
-coverage. Each record uses exactly these fields (no extras): `claim`, `location` (a single
-`file:line`, no ranges), `kind`, `tier`, `verdict`, `evidence`, `fix`.
+`verdicts.json` is the engine's verdicts artifact — one entry per document the plan declared,
+each carrying one verdict per assertion unit `segment` printed:
 
-Rules: `kind` is one of `command` / `path` / `symbol` / `behavior` / `structure` / `value`;
-`verdict` is one of `VERIFIED` / `STALE` / `UNVERIFIABLE` — literal enum strings, no invented
-values. `fix` is non-null only for `STALE`, and it is the **complete replacement text** for
-the assertion unit at `location` — never an instruction like "change X to Y" — and must meet the
+```json
+{"schema_version": 1, "documents": [{"path": "CLAUDE.md", "status": "ok", "verdicts": []}]}
+```
+
+`schema_version` is optional and must be `1` when present. An entry's fields are exactly
+`path`, `status`, `verdicts`, `reason`, `chunk` — no extras. `status` is `ok` or `failed`: an
+`ok` entry carries `verdicts` and no `reason`; a `failed` entry carries a one-line `reason` and
+no `verdicts`, which is how you declare a document you did not examine — a gap with no reason is
+indistinguishable from a document nobody thought about. Narrative (`anchor`) documents get no
+entry at all; the engine checks their `As of` anchors itself.
+
+A verdict's fields are exactly `unit`, `assertion_class`, `verdict`, `kind`, `tier`,
+`evidence`, `fix`. Two are always required: `unit` is the `ordinal` `segment` printed for that
+unit, and `assertion_class` is one of `factual` / `normative` / `rationale` / `non-assertive`.
+
+`verdict`, `kind`, `tier`, and `evidence` travel together — all four, or none. A `factual` unit
+owes all four; a `non-assertive` unit takes none of them, because it asserts nothing the code
+could contradict. `verdict` is one of `VERIFIED` / `STALE` / `UNVERIFIABLE`; `kind` is one of
+`command` / `path` / `symbol` / `behavior` / `structure` / `value`; `tier` is the integer `1`,
+`2`, or `3` — literal enum values, no invented ones.
+
+`fix` is present only, and always, for `STALE`, and it is the **complete replacement text** for
+that unit — never an instruction like "change X to Y" — and must meet the
 writing-docs bar. Preserve the target document's physical-line convention: when the source unit
 is soft-wrapped, draft `fix` already wrapped, with LF embedded in the JSON string and the exact
 list marker and continuation indentation the replacement needs. Do not leave reflow to
@@ -104,19 +148,25 @@ embedded LF only for a unit that already spans multiple source lines and owns ev
 span (no neighboring assertion unit shares either boundary line), and every physical line must be
 non-empty (no CR or NUL). The replacement may take a different number of physical lines when its
 corrected content wraps differently, but it remains one logical assertion unit.
-`evidence` is mandatory for **every** verdict, including VERIFIED (the
-grep/command/line that proves it) — and it is **one line: pointer + fact**. The `file:line`
-or command, and the fact it shows. No history (prior PRs, how the drift arose), no restated
-command output, no reasoning narrative — the verdict carries the conclusion; evidence
-carries only what proves it. Emit the canonical wrapped object
-`{"records": [...], "summary": {"verified": N, "stale": N, "unverifiable": N}}`; on success
-the validator prints a `summary:` line as JSON, recomputed from the records, that automation
-can gate on.
 
-See **output-contract.md** for a worked three-record example (a STALE command, a STALE
-behavior, an UNVERIFIABLE quality claim) with every field populated.
+`evidence` is an object, mandatory for **every** judged unit, VERIFIED included: `{"observed":
+<the fact you read>, "source": <repository-relative path>, "line": <int>, "command": <the one
+command line that settled it>}`. `observed` is always required and is **one line** — the fact
+the citation shows. No history (prior PRs, how the drift arose), no restated command output, no
+reasoning narrative: the verdict carries the conclusion; evidence carries only what proves it.
+VERIFIED and STALE each rest on **exactly one** citation — `source` or `command`, never both,
+because a verdict rests on one place a reader goes. `line` points into a file, so it never
+accompanies `command`. A cited `command` is one read-only command line, not a shell program: it
+may not carry `;`, `&`, `|`, `<`, `>`, `(`, `)`, `$`, a backtick, or a backslash. UNVERIFIABLE
+needs no citation — it records that nothing in the repository settles the claim — but it still
+carries `observed`.
 
-The validator (step 4) also cross-checks a wrapped object's `summary` counts against its records, and accepts a bare array, recomputing the authoritative summary for you.
+On success the validator prints a `summary:` line as JSON, recomputed from your verdicts
+(`verified` / `stale` / `unverifiable`, counted across every document), that automation can
+gate on.
+
+See **output-contract.md** for a worked example: a STALE `command` unit, a VERIFIED `behavior`
+unit citing a command, a `non-assertive` unit, and a `failed` document entry.
 
 ## Modes
 
@@ -131,16 +181,16 @@ The validator (step 4) also cross-checks a wrapped object's `summary` counts aga
   only confirms the name still appears: read the cited line (Tier 2), and read implementing
   code (Tier 3) for any `behavior`/`value` claim, where the rename-grep gives false comfort. A
   rename/move/deletion is settled cheaper — don't pay Tier 3 for a claim Tier 1–2 already
-  resolves. Output only records for touched claims. Completeness is the metric: a changed
-  symbol referenced in five docs must produce five records.
+  resolves. Judge only the units carrying touched claims. Completeness is the metric: a changed
+  symbol referenced in five docs must produce five verdicts.
 
 ## Red flags — STOP
 
 - Writing "looks consistent" / "should be fine" without opening the file → not a verdict.
 - Trusting a `file:line` anchor instead of reading that line → anchors drift a few lines;
   read the line and judge the claim (the anchor rule above).
-- Emitting a prose report with no structured records → automation can't trigger on it.
-- A VERIFIED record with an empty `evidence` field → unverified; go get the evidence.
+- Emitting a prose report instead of `verdicts.json` → the engine has nothing to audit.
+- A VERIFIED verdict with no `evidence.observed` → unverified; go get the evidence.
 - Diff-scoped run that checked the one obvious doc → grep ALL docs for the changed subject.
 - Eyeballing a command table instead of grepping the Makefile/package.json for each target.
 - Skipping a "robust"/"fast"/"production-ready" line because it's "just prose" → extract it
@@ -148,10 +198,10 @@ The validator (step 4) also cross-checks a wrapped object's `summary` counts aga
 - Marking a quality boast STALE because the code argues against it, and drafting a
   replacement → still UNVERIFIABLE; the contradiction goes in `evidence`. A `fix` must
   restore a checkable true value, not reword puffery.
-- A record with an invented `kind` (e.g. `schema_mismatch`) → use the six enum values only.
+- A verdict with an invented `kind` (e.g. `schema_mismatch`) → use the six enum values only.
 - Marking an anchor STALE for being off by a line, or emitting a `fix` that only changes a
   line number → not drift. The anchor is metadata, not its own claim.
 - Repointing a claim at a superseding document you did not open → the header says it supersedes,
   not what it contains. Open the target; assert only what it shows.
 - Evidence that tells a story — prior fixes, what re-staled the line, pasted command output →
-  one line, pointer + fact. History lives in git; the record proves, it doesn't narrate.
+  one line, pointer + fact. History lives in git; the evidence proves, it doesn't narrate.
