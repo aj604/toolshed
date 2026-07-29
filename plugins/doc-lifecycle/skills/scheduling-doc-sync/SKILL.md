@@ -216,10 +216,11 @@ and are the only doc-lifecycle content left under `.github/`.
    starter `{"exclude": [], "include": []}` (empty arrays — a valid no-op default the human
    tunes). `plan-chunks.py` (the sibling `detecting-doc-bloat` skill's own copy) reads it to pick
    which docs a large bloat audit covers (exclude/include globs) and how to chunk them — the
-   optional `policy_scope` (directories of ephemeral artifacts, each swept as one POLICY record)
-   and `chunking` (`max_docs` / `max_lines` / `max_chunks`) keys are documented in that script's
-   docstring; Migration mode reads the same file to infer documentation roots. An existing file
-   is a tuned config — never overwrite it.
+   `chunking` (`max_docs` / `max_lines` / `max_chunks`) key is documented in that script's
+   docstring (`policy_scope` is a retired key it now flags and ignores — bulk directory
+   retirement is an enumerable-scope `RETIRE-DOC` verdict instead); Migration mode reads the
+   same file to infer documentation roots. An existing file is a tuned config — never
+   overwrite it.
 8. Seed the drift waivers — **only if absent**: write `.doc-lifecycle/drift-waivers.json`
    with the starter `{"waivers": []}`. This is the UNVERIFIABLE disposition record: an entry
    `{"file": <doc>, "claim": <quoted claim text>, "reason": ..., "date": ...}` annotates the

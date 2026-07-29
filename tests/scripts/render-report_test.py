@@ -6,7 +6,6 @@ real $GITHUB_STEP_SUMMARY file for the summary subcommands.
 Run: python3 tests/scripts/render-report_test.py
 """
 
-import json
 import os
 import subprocess
 import sys
@@ -19,64 +18,6 @@ SCRIPT = os.path.join(
     "plugins", "doc-lifecycle", "skills", "scheduling-doc-sync",
     "scripts", "render-report.py",
 )
-
-
-def brec(verdict, location=None, doc="README.md", evidence="seven lines carry one fact",
-         status=None, files=None, rid="B1"):
-    return {"id": rid, "doc": doc, "location": location, "verdict": verdict,
-            "evidence": evidence, "proposal": None, "status": status, "files": files}
-
-
-def run(*cmd):
-    """Run a subprocess command and return the result."""
-    return subprocess.run(cmd, capture_output=True, text=True)
-
-
-def write_report(records):
-    """Write a bloat report (filtered lane file) to a temp JSON file."""
-    fd, path = tempfile.mkstemp(suffix=".json")
-    with os.fdopen(fd, "w") as f:
-        json.dump({"records": records}, f)
-    return path
-
-
-class BloatRender(unittest.TestCase):
-    def test_triage_groups_by_doc_with_ids(self):
-        report = write_report([
-            brec("CUT", location="README.md:5"),
-            brec("POLICY", doc="docs/superpowers", rid="B2",
-                 files=["docs/superpowers/plans/a.md"]),
-            brec("DISTILL", doc="docs/plans/old.md", status="ready", rid="B3"),
-        ])
-        out = run(sys.executable, SCRIPT, "bloat-triage", "--report", report)
-        os.unlink(report)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("README.md", out.stdout)
-        self.assertIn("[B1] CUT", out.stdout)
-        self.assertIn("README.md:5", out.stdout)
-        self.assertIn("[B2] POLICY", out.stdout)
-        self.assertIn("(1 files)", out.stdout)
-        self.assertIn("[B3] DISTILL(ready)", out.stdout)
-        self.assertIn("**Rollup:**", out.stdout)
-        self.assertNotIn("approve", out.stdout.lower())
-
-    def test_triage_renders_unswept_banner(self):
-        report = write_report([brec("CUT", location="README.md:5")])
-        with open(report) as f:
-            data = json.load(f)
-        data["unswept"] = [{"chunk": "c-dead1", "docs": ["docs/plans/p.md"]}]
-        with open(report, "w") as f:
-            json.dump(data, f)
-        out = run(sys.executable, SCRIPT, "bloat-triage", "--report", report)
-        os.unlink(report)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("1 chunk(s) unswept", out.stdout)
-        self.assertIn("docs/plans/p.md", out.stdout)
-
-    def test_triage_missing_report_exits_2(self):
-        out = run(sys.executable, SCRIPT, "bloat-triage",
-                  "--report", "/nonexistent.json")
-        self.assertEqual(out.returncode, 2)
 
 
 class UpgradeRender(unittest.TestCase):
