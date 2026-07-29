@@ -48,13 +48,24 @@ change and the apply refuses (`apply-working-tree-not-confined`). The steps and 
 invocation templates below reuse that same destination; only the filename changes per
 artifact.
 
-1. **Plan the chunks.** `python3 -m doclifecycle bloat-plan --repo . >
+1. **Plan the chunks.** Requires `.doc-lifecycle/registry.json` — this whole
+   audit is a walk of the *registered* corpus, and an unregistered repo has
+   none. No registry yet: **bootstrapping-docs** writes one for a repo with no
+   doc set; for a repo whose docs exist but nothing classifies them yet, run
+   its `migration-draft --registry-only` step (**scheduling-doc-sync**'s
+   "Migration to the registry contract" is the one owner of that sequence).
+   `python3 -m doclifecycle bloat-plan --repo . >
    "${TMPDIR:-/tmp}/bloat-plan.json"` partitions every indexed document into bounded chunks
    (`--max-documents`, `--max-units`), content-addressed so an unchanged chunk
-   keeps its id. For a dispatched sweep, `scripts/plan-chunks.py` plans from
+   keeps its id, and refuses outright (`registry-missing`) when there is none.
+   For a dispatched sweep, `scripts/plan-chunks.py` plans from
    the repository's `.md` files and `.doc-lifecycle/audit-scope.json` instead,
    adding the dispatch ergonomics the engine has no opinion about: per-chunk
-   turn budgets, `--emit-prompt` slices, and `--results-dir` resume. Either
+   turn budgets, `--emit-prompt` slices, and `--results-dir` resume. It does
+   **not** read the registry, so it plans an unregistered or unauditable
+   corpus without complaint — check the registry exists yourself before
+   dispatching a sweep with it, or every chunk's model invocation is spent
+   before `bloat-audit` refuses at the end. Either
    way `bloat-audit` re-derives every fact from the registry, so a chunk plan
    is a work order, never an authority.
 2. **Judge each chunk.** Small scope (≲2 chunks): sweep inline with the

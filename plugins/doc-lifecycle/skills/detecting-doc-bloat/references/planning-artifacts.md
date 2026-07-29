@@ -6,9 +6,19 @@ Reference for `detecting-doc-bloat` chunk executors whose chunk carries
 ## Planning artifacts: classify by whether the implementation landed
 
 A planning artifact (design doc, spec, plan — conventionally `docs/plans/`)
-describes an *intended change*. Location is a hint; what the doc does is the
-test — and a doc whose first line is the `> As of` anchor is narrative, never
-a planning artifact.
+describes an *intended change*. Location is a hint; **the registry is the
+test, not the doc's shape or a `> Status:` marker on it.** `python3 -m
+doclifecycle segment --repo . --path <path>` — which this skill already
+requires you to run for every unit digest — prints that document's `kind` at
+the top level of its output: this is the registry's own classification, the
+same one the engine checks a `DISTILL` verdict's path against
+(`bloat-distill-not-planning`). A doc registered `living` or `narrative` that
+happens to carry a `> Status:` marker and sit under a `specs/`-shaped path is
+**not** a planning artifact for this audit — the marker there is a finding to
+surface (the registry and the doc's own habits disagree), never a licence to
+emit `DISTILL` against it. A doc whose first line is the `> As of` anchor is
+narrative, never a planning artifact, regardless of what `segment` reports —
+per `verdict-lenses.md`, the anchor line is the classifier for that case.
 
 **The file is the authority; you are a reporter.** A true planning artifact
 carries its own lifecycle state as a `> Status: <pending-implementation|ready>`
@@ -49,7 +59,10 @@ exactly one `DISTILL` verdict:
   pending design is accurate about the future; it is neither bloat to cut nor
   ready to distill — the record exists to *say so*, not to propose an edit.
   Never propose deleting it. `evidence` = the grep that returned nothing,
-  naming the absent symbols.
+  naming the absent symbols. **Name no `destination`.** Nothing has landed, so
+  there is no residue to place yet — a destination here would widen the
+  approval set's mutation scope to a document nobody is authoring, on a
+  record that carries no evidence anything is ready to move into it.
 - **The marker says `pending-implementation`, but the grep finds the design's
   symbols already landed** → `status: "pending-implementation"` — you copy
   the file, you never override it, however current your own evidence makes it
@@ -57,7 +70,13 @@ exactly one `DISTILL` verdict:
   *and states that the marker is stale*: the implementation has landed but the
   file has not been updated to say so. That note is what gives the human the
   signal to flip the marker — a git-approved edit, never yours to make — after
-  which the *next* audit's grep confirms currency and emits `ready`.
+  which the *next* audit's grep confirms currency and emits `ready`. **Name no
+  `destination` here either** — the record's `status` stays
+  `pending-implementation` because you copy the file, not your own evidence,
+  and a `pending-implementation` record is unactionable by convention only:
+  nothing in its shape stops a destination from being minted into an approval.
+  The next `ready` audit, against the flipped marker, is where a destination
+  belongs.
 
 In diff-scoped runs, **a landing planning artifact is not an objection** — a
 PR that adds a design doc for unbuilt code is *correct*; emit
@@ -109,3 +128,7 @@ A `scope` verdict carries no `path`, `units`, `destination`, `proposal`, or
   audit repeats the same finding.
 - Proposing to delete or edit a pending design → it is accurate about the
   future; the record says so and stops.
+- Naming a `destination` on a `pending-implementation` verdict → nothing has
+  landed to place anywhere; a destination there widens the eventual approval's
+  mutation scope to a document nobody is authoring. Only a `ready` verdict may
+  name one.
