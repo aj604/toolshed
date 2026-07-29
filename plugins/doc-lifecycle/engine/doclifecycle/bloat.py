@@ -263,22 +263,21 @@ def plan_repository_chunks(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
 # --------------------------------------------------------------------------
 
 def load_bloat_verdicts(path):
-    """Read a lane's bloat verdicts file. Returns the verdict list, or `Invalid`.
+    """Read a lane's bloat verdicts file. Returns the payload, or `Invalid`.
 
-    The file/payload split `drift.load_verdicts` draws — reading is a separate
-    failure from what the payload says — plus the top-level shape check drift
-    leaves to `_verdict_entries`: an object, no extra keys, carrying a
-    `verdicts` list (optionally a `schema_version`, which must equal
-    `ARTIFACT_SCHEMA_VERSION` if present). `record_verdicts` checks each entry
-    in that list; this only checks the envelope around it.
-
-    Returns the `verdicts` list itself, not the envelope, so the result feeds
-    straight into `audit_bloat` — the composition stays one call in the
-    command, exactly as `record_verdicts` already expects a bare list.
+    The file/payload split `drift.load_verdicts` draws, and nothing else:
+    reading is a separate failure from what the payload says, and this
+    function does not look inside the payload at all. Shape and
+    `schema_version` discipline live in `audit_bloat` — exactly the split
+    drift draws between `load_verdicts` (a bare reader) and `_verdict_entries`
+    (the shape check, run *inside* `audit_drift`) — so every path into
+    `audit_bloat`, not only this file loader's, enforces them. A check that
+    lived only here could be silently routed around by an in-process caller
+    that built the envelope itself and called `audit_bloat` directly.
     """
     try:
         with open(path, encoding="utf-8") as fh:
-            payload = json.load(fh)
+            return json.load(fh)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return Invalid((Problem(
             code="bloat-verdicts-unreadable",
@@ -286,37 +285,50 @@ def load_bloat_verdicts(path):
             location=path,
         ),))
 
+
+def _verdict_list(payload):
+    """(the `verdicts` list, ()) or (None, problems), from a bloat envelope.
+
+    The shape check `load_bloat_verdicts` deliberately does not do: an
+    object, no extra keys, carrying a `verdicts` list (optionally a
+    `schema_version`, which must equal `ARTIFACT_SCHEMA_VERSION` if present).
+    Called from `audit_bloat` itself, on drift's `_verdict_entries` pattern,
+    so no call path into `audit_bloat` can skip it.
+    """
     if (not isinstance(payload, dict)
             or set(payload) - {"schema_version", "verdicts"}
             or "verdicts" not in payload
             or not isinstance(payload["verdicts"], list)):
-        return Invalid((Problem(
+        return None, (Problem(
             code="bloat-verdicts-invalid-shape",
             message=(
                 f"verdicts must be an object shaped {{'verdicts': [...]}} "
                 f"(optionally with 'schema_version'), not {payload!r}"
             ),
             location="verdicts",
-        ),))
+        ),)
 
     version = payload.get("schema_version", ARTIFACT_SCHEMA_VERSION)
     if version != ARTIFACT_SCHEMA_VERSION:
-        return Invalid((Problem(
+        return None, (Problem(
             code="bloat-verdicts-invalid-shape",
             message=(
                 f"verdicts schema_version {version!r} is not supported; this "
                 f"engine reads integer version {ARTIFACT_SCHEMA_VERSION}"
             ),
             location="verdicts.schema_version",
-        ),))
+        ),)
 
-    return payload["verdicts"]
+    return payload["verdicts"], ()
 
 
 # Every bloat verdict is checked against the whole-repository context index,
 # never a document-scoped glob, so the evidence boundary a run declares is
 # always "everything" — and, per the brief, no local tool: bloat cites no
 # command the way drift's `--evidence-command` lets a claim be settled by one.
+# `sources` is non-operative — unlike drift, nothing in the bloat lane checks
+# a citation against it — and is `("**",)` rather than `()` only because
+# `report.validate_report` refuses an empty `sources` list outright.
 EVIDENCE_BOUNDARY = EvidenceBoundary(sources=("**",), excluded=(), commands=())
 
 
@@ -346,9 +358,13 @@ def audit_bloat(repo_root, verdicts, registry_path=DEFAULT_REGISTRY_PATH):
     verdicts against the index, and validate what results through the same
     `report.validate_report` every other lane runs through.
 
-    `verdicts` is required — there is no planless bloat audit the way a drift
-    run can leave living documents unexamined; a value judgment about the
-    corpus has to have been made by someone.
+    `verdicts` is the envelope a bloat lane returned —
+    `{"verdicts": [...]}`, optionally with a matching `schema_version` — not
+    a bare list; `_verdict_list` checks its shape here, inside the
+    composition, the same seam `drift.audit_drift` checks its verdicts
+    payload at (`_verdict_entries`). Required — there is no planless bloat
+    audit the way a drift run can leave living documents unexamined; a value
+    judgment about the corpus has to have been made by someone.
     """
     index = build_context_index(repo_root, registry_path)
     if isinstance(index, Invalid):
@@ -363,7 +379,11 @@ def audit_bloat(repo_root, verdicts, registry_path=DEFAULT_REGISTRY_PATH):
         audit_mode="full", evidence_boundary=EVIDENCE_BOUNDARY, **state
     )
 
-    result = record_verdicts(index, lineage, verdicts)
+    entries, problems = _verdict_list(verdicts)
+    if problems:
+        return Invalid(tuple(problems))
+
+    result = record_verdicts(index, lineage, entries)
     if isinstance(result, Invalid):
         return result
 

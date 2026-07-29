@@ -876,8 +876,15 @@ class CoverageIsDeclared(RepoTestCase):
 
 
 class LoadingBloatVerdicts(RepoTestCase):
-    """`load_bloat_verdicts`'s envelope check, mirroring `drift.load_verdicts`
-    plus the top-level shape discipline `drift._verdict_entries` applies."""
+    """`load_bloat_verdicts`'s file-reader-only seam.
+
+    Mirrors `drift.load_verdicts` exactly: reading is a separate failure from
+    what the payload says, and this function does not look inside the payload
+    at all — that discipline moved to `audit_bloat` (`AuditBloatComposesTheReport`
+    below), the same split drift draws between `load_verdicts` and
+    `_verdict_entries`, so every call path into `audit_bloat` enforces it, not
+    just this file loader's.
+    """
 
     def path(self, text):
         root = self.repo({"verdicts.json": text})
@@ -900,47 +907,19 @@ class LoadingBloatVerdicts(RepoTestCase):
             [p.code for p in result.problems], ["bloat-verdicts-unreadable"]
         )
 
-    def test_a_bare_list_is_the_wrong_shape(self):
-        result = bloat.load_bloat_verdicts(self.path("[]"))
-
-        self.assertEqual(
-            [p.code for p in result.problems], ["bloat-verdicts-invalid-shape"]
-        )
-
-    def test_a_verdicts_value_that_is_not_a_list_is_the_wrong_shape(self):
-        result = bloat.load_bloat_verdicts(self.path('{"verdicts": "nope"}'))
-
-        self.assertEqual(
-            [p.code for p in result.problems], ["bloat-verdicts-invalid-shape"]
-        )
-
-    def test_an_unexpected_top_level_key_is_the_wrong_shape(self):
-        result = bloat.load_bloat_verdicts(
-            self.path('{"verdicts": [], "extra": true}')
-        )
-
-        self.assertEqual(
-            [p.code for p in result.problems], ["bloat-verdicts-invalid-shape"]
-        )
-
-    def test_an_unsupported_schema_version_is_the_wrong_shape(self):
-        result = bloat.load_bloat_verdicts(
-            self.path('{"schema_version": 99, "verdicts": []}')
-        )
-
-        self.assertEqual(
-            [p.code for p in result.problems], ["bloat-verdicts-invalid-shape"]
-        )
-
-    def test_a_well_shaped_file_returns_the_verdicts_list(self):
+    def test_a_well_shaped_file_returns_the_envelope_unchanged(self):
         result = bloat.load_bloat_verdicts(
             self.path('{"schema_version": 1, "verdicts": [{"id": "B-1"}]}')
         )
 
-        self.assertEqual(result, [{"id": "B-1"}])
+        self.assertEqual(
+            result, {"schema_version": 1, "verdicts": [{"id": "B-1"}]}
+        )
 
-    def test_schema_version_is_optional(self):
-        result = bloat.load_bloat_verdicts(self.path('{"verdicts": []}'))
+    def test_a_malformed_envelope_is_returned_unchanged_not_refused(self):
+        """Shape checking is not this function's job — `audit_bloat` owns it,
+        so nothing here can be routed around by a hand-built envelope."""
+        result = bloat.load_bloat_verdicts(self.path("[]"))
 
         self.assertEqual(result, [])
 
@@ -973,10 +952,15 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
         entry.update(overrides)
         return entry
 
+    def envelope(self, repo, *verdicts, **overrides):
+        payload = {"verdicts": list(verdicts) or [self.verdict(repo)]}
+        payload.update(overrides)
+        return payload
+
     def test_a_valid_verdict_list_yields_a_report_with_its_code(self):
         repo = self.corpus()
 
-        result = bloat.audit_bloat(repo, [self.verdict(repo)])
+        result = bloat.audit_bloat(repo, self.envelope(repo))
 
         self.assertIsInstance(result, Report, result)
         self.assertEqual(result.records[0].to_dict()["code"], bloat.CUT)
@@ -985,14 +969,14 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
         repo = self.corpus()
         index = build_context_index(repo)
 
-        result = bloat.audit_bloat(repo, [self.verdict(repo)])
+        result = bloat.audit_bloat(repo, self.envelope(repo))
 
         self.assertEqual(result.lineage.registry_digest, index.registry_digest)
 
     def test_the_report_validates_with_schema_version_and_hex_digests(self):
         repo = self.corpus()
 
-        result = bloat.audit_bloat(repo, [self.verdict(repo)])
+        result = bloat.audit_bloat(repo, self.envelope(repo))
 
         payload = result.to_dict()
         self.assertEqual(payload["schema_version"], ARTIFACT_SCHEMA_VERSION)
@@ -1003,18 +987,62 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
     def test_invalid_verdicts_return_invalid_preserving_recorder_codes(self):
         repo = self.corpus()
 
-        result = bloat.audit_bloat(repo, [self.verdict(repo, evidence="")])
+        result = bloat.audit_bloat(
+            repo, self.envelope(repo, self.verdict(repo, evidence=""))
+        )
 
         self.assertIsInstance(result, Invalid)
         self.assertIn("bloat-missing-evidence", [p.code for p in result.problems])
 
-    def test_a_non_list_verdicts_argument_is_invalid(self):
+    def test_a_bare_list_is_not_a_valid_envelope(self):
+        """`audit_bloat` takes the envelope, not a bare list — an in-process
+        caller that hand-unwraps `load_bloat_verdicts`' payload and skips
+        straight to a list is refused here, not silently accepted."""
         repo = self.corpus()
 
-        result = bloat.audit_bloat(repo, {"not": "a list"})
+        result = bloat.audit_bloat(repo, [self.verdict(repo)])
 
         self.assertIsInstance(result, Invalid)
-        self.assertIn("bloat-invalid-shape", [p.code for p in result.problems])
+        self.assertIn(
+            "bloat-verdicts-invalid-shape", [p.code for p in result.problems]
+        )
+
+    def test_an_envelope_missing_the_verdicts_key_is_invalid(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, {"not": "verdicts"})
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn(
+            "bloat-verdicts-invalid-shape", [p.code for p in result.problems]
+        )
+
+    def test_an_unexpected_top_level_key_is_invalid(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, self.envelope(repo, extra=True))
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn(
+            "bloat-verdicts-invalid-shape", [p.code for p in result.problems]
+        )
+
+    def test_an_unsupported_schema_version_is_invalid(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, self.envelope(repo, schema_version=99))
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn(
+            "bloat-verdicts-invalid-shape", [p.code for p in result.problems]
+        )
+
+    def test_schema_version_is_optional(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, {"verdicts": [self.verdict(repo)]})
+
+        self.assertIsInstance(result, Report, result)
 
     def test_an_invalid_registry_invalidates_the_run(self):
         repo = self.git_repo({
@@ -1022,7 +1050,7 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
             "docs/a.md": "# A\n\nAlpha.\n",
         })
 
-        result = bloat.audit_bloat(repo, [])
+        result = bloat.audit_bloat(repo, {"verdicts": []})
 
         self.assertIsInstance(result, Invalid)
 
@@ -1030,7 +1058,7 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
         """End-to-end mintability: this is what makes fixing-docs' step 1 real
         for bloat, exactly as it already is for drift."""
         repo = self.corpus()
-        report = bloat.audit_bloat(repo, [self.verdict(repo)])
+        report = bloat.audit_bloat(repo, self.envelope(repo))
         self.assertIsInstance(report, Report, report)
         digest = report.records[0].digest
 

@@ -183,7 +183,10 @@ class BloatAuditCommand(RepoTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             json.loads(result.stdout),
-            bloat.audit_bloat(repo, verdicts).to_dict(),
+            # `audit_bloat` takes the envelope the file holds — the same
+            # shape `load_bloat_verdicts` hands the CLI unchanged — not the
+            # bare `verdicts` list.
+            bloat.audit_bloat(repo, {"verdicts": verdicts}).to_dict(),
         )
 
     def test_a_cut_records_digest_is_mintable(self):
