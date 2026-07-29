@@ -4,7 +4,7 @@ Stdlib-only Python package (`doclifecycle`) behind the plugin's skills and workf
 third-party dependencies. Library functions are the implementation; the commands wrap them and
 add nothing, so an import and a command cannot disagree. The one external program it runs is
 `git`, and only to read: a repository's identity and HEAD, which paths a commit range changed,
-and when a path last changed. Nothing here writes to a repository.
+and when a path last changed. Git is read-only here; the applier — below — is the one component that writes, and it writes the working tree directly, never the index.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
 contract, the lineage-keyed cache, the segmenter, finding identity, the context index, the
