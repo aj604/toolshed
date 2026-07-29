@@ -21,13 +21,13 @@ applier — the only component that writes.
 | `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
 | `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
 | `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
-| `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, the chunk cache seam |
+| `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, `audit_bloat()`, `load_bloat_verdicts()`, the chunk cache seam |
 | `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, `load_verdicts()`, the verdicts and anchor checks |
 | `doclifecycle/migrate.py` | `draft_registry()`, `dry_run_migration()`, the legacy-install inference and the migration contract |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
-| `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope and the minter kinds |
-| `doclifecycle/policy.py` | `load_auto_apply_policy()`, `policy_eligibility()`, `mint_policy_approval_set()`, the eligibility classes and the never-eligible codes |
+| `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope, the minter kinds, and `POLICY_NEVER_ELIGIBLE_CODES` — the bloat verdict codes a policy minter may never select, checked here as well as by `policy.py` |
+| `doclifecycle/policy.py` | `load_auto_apply_policy()`, `policy_eligibility()`, `mint_policy_approval_set()`, the eligibility classes; `NEVER_ELIGIBLE_CODES` is an alias of `approval.POLICY_NEVER_ELIGIBLE_CODES`, not a second declaration of it |
 | `doclifecycle/applier.py` | `apply_edit_plan()`, `load_edit_plan()`, `load_approval_payload()`, the edit-plan vocabulary, the record-code remedy table, and the whole-diff confinement check |
 | `doclifecycle/render.py` | `render_report()`, `render_approval_set()`, `approval_trailers()` — Markdown and git trailers from validated artifacts, and nothing else |
 | `doclifecycle/repository.py` | `lineage()`, `resolve_commit()`, `changed_paths()`, `last_change()`, `tracking()`, `tracked_files()`, `worktree_changes()`, `head_bytes()` — everything read from git |
@@ -790,7 +790,7 @@ and `docs/plans/*.md → planning, set plans`, and whose `docs/fee-policy.md` an
   "schema_version": 1,
   "registry_digest": "3613c1c8335b019b9685af1346bf6a78c86f1bf553f70b459fb7c613fd2179dc",
   "inventory_digest": "4720cbf9091d991c78db3f4538130d4549bc7daa6574c8733c8fa84143d26a5a",
-  "digest": "1e41b25c195eb3b2f18ad46fd46368ead7e047950a6810b90b777659988dcf40",
+  "digest": "f2def18aaec4e88f11f95bfd33354e7ac86b73fa4a99f10aeb80ec324737af6a",
   "occurrences": {
     "3bb14dce3f2909ce16065f0777ce8f1cd40e50c7dea80b9e5a7030956c5efdd6": [
       {"path": "docs/fee-policy.md", "ordinal": 1, "line": 3, "end_line": 3},
@@ -815,8 +815,26 @@ and `docs/plans/*.md → planning, set plans`, and whose `docs/fee-policy.md` an
   and any inventoried document that will not decode, are named here rather than skipped —
   `bloat.BloatResult.report_payload()` turns each into an `incomplete` scope, which forces
   `partial`.
+- **A planning document's lifecycle state is file-bound, and the index is where it is read.**
+  "The registry" above says content-coupled facts, lifecycle state included, stay in the
+  documents; here is the mechanism that makes that true rather than advisory.
+  `_lifecycle_status()` reads a planning document's own `> Status: <value>` block-quote marker,
+  matched the same way `drift.py`'s `> As of` anchor is — against the segmenter's normalized
+  text, never a literal line-1 read — and the only two values a document may declare,
+  `LIFECYCLE_STATUSES` (`context.py`), are `pending-implementation` and `ready`. An absent
+  marker, a malformed one, or one carrying any other value all collapse to the same fail-safe
+  default, `DEFAULT_LIFECYCLE_STATUS`: never `ready`, because a plan nobody has git-approved as
+  done must never read as the state that unlocks `DISTILL`'s remedy set (below).
+  `ContextIndex.lifecycle_status(path)` is the one place this is read back from — `None` for a
+  path the index does not hold or one that is not a planning document, since lifecycle state is
+  not a fact about any other kind. The state lives on `IndexedDocument.lifecycle_status`, set
+  only for `kind == "planning"` documents and `None` for every other kind, which is why it is
+  inside the index's own digest (below) rather than a separate lineage field: it is exactly as
+  much a fact about the corpus as a unit's text is, and it moved the digest as of the same
+  change that added the field (the stale example digest below was the visible consequence).
 - The index is a pure function of the inventory, so it needs no lineage field of its own; its
-  digest covers the inventory digest, each document's ordered units, and the unexamined scopes.
+  digest covers the inventory digest, each document's ordered units and (for a planning document)
+  its file-bound lifecycle status, and the unexamined scopes.
 
 ```python
 from doclifecycle.context import build_context_index
@@ -850,11 +868,20 @@ and repository it was built from.
 | `EXTRACT-AND-MOVE` | right content, wrong document | yes |
 | `MERGE-DOC` | near-duplicate; fold into the survivor | yes |
 | `RETIRE-DOC` | carries nothing another document lacks | no |
-| `DISTILL` | planning artifact; `ready` or `pending-implementation` | optional — the residue document it authors |
+| `DISTILL` | planning artifact; carries the document's own file-bound status, `ready` or `pending-implementation` | optional — the residue document it authors |
 
 The legacy skill's `POLICY` verdict is deliberately absent. A bulk judgment no longer rides on
 a hand-declared directory whose file list the model echoes back: it declares an enumerable
 inclusion rule and the engine expands it (see *Deterministic scopes* below).
+
+**A `DISTILL` verdict's `status` is checked against the file, never taken as the model's word.**
+`record_verdicts()` refuses one against a document the registry does not classify `planning`
+(`bloat-distill-not-planning` — a lifecycle status is not a fact about any other kind), refuses a
+value outside `context.LIFECYCLE_STATUSES` (`bloat-unknown-status`), and, when both of those
+pass, compares the declared `status` against `index.lifecycle_status(path)` — the marker read
+off the document itself. A mismatch is `bloat-status-not-file-bound`: the file is the authority,
+and a verdict may report what it says, never assert something else. `status` on any other verdict
+is `bloat-status-forbidden` — only `DISTILL` carries one.
 
 ### Chunk planning
 
@@ -868,8 +895,8 @@ Real output for the same two-document repository as above:
 {
   "status": "ok",
   "schema_version": 1,
-  "index_digest": "1e41b25c195eb3b2f18ad46fd46368ead7e047950a6810b90b777659988dcf40",
-  "digest": "bbb951e48f788577b11a086923b16bdbd86ea2d2abf0f57cbd8711a0bd89679e",
+  "index_digest": "f2def18aaec4e88f11f95bfd33354e7ac86b73fa4a99f10aeb80ec324737af6a",
+  "digest": "7f8f658b26f7a8b5ec51ca998df04dc5db0d976f8c2b8685254989eb0db945dc",
   "chunks": [
     {"id": "c-135e93546e086eef", "documents": ["docs/fee-policy.md"], "unit_count": 2},
     {"id": "c-77f609c2fb738ce5", "documents": ["docs/plans/p.md"], "unit_count": 2}
@@ -1033,6 +1060,47 @@ vocabulary: each of the index's unexamined scopes becomes an `incomplete` entry,
 never reports `clean` about it, and the absence of a bloat finding for a document nobody read
 cannot be mistaken for a verdict that it is lean. The state is derived from the content, for the
 same reason the contract re-derives it.
+
+### Audit command
+
+```bash
+python3 -m doclifecycle bloat-audit --repo . --verdicts verdicts.json
+```
+
+`--repo` and `--registry` are the corpus flags every command shares; `--verdicts` is required —
+there is no planless bloat audit the way a drift run can leave living documents unexamined, since
+a value judgment about the corpus has to have been made by someone. The file it names is the
+envelope a bloat lane returns: `{"verdicts": [...]}`, optionally with a `schema_version` that
+must equal `ARTIFACT_SCHEMA_VERSION` when present — not a bare list.
+
+`load_bloat_verdicts()` and `audit_bloat()` draw the same file/payload split
+`drift.load_verdicts()`/`audit_drift()` draw, deliberately asymmetric in where each checks its
+input. `load_bloat_verdicts()` is a thin reader: an unreadable or unparseable file is
+`bloat-verdicts-unreadable`, and it looks no further into what the JSON says. `audit_bloat()` is
+where the envelope's shape — the object wrapper, the closed key set, the `verdicts` list, the
+`schema_version` — is actually enforced (`bloat-verdicts-invalid-shape`), the same seam
+`audit_drift()` checks its own verdicts payload at. Enforcing it inside the composition rather
+than the loader means every path into `audit_bloat()`, not only the CLI's, gets the check — an
+in-process caller that built the envelope itself and skipped the file reader entirely cannot
+route around it.
+
+`audit_bloat(repo_root, verdicts, registry_path=...)` indexes the repository
+(`build_context_index()`), checks the verdicts against it (`record_verdicts()`), and validates
+the result through the same `report.validate_report()` every lane shares. The lineage it builds
+always declares `audit_mode: "full"` — bloat has no diff-scoped mode, the whole corpus is the
+evidence for any one verdict — and a fixed `evidence_boundary` (`sources: ["**"]`, no commands):
+unlike drift's, it is not consumer-configurable, since nothing in the bloat lane cites a source
+or a local tool the way a drift verdict can. Exit codes are the report states: 0 clean or
+findings, 1 invalid, 2 usage, 4 partial.
+
+The library calls behind it:
+
+```python
+from doclifecycle.bloat import audit_bloat, load_bloat_verdicts
+
+verdicts = load_bloat_verdicts("verdicts.json")   # → payload dict, or Invalid
+audit_bloat(".", verdicts)                        # → Report or Invalid
+```
 
 ## Drift audit
 
@@ -1267,11 +1335,24 @@ the code it describes was current, not when the file was last touched, so a typo
 otherwise read as drift.
 
 The anchor's references are its backticked tokens, and only those: reading unbackticked prose as
-filenames would open paths a sentence merely mentioned. A token is a path when it contains a `/`
-or ends in an extension starting with a letter, which is what keeps `` `v1.2` `` from being
-opened as a path at all. A trailing `:<line>` is trimmed, and an absolute path or one
-containing `..` is not a repository reference at all. Anchor findings group the anchor's own
-unit, so they point at the line to fix; the prose around it is never read as an assertion.
+filenames would open paths a sentence merely mentioned. A token is a candidate path when it
+contains a `/` or ends in an extension starting with a letter, which is what keeps `` `v1.2` ``
+from being opened as a path at all — that filter is `_anchor_references`'s own, since it is about
+what counts as a candidate in the first place, not about spelling. A trailing `:<line>` is
+trimmed before anything else runs. Whether what is left is actually a well-formed
+repository-relative path is not decided here a second time: the candidate goes through
+`paths.repository_relative_problem()`, the same canonical-path policy the rest of the engine
+answers that question from (*Path authorization* above) — so `..`, a leading `/` or `~`, a
+backslash, whitespace, a control character, and a non-NFC spelling are refused as a *reference*
+the identical way they are refused as an edit target, through the one list rather than a second,
+hand-rolled copy of it. A candidate the policy refuses is not a reference at all — dropped
+silently, the way any spelling problem is here: `_anchor_references` is a candidate extractor,
+not a refusing one, so a token it drops is simply not a reference, never a finding of its own.
+One shape is deliberately accepted rather than refused: a directory
+anchor spells itself with a trailing `/` (`` `docs/plans/` ``) — canonical for "everything
+beneath", not a non-canonical file spelling — so the token's own trailing slash is stripped before
+the policy check reads the directory name underneath it (#93). Anchor findings group the anchor's
+own unit, so they point at the line to fix; the prose around it is never read as an assertion.
 
 References are repository-relative and complete: a token that resolves to nothing is reported as
 unresolvable, never as a removal, and a shorthand is not resolved against a prefix an earlier
@@ -1679,6 +1760,12 @@ disagrees with the content, and `approval-missing-field` if it is absent. Pass
 `Doc-Lifecycle-Approval` trailer of the change claiming it: a different file is
 `approval-digest-unexpected`, however well-formed it is.
 
+Reading the file is `digest.load_strict_json` behind `load_approval_set` — the same mechanics an
+edit plan's read shares (above): an unreadable file is `approval-unreadable`, one that will not
+parse is `approval-unparseable`, and one nesting past the decoder's own recursion bound is
+`approval-nesting-too-deep`, defense in depth rather than an enforced bound, exactly as for a
+plan.
+
 `report_state` is the report's own state when the set was minted, inside the digest. It is
 there because a `partial` report's absent records are the *unexamined* ones and reconciliation
 only groups records that were present — so a coverage gap can hide a finding that would have
@@ -1952,6 +2039,22 @@ directions: no code any class admits maps to `create-document`, `retire-document
 whose code the table did not carry would mint authority the lane then refuses itself, which is
 fail-shut but is not a working default.
 
+**The restriction also lives on the artifact, not only in how a policy is allowed to produce
+one.** `policy_eligibility` and `RECORD_REMEDIES` are a defense in the *producer* — they decide
+what `mint_policy_approval_set` will select — but an approval set is a file, and `mint-approval
+--minter-kind policy` (above) is a raw door that credits a policy without consulting one: it
+mints for any record class a human names, `minter.kind` included. A defense living only in the
+one producer that stays honest is not a defense against a caller who skips it. So
+`approval.POLICY_NEVER_ELIGIBLE_CODES` — the same six bloat verdict codes
+(`policy.NEVER_ELIGIBLE_CODES` is its alias) — is checked directly against the artifact's own
+`minter.kind` and each selected record's `code`, structurally, needing no report and no
+repository: once at mint time inside `mint_approval_set` itself, and again inside
+`validate_approval_set`'s unconditional structural layer — so a hand-edited `minter` field cannot
+brand a bloat selection `policy` after the fact, and an artifact minted by whatever route skipped
+the check is still caught on read-back. Either violation is `approval-policy-ineligible-record`. A
+human minting the same selection is unrestricted — bloat review by a person is exactly what
+bloat review is for — so the check fires only when `minter.kind == "policy"`.
+
 ### Commands
 
 ```bash
@@ -2002,13 +2105,23 @@ The order of refusals is the contract:
    a selection nobody minted would validate. `invalid` problems surface as-is; a lineage field
    that moved is a `stale` refusal (exit 3) naming every field, with no working-tree change —
    the message says to re-run the audit and mint afresh.
-2. **The plan.** Structural validation is exhaustive: unknown fields, the schema version, the
+2. **The plan.** Reading it can already refuse: `load_edit_plan` is `digest.load_strict_json`,
+   so an unreadable file is `plan-unreadable`, one that will not parse (a syntax error, or a
+   `NaN`/`Infinity` value no strict re-parse would survive) is `plan-unparseable`, and one
+   nesting past the decoder's own recursion bound is `plan-nesting-too-deep` — defense in depth
+   here rather than an enforced structural bound the way `report.py`'s own `MAX_NESTING` walk is,
+   since a plan (unlike a report) has no post-parse nesting check behind it. Structural
+   validation from there is exhaustive: unknown fields, the schema version, the
    digest (`plan-digest-mismatch` on any tamper), the approval binding
    (`plan-approval-mismatch`), each operation's exact field set and spelling
    (`plan-invalid-operation`, via `paths.write_target_problem` — the same owner the approval
    set's paths go through), the target class (`plan-forbidden-target-class`), the record
    binding (`plan-record-not-approved`, `plan-target-not-record-target` — an operation writes
-   only its own record's targets), duplicates (`plan-duplicate-operation`), overlapping or
+   only its own record's targets), completeness in the reverse direction — every approved record
+   must name at least one usable operation, or the plan silently drops work the approval set
+   mandated (`plan-record-not-executed`), and a composite remedy's every required leg must be
+   present, not merely one of them (`plan-remedy-incomplete`, below) — duplicates
+   (`plan-duplicate-operation`), overlapping or
    ambiguous spans (`plan-overlapping-spans`, `plan-conflicting-operations`), and the declared
    postimages (`plan-invalid-postimages`, `plan-postimages-not-derived`).
 3. **The remedy is the record's, not the plan's.** `RECORD_REMEDIES` maps each finding code to
@@ -2020,7 +2133,15 @@ The order of refusals is the contract:
    (`plan-operation-not-record-remedy`). Without it the plan picks the operation, and the
    auto-apply policy's whole restriction — mechanical drift fixes yes, retirements and
    creations never — is unenforceable, because a policy-minted `STALE` record could be executed
-   as a `retire-document`. A positioned operation on the record's own document must also lie
+   as a `retire-document`. `MERGE-DOC` is the one remedy whose two operations are not
+   substitutes for each other: `REQUIRED_REMEDY_OPERATIONS` names both `move-with-provenance`
+   and `retire-document` as required together, so a plan that lands the move without the
+   retirement (a duplication left behind) or the retirement without the move (a plain deletion)
+   is `plan-remedy-incomplete` — a different, unapproved change either way. `DISTILL`'s five-op
+   remedy is deliberately *not* in that table: which span edits a given residue needs is a
+   per-record choice, not a fixed shape every distillation must exercise whole, so a plan may
+   use any subset of it, so long as `plan-record-not-executed` sees at least one. A positioned
+   operation on the record's own document must also lie
    within the hull of that record's approved units — their first line through their last, so
    the blank lines between two approved units stay editable —
    or it is `plan-span-outside-approved-units`. The hull is measured against HEAD, and checked
@@ -2057,8 +2178,21 @@ The order of refusals is the contract:
    another passage of an approved document — one no record covers, so one no unit-level
    preimage check sees — ride into the diff this run certifies. Commit or discard first; this
    is also why sequential partial applies from one report commit between subsets. After
-   writing, the diff is read again, and an unaccounted change rolls this run's writes back and
-   fails the run (`apply-unconfined-change`). Nothing is ever staged or committed here: change
+   writing, the diff is read again and checked twice, not once. First against the approval
+   set's scope, exactly as before the write (`apply-unconfined-change` this time — the code
+   names which side of the write the same scope check ran on). Second, narrower: what changed
+   is compared against the plan's own written paths (sources and move destinations,
+   `_written_paths`), and anything outside that set is `apply-working-tree-not-clean` — the
+   pre-write code, reused, because the shape of the refusal is the same one: a change this plan
+   did not make riding into the diff it certifies. The second comparison exists because the
+   scope check alone is not narrow enough post-write: a record's destination is in scope the
+   moment the record has one (`derived_scope_paths`), but not every remedy for that record
+   writes both ends — `DISTILL`'s `create-document` writes only the destination, leaving the
+   planning artifact it retires in scope yet unwritten by *this* plan. A concurrent change
+   landing there would pass the scope check and then ride into the diff as this run's own.
+   Either post-write refusal rolls this run's writes back to what was snapshotted before
+   failing, so a caught race leaves the tree exactly as found for a human to inspect, never
+   half-written. Nothing is ever staged or committed here: change
    approval — a person merging or committing — is the only thing that lands anything.
 
 Application order is deterministic: per document, span edits apply bottom-up so the plan's line
@@ -2104,7 +2238,8 @@ the lineage digest, the finding code, the document, and the normalized unit grou
 one deliberately leaves out is in the two sections above, and it is always the same kind of
 thing: position, prose, and judgment.
 
-A context-index digest covers the inventory digest, each document's ordered units, and the
+A context-index digest covers the inventory digest, each document's ordered units and (for a
+planning document) its file-bound lifecycle status, and the
 scopes it could not examine; a chunk id covers its members and their document digests; a chunk
 plan's digest covers the index digest and every chunk; and a scope enumeration's digest covers
 the inclusion rule and the members it expanded to. Each is a fact about the corpus, so none of
@@ -2124,7 +2259,8 @@ Seams under test: the library calls (`build_inventory()`, `authorize_path()`,
 `cache.put()`, `cache.get()`, `segment_text()`, `segment_document()`, `build_finding()`,
 `record_classifications()`, `build_context_index()`, `bloat.plan_chunks()`,
 `bloat.merge_contention()`, `bloat.enumerate_scope()`, `bloat.record_verdicts()`,
-`bloat.load_chunk()`, `bloat.store_chunk()`, `plan_drift_audit()`, `audit_drift()`,
+`bloat.load_chunk()`, `bloat.store_chunk()`, `bloat.audit_bloat()`,
+`bloat.load_bloat_verdicts()`, `plan_drift_audit()`, `audit_drift()`,
 `load_verdicts()`, `draft_registry()`, `dry_run_migration()`, `repository.lineage()`,
 `repository.resolve_commit()`, `repository.changed_paths()`, `repository.last_change()`,
 `repository.tracking()`, `repository.tracked_files()`, `reconcile()`, `mint_approval_set()`,
