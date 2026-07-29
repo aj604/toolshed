@@ -1,5 +1,7 @@
 # Shadow-mode parity gate (issue #76)
 
+> Status: ready
+
 **Status:** criteria pre-registered 2026-07-26 in their own commit; cycle run and verdict
 recorded the same day, in later commits. **Verdict: FAIL** — G1b (write proof, on its
 instrument), G4 (false positives), G5 (cost). See Verdict.

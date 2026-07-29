@@ -1,5 +1,7 @@
 # doc-bloat scale hardening: provisioned executors, per-chunk budgets, convergent runs
 
+> Status: ready
+
 **Date:** 2026-07-07. **Status:** approved (core sections user-approved in session; rollout
 sections per implementer judgment). **Prior design:**
 `2026-07-06-detecting-doc-bloat-rearchitecture-design.md` (this hardens its headless lane).

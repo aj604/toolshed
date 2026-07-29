@@ -152,8 +152,15 @@
 - Decided: `_completeness_problems` adds two refusals — `plan-record-not-executed` (an approved record
   with no usable operation in the plan) and `plan-remedy-incomplete` (a composite record missing a
   required leg) — checked against a new `REQUIRED_REMEDY_OPERATIONS` table declaring MERGE-DOC's two
-  legs (move-with-provenance, retire-document) both required. DISTILL is deliberately exempt: its
-  remedy is a single create-or-retire operation, never a composite one.
+  legs (move-with-provenance, retire-document) both required. DISTILL's requirement is conditional on
+  its own record, via `DESTINATION_CONDITIONAL_CODES`: a DISTILL record naming a `destination` was
+  approved as "author the residue there, then retire the planning artifact", and `create-document` is
+  required of it for the same reason MERGE-DOC's move is required — a plan carrying only the
+  retirement destroys the source and writes nothing. A destination-less DISTILL proposed no residue at
+  all, so retiring the planning artifact alone is its whole approved remedy and stays exempt. (DISTILL's
+  remedy set is five operations — `create-document` plus the three span edits plus `retire-document`,
+  `RECORD_REMEDIES` — of which only the creation is required whole; which span edits a given residue
+  needs is chosen per record, not required as a fixed set.)
 - Decided (a pre-existing bug found en route): landing the completeness check exposed that the blanket
   whole-document conflict rule refused every valid both-legs MERGE-DOC plan outright — a retired
   document tolerated no other edit, including its own paired move. The move+retire conflict exemption
@@ -163,8 +170,10 @@
   (`RECORD_REMEDIES` makes MERGE-DOC the only code whose remedy is both ops, so a same-record check is
   equivalent to, and cheaper than, re-deriving the record's code).
 - Verified: `tests/engine/applier_test.py` covers both new refusals, the cross-record regression (two
-  records, one shared path, wrong exemption applied), and MERGE-DOC's own paired legs plus a stray
-  third operation on the source path.
+  records, one shared path, wrong exemption applied), MERGE-DOC's own paired legs plus a stray third
+  operation on the source path, a destination-carrying DISTILL plan that retires without creating the
+  residue (refused), the honest create-then-retire DISTILL path (applies clean), and a destination-less
+  DISTILL that only retires (also applies clean, the exemption held).
 - Code: plugins/doc-lifecycle/engine/doclifecycle/applier.py, tests/engine/applier_test.py
 
 ## 2026-07-29 — policy provenance is checked on the artifact, not only at the producer (#57)
@@ -230,6 +239,27 @@
   `tests/engine/acceptance/scenario_policy_test.py`,
   `tests/baselines/multiline-fix-red/`
 
+## 2026-07-29 — the bloat-triage render path retires; render-report.py's second consumer goes to zero (#77 follow-up)
+- Evidence: `detecting-doc-bloat/SKILL.md` moved to summarizing its report by hand (6c2c4aa), leaving
+  `render-report.py`'s `bloat-triage` subcommand with no caller. It also died on a real report (the
+  engine keys documents as `path`, not `doc`) and carried `POLICY` branches and an unswept banner —
+  dead weight from a retired verdict and a retired sidecar shape.
+- Decided: delete the `bloat-triage` subcommand and its dedicated test class.
+  `render-report.py`'s only remaining consumer is the upgrade lane (`upgrade-summary`,
+  `upgrade-pr-body`, `upgrade-notice`). `CLAUDE.md`, `scheduling-doc-sync/SKILL.md` (`policy_scope`
+  is a retired `plan-chunks.py` key), `fixing-docs/SKILL.md` (`POLICY` doesn't expand to per-file
+  records), and `growing-docs/SKILL.md` (narrative anchors are `drift-audit`'s enforced `ANCHOR-*`
+  findings today, not a future hook) are corrected to match.
+- Superseded: the 2026-07-27 entry below, "render-report.py sheds its legacy-lane subcommands (#77
+  follow-up)" — **marked superseded in place**. Its evidence that render-report.py was "kept
+  wholesale, since `bloat-triage` and the upgrade lane still call it" no longer holds; the upgrade
+  lane is now the sole caller. Left standing as the record of what was true then.
+- Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/render-report.py`,
+  `tests/scripts/render-report_test.py`, `CLAUDE.md`,
+  `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
+  `plugins/doc-lifecycle/skills/growing-docs/SKILL.md`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`
+
 ## 2026-07-27 — a vendored copy needs a reader, or it doesn't get vendored (#77 follow-up)
 - Evidence: `apply-upgrade.py`'s `SCRIPTS` table kept vendoring `plan-chunks.py`,
   `validate-bloat-output.py`, and `validate-drift-output.py` into every install's
@@ -275,6 +305,11 @@
   `render-audit-summary.py` the audit lane's — neither reuses `render-report.py`'s rendering, and
   there is no functional gap the retired subcommands would fill; keeping them would be two
   implementations of the same purpose, one of them dead.
+- Superseded (in part) — **marked superseded in place**: the 2026-07-29 entry above, "the
+  bloat-triage render path retires; render-report.py's second consumer goes to zero" — this
+  entry's evidence that `bloat-triage` still calls `render-report.py` no longer holds; the
+  upgrade lane is now the sole caller. This entry's own decision (delete the dead legacy
+  subcommands, adopt none) still binds. Left standing as the record of what was true then.
 - Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/render-report.py` (and its
   byte-identical `.doc-lifecycle/wiring/` copy), `tests/scripts/render-report_test.py`
 

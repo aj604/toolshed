@@ -1,5 +1,7 @@
 # Shadow-mode parity gate, second cycle — G4 addendum (issue #123)
 
+> Status: ready
+
 **Status:** the second cycle's single blocker is fixed and G4 is re-measured on that cycle's own
 report. No third cycle was run; the reasoning for that is below, in full.
 **Amends:** `docs/plans/2026-07-27-shadow-parity-gate-rerun.md` — its Verdict and its "What #77

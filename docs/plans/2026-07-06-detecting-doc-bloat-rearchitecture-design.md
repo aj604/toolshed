@@ -1,6 +1,9 @@
 # detecting-doc-bloat rearchitecture — harness, chunked sweeps, contract v2
 
-Status: approved design, pre-implementation. Companion plan: to be written via
+> Status: ready
+
+Status (at authoring): approved design, pre-implementation. Implemented since — see the
+companion plan below and `docs/decisions.md`'s 2026-07-06 entry. Companion plan: to be written via
 superpowers:writing-plans. Author: brainstorming session 2026-07-06 with a
 pattern-corpus consultation (paths cited inline are repo-relative in
 `agentic-skill-design-patterns`).
