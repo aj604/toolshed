@@ -1063,6 +1063,47 @@ class NarrativeAnchors(DriftRepoTestCase):
         self.assertEqual(record.extra["evidence"]["source"], "src/")
         self.assertIn("last changed", record.extra["evidence"]["observed"])
 
+    def test_no_unsafe_spelling_of_an_anchor_reference_is_accepted(self):
+        """Issue #57 review: the ad-hoc filter accepted spellings
+        `paths.repository_relative_problem` rejects — `paths.py` is the single
+        owner of what a repository-relative path is (drift.py:701-705), and an
+        anchor reference is no exception. A candidate with any path problem is
+        prose the extractor never claimed as a reference, so it is silently
+        skipped, not surfaced as ANCHOR-UNRESOLVABLE-REFERENCE."""
+        unsafe = {
+            "windows separator": r"docs\guide.md",
+            "dot component": "./docs/guide.md",
+            "doubled separator": "docs//guide.md",
+            "mid dot component": "docs/./guide.md",
+            "trailing separator": "docs/guide.md/",
+            "leading dash": "-rf.md",
+            "drive letter": "C:/x/guide.md",
+        }
+        for name, reference in unsafe.items():
+            with self.subTest(spelling=name):
+                root = self.drift_repo(**{
+                    NARRATIVE: "# Tour\n\n"
+                               f"> As of 2026-01-01 (`{reference}`)\n\nHi.\n"})
+
+                report = self.audit(root)
+
+                self.assertEqual(report.records, ())
+
+    def test_a_bad_spelling_does_not_hide_a_real_reference_in_the_same_anchor(self):
+        """A malformed sibling is silently skipped as prose; it must not
+        swallow the canonical reference beside it."""
+        root = self.drift_repo(**{
+            NARRATIVE: "# Tour\n\n"
+                       f"> As of 2026-01-01 (`docs\\guide.md`, `{SOURCE}`)\n\nHi.\n"})
+        self.write(root, SOURCE, "RATE = 0.025\n")
+        self.commit(root, "raise the rate")
+
+        report = self.audit(root)
+
+        records = self.anchor_records(report)
+        self.assertNotIn("ANCHOR-UNRESOLVABLE-REFERENCE", records)
+        self.assertEqual(records["ANCHOR-STALE"].extra["references"], [SOURCE])
+
 
 class EvidencePointers(DriftRepoTestCase):
     def stale_record(self, root, **overrides):
