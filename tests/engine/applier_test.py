@@ -984,6 +984,137 @@ class RemedyBinding(ApplierTestCase):
         )
 
 
+class PlanCompleteness(ApplierTestCase):
+    """An approval set is the whole mandate: every record must be executed,
+    and a composite remedy must land every leg it is made of."""
+
+    def test_plan_omitting_an_approved_record_is_refused(self):
+        # The approval selects both R-1 (docs/a.md) and R-2 (docs/b.md); the
+        # plan only carries R-1's operation. Silently dropping R-2 must be a
+        # refusal, not a clean run that under-reports what it did.
+        one, two = self.two_findings()
+        report, approval = self.approve([one, two])
+        post = DOC_A_TEXT.replace(OLD_SENTENCE, NEW_SENTENCE)
+        op = {
+            "op": "replace",
+            "record": one["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "start_line": 3,
+            "end_line": 3,
+            "preimage": OLD_SENTENCE,
+            "text": NEW_SENTENCE,
+        }
+        plan = self.plan(approval, [op], {DOC_A: sha256_text(post)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-record-not-executed"])
+        problem = next(
+            p for p in result.problems if p.code == "plan-record-not-executed"
+        )
+        self.assertIn(DOC_B, problem.message)
+
+    def test_merge_doc_plan_with_only_the_retirement_leg_is_refused(self):
+        # The reproduction that destroyed the source: a MERGE-DOC record
+        # authorizes a move and a retirement together, and a plan carrying
+        # only the retirement deletes the document and moves nothing.
+        units = self.units(self.repo, DOC_A)
+        record = self.finding(
+            "BLOAT-010", "MERGE-DOC", DOC_A, units, destination={"path": DOC_B},
+        )
+        report, approval = self.approve([record])
+        op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "preimage": DOC_A_TEXT,
+        }
+        plan = self.plan(approval, [op], {DOC_A: None})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-remedy-incomplete"])
+
+    def test_merge_doc_plan_with_both_legs_applies(self):
+        # The honest path: a move and its paired retirement, together, are
+        # the one merge a reviewer approved, and land clean.
+        units = self.units(self.repo, DOC_A)
+        record = self.finding(
+            "BLOAT-011", "MERGE-DOC", DOC_A, units, destination={"path": DOC_B},
+        )
+        report, approval = self.approve([record])
+        # The move's span is bounded by the hull of the record's approved
+        # units, which does not include the "# Fees" heading (not assertion-
+        # capable) — lines 3..5, the two sentences. The retirement still
+        # carries the whole document as its preimage: what the move does not
+        # carry to the destination is simply gone once the source is retired.
+        moved = "\n".join(DOC_A_TEXT.split("\n")[2:5])
+        post_dest = DOC_B_TEXT + moved + "\n"
+        move_op = {
+            "op": "move-with-provenance",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "destination": DOC_B,
+            "start_line": 3,
+            "end_line": 5,
+            "preimage": moved,
+        }
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "preimage": DOC_A_TEXT,
+        }
+        plan = self.plan(approval, [move_op, retire_op], {
+            DOC_A: None,
+            DOC_B: sha256_text(post_dest),
+        })
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, DOC_A)))
+        self.assertEqual(self.read(self.repo, DOC_B), post_dest)
+
+    def test_full_coverage_plan_still_applies(self):
+        # Every approved record named -> clean, unaffected by the new checks.
+        one, two = self.two_findings()
+        report, approval = self.approve([one, two])
+        post_a = DOC_A_TEXT.replace(OLD_SENTENCE, NEW_SENTENCE)
+        five_times = "The worker retries a failed job five times."
+        three_times = "The worker retries a failed job three times."
+        post_b = DOC_B_TEXT.replace(three_times, five_times)
+        ops = [
+            {
+                "op": "replace",
+                "record": one["digest"],
+                "target_class": "documentation",
+                "path": DOC_A,
+                "start_line": 3,
+                "end_line": 3,
+                "preimage": OLD_SENTENCE,
+                "text": NEW_SENTENCE,
+            },
+            {
+                "op": "replace",
+                "record": two["digest"],
+                "target_class": "documentation",
+                "path": DOC_B,
+                "start_line": 3,
+                "end_line": 3,
+                "preimage": three_times,
+                "text": five_times,
+            },
+        ]
+        plan = self.plan(approval, ops, {
+            DOC_A: sha256_text(post_a), DOC_B: sha256_text(post_b),
+        })
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertEqual(self.read(self.repo, DOC_A), post_a)
+        self.assertEqual(self.read(self.repo, DOC_B), post_b)
+
+
 class AlreadyAppliedIsDerived(ApplierTestCase):
     """"Already applied" is computed from the baseline, never declared."""
 

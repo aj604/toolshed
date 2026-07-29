@@ -126,6 +126,19 @@ RECORD_REMEDIES = {
     DISTILL: (OP_CREATE, OP_REPLACE, OP_INSERT, OP_DELETE, OP_RETIRE),
 }
 
+# Composite remedies whose legs are not substitutes for one another: a record
+# whose code is a key here must see every listed operation among its own
+# operations, or the plan lands a different, unapproved change (a retirement
+# with no move is a deletion; a move with no retirement is a duplication).
+# MERGE-DOC is the whole vocabulary's only composite remedy today — one move
+# and one retirement, together, are the one merge a reviewer approved — so it
+# is the only entry; a plan may still use any subset of `DISTILL`'s five-op
+# remedy, since which span edits a given residue needs is chosen per record
+# rather than required whole.
+REQUIRED_REMEDY_OPERATIONS = {
+    MERGE_DOC: (OP_MOVE, OP_RETIRE),
+}
+
 # The operations that name a line span in an existing document.
 SPAN_OPS = (OP_REPLACE, OP_DELETE, OP_MOVE)
 # Every operation whose position in an existing document is stated, and so can
@@ -431,6 +444,53 @@ def _binding_problems(i, operation, by_digest, bad):
             where)
 
 
+def _completeness_problems(usable, by_digest, bad):
+    """Every approved record, against what the plan actually executes.
+
+    `_binding_problems` checks each operation against its record; this is the
+    reverse direction — each record against its operations — and it is not
+    redundant with that check, since an operation can bind cleanly to every
+    record it names while a *different* approved record names none at all.
+    An approval set is the whole mandate: a plan that silently drops one of
+    its records would let the run report work it did not do, exactly as if
+    it had invented an operation the approval never saw.
+
+    A record whose code is in `REQUIRED_REMEDY_OPERATIONS` is a composite
+    remedy, and the same silent drop can happen one leg at a time: a plan can
+    name the record and still execute only part of what was approved.
+    MERGE-DOC is the case this closes — a retirement with no move destroys
+    the source and moves nothing; a move with no retirement leaves the
+    duplicate that was supposed to go away.
+    """
+    ops_by_record = {}
+    for _, operation in usable:
+        ops_by_record.setdefault(operation["record"], []).append(operation["op"])
+
+    for digest, record in by_digest.items():
+        ops = ops_by_record.get(digest)
+        if not ops:
+            bad("plan-record-not-executed",
+                f"approved record {record.record_id} ({record.code!r} at "
+                f"{record.path!r}) names no usable operation in this plan — "
+                f"an approval set is the whole mandate: a plan that silently "
+                f"drops an approved record would let the run report work it "
+                f"did not do",
+                "operations")
+            continue
+        required = REQUIRED_REMEDY_OPERATIONS.get(record.code)
+        if required is None:
+            continue
+        missing = [op for op in required if op not in ops]
+        if missing:
+            bad("plan-remedy-incomplete",
+                f"approved record {record.record_id} ({record.code!r} at "
+                f"{record.path!r}) carries {sorted(set(ops))} and is missing "
+                f"{missing} — MERGE-DOC is one composite act — a move and a "
+                f"retirement; either leg alone is a different, unapproved "
+                f"change",
+                "operations")
+
+
 def _approved_hull(repo_root, record):
     """((first line, last line), None) of a record's approved units, or
     (None, why not) — the passage a remedy for this record may edit.
@@ -633,7 +693,22 @@ def _conflict_problems(operations, bad):
 
     for path, entries in by_path.items():
         whole = [i for i, op in entries if op["op"] in WHOLE_DOCUMENT_OPS]
-        if whole and (len(entries) > 1 or path in destinations):
+        # One pairing is not a race even though it is two operations claiming
+        # the same path with one of them whole: a move whose own source is
+        # this path, retired alongside it. `_compute_postimages` always lets
+        # the retirement decide this path's final content, unconditionally
+        # and regardless of list order — the move's only other effect is its
+        # append to a *different* path (its destination) — so this is the one
+        # whole-document combination `REQUIRED_REMEDY_OPERATIONS` requires a
+        # plan to carry together (MERGE-DOC) rather than a plan picking an
+        # order the applier would have to guess.
+        paired_move_and_retire = (
+            len(entries) == 2 and path not in destinations
+            and {op["op"] for _, op in entries} == {OP_MOVE, OP_RETIRE}
+        )
+        if whole and not paired_move_and_retire and (
+            len(entries) > 1 or path in destinations
+        ):
             bad("plan-conflicting-operations",
                 f"operations {sorted(i for i, _ in entries)} all touch {path}, "
                 f"which operations[{whole[0]}] claims whole — a created or "
@@ -802,6 +877,8 @@ def _validate_plan(payload, approval):
     by_digest = {record.digest: record for record in approval.records}
     for i, operation in usable:
         _binding_problems(i, operation, by_digest, bad)
+
+    _completeness_problems(usable, by_digest, bad)
 
     if len(usable) == len(operations):
         _conflict_problems(operations, bad)
