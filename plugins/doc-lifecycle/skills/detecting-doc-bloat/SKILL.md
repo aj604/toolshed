@@ -74,7 +74,14 @@ key plans normally, and the planner says so.
    member, and writes the validated report. It fails closed: any problem
    records nothing and names everything, so one re-prompt fixes all of it.
    Exit 0 is a report (clean or with findings), 1 refused, 4 partial —
-   something in the corpus was not examined, and the report says what.
+   `partial` means the *index* could not examine something (an unregistered or
+   symlinked path), and the report names it.
+
+   **An unswept chunk is not in that count.** The engine sees only the verdicts
+   it was handed, so documents a `--allow-partial` assembly skipped read as
+   examined-and-clean at exit 0. After a partial assembly the report's coverage
+   is not what it appears: carry the `--unswept-out` list forward and name
+   those chunks yourself whenever you present or hand off the report.
 
 **Headless (chunk executor):** your chunk slice arrived verbatim in the
 dispatch prompt — the doc list and the output path. That slice is your entire
@@ -125,9 +132,14 @@ EXTRACT-AND-MOVE / MERGE-DOC / RETIRE-DOC / DISTILL`; the artifact is the
 envelope `{"schema_version": 1, "verdicts": [...]}`. `files`, `members`,
 `occurrences`, and `contention` are refused outright — a bulk finding's
 members are enumerated from the index, never asserted by the model.
-`DISTILL` verdicts carry classification + landed-code evidence **only** — the
+`DISTILL` verdicts carry classification + landed-code evidence, plus — where
+you can say where the residue belongs — an optional `destination`, a path
+nobody has written yet. Never the residue itself: the
 claims/insights/decision-entry authoring is the `doc-distiller` agent's
-post-approval job, dispatched by `fixing-docs`. Field rules, the worked
+post-approval job, dispatched by `fixing-docs`. A `DISTILL` naming no
+destination is a *retire-only* distillation, legal and lossy exactly when the
+residue lands under no record — so omit it because there is nothing to place,
+not by default. Field rules, the worked
 example, and the chunk-result seam shape: **`output-contract.md`**. The
 shape checker sees shape; `bloat-audit` is the authority on everything else.
 Never hand off anything either one rejects.

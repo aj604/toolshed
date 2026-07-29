@@ -30,8 +30,14 @@ exactly one `DISTILL` verdict:
   is a distillation candidate: its value has already moved into the code;
   what remains is scaffolding plus whatever durable decisions and insights the
   **doc-distiller** will extract **after a human approves this record's
-  digest**. Your verdict carries the classification and the proof, nothing
-  else — no `proposal`, no residue text anywhere. **Detection never
+  digest**. Your verdict carries the classification, the proof, and — when you
+  can say where that residue belongs — a `destination`: the path of the
+  document the distiller would author it into, which must be one **nobody has
+  written yet** (the engine checks that, and refuses an occupied path). It
+  carries nothing else: no `proposal`, no residue text anywhere. Omit
+  `destination` only when there is genuinely nothing to place; that is a
+  *retire-only* distillation, and it loses whatever residue no other record
+  lands. **Detection never
   authors the residue.** The insight walk, claim drafting, and decision-entry
   drafting are the distiller's post-approval protocol — running them now is
   speculative work no one approved, and writing their output into `evidence`
