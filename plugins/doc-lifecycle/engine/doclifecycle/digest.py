@@ -63,9 +63,12 @@ def load_strict_json(path, *, unreadable_code, unparseable_code, nesting_code,
       `unparseable_code`;
     - a `RecursionError` — the decoder recurses, and a few kilobytes of
       nested brackets must reach a verdict, not a traceback — answers
-      `nesting_code`, whose message cites `max_nesting` for the caller that
-      also enforces it structurally (a decoded artifact can nest deeper than
-      the decoder itself survived, so this alone is not that enforcement).
+      `nesting_code`, whose message cites `max_nesting`. Only `report.py`
+      pairs this with a structural bound (`_scan`, an iterative,
+      `MAX_NESTING`-deep post-parse walk of every record); `applier.py` and
+      `approval.py` have no such guard, so for a plan or an approval set
+      this catch is defense in depth, not an enforced bound — a decoded
+      payload can nest deeper than the decoder itself happened to survive.
     """
     try:
         with open(path, encoding="utf-8") as fh:
