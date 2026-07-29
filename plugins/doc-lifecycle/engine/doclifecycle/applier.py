@@ -1405,6 +1405,19 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
     changed, problem = _confinement_problem(
         repo_root, approval.scope, "apply-unconfined-change"
     )
+    if problem is None:
+        # The scope check above is path-granular against the whole approval,
+        # not this plan's operations — a record with a destination puts both
+        # ends in scope (`derived_scope_paths`), but not every remedy for one
+        # writes both: a DISTILL record's `create-document` writes only the
+        # destination, leaving its source in scope but unwritten by this
+        # plan. A concurrent change landing there is inside the approval's
+        # scope and so would pass the check above, then ride into the diff
+        # this run certifies as its own. Same exact-path comparison the
+        # already-applied branch above makes.
+        problem = _unaccounted_problem(
+            sorted(set(changed) - _written_paths(operations))
+        )
     if problem is not None:
         # An unaccounted change surfaced after the write — roll this run's own
         # writes back to the snapshotted bytes and refuse; whatever else moved
