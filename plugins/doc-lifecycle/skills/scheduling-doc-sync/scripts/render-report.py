@@ -3,18 +3,17 @@
 
 This script owns user-facing strings — step summaries and PR/issue bodies — so
 a caller's self-explaining exits are unit-testable instead of living as
-jq/heredoc templates in YAML. Its callers are doc-sync-upgrade.yml
-(`upgrade-summary`, `upgrade-pr-body`, `upgrade-notice`) and the
-detecting-doc-bloat skill's in-session triage render (`bloat-triage`).
+jq/heredoc templates in YAML. Its only caller is doc-sync-upgrade.yml
+(`upgrade-summary`, `upgrade-pr-body`, `upgrade-notice`).
 
 The legacy doc-sync.yml/doc-bloat.yml write lanes had their own subcommands
-here (pre-summary, issue-body, pr-body, the remaining bloat-* variants, and
-more); both lanes and every non-triage rendering path were removed in
-aj604/toolshed#77 — the new engine's render-audit-summary.py and
-render-apply-summary.py own that run surface now.
+here (pre-summary, issue-body, pr-body, the bloat-* variants, and more); both
+lanes and every non-upgrade rendering path were removed in aj604/toolshed#77
+— the new engine's render-audit-summary.py and render-apply-summary.py own
+that run surface now, and detecting-doc-bloat now summarizes its report by
+hand rather than through a render-report.py subcommand.
 
 Usage:
-    render-report.py bloat-triage --report FILE
     render-report.py upgrade-summary --status S --current C --latest L [--pr-url URL] [--files F]
     render-report.py upgrade-pr-body --current C --latest L [--files F]
     render-report.py upgrade-notice --current C --latest L --repo OWNER/NAME [--workflow NAME] --title-out FILE --body-out FILE
@@ -28,37 +27,6 @@ import os
 import sys
 
 
-def load_report(path):
-    """(records, unswept-or-None) from a report file, either shape."""
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    if isinstance(data, list):
-        return data, None
-    if isinstance(data, dict) and isinstance(data.get("records"), list):
-        return data["records"], data.get("unswept")
-    raise ValueError(
-        "report must be a JSON array of records, or an object with a 'records' array"
-    )
-
-
-def render_unswept_banner(unswept):
-    """The loud gap: chunks the sweep never produced a valid result for."""
-    if not unswept:
-        return []
-    docs = [p for u in unswept for p in u.get("docs", [])]
-    return [
-        f"> ⚠️ **{len(unswept)} chunk(s) unswept** — these docs were NOT "
-        f"audited this run (their sweep jobs failed twice); the next sweep "
-        f"resumes them automatically: {', '.join(f'`{d}`' for d in docs)}",
-        "",
-    ]
-
-
-def md_cell(text):
-    # Cells escape | and flatten newlines so evidence can't break its row.
-    return str(text).replace("|", "\\|").replace("\n", " ")
-
-
 def write_summary(text):
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if path:
@@ -66,38 +34,6 @@ def write_summary(text):
             f.write(text + "\n")
     else:
         print(text)
-
-
-def render_bloat_rollup(records):
-    counts, docs = {}, set()
-    for r in records:
-        counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
-        docs.add(r["doc"])
-    order = ["CUT", "CONDENSE", "EXTRACT-AND-MOVE", "RETIRE-DOC",
-             "MERGE-DOC", "DISTILL", "POLICY"]
-    parts = [f"{v.lower().replace('-', ' ')} {counts[v]}" for v in order if v in counts]
-    return (f"**Rollup:** {len(records)} record(s) across {len(docs)} doc(s) — "
-            + ", ".join(parts))
-
-
-def render_bloat_triage(records, unswept=None):
-    """In-session triage view: rollup, then records grouped by doc, one line
-    per record — the human approves by the [id]s shown."""
-    by_doc = {}
-    for r in records:
-        by_doc.setdefault(r["doc"], []).append(r)
-    lines = [*render_unswept_banner(unswept), render_bloat_rollup(records), ""]
-    for doc in sorted(by_doc):
-        lines.append(doc)
-        for r in by_doc[doc]:
-            verdict = r["verdict"]
-            if verdict == "DISTILL":
-                verdict = f"DISTILL({r.get('status')})"
-            where = r.get("location") or ""
-            extra = f" ({len(r.get('files') or [])} files)" if r["verdict"] == "POLICY" else ""
-            lines.append(f"  [{r['id']}] {verdict:<14} {where}{extra} — "
-                         f"{md_cell(r['evidence'])}")
-    return "\n".join(lines)
 
 
 def _upgrade_apply_instructions(latest):
@@ -279,9 +215,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
 
-    btriage = sub.add_parser("bloat-triage")
-    btriage.add_argument("--report", required=True)
-
     usum = sub.add_parser("upgrade-summary")
     usum.add_argument("--status", required=True)
     usum.add_argument("--current", required=True)
@@ -314,9 +247,6 @@ def main():
             print(render_upgrade_notice(
                 args.current, args.latest, args.repo, args.workflow,
                 args.title_out, args.body_out))
-        elif args.mode == "bloat-triage":
-            records, unswept = load_report(args.report)
-            print(render_bloat_triage(records, unswept))
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
         print(f"error: {e!r}", file=sys.stderr)
         return 2

@@ -100,8 +100,10 @@ be mistaken for a retire-on-landing planning artifact. Its home:
 
 1. **First line under the title, always:**
    `> As of <YYYY-MM-DD> (<commit or file:line anchors current at writing>)`
-   — the staleness anchor readers can check against; a hook for future drift tooling
-   (today's drift skills audit repo-tracking claims, not narrative docs). This line
+   — the staleness anchor readers can check against, and drift-audit checks it too:
+   the engine parses this line deterministically and emits ANCHOR-MISSING,
+   ANCHOR-MALFORMED, ANCHOR-STALE, ANCHOR-FUTURE-DATED, or
+   ANCHOR-UNRESOLVABLE-REFERENCE findings against it. This line
    is also the doc's **durable-narrative marker**: bloat tooling classifies an
    anchored doc as narrative — never as a planning artifact to distill — wherever
    it sits. **Every backticked path anchor is repository-relative and written in
