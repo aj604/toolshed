@@ -152,7 +152,7 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   grant naming a Bash executable beyond `git`/`python3`, since those patterns are prefix-matched,
   #118),
   `install-parity_test.py`
-  (the dogfooded `.github/` install is byte-identical to what `apply-upgrade.py` would lay down
+  (the dogfooded install (`.doc-lifecycle/` plus the three lane workflows under `.github/workflows/`) is byte-identical to what `apply-upgrade.py` would lay down
   from the plugin with this install's knobs, plus a whole-tree comparison of the vendored engine),
   and `engine-capability_test.py` (the engine's
   applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the
