@@ -1076,6 +1076,106 @@ class PlanCompleteness(ApplierTestCase):
         self.assertFalse(os.path.exists(os.path.join(self.repo, DOC_A)))
         self.assertEqual(self.read(self.repo, DOC_B), post_dest)
 
+    def test_move_and_retire_from_different_records_on_one_path_is_refused(self):
+        # The move+retire exemption must be scoped to a single approved
+        # record. Here two *different* records both target docs/a.md — an
+        # EXTRACT-AND-MOVE (moves one unit to docs/b.md) and an unrelated
+        # RETIRE-DOC (retires the whole document) — and nothing in approval
+        # validation forbids selecting both together. A plan carrying one
+        # operation from each passes binding (each operation matches its own
+        # record) and completeness (neither code is a composite in
+        # `REQUIRED_REMEDY_OPERATIONS`), so only the conflict check stands
+        # between this and silently discarding everything the move did not
+        # carry out — exactly the exemption's blast radius if it keyed only
+        # on op-type and path instead of the record the two operations share.
+        #
+        # The two records' approved units are disjoint (unit[1] vs unit[0])
+        # so reconciliation treats them as independent and both are
+        # selectable together — the scenario the exemption must still refuse
+        # is not ruled out at mint time.
+        units = self.units(self.repo, DOC_A)
+        move_record = self.finding(
+            "BLOAT-014", "EXTRACT-AND-MOVE", DOC_A, [units[1]],
+            destination={"path": DOC_B},
+        )
+        retire_record = self.finding(
+            "BLOAT-015", "RETIRE-DOC", DOC_A, [units[0]],
+        )
+        report, approval = self.approve([move_record, retire_record])
+        moved = "Refunds reverse the fee at the rate charged."
+        move_op = {
+            "op": "move-with-provenance",
+            "record": move_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "destination": DOC_B,
+            "start_line": 5,
+            "end_line": 5,
+            "preimage": moved,
+        }
+        retire_op = {
+            "op": "retire-document",
+            "record": retire_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "preimage": DOC_A_TEXT,
+        }
+        plan = self.plan(approval, [move_op, retire_op], {
+            DOC_A: None,
+            DOC_B: sha256_text(DOC_B_TEXT + moved + "\n"),
+        })
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-conflicting-operations"])
+
+    def test_merge_doc_both_legs_plus_a_stray_third_op_on_the_source_is_refused(self):
+        # Even a genuine MERGE-DOC record's own move+retire pair does not
+        # open the source path to a third, unrelated operation riding along
+        # on the same exemption — a stray CUT record's delete, also on
+        # docs/a.md, keeps this refused. The two records' approved units are
+        # disjoint (unit[0] vs unit[1]) so both are selectable together.
+        units = self.units(self.repo, DOC_A)
+        merge_record = self.finding(
+            "BLOAT-016", "MERGE-DOC", DOC_A, [units[0]],
+            destination={"path": DOC_B},
+        )
+        cut_record = self.finding("BLOAT-017", "CUT", DOC_A, [units[1]])
+        report, approval = self.approve([merge_record, cut_record])
+        moved = DOC_A_TEXT.split("\n")[2]
+        move_op = {
+            "op": "move-with-provenance",
+            "record": merge_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "destination": DOC_B,
+            "start_line": 3,
+            "end_line": 3,
+            "preimage": moved,
+        }
+        retire_op = {
+            "op": "retire-document",
+            "record": merge_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "preimage": DOC_A_TEXT,
+        }
+        delete_op = {
+            "op": "delete",
+            "record": cut_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "start_line": 5,
+            "end_line": 5,
+            "preimage": "Refunds reverse the fee at the rate charged.",
+        }
+        plan = self.plan(approval, [move_op, retire_op, delete_op], {
+            DOC_A: None,
+            DOC_B: sha256_text(DOC_B_TEXT + moved + "\n"),
+        })
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-conflicting-operations"])
+
     def test_full_coverage_plan_still_applies(self):
         # Every approved record named -> clean, unaffected by the new checks.
         one, two = self.two_findings()

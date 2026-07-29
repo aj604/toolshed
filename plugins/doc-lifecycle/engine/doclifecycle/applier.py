@@ -694,17 +694,27 @@ def _conflict_problems(operations, bad):
     for path, entries in by_path.items():
         whole = [i for i, op in entries if op["op"] in WHOLE_DOCUMENT_OPS]
         # One pairing is not a race even though it is two operations claiming
-        # the same path with one of them whole: a move whose own source is
-        # this path, retired alongside it. `_compute_postimages` always lets
-        # the retirement decide this path's final content, unconditionally
-        # and regardless of list order — the move's only other effect is its
-        # append to a *different* path (its destination) — so this is the one
-        # whole-document combination `REQUIRED_REMEDY_OPERATIONS` requires a
-        # plan to carry together (MERGE-DOC) rather than a plan picking an
-        # order the applier would have to guess.
+        # the same path with one of them whole: the *same approved record's*
+        # own move and retirement, together — the exact shape
+        # `REQUIRED_REMEDY_OPERATIONS` requires a MERGE-DOC plan to carry
+        # (`RECORD_REMEDIES` makes MERGE-DOC the only code whose remedy is
+        # both `OP_MOVE` and `OP_RETIRE`, so the same-record test below is
+        # equivalent to, and cheaper than, re-deriving the record's code
+        # here). `_compute_postimages` always lets the retirement decide this
+        # path's final content, unconditionally and regardless of list order
+        # — the move's only other effect is its append to a *different* path
+        # (its destination) — so those two operations never race. Two
+        # operations from *different* records that happen to be a move and a
+        # retirement of the same path are not this shape: nothing approved
+        # them as one act, so they keep the ordinary whole-document refusal
+        # below (`plan-record-not-executed`/`plan-remedy-incomplete` in
+        # `_completeness_problems` police the record-level MERGE-DOC
+        # contract; this check polices only whether the two operations that
+        # do claim the path may coexist at all).
         paired_move_and_retire = (
             len(entries) == 2 and path not in destinations
             and {op["op"] for _, op in entries} == {OP_MOVE, OP_RETIRE}
+            and len({op["record"] for _, op in entries}) == 1
         )
         if whole and not paired_move_and_retire and (
             len(entries) > 1 or path in destinations
