@@ -160,8 +160,9 @@
   carrying only the creation leaves the artifact standing beside its own residue. A destination-less
   DISTILL proposed no residue, so the retirement alone is its whole approved remedy. (DISTILL's
   remedy set is five operations — `create-document` plus the three span edits plus `retire-document`,
-  `RECORD_REMEDIES` — of which only the creation is required whole; which span edits a given residue
-  needs is chosen per record, not required as a fixed set.)
+  `RECORD_REMEDIES` — of which the retirement is always required and the creation whenever the
+  record names a destination; which span edits a given residue needs is chosen per record, not
+  required as a fixed set.)
 - Decided (a pre-existing bug found en route): landing the completeness check exposed that the blanket
   whole-document conflict rule refused every valid both-legs MERGE-DOC plan outright — a retired
   document tolerated no other edit, including its own paired move. The move+retire conflict exemption
@@ -202,6 +203,27 @@
   plugins/doc-lifecycle/engine/doclifecycle/policy.py, tests/engine/approval_test.py,
   tests/engine/approval_cli_test.py, tests/engine/policy_test.py
 
+## 2026-07-29 — the bloat-triage render path retires; render-report.py's second consumer goes to zero (#77 follow-up)
+- Evidence: `detecting-doc-bloat/SKILL.md` moved to summarizing its report by hand (6c2c4aa), leaving
+  `render-report.py`'s `bloat-triage` subcommand with no caller. It also died on a real report (the
+  engine keys documents as `path`, not `doc`) and carried `POLICY` branches and an unswept banner —
+  dead weight from a retired verdict and a retired sidecar shape.
+- Decided: delete the `bloat-triage` subcommand and its dedicated test class.
+  `render-report.py`'s only remaining consumer is the upgrade lane (`upgrade-summary`,
+  `upgrade-pr-body`, `upgrade-notice`). `CLAUDE.md`, `scheduling-doc-sync/SKILL.md` (`policy_scope`
+  is a retired `plan-chunks.py` key), `fixing-docs/SKILL.md` (`POLICY` doesn't expand to per-file
+  records), and `growing-docs/SKILL.md` (narrative anchors are `drift-audit`'s enforced `ANCHOR-*`
+  findings today, not a future hook) are corrected to match.
+- Superseded: the 2026-07-27 entry below, "render-report.py sheds its legacy-lane subcommands (#77
+  follow-up)" — **marked superseded in place**. Its evidence that render-report.py was "kept
+  wholesale, since `bloat-triage` and the upgrade lane still call it" no longer holds; the upgrade
+  lane is now the sole caller. Left standing as the record of what was true then.
+- Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/render-report.py`,
+  `tests/scripts/render-report_test.py`, `CLAUDE.md`,
+  `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
+  `plugins/doc-lifecycle/skills/growing-docs/SKILL.md`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`
+
 ## 2026-07-28 — a STALE fix preserves a soft-wrapped unit's physical shape (#126)
 - Evidence: DRIFT-021 and DRIFT-022 in
   `tests/baselines/shadow-parity-gate-rerun/shadow-report.json` correctly identify stale passages
@@ -239,27 +261,6 @@
   `tests/engine/acceptance/scenario_drift_test.py`,
   `tests/engine/acceptance/scenario_policy_test.py`,
   `tests/baselines/multiline-fix-red/`
-
-## 2026-07-29 — the bloat-triage render path retires; render-report.py's second consumer goes to zero (#77 follow-up)
-- Evidence: `detecting-doc-bloat/SKILL.md` moved to summarizing its report by hand (6c2c4aa), leaving
-  `render-report.py`'s `bloat-triage` subcommand with no caller. It also died on a real report (the
-  engine keys documents as `path`, not `doc`) and carried `POLICY` branches and an unswept banner —
-  dead weight from a retired verdict and a retired sidecar shape.
-- Decided: delete the `bloat-triage` subcommand and its dedicated test class.
-  `render-report.py`'s only remaining consumer is the upgrade lane (`upgrade-summary`,
-  `upgrade-pr-body`, `upgrade-notice`). `CLAUDE.md`, `scheduling-doc-sync/SKILL.md` (`policy_scope`
-  is a retired `plan-chunks.py` key), `fixing-docs/SKILL.md` (`POLICY` doesn't expand to per-file
-  records), and `growing-docs/SKILL.md` (narrative anchors are `drift-audit`'s enforced `ANCHOR-*`
-  findings today, not a future hook) are corrected to match.
-- Superseded: the 2026-07-27 entry below, "render-report.py sheds its legacy-lane subcommands (#77
-  follow-up)" — **marked superseded in place**. Its evidence that render-report.py was "kept
-  wholesale, since `bloat-triage` and the upgrade lane still call it" no longer holds; the upgrade
-  lane is now the sole caller. Left standing as the record of what was true then.
-- Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/render-report.py`,
-  `tests/scripts/render-report_test.py`, `CLAUDE.md`,
-  `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
-  `plugins/doc-lifecycle/skills/growing-docs/SKILL.md`,
-  `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`
 
 ## 2026-07-27 — a vendored copy needs a reader, or it doesn't get vendored (#77 follow-up)
 - Evidence: `apply-upgrade.py`'s `SCRIPTS` table kept vendoring `plan-chunks.py`,
@@ -999,7 +1000,7 @@
   the 2026-07-03 entry below names `references/apply-discipline.md` as the owner of apply-only
   discipline; that owner is now the applier contract in `plugins/doc-lifecycle/engine/README.md`.
 - Known gap, filed not fixed [superseded — see the 2026-07-29 "an approval set is the whole
-  mandate; a plan may not silently under-cover it" entry below]: `bloat.DESTINATION_VERDICTS`
+  mandate; a plan may not silently under-cover it" entry above]: `bloat.DESTINATION_VERDICTS`
   excludes `DISTILL`, so no record the bloat audit mints can carry a `destination` —
   `create-document` refuses `plan-target-not-record-target` and only the lossy `retire-document`
   half executes. A residue destination has to be its own concept, since bloat's destination check

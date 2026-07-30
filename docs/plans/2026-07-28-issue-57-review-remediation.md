@@ -321,8 +321,8 @@ Plus `context_test.py`: the index reports `ready` / `pending-implementation` / d
 **Files:**
 - Modify: `.doc-lifecycle/wiring/engine/` (wholesale), `.doc-lifecycle/installed-version`, `plugins/doc-lifecycle/.claude-plugin/plugin.json`, `plugins/doc-lifecycle/engine/doclifecycle/__init__.py`
 
-- [x] **Step 1: Version bump**: `PLUGIN_VERSION` `0.43.0` → `0.44.0` (`__init__.py`), `plugin.json` version to match, `RULESET_VERSION` `6` → `7` (audit semantics changed: file-bound status, canonical anchor paths, policy-brand refusal). `.doc-lifecycle/installed-version` → `0.44.0`.
-- [x] **Step 2: Re-vendor**: `rsync -a --delete plugins/doc-lifecycle/engine/ .doc-lifecycle/wiring/engine/`.
+- [x] **Step 1: Version bump**: `PLUGIN_VERSION` `0.43.4` → `0.44.0` (`__init__.py`), `plugin.json` version to match, `RULESET_VERSION` `6` → `7` (audit semantics changed: file-bound status, canonical anchor paths, policy-brand refusal). `.doc-lifecycle/installed-version` → `0.44.0`.
+- [x] **Step 2: Re-vendor**: `rsync -a --checksum --delete plugins/doc-lifecycle/engine/ .doc-lifecycle/wiring/engine/` — `--checksum` because a version-string edit is the same byte length, which `-a`'s size+mtime quick check skips silently.
 - [x] **Step 3: Full gate, in order** (fail → fix → rerun; report every result verbatim):
 
 ```bash
