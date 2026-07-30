@@ -68,7 +68,16 @@ def scope_retire(**over):
 
 
 def envelope(verdicts, **over):
-    obj = {"schema_version": 1, "verdicts": verdicts}
+    obj = {
+        "schema_version": 1,
+        "verdicts": verdicts,
+        "completion": {
+            "index_digest": "a" * 64,
+            "plan_digest": "b" * 64,
+            "chunks": [],
+            "digest": "c" * 64,
+        },
+    }
     obj.update(over)
     return obj
 
@@ -103,7 +112,9 @@ class Envelope(unittest.TestCase):
         self.assertIn("OK: 1 verdict(s) valid", r.stdout)
 
     def test_envelope_without_schema_version_valid(self):
-        r = run({"verdicts": [cut()]})
+        payload = envelope([cut()])
+        del payload["schema_version"]
+        r = run(payload)
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_bare_array_refused_legibly(self):
@@ -111,6 +122,12 @@ class Envelope(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("verdicts", r.stderr)
         self.assertIn("envelope", r.stderr)
+
+    def test_completion_cannot_be_omitted_from_an_empty_verdict_envelope(self):
+        r = run({"schema_version": 1, "verdicts": []})
+
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("completion", r.stderr)
 
     def test_unsupported_schema_version_refused(self):
         r = run(envelope([cut()], schema_version=2))
@@ -454,6 +471,7 @@ class SeamFixture(unittest.TestCase):
         os.makedirs(self.chunks_dir)
         self.manifest = {
             "schema": 1,
+            "index_digest": "a" * 64,
             "chunks": [
                 {"id": "c-aaa", "turns": 20,
                  "docs": [{"path": "README.md", "lines": 20, "hint": "living"},
@@ -581,7 +599,7 @@ class Assembly(SeamFixture):
         r, out = self.assemble()
         self.assertEqual(r.returncode, 0, r.stderr)
         payload = self.read(out)
-        self.assertEqual(set(payload), {"schema_version", "verdicts"})
+        self.assertEqual(set(payload), {"schema_version", "verdicts", "completion"})
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual([v["id"] for v in payload["verdicts"]], ["B1", "B2"])
         final = run_argv(out)
@@ -596,7 +614,8 @@ class Assembly(SeamFixture):
         # an incomplete fan-out. Found by review on the split stack.
         manifest = os.path.join(self.tmp.name, "malformed-manifest.json")
         with open(manifest, "w", encoding="utf-8") as fh:
-            json.dump({"chunks": [{"id": "c-aaa", "docs": [{}]}]}, fh)
+            json.dump({"index_digest": "a" * 64,
+                       "chunks": [{"id": "c-aaa", "docs": [{}]}]}, fh)
         out = os.path.join(self.tmp.name, "bloat-verdicts.json")
 
         r = run_argv("--assemble", self.chunks_dir, "--manifest", manifest,
@@ -629,7 +648,8 @@ class Assembly(SeamFixture):
             self.assertEqual(json.load(f), [
                 {"chunk": "c-bbb", "docs": ["docs/plans/old-design.md"]}])
         # The envelope stays exactly what bloat-audit accepts.
-        self.assertEqual(set(self.read(out)), {"schema_version", "verdicts"})
+        self.assertEqual(set(self.read(out)),
+                         {"schema_version", "verdicts", "completion"})
 
     def test_complete_assembly_writes_an_empty_unswept_list(self):
         self.write_both()
@@ -639,17 +659,34 @@ class Assembly(SeamFixture):
         with open(unswept, encoding="utf-8") as f:
             self.assertEqual(json.load(f), [])
 
-    def test_invalid_chunk_fails_even_with_allow_partial(self):
+    def test_invalid_chunk_is_a_gap_with_allow_partial(self):
         self.write_chunk("c-aaa.json", self.first_result([cut(verdict="POLICY")]))
         self.write_chunk("c-bbb.json", self.second_result())
-        for extra in ((), ("--allow-partial",)):
-            r, _ = self.assemble(*extra)
-            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-            self.assertIn("c-aaa", r.stderr)
+        refused, _ = self.assemble()
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        partial, out = self.assemble("--allow-partial")
+        self.assertEqual(partial.returncode, 0, partial.stdout + partial.stderr)
+        chunk = self.read(out)["completion"]["chunks"][0]
+        self.assertEqual(chunk["result"], "invalid")
+        self.assertEqual(chunk["id"], "c-aaa")
+
+    def test_unreadable_chunk_is_a_gap_with_allow_partial(self):
+        path = os.path.join(self.chunks_dir, "c-aaa.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        self.write_chunk("c-bbb.json", self.second_result())
+
+        result, out = self.assemble("--allow-partial")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        chunk = self.read(out)["completion"]["chunks"][0]
+        self.assertEqual(chunk["result"], "invalid")
+        self.assertIn("unreadable", chunk["reason"])
 
     def test_empty_manifest_assembles_an_empty_envelope(self):
         with open(self.manifest_path, "w", encoding="utf-8") as f:
-            json.dump({"schema": 1, "chunks": [], "pending": []}, f)
+            json.dump({"schema": 1, "index_digest": "a" * 64,
+                       "chunks": [], "pending": []}, f)
         r, out = self.assemble()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.read(out)["verdicts"], [])

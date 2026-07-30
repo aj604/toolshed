@@ -43,7 +43,7 @@ that never see each other reach the same answer.
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .cache import cache_key, get as cache_get, put as cache_put
@@ -54,8 +54,8 @@ from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import DOCUMENTATION, authorize_path
 from .registry import compile_glob
 from .report import (
-    EvidenceBoundary, Lineage, current_lineage, state_from_content, validate_report,
-    whole_number,
+    EvidenceBoundary, Lineage, SCOPE_WHOLE_INVENTORY, current_lineage,
+    state_from_content, validate_report, whole_number,
 )
 from .results import STATUS_OK, Invalid, Problem
 
@@ -289,8 +289,8 @@ def load_bloat_verdicts(path):
         ),))
 
 
-def _verdict_list(payload):
-    """(the `verdicts` list, ()) or (None, problems), from a bloat envelope.
+def _audit_input(payload):
+    """(`verdicts`, `completion`, problems) from a bloat audit envelope.
 
     The shape check `load_bloat_verdicts` deliberately does not do: an
     object, no extra keys, carrying a `verdicts` list (optionally a
@@ -299,14 +299,15 @@ def _verdict_list(payload):
     so no call path into `audit_bloat` can skip it.
     """
     if (not isinstance(payload, dict)
-            or set(payload) - {"schema_version", "verdicts"}
-            or "verdicts" not in payload
-            or not isinstance(payload["verdicts"], list)):
-        return None, (Problem(
+            or set(payload) - {"schema_version", "verdicts", "completion"}
+            or not {"verdicts", "completion"}.issubset(payload)
+            or not isinstance(payload.get("verdicts"), list)):
+        return None, None, (Problem(
             code="bloat-verdicts-invalid-shape",
             message=(
-                f"verdicts must be an object shaped {{'verdicts': [...]}} "
-                f"(optionally with 'schema_version'), not {payload!r}"
+                "bloat audit input must carry verdicts and completion, with "
+                "only an optional schema_version — completion is report "
+                "evidence, not an optional presentation sidecar"
             ),
             location="verdicts",
         ),)
@@ -316,7 +317,7 @@ def _verdict_list(payload):
     # compare equal to `1`, so an envelope declaring either passed a check whose
     # own message says it reads an *integer* version.
     if not whole_number(version) or version != ARTIFACT_SCHEMA_VERSION:
-        return None, (Problem(
+        return None, None, (Problem(
             code="bloat-verdicts-invalid-shape",
             message=(
                 f"verdicts schema_version {version!r} is not supported; this "
@@ -325,7 +326,149 @@ def _verdict_list(payload):
             location="verdicts.schema_version",
         ),)
 
-    return payload["verdicts"], ()
+    return payload["verdicts"], payload["completion"], ()
+
+
+def _plan_digest(index_digest, chunks):
+    """Bind one planned index to chunk identities and document membership."""
+    return sha256_canonical({
+        "index_digest": index_digest,
+        "chunks": [
+            {"id": chunk["id"], "documents": chunk["documents"]}
+            for chunk in chunks
+        ],
+    })
+
+
+def _completion_content_digest(index_digest, plan_digest, chunks):
+    return sha256_canonical({
+        "index_digest": index_digest,
+        "plan_digest": plan_digest,
+        "chunks": chunks,
+    })
+
+
+def _validate_completion(index, verdicts, raw):
+    """Validate assembled completion evidence against the current index.
+
+    The assembler is allowed to report missing or invalid worker results; those
+    are coverage gaps.  The completion artifact itself is authority-shaped
+    input, though, so stale, duplicated, mismatched, or edited evidence is an
+    invalid run rather than a partial one.
+    """
+    problems = []
+
+    def bad(code, message, location):
+        problems.append(Problem(code=code, message=message, location=location))
+
+    if not isinstance(raw, dict) or set(raw) != {
+            "index_digest", "plan_digest", "chunks", "digest"}:
+        bad("bloat-completion-invalid-shape",
+            "completion must carry exactly index_digest, plan_digest, chunks, "
+            "and digest", "completion")
+        return None, tuple(problems)
+
+    chunks = raw.get("chunks")
+    if not isinstance(chunks, list):
+        bad("bloat-completion-invalid-shape", "completion.chunks must be a list",
+            "completion.chunks")
+        return None, tuple(problems)
+    chunk_fields = {"id", "documents", "result", "verdict_ids", "reason"}
+    malformed = [position for position, chunk in enumerate(chunks)
+                 if not isinstance(chunk, dict) or set(chunk) != chunk_fields]
+    if malformed:
+        for position in malformed:
+            bad("bloat-completion-invalid-shape",
+                f"completion.chunks[{position}] must carry exactly id, "
+                "documents, result, verdict_ids, and reason",
+                f"completion.chunks[{position}]")
+        return None, tuple(problems)
+
+    if raw.get("index_digest") != index.digest:
+        bad("bloat-completion-index-mismatch",
+            "completion was planned against a different context index; re-plan "
+            "and re-run every pending chunk", "completion.index_digest")
+
+    expected_plan_digest = _plan_digest(raw.get("index_digest"), chunks)
+    if raw.get("plan_digest") != expected_plan_digest:
+        bad("bloat-completion-plan-mismatch",
+            "completion plan digest does not bind these chunk identities and "
+            "document memberships", "completion.plan_digest")
+    expected_digest = _completion_content_digest(
+        raw.get("index_digest"), raw.get("plan_digest"), chunks,
+    )
+    if raw.get("digest") != expected_digest:
+        bad("bloat-completion-digest-mismatch",
+            "completion evidence changed after assembly", "completion.digest")
+
+    expected_documents = {document.path for document in index.documents}
+    placed, chunk_ids, assigned = [], [], []
+    verdict_ids = [entry.get("id") if isinstance(entry, dict) else None
+                   for entry in verdicts]
+    for position, chunk in enumerate(chunks):
+        where = f"completion.chunks[{position}]"
+        chunk_id = chunk["id"]
+        documents = chunk["documents"]
+        result = chunk["result"]
+        ids = chunk["verdict_ids"]
+        reason = chunk["reason"]
+        if not _nonempty(chunk_id):
+            bad("bloat-completion-invalid-chunk", "chunk id must be non-empty",
+                where + ".id")
+        else:
+            chunk_ids.append(chunk_id)
+        if (not isinstance(documents, list) or not documents
+                or not all(_nonempty(path) for path in documents)
+                or len(set(documents)) != len(documents)):
+            bad("bloat-completion-invalid-chunk",
+                "chunk documents must be a non-empty unique path list",
+                where + ".documents")
+            documents = []
+        if result not in ("complete", "missing", "invalid"):
+            bad("bloat-completion-invalid-result",
+                "chunk result must be complete, missing, or invalid",
+                where + ".result")
+        if not isinstance(ids, list) or not all(_nonempty(value) for value in ids):
+            bad("bloat-completion-invalid-chunk",
+                "chunk verdict_ids must be a list of non-empty ids",
+                where + ".verdict_ids")
+            ids = []
+        if result == "complete":
+            if reason != "":
+                bad("bloat-completion-invalid-result",
+                    "a complete chunk carries no failure reason", where + ".reason")
+            assigned.extend(ids)
+        else:
+            if ids:
+                bad("bloat-completion-invalid-result",
+                    "a missing or invalid chunk cannot contribute verdicts",
+                    where + ".verdict_ids")
+            if not _nonempty(reason):
+                bad("bloat-completion-invalid-result",
+                    "a missing or invalid chunk must explain its coverage gap",
+                    where + ".reason")
+        placed.extend(documents)
+
+    if len(set(chunk_ids)) != len(chunk_ids):
+        bad("bloat-completion-duplicate-chunk",
+            "completion names a planned chunk more than once", "completion.chunks")
+    if len(set(placed)) != len(placed):
+        bad("bloat-completion-duplicate-document",
+            "a document belongs to more than one planned chunk",
+            "completion.chunks")
+    missing_documents = sorted(expected_documents - set(placed))
+    unknown_documents = sorted(set(placed) - expected_documents)
+    if missing_documents or unknown_documents:
+        bad("bloat-completion-membership-mismatch",
+            f"completion does not partition the current index exactly; missing "
+            f"{missing_documents}, unknown {unknown_documents}",
+            "completion.chunks")
+    if assigned != verdict_ids or len(set(assigned)) != len(assigned):
+        bad("bloat-completion-verdict-mismatch",
+            "complete chunks must bind every supplied verdict id exactly once, "
+            "in assembled order", "completion.chunks")
+
+    return chunks if not problems else None, tuple(problems)
 
 
 # Every bloat verdict is checked against the whole-repository context index,
@@ -364,9 +507,10 @@ def audit_bloat(repo_root, verdicts, registry_path=DEFAULT_REGISTRY_PATH):
     verdicts against the index, and validate what results through the same
     `report.validate_report` every other lane runs through.
 
-    `verdicts` is the envelope a bloat lane returned —
-    `{"verdicts": [...]}`, optionally with a matching `schema_version` — not
-    a bare list; `_verdict_list` checks its shape here, inside the
+    `verdicts` is the envelope a bloat lane assembled — `{"verdicts": [...],
+    "completion": {...}}`, optionally with a matching `schema_version` — not
+    a bare list and never a verdict-only artifact whose missing work lived in
+    an optional sidecar. `_audit_input` checks its shape here, inside the
     composition, the same seam `drift.audit_drift` checks its verdicts
     payload at (`_verdict_entries`). Required — there is no planless bloat
     audit the way a drift run can leave living documents unexamined; a value
@@ -385,13 +529,69 @@ def audit_bloat(repo_root, verdicts, registry_path=DEFAULT_REGISTRY_PATH):
         audit_mode="full", evidence_boundary=EVIDENCE_BOUNDARY, **state
     )
 
-    entries, problems = _verdict_list(verdicts)
+    entries, completion, problems = _audit_input(verdicts)
     if problems:
         return Invalid(tuple(problems))
 
-    result = record_verdicts(index, lineage, entries)
-    if isinstance(result, Invalid):
-        return result
+    completed_chunks, problems = _validate_completion(index, entries, completion)
+    if problems:
+        return Invalid(tuple(problems))
+
+    by_id = {entry["id"]: entry for entry in entries}
+    findings, examined, incomplete = [], [], [
+        {"scope": gap.scope, "reason": gap.reason} for gap in index.unexamined
+    ]
+    for completed in completed_chunks:
+        if completed["result"] == "complete":
+            chunk = Chunk(
+                chunk_id=completed["id"],
+                documents=tuple(completed["documents"]),
+                unit_count=sum(
+                    len(index.document(path).units)
+                    for path in completed["documents"]
+                ),
+            )
+            result = record_verdicts(
+                index, lineage,
+                [by_id[record_id] for record_id in completed["verdict_ids"]],
+                chunk=chunk,
+            )
+            if isinstance(result, Invalid):
+                return result
+            findings.extend(result.findings)
+            examined.extend({
+                "scope": document,
+                "chunk": completed["id"],
+                "plan_digest": completion["plan_digest"],
+            } for document in completed["documents"])
+            continue
+        code = ("bloat-chunk-missing" if completed["result"] == "missing"
+                else "bloat-chunk-invalid")
+        for document in completed["documents"]:
+            incomplete.append({
+                "scope": document,
+                "reason": (
+                    f"{code}: planned chunk {completed['id']} did not produce "
+                    f"a valid result: {completed['reason']}"
+                ),
+            })
+
+    result = BloatResult(
+        findings=tuple(findings), incomplete=tuple(incomplete),
+        index_digest=index.digest, examined=tuple(examined),
+        scope={
+            "basis": (
+                "the completion artifact partitions the context index into "
+                "content-addressed chunks"
+            ),
+            "coverage": SCOPE_WHOLE_INVENTORY,
+            "documents": sorted(
+                [document.path for document in index.documents]
+                + [gap.scope for gap in index.unexamined]
+            ),
+            "excluded": [],
+        },
+    )
 
     return validate_report(
         result.report_payload(lineage), registry_path=registry_path
@@ -544,6 +744,8 @@ class BloatResult:
     findings: Tuple[Finding, ...]
     incomplete: Tuple[dict, ...]
     index_digest: str
+    examined: Tuple[dict, ...] = ()
+    scope: Optional[dict] = None
     status: str = STATUS_OK
 
     def records(self):
@@ -565,13 +767,18 @@ class BloatResult:
         """
         records = [f.to_record() for f in self.findings]
         incomplete = [dict(i) for i in self.incomplete]
-        return {
+        payload = {
             "status": state_from_content(records, incomplete),
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "lineage": lineage.to_dict(),
             "records": records,
             "incomplete": incomplete,
         }
+        if self.examined:
+            payload["examined"] = [dict(entry) for entry in self.examined]
+        if self.scope is not None:
+            payload["scope"] = dict(self.scope)
+        return payload
 
     def to_dict(self):
         return {

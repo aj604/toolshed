@@ -19,7 +19,7 @@ Three duties:
 1. Final verdicts artifact (default):
        validate-bloat-output.py [FILE]          # FILE, or stdin if omitted
    Input must be the envelope `bloat-audit --verdicts` reads:
-       {"schema_version": 1, "verdicts": [...]}
+       {"schema_version": 1, "verdicts": [...], "completion": {...}}
    `schema_version` is optional and must be 1 when present; no other key is
    allowed, because the engine refuses one. A bare array — the legacy
    contract's report shape — fails with one legible error.
@@ -40,17 +40,16 @@ Three duties:
    renumbers ids B1..Bn in manifest order (unique ids are the engine's rule,
    and approval binds a record's digest, never this label), and writes the
    envelope to --out. A missing or invalid chunk fails the assembly naming the
-   chunk; --allow-partial instead skips MISSING chunks loudly — each is named
-   on stderr with its documents, and --unswept-out writes the same gap list as
-   JSON ({chunk, docs} entries) for a caller to render. The gap stays out of
-   the envelope itself: bloat-audit refuses an envelope carrying any key but
-   `schema_version` and `verdicts`. An invalid chunk always fails.
+   chunk; --allow-partial instead records missing or invalid chunks loudly —
+   each is named on stderr with its documents, inside the envelope's completion
+   evidence, and (optionally) in --unswept-out for a caller to render.
 
 Exit status: 0 valid; 1 contract violation; 2 bad input/usage.
 On success prints a summary recomputed from the verdicts.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -383,7 +382,28 @@ def read_json(src):
 # --------------------------------------------------------------------------
 
 ENVELOPE = ('the verdicts artifact is the envelope bloat-audit reads — '
-            '{"schema_version": 1, "verdicts": [...]}')
+            '{"schema_version": 1, "verdicts": [...], "completion": {...}}')
+
+
+def completion_errors(completion):
+    if not isinstance(completion, dict) or set(completion) != {
+            "index_digest", "plan_digest", "chunks", "digest"}:
+        return ["completion must carry exactly index_digest, plan_digest, "
+                "chunks, and digest"]
+    errs = []
+    for field in ("index_digest", "plan_digest", "digest"):
+        if not (isinstance(completion[field], str)
+                and UNIT_DIGEST.fullmatch(completion[field])):
+            errs.append(f"completion.{field} must be a sha256 digest")
+    chunks = completion.get("chunks")
+    if not isinstance(chunks, list):
+        errs.append("completion.chunks must be a list")
+        return errs
+    for position, chunk in enumerate(chunks):
+        if not isinstance(chunk, dict) or set(chunk) != {
+                "id", "documents", "result", "verdict_ids", "reason"}:
+            errs.append(f"completion.chunks[{position}] has invalid shape")
+    return errs
 
 
 def envelope_errors(data):
@@ -393,7 +413,7 @@ def envelope_errors(data):
     if not isinstance(data, dict):
         return [f"{ENVELOPE}; got {type(data).__name__}"]
     errs = []
-    for name in sorted(set(data) - {"schema_version", "verdicts"}):
+    for name in sorted(set(data) - {"schema_version", "verdicts", "completion"}):
         errs.append(f"{name!r} is not an envelope key — {ENVELOPE}, and the "
                     f"engine refuses any other key")
     version = data.get("schema_version", SCHEMA_VERSION)
@@ -405,6 +425,7 @@ def envelope_errors(data):
                     f"contract is integer version {SCHEMA_VERSION}")
     if not isinstance(data.get("verdicts"), list):
         errs.append(f"{ENVELOPE}; 'verdicts' must be an array")
+    errs.extend(completion_errors(data.get("completion")))
     return errs
 
 
@@ -426,14 +447,18 @@ def run_final(src):
 # Duty 2: the chunk seam
 # --------------------------------------------------------------------------
 
-def load_manifest(path):
+def read_manifest(path):
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     chunks = data.get("chunks") if isinstance(data, dict) else None
     if not isinstance(chunks, list) or not all(
             isinstance(c, dict) and nonempty_str(c.get("id")) for c in chunks):
         raise ValueError(f"manifest {path}: expected {{'chunks': [{{'id': ...}}, ...]}}")
-    return chunks
+    return data
+
+
+def load_manifest(path):
+    return read_manifest(path)["chunks"]
 
 
 def chunk_doc_paths(chunk):
@@ -524,20 +549,32 @@ def run_chunk(path, manifest_path):
 
 def run_assemble(dir_, manifest_path, out, allow_partial, unswept_out):
     try:
-        chunks = load_manifest(manifest_path)
+        manifest = read_manifest(manifest_path)
+        chunks = manifest["chunks"]
     except (OSError, ValueError, json.JSONDecodeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    errs, verdicts, unswept = [], [], []
+    index_digest = manifest.get("index_digest")
+    if not (isinstance(index_digest, str) and UNIT_DIGEST.fullmatch(index_digest)):
+        print("error: manifest carries no valid index_digest — completion "
+              "evidence must bind the chunk plan to the context index",
+              file=sys.stderr)
+        return 2
+    errs, verdicts, unswept, completion = [], [], [], []
     for chunk in chunks:
         path = os.path.join(dir_, chunk["id"] + ".json")
+        documents = chunk_doc_paths(chunk)
         if not os.path.exists(path):
             if allow_partial:
-                docs = chunk_doc_paths(chunk)
                 print(f"note: --allow-partial: chunk {chunk['id']} has no "
                       f"result file — UNSWEPT, and these documents were not "
-                      f"audited this run: {', '.join(docs)}", file=sys.stderr)
-                unswept.append({"chunk": chunk["id"], "docs": docs})
+                      f"audited this run: {', '.join(documents)}", file=sys.stderr)
+                unswept.append({"chunk": chunk["id"], "docs": documents})
+                completion.append({
+                    "id": chunk["id"], "documents": documents,
+                    "result": "missing", "verdict_ids": [],
+                    "reason": "result file was not produced",
+                })
                 continue
             errs.append(f"chunk {chunk['id']}: no result file at {path} — "
                         f"partial assembly refused")
@@ -546,21 +583,66 @@ def run_assemble(dir_, manifest_path, out, allow_partial, unswept_out):
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
+            if allow_partial:
+                detail = f"unreadable result: {e}"
+                print(f"note: --allow-partial: chunk {chunk['id']} has an "
+                      f"invalid result — UNSWEPT: {detail}", file=sys.stderr)
+                unswept.append({"chunk": chunk["id"], "docs": documents})
+                completion.append({
+                    "id": chunk["id"], "documents": documents,
+                    "result": "invalid", "verdict_ids": [], "reason": detail,
+                })
+                continue
             errs.append(f"chunk {chunk['id']}: unreadable result: {e}")
             continue
         chunk_errs = validate_chunk_result(data, chunk)
         if chunk_errs:
+            if allow_partial:
+                detail = "; ".join(chunk_errs)
+                print(f"note: --allow-partial: chunk {chunk['id']} has an "
+                      f"invalid result — UNSWEPT: {detail}", file=sys.stderr)
+                unswept.append({"chunk": chunk["id"], "docs": documents})
+                completion.append({
+                    "id": chunk["id"], "documents": documents,
+                    "result": "invalid", "verdict_ids": [], "reason": detail,
+                })
+                continue
             errs.extend(f"chunk {chunk['id']}: {e}" for e in chunk_errs)
             continue
+        first = len(verdicts) + 1
         verdicts.extend(data["verdicts"])
+        completion.append({
+            "id": chunk["id"], "documents": documents,
+            "result": "complete",
+            "verdict_ids": [f"B{number}" for number in
+                            range(first, len(verdicts) + 1)],
+            "reason": "",
+        })
     if errs:
         return fail(errs)
 
     for n, v in enumerate(verdicts, 1):
         v["id"] = f"B{n}"
+    plan_content = {"index_digest": index_digest, "chunks": [
+        {"id": chunk["id"], "documents": chunk_doc_paths(chunk)}
+        for chunk in chunks
+    ]}
+    plan_digest = hashlib.sha256(json.dumps(
+        plan_content, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")).hexdigest()
+    completion_content = {
+        "index_digest": index_digest,
+        "plan_digest": plan_digest,
+        "chunks": completion,
+    }
+    completion_content["digest"] = hashlib.sha256(json.dumps(
+        completion_content, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")).hexdigest()
     with open(out, "w", encoding="utf-8") as f:
-        json.dump({"schema_version": SCHEMA_VERSION, "verdicts": verdicts},
-                  f, indent=2)
+        json.dump({"schema_version": SCHEMA_VERSION, "verdicts": verdicts,
+                   "completion": completion_content}, f, indent=2)
         f.write("\n")
     if unswept_out:
         with open(unswept_out, "w", encoding="utf-8") as f:

@@ -133,6 +133,22 @@ class InventoryDefaults(unittest.TestCase):
                 m = json.load(f)
             self.assertEqual(m["schema"], 1)
 
+    def test_registered_plan_binds_the_current_context_index(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, ".doc-lifecycle/registry.json", json.dumps({
+                "schema_version": 1,
+                "roots": ["docs"],
+                "sets": [],
+                "rules": [{"glob": "docs/*.md", "kind": "living"}],
+            }))
+            write(root, "docs/guide.md", "# Guide\n\nCurrent guidance.\n")
+            git_init(root)
+
+            result = run(root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertRegex(manifest(result)["index_digest"], r"^[0-9a-f]{64}$")
+
 
 class Hints(unittest.TestCase):
     def hint_of(self, m, path):
@@ -373,6 +389,23 @@ class ResumeAndCeiling(unittest.TestCase):
             m2 = manifest(run(root, results_dir=results))
 
             self.assertIn(stale_id, m2["pending"])
+
+    def test_a_semantically_invalid_verdict_chunk_stays_pending(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "# A\n\nAlpha.\n")
+            git_init(root)
+            first = manifest(run(root))
+            chunk_id = first["chunks"][0]["id"]
+            results = os.path.join(root, "chunks")
+            os.makedirs(results)
+            write(root, f"chunks/{chunk_id}.json", json.dumps({
+                "chunk": chunk_id,
+                "verdicts": [{"id": "B1", "verdict": "POLICY"}],
+            }))
+
+            resumed = manifest(run(root, results_dir=results))
+
+            self.assertEqual(resumed["pending"], [chunk_id])
 
     def test_pending_equals_all_ids_without_results_dir(self):
         with tempfile.TemporaryDirectory() as root:

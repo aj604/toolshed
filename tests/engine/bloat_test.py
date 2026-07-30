@@ -1031,7 +1031,36 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
         return entry
 
     def envelope(self, repo, *verdicts, **overrides):
-        payload = {"verdicts": list(verdicts) or [self.verdict(repo)]}
+        entries = list(verdicts) or [self.verdict(repo)]
+        plan = bloat.plan_repository_chunks(repo)
+        chunks = []
+        assigned = set()
+        for chunk in plan.chunks:
+            ids = [entry["id"] for entry in entries
+                   if entry.get("scope") is not None
+                   or entry.get("path") in chunk.documents]
+            assigned.update(ids)
+            chunks.append({
+                "id": chunk.chunk_id,
+                "documents": list(chunk.documents),
+                "result": "complete",
+                "verdict_ids": ids,
+                "reason": "",
+            })
+        plan_digest = bloat._plan_digest(plan.index_digest, chunks)
+        completion = {
+            "index_digest": plan.index_digest,
+            "plan_digest": plan_digest,
+            "chunks": chunks,
+        }
+        completion["digest"] = bloat._completion_content_digest(
+            plan.index_digest, plan_digest, chunks,
+        )
+        payload = {
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "verdicts": entries,
+            "completion": completion,
+        }
         payload.update(overrides)
         return payload
 
@@ -1135,10 +1164,83 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
 
     def test_schema_version_is_optional(self):
         repo = self.corpus()
+        payload = self.envelope(repo)
+        del payload["schema_version"]
 
-        result = bloat.audit_bloat(repo, {"verdicts": [self.verdict(repo)]})
+        result = bloat.audit_bloat(repo, payload)
 
         self.assertIsInstance(result, Report, result)
+
+    def test_completion_from_a_stale_index_is_refused(self):
+        repo = self.corpus()
+        payload = self.envelope(repo)
+        payload["completion"]["index_digest"] = "0" * 64
+
+        result = bloat.audit_bloat(repo, payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn("bloat-completion-index-mismatch",
+                      [problem.code for problem in result.problems])
+
+    def test_tampered_completion_digest_is_refused(self):
+        repo = self.corpus()
+        payload = self.envelope(repo)
+        payload["completion"]["chunks"][0]["reason"] = "edited later"
+
+        result = bloat.audit_bloat(repo, payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn("bloat-completion-digest-mismatch",
+                      [problem.code for problem in result.problems])
+
+    def test_duplicate_chunk_is_refused_even_with_recomputed_digests(self):
+        repo = self.corpus()
+        payload = self.envelope(repo)
+        completion = payload["completion"]
+        completion["chunks"].append(dict(completion["chunks"][0]))
+        completion["plan_digest"] = bloat._plan_digest(
+            completion["index_digest"], completion["chunks"],
+        )
+        completion["digest"] = bloat._completion_content_digest(
+            completion["index_digest"], completion["plan_digest"],
+            completion["chunks"],
+        )
+
+        result = bloat.audit_bloat(repo, payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn("bloat-completion-duplicate-chunk",
+                      [problem.code for problem in result.problems])
+
+    def test_mismatched_membership_is_refused_with_recomputed_digests(self):
+        repo = self.corpus()
+        payload = self.envelope(repo)
+        completion = payload["completion"]
+        completion["chunks"][0]["documents"] = ["docs/not-planned.md"]
+        completion["plan_digest"] = bloat._plan_digest(
+            completion["index_digest"], completion["chunks"],
+        )
+        completion["digest"] = bloat._completion_content_digest(
+            completion["index_digest"], completion["plan_digest"],
+            completion["chunks"],
+        )
+
+        result = bloat.audit_bloat(repo, payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn("bloat-completion-membership-mismatch",
+                      [problem.code for problem in result.problems])
+
+    def test_malformed_completion_chunk_fails_shut_without_a_traceback(self):
+        repo = self.corpus()
+        payload = self.envelope(repo)
+        payload["completion"]["chunks"] = [{}]
+
+        result = bloat.audit_bloat(repo, payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn("bloat-completion-invalid-shape",
+                      [problem.code for problem in result.problems])
 
     def test_an_invalid_registry_invalidates_the_run(self):
         repo = self.git_repo({

@@ -27,9 +27,10 @@ Chunk ids are content-addressed (sha256 over member (path, content-sha256)
 pairs, the content hash computed during the same read that counts lines), so
 re-planning an unchanged tree yields the same ids — which is what makes
 --results-dir resume work: a chunk whose <id>.json result already exists,
-parses, and names the chunk stays in "chunks" but leaves "pending" — an
-edited doc changes its chunk's id and an invalid leftover never counts, so
-a stale or garbage prior result is never reused.
+parses, names the chunk, and passes the same public verdict shape check as
+assembly stays in "chunks" but leaves "pending" — an edited doc changes its
+chunk's id and an invalid leftover never counts, so stale or invalid work is
+scheduled again.
 
 Every chunk carries a "turns" budget for the model invocation that will sweep
 it: 12 + 2 per doc (4 per planning doc) + 1 per full 600 lines, clamped to
@@ -61,8 +62,10 @@ the stamped `turns` when present, the floor for a pre-`turns` manifest of
 this script's own dialect (`docs` present), and fails loudly (exit 2) for a
 `bloat-plan` manifest, which was never sized by this script's turn formula.
 
-Output (plan mode): manifest JSON {"schema": 1, "chunks": [...], "pending":
-[ids]} to --out (stdout if omitted). A chunk is
+Output (plan mode): manifest JSON {"schema": 1, "index_digest": "...",
+"chunks": [...], "pending": [ids]} to --out (stdout if omitted). A registered
+repository carries `index_digest`; without a valid public context index the
+field is absent and completion assembly refuses. A chunk is
 {"id", "turns": N, "docs": [{"path", "lines", "hint"}]}. The run-surface
 report (doc count, chunk count, projected invocations, resume skips) always
 prints to stderr.
@@ -91,6 +94,12 @@ import sys
 
 DEFAULT_MAX_DOCS = 8
 DEFAULT_MAX_LINES = 1200
+ENGINE = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "engine",
+))
+VERDICT_VALIDATOR = os.path.join(
+    os.path.dirname(__file__), "validate-bloat-output.py",
+)
 
 # Keys a config may still carry from the legacy contract. Noted, never read:
 # `policy_scope` declared the directories one POLICY record covered, and both
@@ -345,6 +354,30 @@ def plan(root, cfg):
     return len(sized), chunks
 
 
+def current_index_digest(root):
+    """The audit engine's current context-index digest, or None if unavailable.
+
+    Planning still diagnoses an absent registry at the public `bloat-audit`
+    seam, as before.  A registered run carries this digest into its manifest so
+    assembly can bind completion to the same index the audit re-derives.
+    """
+    env = dict(os.environ)
+    env["PYTHONPATH"] = (ENGINE + os.pathsep + env["PYTHONPATH"]
+                         if env.get("PYTHONPATH") else ENGINE)
+    result = subprocess.run(
+        [sys.executable, "-m", "doclifecycle", "context-index", "--repo", root],
+        capture_output=True, text=True, env=env,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    digest = payload.get("digest") if isinstance(payload, dict) else None
+    return digest if isinstance(digest, str) else None
+
+
 SWEEP_PROMPT = """\
 You are a chunk executor. Invoke the doc-lifecycle:detecting-doc-bloat
 skill for the verdict rules and output contract, then audit exactly the docs
@@ -384,8 +417,15 @@ def usable_result(results_dir, cid):
             data = json.load(f)
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return False
-    return (isinstance(data, dict) and data.get("chunk") == cid
-            and isinstance(data.get("verdicts"), list))
+    shaped = (isinstance(data, dict) and data.get("chunk") == cid
+              and isinstance(data.get("verdicts"), list))
+    if not shaped:
+        return False
+    checked = subprocess.run(
+        [sys.executable, VERDICT_VALIDATOR, "--chunk", path],
+        capture_output=True, text=True,
+    )
+    return checked.returncode == 0
 
 
 def load_manifest(path):
@@ -543,8 +583,11 @@ def main():
         report += f" (resume: {len(chunks) - len(pending)} already have results)"
     print(report, file=sys.stderr)
 
-    text = json.dumps({"schema": 1, "chunks": chunks, "pending": pending},
-                      indent=2)
+    manifest = {"schema": 1, "chunks": chunks, "pending": pending}
+    index_digest = current_index_digest(args.root)
+    if index_digest is not None:
+        manifest["index_digest"] = index_digest
+    text = json.dumps(manifest, indent=2)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(text + "\n")

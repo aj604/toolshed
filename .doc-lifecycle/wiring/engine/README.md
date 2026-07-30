@@ -1158,8 +1158,13 @@ python3 -m doclifecycle bloat-audit --repo . --verdicts verdicts.json
 `--repo` and `--registry` are the corpus flags every command shares; `--verdicts` is required —
 there is no planless bloat audit the way a drift run can leave living documents unexamined, since
 a value judgment about the corpus has to have been made by someone. The file it names is the
-envelope a bloat lane returns: `{"verdicts": [...]}`, optionally with a `schema_version` that
-must equal `ARTIFACT_SCHEMA_VERSION` when present — not a bare list.
+envelope a bloat lane returns: `{"verdicts": [...], "completion": {...}}`, optionally with a
+`schema_version` that must equal `ARTIFACT_SCHEMA_VERSION` when present — not a bare list.
+Completion is mandatory report evidence, not a presentation sidecar: it binds the current context
+index, planned chunk identities and membership, and which valid results supplied which verdict ids.
+Missing or invalid chunk results become per-document `incomplete` entries naming the chunk and force
+partial; complete chunks become `examined` entries carrying the chunk and plan digest. A stale,
+duplicated, mismatched, or tampered completion artifact is invalid and records nothing.
 
 `load_bloat_verdicts()` and `audit_bloat()` draw the same file/payload split
 `drift.load_verdicts()`/`audit_drift()` draw, deliberately asymmetric in where each checks its
