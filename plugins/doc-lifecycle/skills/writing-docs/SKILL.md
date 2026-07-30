@@ -11,7 +11,7 @@ description: 'Use when writing or editing a documentation file whose job is to t
 This is the spine: when any guideline conflicts with verifiability, verifiability wins. A
 smaller all-true doc beats a complete one with unverifiable parts.
 
-Every line has one of the document model's four assertion classes:
+Every assertion unit has one of the document model's four assertion classes:
 
 - **Factual** — commands, paths, symbols, behavior (output included), structure, values.
   Must be mechanically checkable against current evidence.

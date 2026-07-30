@@ -57,7 +57,7 @@ Start with **[the principles](docs/guides/principles.md)** — one page on the m
 | Docs exist — accurate, but heavy | "audit the docs for bloat" | [Auditing and fixing bloat](docs/guides/auditing-doc-bloat.md) |
 | The drift loop feels routine — audit it unattended | "set up doc sync" | [Turning on the nightly](docs/guides/scheduling-doc-sync.md) |
 
-Two skills need no starting point because they trigger on the way: any edit to a README / runbook / `CLAUDE.md` invokes `writing-docs` (every line a verifiable claim), and "should we document X?" invokes `growing-docs` (demand signals grow docs; calendars don't).
+Two skills need no starting point because they trigger on the way: any edit to a README / runbook / `CLAUDE.md` invokes `writing-docs` (every assertion discharges its review obligation), and "should we document X?" invokes `growing-docs` (demand signals grow docs; calendars don't).
 
 ## What an audit hands you
 

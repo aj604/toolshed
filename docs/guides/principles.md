@@ -8,7 +8,7 @@ skill file that enforces it, so none of this is aspiration — you can go read t
 ## 1. A repo-tracking doc is a set of claims
 
 A README, runbook, or CLAUDE.md exists to be *true of the repo as it is now*. So every
-line has one of four assertion classes (`skills/writing-docs/SKILL.md`):
+assertion unit has one of four classes (`skills/writing-docs/SKILL.md`):
 
 - **factual** — a command, path, symbol, behavior, structure, or value checked against
   current evidence;

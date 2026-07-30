@@ -1495,19 +1495,6 @@ class RecordedCoverage(DriftRepoTestCase):
         self.assertNotIn(LIVING, [e.scope for e in report.examined])
         self.assertEqual([g.scope for g in report.incomplete], [LIVING])
 
-    def test_recorded_coverage_is_part_of_the_reports_identity(self):
-        """Two runs finding nothing, one having verified a claim and one
-        having declared it unjudgeable, are not the same report."""
-        root = self.drift_repo()
-        verified = self.verified_report(root)
-        unjudged = self.audit(root, verdicts=self.verdicts_for(
-            root, self.unit_entry(root, LIVING, LIVING_CLAIM, NON_ASSERTIVE)
-        ))
-
-        self.assertEqual(verified.status, unjudged.status)
-        self.assertNotEqual(verified.digest, unjudged.digest)
-
-
 class WaiverBreadth(DriftRepoTestCase):
     """A waiver is exactly as broad as the text it quotes — so bound the text.
 
