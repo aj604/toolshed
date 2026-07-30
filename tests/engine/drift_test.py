@@ -1063,6 +1063,29 @@ class NarrativeAnchors(DriftRepoTestCase):
         self.assertEqual(record.extra["evidence"]["source"], "src/")
         self.assertIn("last changed", record.extra["evidence"]["observed"])
 
+    def test_a_dot_directory_anchor_is_still_checked(self):
+        """Issue #57 review: `FILE_EXTENSION` anchors on the end of the
+        string, so a directory whose own name begins with a dot matched it
+        whole — `.github` is "a dot then up to six word characters". Read as a
+        file spelling, the trailing '/' survived into the candidate, which
+        `repository_relative_problem` then refused as non-canonical, so the
+        reference was dropped and the anchor silently stopped being checked:
+        the exact failure the canonical path policy exists to prevent."""
+        for directory in (".github", ".claude", ".vscode"):
+            with self.subTest(directory=directory):
+                root = self.drift_repo(**{
+                    NARRATIVE: "# Tour\n\n"
+                               f"> As of 2026-01-01 (`{directory}/`)\n\nHi.\n"})
+                self.write(root, f"{directory}/config.yml", "on: push\n")
+                self.commit(root, "add a config beneath the dot directory")
+
+                report = self.audit(root)
+
+                record = self.anchor_records(report)["ANCHOR-STALE"]
+                self.assertEqual(
+                    record.extra["evidence"]["source"], f"{directory}/"
+                )
+
     def test_no_unsafe_spelling_of_an_anchor_reference_is_accepted(self):
         """Issue #57 review: the ad-hoc filter accepted spellings
         `paths.repository_relative_problem` rejects — `paths.py` is the single
