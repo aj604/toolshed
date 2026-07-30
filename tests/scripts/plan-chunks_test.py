@@ -352,6 +352,28 @@ class ResumeAndCeiling(unittest.TestCase):
             self.assertEqual(len(m2["pending"]), 1)
             self.assertIn("resume", r.stderr)
 
+    def test_a_legacy_records_chunk_does_not_mark_the_chunk_done(self):
+        # Chunk ids are content-addressed, so an unchanged sweep keeps its id
+        # across the `records` -> `verdicts` schema migration. Matching on
+        # `chunk` alone dropped the chunk from `pending` while the assembler
+        # later refused the file for carrying no `verdicts` — a resume that
+        # could not redispatch without deleting the cached file by hand.
+        # Found by review on the split stack.
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "a/x.md", "# x")
+            write(root, "docs/plans/p.md", "# plan")
+            git_init(root)
+            m1 = manifest(run(root))
+            stale_id = m1["chunks"][0]["id"]
+            results = os.path.join(root, "chunks")
+            os.makedirs(results)
+            write(root, f"chunks/{stale_id}.json",
+                  json.dumps({"chunk": stale_id, "records": []}))
+
+            m2 = manifest(run(root, results_dir=results))
+
+            self.assertIn(stale_id, m2["pending"])
+
     def test_pending_equals_all_ids_without_results_dir(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "a/x.md", "# x")
@@ -377,6 +399,47 @@ def run_emit(root, manifest_path, flag, chunk_id, results_dir=None):
     if results_dir is not None:
         cmd += ["--results-dir", results_dir]
     return subprocess.run(cmd, capture_output=True, text=True)
+
+
+class EmitPromptResultsDirConfinement(unittest.TestCase):
+    """The rendered prompt *states* the results path is outside the work tree
+    and tells the executor to write nothing into the repository. `abspath`
+    makes a path absolute, which is not the same as making it external, so a
+    --results-dir under --root left that claim false and the executor's result
+    landing as an unaccounted repository change the applier refuses. Found by
+    review on the split stack."""
+
+    def manifest_for(self, root):
+        path = os.path.join(root, "manifest.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(run(root).stdout)
+        return path, manifest(run(root))["chunks"][0]["id"]
+
+    def test_a_results_dir_inside_the_repository_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "alpha")
+            git_init(root)
+            man, cid = self.manifest_for(root)
+            inside = os.path.join(root, "chunks")
+            os.makedirs(inside)
+
+            r = run_emit(root, man, "--emit-prompt", cid, results_dir=inside)
+
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("inside the repository", r.stderr)
+
+    def test_a_results_dir_outside_the_repository_renders(self):
+        # The honest path the refusal must not close.
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as outside:
+            write(root, "docs/a.md", "alpha")
+            git_init(root)
+            man, cid = self.manifest_for(root)
+
+            r = run_emit(root, man, "--emit-prompt", cid, results_dir=outside)
+
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn(outside, r.stdout)
 
 
 class ContentAddressedIds(unittest.TestCase):

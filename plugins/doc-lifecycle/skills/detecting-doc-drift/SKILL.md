@@ -114,6 +114,11 @@ which this one structurally is not.
    UNVERIFIABLE judgments as records with digests, your VERIFIED ones as coverage, and the
    narrative documents' anchors checked engine-side. Exit 0 is a complete report, 4 partial
    (something was not examined), 1 refused (e.g. a document the plan never declared).
+   **Pass the same `--mode` (and `--since`) you planned with in step 1** — the audit
+   re-derives the scope from these flags, so a diff-scoped plan audited `--mode full` is
+   measured against every living document instead of the planned ones: the documents you
+   were never given become unexamined scope, and a correct incremental run exits 4 partial
+   rather than producing the report that was asked for.
 
 ### Verification tiers + escalation rule
 

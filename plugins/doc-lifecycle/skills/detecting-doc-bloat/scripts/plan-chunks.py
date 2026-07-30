@@ -368,15 +368,24 @@ Orchestration, retries, and assembly belong to whoever dispatched you.
 
 
 def usable_result(results_dir, cid):
-    """True only for a parseable result that names this chunk. An invalid
-    file surviving a failed CI retry must not mask the chunk as done."""
+    """True only for a parseable *current-shape* result that names this chunk.
+
+    An invalid file surviving a failed CI retry must not mask the chunk as
+    done — and neither must a legacy one. Chunk ids are content-addressed, so
+    an unchanged sweep keeps its id across the `records` -> `verdicts` schema
+    migration: a stale `{"chunk": id, "records": [...]}` file matched on
+    `chunk` alone, dropped the chunk from `pending`, and was then refused by
+    the assembler for carrying no `verdicts` — a resume that could not
+    redispatch without someone deleting the cached file by hand.
+    """
     path = os.path.join(results_dir, cid + ".json")
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return False
-    return isinstance(data, dict) and data.get("chunk") == cid
+    return (isinstance(data, dict) and data.get("chunk") == cid
+            and isinstance(data.get("verdicts"), list))
 
 
 def load_manifest(path):
@@ -416,6 +425,22 @@ def chunk_doc_lines(chunk):
         return [f"  - {p}" for p in documents]
     die(f"error: chunk {chunk.get('id')!r} carries neither 'docs' nor "
         "'documents' — not a recognized chunk-manifest dialect")
+
+
+def outside_the_work_tree(results_dir, root):
+    """Whether `results_dir` really lies outside the repository at `root`.
+
+    `os.path.abspath` makes a path absolute, which is not the same as making
+    it external: a `--results-dir` under `--root` (the `chunks` resume
+    directory, say) absolutizes happily and stays in the worktree. The
+    rendered prompt then *states* the path is outside and tells the executor
+    not to write into the repository — so the one claim the executor is given
+    no way to check would be false, and its result lands as an unaccounted
+    repository change the applier refuses.
+    """
+    results = os.path.realpath(results_dir)
+    repo = os.path.realpath(root)
+    return os.path.commonpath([results, repo]) != repo
 
 
 def emit_prompt(chunk, results_dir):
@@ -480,6 +505,14 @@ def main():
                 die("error: --emit-prompt requires --results-dir — the "
                     "out-of-work-tree directory the rendered prompt tells "
                     "the executor to write its result into")
+            if not outside_the_work_tree(args.results_dir, args.root):
+                die(f"error: --results-dir {args.results_dir} is inside the "
+                    f"repository at {args.root} — the rendered prompt tells "
+                    f"the executor that path is outside the work tree and to "
+                    f"write nothing into the repository, so a contained "
+                    f"directory makes that instruction false and leaves an "
+                    f"unaccounted change the applier refuses. Pass a path "
+                    f"outside the repository (${{TMPDIR:-/tmp}}/...)")
             print(emit_prompt(chunk, args.results_dir), end="")
         else:
             print(emit_turns(chunk))
