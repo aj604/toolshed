@@ -40,6 +40,7 @@ index, and for duplicated content it is *derived* from the index — so two chun
 that never see each other reach the same answer.
 """
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
@@ -52,7 +53,7 @@ from .finding import Finding, build_finding
 from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import DOCUMENTATION, authorize_path
 from .registry import compile_glob
-from .report import state_from_content
+from .report import EvidenceBoundary, Lineage, current_lineage, state_from_content, validate_report
 from .results import STATUS_OK, Invalid, Problem
 
 # The verdicts, carried over from the skill this absorbs so a reviewer reading
@@ -258,6 +259,140 @@ def plan_repository_chunks(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
 
 
 # --------------------------------------------------------------------------
+# The audit: verdicts in, a validated report out
+# --------------------------------------------------------------------------
+
+def load_bloat_verdicts(path):
+    """Read a lane's bloat verdicts file. Returns the payload, or `Invalid`.
+
+    The file/payload split `drift.load_verdicts` draws, and nothing else:
+    reading is a separate failure from what the payload says, and this
+    function does not look inside the payload at all. Shape and
+    `schema_version` discipline live in `audit_bloat` — exactly the split
+    drift draws between `load_verdicts` (a bare reader) and `_verdict_entries`
+    (the shape check, run *inside* `audit_drift`) — so every path into
+    `audit_bloat`, not only this file loader's, enforces them. A check that
+    lived only here could be silently routed around by an in-process caller
+    that built the envelope itself and called `audit_bloat` directly.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return Invalid((Problem(
+            code="bloat-verdicts-unreadable",
+            message=f"cannot read the verdicts at {path}: {exc}",
+            location=path,
+        ),))
+
+
+def _verdict_list(payload):
+    """(the `verdicts` list, ()) or (None, problems), from a bloat envelope.
+
+    The shape check `load_bloat_verdicts` deliberately does not do: an
+    object, no extra keys, carrying a `verdicts` list (optionally a
+    `schema_version`, which must equal `ARTIFACT_SCHEMA_VERSION` if present).
+    Called from `audit_bloat` itself, on drift's `_verdict_entries` pattern,
+    so no call path into `audit_bloat` can skip it.
+    """
+    if (not isinstance(payload, dict)
+            or set(payload) - {"schema_version", "verdicts"}
+            or "verdicts" not in payload
+            or not isinstance(payload["verdicts"], list)):
+        return None, (Problem(
+            code="bloat-verdicts-invalid-shape",
+            message=(
+                f"verdicts must be an object shaped {{'verdicts': [...]}} "
+                f"(optionally with 'schema_version'), not {payload!r}"
+            ),
+            location="verdicts",
+        ),)
+
+    version = payload.get("schema_version", ARTIFACT_SCHEMA_VERSION)
+    if version != ARTIFACT_SCHEMA_VERSION:
+        return None, (Problem(
+            code="bloat-verdicts-invalid-shape",
+            message=(
+                f"verdicts schema_version {version!r} is not supported; this "
+                f"engine reads integer version {ARTIFACT_SCHEMA_VERSION}"
+            ),
+            location="verdicts.schema_version",
+        ),)
+
+    return payload["verdicts"], ()
+
+
+# Every bloat verdict is checked against the whole-repository context index,
+# never a document-scoped glob, so the evidence boundary a run declares is
+# always "everything" — and, per the brief, no local tool: bloat cites no
+# command the way drift's `--evidence-command` lets a claim be settled by one.
+# `sources` is non-operative — unlike drift, nothing in the bloat lane checks
+# a citation against it — and is `("**",)` rather than `()` only because
+# `report.validate_report` refuses an empty `sources` list outright.
+EVIDENCE_BOUNDARY = EvidenceBoundary(sources=("**",), excluded=(), commands=())
+
+
+def _audit_config_digest(boundary):
+    """The consumer configuration this bloat audit ran under.
+
+    `drift._audit_config_digest`'s reasoning, carried over: what a consumer
+    can set that could change a verdict. Bloat's boundary is fixed
+    (`EVIDENCE_BOUNDARY`) rather than consumer-configurable, so this digest
+    only has to be stable and distinct from drift's, never re-derived from
+    argv the way drift's is.
+    """
+    return sha256_canonical({
+        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "audit": "bloat",
+        "evidence_boundary": boundary.to_dict(),
+    })
+
+
+def audit_bloat(repo_root, verdicts, registry_path=DEFAULT_REGISTRY_PATH):
+    """Run a bloat audit. Returns a validated `Report`, or `Invalid`.
+
+    The repository-level entrypoint, on `plan_repository_chunks`'s pattern (the
+    composition lives here rather than in the command, so the command stays a
+    call to one library function): index the repository, build the lineage the
+    run carries (mirroring `drift.audit_drift`'s construction), check the
+    verdicts against the index, and validate what results through the same
+    `report.validate_report` every other lane runs through.
+
+    `verdicts` is the envelope a bloat lane returned —
+    `{"verdicts": [...]}`, optionally with a matching `schema_version` — not
+    a bare list; `_verdict_list` checks its shape here, inside the
+    composition, the same seam `drift.audit_drift` checks its verdicts
+    payload at (`_verdict_entries`). Required — there is no planless bloat
+    audit the way a drift run can leave living documents unexamined; a value
+    judgment about the corpus has to have been made by someone.
+    """
+    index = build_context_index(repo_root, registry_path)
+    if isinstance(index, Invalid):
+        return index
+
+    state, problems = current_lineage(
+        repo_root, registry_path, _audit_config_digest(EVIDENCE_BOUNDARY)
+    )
+    if problems:
+        return Invalid(tuple(problems))
+    lineage = Lineage(
+        audit_mode="full", evidence_boundary=EVIDENCE_BOUNDARY, **state
+    )
+
+    entries, problems = _verdict_list(verdicts)
+    if problems:
+        return Invalid(tuple(problems))
+
+    result = record_verdicts(index, lineage, entries)
+    if isinstance(result, Invalid):
+        return result
+
+    return validate_report(
+        result.report_payload(lineage), registry_path=registry_path
+    )
+
+
+# --------------------------------------------------------------------------
 # Destinations and contention
 # --------------------------------------------------------------------------
 
@@ -342,13 +477,21 @@ def enumerate_scope(index, rule):
     are both refused: a bulk judgment over an unknown or empty set is
     unfalsifiable.
     """
-    if not isinstance(rule, dict) or len(rule) != 1 or not set(rule) <= set(SCOPE_SELECTORS):
+    # The selector's *value* is checked here alongside its name, not left to
+    # each branch: a rule is model-supplied, and `{"glob": 123}` reached
+    # `compile_glob` and raised out of a public seam — no report, no Problem, a
+    # traceback. A selector naming something that is not a non-empty string
+    # names no set of documents whatever the selector is, so all three read the
+    # same refusal.
+    if not isinstance(rule, dict) or len(rule) != 1 or not set(rule) <= set(SCOPE_SELECTORS) or not all(
+            isinstance(v, str) and v != "" for v in rule.values()):
         return Invalid((Problem(
             code="bloat-scope-not-enumerable",
             message=(
                 f"a bulk scope must be exactly one of "
-                f"{list(SCOPE_SELECTORS)}, not {rule!r} — a scope nobody can "
-                f"expand into a file list cannot be reviewed or applied"
+                f"{list(SCOPE_SELECTORS)} naming a non-empty string, not "
+                f"{rule!r} — a scope nobody can expand into a file list cannot "
+                f"be reviewed or applied"
             ),
             location="scope",
         ),))
@@ -524,8 +667,27 @@ class _Recorder:
 
     # -- a verdict about one document ---------------------------------------
 
+    def _locate(self, where, record_id, path=None):
+        """A verdict's location, addressable without recounting the envelope.
+
+        `where` alone (`verdicts[N]`) is a position in the *assembled*
+        envelope — assembly renumbers every chunk worker's own id
+        (`output-contract.md`'s `B1..Bn`), so the index by itself names
+        neither the id a reviewer or a re-dispatched worker would recognize
+        nor the document a refusal is about. Both are appended when known, on
+        `drift._verdict_entries`'s `f"{where} command={command!r}"` pattern,
+        so relocating the right chunk for a re-prompt needs no recount.
+        """
+        located = where
+        if _nonempty(record_id):
+            located = f"{located} id={record_id!r}"
+        if _nonempty(path):
+            located = f"{located} path={path!r}"
+        return located
+
     def _one_document(self, raw, where, verdict, mark):
         path = raw.get("path")
+        where = self._locate(where, raw.get("id"), path)
         document = self.index.document(path) if _nonempty(path) else None
 
         if document is None:
@@ -573,6 +735,7 @@ class _Recorder:
 
     def _bulk(self, raw, where, verdict, mark):
         """Expand a bulk judgment into one finding per enumerated member."""
+        where = self._locate(where, raw.get("id"))
         scope = raw["scope"]
         if verdict not in SCOPE_VERDICTS:
             self.bad("bloat-scope-verdict-ineligible",
@@ -663,10 +826,28 @@ class _Recorder:
                          f"do", where)
             return None
 
-        owners = {
+        owners_including_self = {
             self.index.owner_of(unit) for unit in units
             if len(self.index.occurrences_of(unit)) > 1
-        } - {path}
+        }
+
+        if owners_including_self == {path}:
+            # Every duplicated unit in this group is owned by the document
+            # being judged — it is the original the other occurrence(s) point
+            # at, not a copy of one. There is no other document to fold into,
+            # regardless of what was proposed: accepting a model-proposed
+            # destination here would bypass the index guard this whole
+            # function exists to enforce.
+            self.bad("bloat-destination-self-owner",
+                     f"the index owns this content at {path} itself — this "
+                     f"document is not a duplicate, it is the original the "
+                     f"other occurrence(s) point back at, so there is no "
+                     f"other document for {verdict} to fold it into; naming "
+                     f"a destination here asserts a merge the index does "
+                     f"not support", where)
+            return None
+
+        owners = owners_including_self - {path}
 
         if len(owners) > 1:
             # The group's content is owned in more than one place, so no single
@@ -914,8 +1095,10 @@ class _Recorder:
                 self.bad("bloat-status-not-file-bound",
                          f"the planning document's own marker says "
                          f"{file_status!r} — lifecycle state lives in the file "
-                         f"(CONTEXT.md: content-coupled facts stay in the "
-                         f"file), and a verdict may report it, never assert it",
+                         f"(the registry owns classification; content-coupled "
+                         f"facts like lifecycle state stay in the document — "
+                         f"engine/README.md, \"The registry\"), and a verdict "
+                         f"may report it, never assert it",
                          where)
                 return None
             return status
