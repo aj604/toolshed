@@ -86,6 +86,11 @@ PROPOSAL_VERDICTS = (CONDENSE, EXTRACT_AND_MOVE)
 # made, and a scope-wide move would need a per-document destination.
 SCOPE_VERDICTS = (RETIRE_DOC,)
 
+# Verdicts whose remedy retires the source document. Unlike passage remedies,
+# their subject is the complete current deterministic segmentation: approving
+# fewer units must never authorize deletion of the units left behind.
+WHOLE_DOCUMENT_VERDICTS = (RETIRE_DOC, DISTILL, MERGE_DOC)
+
 # Owned by context.py, not repeated here: `_status()` checks a verdict's
 # status *against* the planning document's own file-bound marker, so the set
 # of legal values has to be the one thing both sides read, never two lists
@@ -1137,17 +1142,34 @@ class _Recorder:
             self.bad("bloat-invalid-shape",
                      f"{where} must name at least one assertion unit", where)
             return ()
+        valid_units = []
         for unit in units:
-            if unit not in document.units:
+            if not isinstance(unit, str) or unit not in document.units:
                 self.bad("bloat-unknown-unit",
                          f"unit {unit!r} does not occur in {path} — a verdict is "
                          f"about content that is actually there", where)
+            if isinstance(unit, str):
+                valid_units.append(unit)
 
-        destination = self._destination(raw, where, verdict, path, units)
+        if verdict in WHOLE_DOCUMENT_VERDICTS:
+            if len(valid_units) != len(set(valid_units)):
+                self.bad("bloat-whole-document-unit-duplicate",
+                         f"{verdict} names a unit identity more than once for "
+                         f"{path} — a whole-document judgment binds the current "
+                         f"deterministic unit set exactly once", where)
+            missing = sorted(set(document.units) - set(valid_units))
+            if missing:
+                self.bad("bloat-whole-document-units-incomplete",
+                         f"{verdict} retires all of {path}, but its unit set "
+                         f"omits {len(missing)} current deterministic unit(s) — "
+                         f"a whole-document judgment must name every unit the "
+                         f"current segmentation contains", where)
+
+        destination = self._destination(raw, where, verdict, path, valid_units)
         extra = {
             "verdict": verdict,
             "evidence": raw.get("evidence"),
-            "duplicate_search": self._duplicate_search(path, units),
+            "duplicate_search": self._duplicate_search(path, valid_units),
             "destination": destination,
             "proposal": self._proposal(raw, where, verdict),
             "status": self._status(raw, where, verdict, path, document),

@@ -1036,6 +1036,16 @@ cannot express: the group is a deduplicated set of content digests, so `here` is
 copies *in this document* the finding is about — two identical sentences are one group member and
 two `here` entries — and `elsewhere` is what makes the redundancy claim checkable.
 
+`RETIRE-DOC`, `DISTILL`, and `MERGE-DOC` are whole-document judgments
+(`bloat.WHOLE_DOCUMENT_VERDICTS`): each retires its source, so its `units` must equal the
+document's complete current deterministic unit set. `record_verdicts()` checks that equality
+before building a finding. An omitted unit is `bloat-whole-document-units-incomplete`; a repeated
+identity is `bloat-whole-document-unit-duplicate`; and an extra, stale, or malformed identity is
+`bloat-unknown-unit`. The set includes structural units such as headings, not only
+assertion-capable prose. Passage remedies (`CUT`, `CONDENSE`, `EXTRACT-AND-MOVE`) keep their
+selected-unit hulls, and bulk `RETIRE-DOC` remains complete because scope enumeration supplies each
+member's units directly from the index.
+
 ### Deterministic scopes
 
 `enumerate_scope(index, rule)` expands exactly one of `{"set": …}`, `{"glob": …}`, or
@@ -1120,7 +1130,9 @@ caller (or a skill documenting the contract) can cite instead of restating.
 | `bloat-duplicate-id` | two verdicts share an `id` — records a reviewer cannot tell apart cannot be approved apart |
 | `bloat-unknown-document` | `path` is not a document this repository's index claims |
 | `bloat-document-outside-chunk` | a single-document verdict names a path outside the dispatched chunk's slice |
-| `bloat-unknown-unit` | a named unit digest does not occur in the document it is claimed against |
+| `bloat-unknown-unit` | a named unit identity is malformed or does not occur in the document it is claimed against (including an extra or stale identity on a whole-document verdict) |
+| `bloat-whole-document-unit-duplicate` | `RETIRE-DOC`, `DISTILL`, or `MERGE-DOC` repeats a unit identity instead of binding the deterministic unit set exactly once |
+| `bloat-whole-document-units-incomplete` | `RETIRE-DOC`, `DISTILL`, or `MERGE-DOC` omits one or more units from the source document's complete current deterministic unit set |
 | `bloat-scope-verdict-ineligible` | a bulk `scope` verdict's code is not in `SCOPE_VERDICTS` — only `RETIRE-DOC` applies uniformly to every member of a scope |
 | `bloat-scope-not-enumerable` | `scope` is not exactly one of `{"set"\|"glob"\|"kind"}` naming a non-empty string |
 | `bloat-scope-empty` | the enumerated scope covers no document in the repository |

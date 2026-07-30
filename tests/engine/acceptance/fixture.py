@@ -88,9 +88,9 @@ PLANNING_DOC = "docs/plans/2026-07-20-followup-plan.md"
 #   CONTENDED_ASSERTION   also in FEE_ROLLOUT_PLAN
 #
 # Because the copies live in two different planning documents, a chunk plan puts
-# them in different chunks — and both must resolve to POLICY_DOC as the merge
-# target, independently and identically. The three planning documents (this
-# pair plus PLANNING_DOC) are the `plans` document set a bulk-retirement
+# them in different chunks — and both passage moves must resolve to POLICY_DOC
+# as their target, independently and identically. The three planning documents
+# (this pair plus PLANNING_DOC) are the `plans` document set a bulk-retirement
 # enumeration expands.
 POLICY_DOC = "docs/fee-policy.md"
 FEE_TIERS_PLAN = "docs/plans/2026-07-21-fee-tiers-plan.md"

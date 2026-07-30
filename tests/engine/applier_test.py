@@ -1648,6 +1648,97 @@ class DistillationLandsItsResidue(ApplierTestCase):
         self.assertIsNone(record["destination"])
 
 
+class CompleteWholeDocumentAuditRecordsApply(ApplierTestCase):
+    """Complete RETIRE-DOC and MERGE-DOC records traverse every public gate.
+
+    DISTILL's equivalent path is `DistillationLandsItsResidue` above. These
+    records also come from the bloat audit boundary rather than test-authored
+    findings, then pass human approval, plan validation, and application.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lineage = self.lineage_for(
+            self.repo, audit_mode="chunk",
+            evidence_boundary=EvidenceBoundary(("docs/**",)),
+        )
+
+    def audited_record(self, entry):
+        result = record_verdicts(
+            build_context_index(self.repo), self.lineage, [entry]
+        )
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        return result.records()[0]
+
+    def test_complete_retire_doc_is_approved_and_applied(self):
+        index = build_context_index(self.repo)
+        record = self.audited_record({
+            "id": "BLOAT-R1",
+            "verdict": "RETIRE-DOC",
+            "path": PLAN_DOC,
+            "units": list(index.document(PLAN_DOC).units),
+            "evidence": "The tiered-fee plan is superseded by docs/a.md.",
+        })
+        report, approval = self.approve([record])
+        plan = self.plan(approval, [{
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }], {PLAN_DOC: None})
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, PLAN_DOC)))
+
+    def test_complete_merge_doc_is_approved_and_applied(self):
+        source_text = "# Duplicate fees\n\n" + DOC_A_TEXT.split("\n", 2)[2]
+        self.repo = self.git_repo(files={**FILES, PLAN_DOC: source_text})
+        self.lineage = self.lineage_for(
+            self.repo, audit_mode="chunk",
+            evidence_boundary=EvidenceBoundary(("docs/**",)),
+        )
+        index = build_context_index(self.repo)
+        record = self.audited_record({
+            "id": "BLOAT-M1",
+            "verdict": "MERGE-DOC",
+            "path": PLAN_DOC,
+            "units": list(index.document(PLAN_DOC).units),
+            "evidence": "Every substantive unit already lives in docs/a.md.",
+        })
+        self.assertEqual(record["destination"]["path"], DOC_A)
+        report, approval = self.approve([record])
+        moved = source_text.rstrip("\n")
+        post_destination = DOC_A_TEXT + moved + "\n"
+        plan = self.plan(approval, [
+            {
+                "op": "move-with-provenance",
+                "record": record["digest"],
+                "target_class": "documentation",
+                "path": PLAN_DOC,
+                "destination": DOC_A,
+                "start_line": 1,
+                "end_line": 5,
+                "preimage": moved,
+            },
+            {
+                "op": "retire-document",
+                "record": record["digest"],
+                "target_class": "documentation",
+                "path": PLAN_DOC,
+                "preimage": source_text,
+            },
+        ], {PLAN_DOC: None, DOC_A: sha256_text(post_destination)})
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, PLAN_DOC)))
+        self.assertEqual(self.read(self.repo, DOC_A), post_destination)
+
+
 class LoadEditPlan(ApplierTestCase):
     """Reading the plan artifact off disk, strictly."""
 
