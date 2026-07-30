@@ -40,6 +40,7 @@ auto-apply policy off it.
 import datetime
 import json
 import os
+import posixpath
 import re
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
@@ -1056,6 +1057,21 @@ def _anchor_references(text):
     skipped here as prose the extractor never claimed, not refused: this is a
     candidate extractor, and a token it drops silently is simply not a
     reference.
+
+    That question is asked of the *normalized* candidate, because the two
+    answers it can give are not the same kind of answer. `./docs/guide.md`,
+    `docs//guide.md` and `docs/./guide.md` are one file spelled untidily; a
+    backslash, a drive letter, a leading dash, whitespace, an absolute path or
+    a `..` are a different file, or none. Asking on the token as written
+    conflated them, and a narrative document anchored on `./docs/guide.md`
+    reported clean — the anchor silently stopped being checked (issue #57
+    review). What is *stored* is still the token the anchor wrote, so the
+    finding points a reader at the string that is actually in the document.
+
+    A `..` component is skipped before normalization rather than cancelled by
+    it: `a/../b` is `b` only when `a` is not a symlink, so letting normpath
+    resolve one would be a claim about the filesystem this function has not
+    looked at.
     """
     references = []
     for token in BACKTICKED.findall(text):
@@ -1071,6 +1087,14 @@ def _anchor_references(text):
             # canonical form here, not a non-canonical file spelling — so the
             # canonical check reads the directory name underneath it.
             candidate = token[:-1]
+        if ".." in candidate.split("/"):
+            continue                       # traversal, before it can cancel
+        if not candidate.endswith("/"):
+            # Only where a trailing '/' is not part of the spelling: on posix
+            # `docs/guide.md/` names a directory and `docs/guide.md` a file,
+            # so normalizing that one away would answer about a different
+            # path than the anchor wrote.
+            candidate = posixpath.normpath(candidate)
         if repository_relative_problem(candidate) is not None:
             continue                       # not a repository-relative path
         if token not in references:

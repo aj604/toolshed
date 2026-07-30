@@ -4,8 +4,9 @@
 The contract lives in ../SKILL.md ("The output contract") and is the engine's:
 `doclifecycle/drift.py` reads this artifact through `drift-audit --verdicts`.
 Division of labor: this validator catches shape violations before dispatch —
-enums, the judged-unit field set, evidence citation rules, the STALE-only `fix`
-— so a malformed answer fails in a second instead of after a full audit run.
+enums, the judged-unit field set, one answer per unit, evidence citation rules,
+the STALE-only `fix` — so a malformed answer fails in a second instead of after
+a full audit run.
 `drift-audit` is the authority. It holds what this script cannot see: the
 segmentation (whether an ordinal names a real unit, whether a multi-line `fix`
 owns its span), the plan (whether a document was in scope), and the run's
@@ -62,13 +63,27 @@ ENTRY_STATUSES = (ENTRY_OK, ENTRY_FAILED)
 TOPLEVEL_FIELDS = ("schema_version", "documents")
 SCHEMA_VERSION = 1
 
-DIGEST = re.compile(r"^[0-9a-f]{64}$")
+DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 def real_int(v):
     # `bool` is an `int` subclass and `1.0 == 1`, so a bare equality or
     # membership check would wave through `true` / `1.0`.
     return isinstance(v, int) and not isinstance(v, bool)
+
+
+def valid_unit(v):
+    """Whether `v` names a unit the way the contract spells one.
+
+    `fullmatch`, never `match` against a `$`-anchored pattern: `$` also
+    matches just before a trailing newline, so `"<64 hex>\\n"` would read as a
+    digest here and then reach the engine as a digest no unit has —
+    `classification-unknown-unit`, the whole document refused after the audit
+    has already been paid for. Transcription damage to a 64-character string
+    is the exact failure this seam exists to catch, so the match is exact.
+    """
+    return ((real_int(v) and v >= 0)
+            or (isinstance(v, str) and DIGEST.fullmatch(v) is not None))
 
 
 def one_line(v):
@@ -275,8 +290,7 @@ def validate_verdict(entry, where, errs):
         return None
 
     unit = entry["unit"]
-    if not ((real_int(unit) and unit >= 0)
-            or (isinstance(unit, str) and DIGEST.match(unit))):
+    if not valid_unit(unit):
         errs.append(
             f"{where}: unit {unit!r} must be the ordinal `segment` printed "
             f"alongside the unit — a non-negative integer (a 64-character "
@@ -329,6 +343,37 @@ def validate_verdict(entry, where, errs):
     validate_evidence(entry["evidence"], verdict, where, errs)
     validate_fix(entry, verdict, where, errs)
     return verdict if verdict in VERDICTS else None
+
+
+def check_unique_units(verdicts, path, errs):
+    """Refuse a unit answered twice within one document.
+
+    The engine refuses the same thing in `finding.record_classifications` —
+    `classification-duplicate`, "a unit has one class, and two answers is no
+    answer" — and fails the document closed, so a duplicate costs the run every
+    finding it reached, not just the repeated one. Purely shape-detectable, so
+    it belongs here too.
+
+    Units are compared exactly as written. An ordinal and a digest are two ways
+    to name a unit, and only the segmentation says whether they name the same
+    one; this script has no segmentation, so `1` and its digest read as two
+    units here and it is `drift-audit` that collides them. A unit the contract
+    does not recognize is skipped: its own violation is already reported, and
+    it names nothing to be a duplicate of.
+    """
+    first = {}
+    for i, entry in enumerate(verdicts):
+        if not isinstance(entry, dict) or not valid_unit(entry.get("unit")):
+            continue
+        unit = entry["unit"]
+        if unit in first:
+            errs.append(
+                f"{path}:verdicts[{i}]: unit {unit!r} is answered more than "
+                f"once (first at verdicts[{first[unit]}]) — a unit takes one "
+                f"class and one verdict, and two answers is no answer"
+            )
+        else:
+            first[unit] = i
 
 
 def validate_entry(i, entry, seen, errs):
@@ -390,6 +435,7 @@ def validate_entry(i, entry, seen, errs):
     reached = []
     for j, verdict in enumerate(entry["verdicts"]):
         reached.append(validate_verdict(verdict, f"{path}:verdicts[{j}]", errs))
+    check_unique_units(entry["verdicts"], path, errs)
     return reached
 
 
