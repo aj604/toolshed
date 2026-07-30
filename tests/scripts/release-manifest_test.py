@@ -14,6 +14,7 @@ Run: python3 tests/scripts/release-manifest_test.py
 import importlib.util
 import os
 import shutil
+import subprocess
 import tempfile
 import textwrap
 import unittest
@@ -96,6 +97,12 @@ class SyntheticRepo:
     def write(self, rel, text=SUITE):
         _write(self.root, rel, text)
 
+    def initialize_git(self):
+        subprocess.run(["git", "init", "--quiet", self.root], check=True)
+
+    def track(self, *paths):
+        subprocess.run(["git", "-C", self.root, "add", *paths], check=True)
+
     def audit(self):
         # No manifest: these repositories exist to exercise the discovery
         # half. The manifest half has its own cases below.
@@ -103,6 +110,47 @@ class SyntheticRepo:
 
     def cleanup(self):
         shutil.rmtree(self.root, ignore_errors=True)
+
+
+class RepositoryCandidatesFollowGitIgnore(unittest.TestCase):
+    """The guard judges repository candidates, not every physical file."""
+
+    def setUp(self):
+        self.repo = SyntheticRepo()
+        self.repo.initialize_git()
+        self.addCleanup(self.repo.cleanup)
+
+    def test_an_ignored_nested_worktree_copy_is_not_an_unwired_suite(self):
+        self.repo.write(".gitignore", "agent-worktree/\n")
+        self.repo.write("agent-worktree/tests/lanes/copied_test.py")
+        self.assertEqual([], self.repo.audit().unwired)
+
+    def test_an_untracked_nonignored_orphan_suite_is_still_unwired(self):
+        self.repo.write("tests/lanes/orphan_test.py")
+        self.assertEqual(["tests/lanes/orphan_test.py"], self.repo.audit().unwired)
+
+    def test_a_tracked_suite_is_still_checked_against_actual_discovery(self):
+        self.repo.write("tests/engine/tracked_test.py")
+        self.repo.track("tests/engine/tracked_test.py")
+        report = self.repo.audit()
+        self.assertIn("tests/engine/tracked_test.py", report.gate)
+        self.assertEqual([], report.unwired)
+
+    def test_a_vendored_engine_mirror_is_not_an_independent_suite(self):
+        self.repo.write(".doc-lifecycle/wiring/engine/copied_test.py")
+        self.repo.track(".doc-lifecycle/wiring/engine/copied_test.py")
+        self.assertEqual([], self.repo.audit().unwired)
+
+    def test_a_nonignored_malformed_candidate_is_reported(self):
+        self.repo.write("tests/lanes/broken.py", BROKEN)
+        self.assertEqual(["tests/lanes/broken.py"], self.repo.audit().unreadable)
+
+    def test_a_clean_snapshot_and_ignored_worktree_checkout_agree(self):
+        archive = SyntheticRepo()
+        self.addCleanup(archive.cleanup)
+        self.repo.write(".gitignore", "agent-worktree/\n")
+        self.repo.write("agent-worktree/tests/lanes/copied_test.py")
+        self.assertEqual(archive.audit().render(), self.repo.audit().render())
 
 
 class AnUnwiredSuiteIsCaught(unittest.TestCase):
