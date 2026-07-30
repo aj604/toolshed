@@ -52,6 +52,18 @@ another doc** → `MERGE-DOC` (fold the unique remainder into the survivor —
 elsewhere) or `RETIRE-DOC` (the doc carries nothing the other lacks — delete
 it). Evidence: quote or cite the overlapping passage in *both* docs.
 
+**Judge the document the index does *not* own.** For a near-duplicate pair,
+`MERGE-DOC` names the copy — the index already knows which one that is: the
+most durable kind wins (`living` beats `narrative` beats `planning`), ties
+broken by path, and that owner is always the survivor, never the model's
+choice. Emitting `MERGE-DOC` against the document the index owns is refused
+(`bloat-destination-self-owner`) — there is no other document for it to fold
+into. If the survivor you would actually want to keep is *not* the one the
+index owns — the better-written doc happens to be the narrative one, say —
+that disagreement is itself a finding to surface in `evidence` (the index's
+owner is stale, wrong-kind, or otherwise not the doc anyone should keep), not
+a `destination` to assert against the index's answer.
+
 ## The three-lens re-pass (before emitting)
 
 Re-walk each living doc three times, one lens per walk — the `CUT` lens, the

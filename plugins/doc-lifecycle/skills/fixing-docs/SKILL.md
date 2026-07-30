@@ -38,7 +38,7 @@ record **digests** a person selected from it. That selection is the semantic app
 and minting is what turns it into the artifact; the names alone are not it.
 
 ```bash
-python3 -m doclifecycle mint-approval --report report.json --repo . \
+python3 -m doclifecycle mint-approval --report "${TMPDIR:-/tmp}/report.json" --repo . \
   --record <record digest> --minter <who approved> --out /tmp/approval.json
 ```
 
@@ -47,6 +47,15 @@ report can renumber. Repeat it once per approved record. Write the artifact
 **outside the work tree or to a git-ignored path**; the engine refuses a tracked or
 would-be-tracked path, because a `git add -A` in the change it authorizes would
 commit the authority next to the diff.
+
+That same placement rule covers every audit artifact you carry into this flow, not just
+the approval set — the report, the verdicts/plan the detecting skill produced, and the
+edit plan you author in step 2. Step 3's confinement check (below) compares the working
+tree against the approval set's paths, so a `drift-report.json` or `verdicts.json` left
+sitting in the tree reads as an unaccounted change and the run refuses before it applies
+anything. `detecting-doc-drift` and `detecting-doc-bloat` write their artifacts to
+`${TMPDIR:-/tmp}/` for exactly this reason; keep them there rather than moving them into
+the repo to "review before minting."
 
 Minting refuses before it mints; what it refuses, and in what order, is the engine
 README's **Approval sets** section. **A refusal is the answer, not an obstacle**:
@@ -89,8 +98,8 @@ through **writing-docs**.
 ### 3. Run the applier
 
 ```bash
-python3 -m doclifecycle apply-plan --repo . --plan plan.json \
-  --approval /tmp/approval.json --report report.json \
+python3 -m doclifecycle apply-plan --repo . --plan "${TMPDIR:-/tmp}/plan.json" \
+  --approval /tmp/approval.json --report "${TMPDIR:-/tmp}/report.json" \
   [--audit-config-digest <sha256>]
 ```
 
@@ -130,7 +139,8 @@ The approval set itself never enters the repository. Its digest and rendered sum
 | The verdict is **invalid** (exit 1) | Stop and report every problem. An invalid artifact is a forgery or a bug, not a state to work around. |
 | The report is `clean`, or a record you were given is not in it | Stop. The inputs disagree; never guess which record was meant. |
 | A record you were **not** given is obviously right | Surface it. Unapproved is unapproved, and an unminted record cannot reach a plan at all. |
-| A record's code authorizes no operations — `POLICY`, or anything a newer detector emits | Stop and surface it. `RECORD_REMEDIES` is closed and fail-shut: a code nobody listed authorizes **no** operation, so there is no plan to write. `POLICY` in particular is a legacy bulk verdict the bloat engine replaced with enumerable scopes, and its records expand to one per file — approve those instead. |
+| A record's code authorizes no operations — `POLICY`, `ANCHOR-MISSING`, `ANCHOR-MALFORMED`, `ANCHOR-UNVERIFIABLE`, `ANCHOR-FUTURE-DATED`, `ANCHOR-UNRESOLVABLE-REFERENCE`, or anything a newer detector emits | Stop and surface it. `RECORD_REMEDIES` is closed and fail-shut: a code nobody listed authorizes **no** operation, so there is no plan to write. `POLICY` is a legacy bulk verdict the bloat engine retired in favor of enumerable `RETIRE-DOC` scopes. Five of the six `ANCHOR-*` codes need a `> As of` line a human authors, not a span edit anyone approved — minting refuses to select one of them at all, so you will not carry one this far into the flow. **`ANCHOR-STALE` is not one of these five**: its remedy rewrites the anchor line like any other span edit, so do not lump it in with its siblings just because the family name matches — check a record's own code against this table, never the `ANCHOR-` prefix alone, before deciding it is a dead end. |
+| Audit artifacts (report, verdicts, plan) sitting in the work tree | Move them to `${TMPDIR:-/tmp}/` (or another git-ignored path), do **not** commit them. Committing moves `base_commit` and stales the approval you just minted — the recovery is re-running the audit, which re-dirties the tree the same way. Relocate, never commit. |
 
 **Never edit the approval set, the report, or the plan's declared digests to make a
 refusal go away.** Repairing a stale `base_commit`, recomputing a digest over altered

@@ -6,7 +6,14 @@ you emit is the **verdicts envelope** `python3 -m doclifecycle bloat-audit`
 reads; the engine turns it into the report. Shape-check every artifact with
 `scripts/validate-bloat-output.py` before any handoff — and remember what that
 check cannot see: `bloat-audit` is the authority on every fact about the
-corpus (see *What the engine decides* below).
+corpus (see *What the engine decides* below). The field rules below are this
+file's own restatement in one place for the model authoring verdicts; the
+engine's own refusal codes for every way a verdict can be rejected —
+including the `PROPOSAL_VERDICTS` / `DESTINATION_VERDICTS` / `RESIDUE_VERDICTS`
+/ `SCOPE_VERDICTS` sets these field rules are drawn from — are owned by
+`plugins/doc-lifecycle/engine/README.md` ("Bloat audit", the verdict table and
+the "Refusals" table beneath it); this file cites that, not the other way
+round.
 
 ## Verdict fields
 
@@ -19,7 +26,7 @@ A verdict carries only these ten keys, all optional except as ruled below:
 | `id` | non-empty string, unique across the envelope (e.g. `"B1"`). A label the report may renumber — approval binds a record's **digest** |
 | `verdict` | one of `CUT` / `CONDENSE` / `EXTRACT-AND-MOVE` / `MERGE-DOC` / `RETIRE-DOC` / `DISTILL` — literal enum, no invented values |
 | `path` | the document judged; required unless the verdict carries `scope` |
-| `units` | non-empty array of **unit digests** — the `digest` values `python3 -m doclifecycle segment --repo . --path <path>` prints for that document, copied verbatim. This is what the verdict is *about*, and what the applier's span is bounded by. Required unless the verdict carries `scope` |
+| `units` | non-empty array of **unit digests** — the `digest` values `python3 -m doclifecycle segment --repo . --path <path>` prints for that document, copied verbatim. This is what the verdict is *about*, and what the applier's span is bounded by. Required unless the verdict carries `scope`. **`CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`** (a passage verdict): name only the passage's own units. **`DISTILL`/`MERGE-DOC`/`RETIRE-DOC`** (a whole-document verdict, subject is the document, not a passage): name **every** unit `segment` prints for it, assertion-capable or not — never one representative and never only the assertion-capable subset. **This is a contract you must honor, not one the tooling checks for you**: neither `validate-bloat-output.py` nor the engine's `record_verdicts()` verifies that a whole-document verdict names every unit — both only check that each named unit occurs in the document (`bloat-unknown-unit`), never that none was left out. The applier bounds any positioned operation the remedy uses (`MERGE-DOC`'s move, `DISTILL`'s span edits) to the **hull** of the record's named units — first line through last — so a whole-document verdict naming fewer than every unit silently narrows what the eventual apply can touch, with nothing downstream to catch the gap |
 | `evidence` | mandatory non-empty string for **every** verdict — why this content does not earn its tokens. `DISTILL`: the landed-code proof (or the grep-returns-nothing proof) plus at most brief classification framing — never the doc's substance |
 | `destination` | where content goes. `EXTRACT-AND-MOVE` / `MERGE-DOC`: the target document — **optional**, because for content that occurs elsewhere the engine derives the destination from the index and refuses a disagreeing one. `DISTILL`: optional, and a path **nobody has written yet** (the residue's home); absent means a retire-only distillation. Any other verdict: absent |
 | `proposal` | `CONDENSE` / `EXTRACT-AND-MOVE`: non-empty string, the complete replacement or the text to land (writing-docs bar; placed byte-verbatim). Any other verdict: absent |
@@ -81,7 +88,10 @@ sweeps for all six verdicts.
       "id": "B3",
       "verdict": "DISTILL",
       "path": "docs/plans/2025-11-02-cache-layer-design.md",
-      "units": ["87abd4c8ec4a2bfeca8ef02bbaebb9c46e0738e58fb8e4b5082979402000fdc8"],
+      "units": [
+        "87abd4c8ec4a2bfeca8ef02bbaebb9c46e0738e58fb8e4b5082979402000fdc8",
+        "f1c9e6b0a2d84e5f9a7c3b1d6e0f4a8b2c5d9e7f1a3b6c8d0e2f4a6b8c0d2e4f"
+      ],
       "evidence": "implementation landed: src/cache.py:5 `CACHE_TTL_S = 300`, :14 `get_or_fill` match the design; the file's own marker reads ready",
       "status": "ready"
     },
@@ -105,7 +115,10 @@ and may sit outside a chunk's slice — only `path` is slice-bound.
 proof, full stop. The claims, insights, and decision entry are the
 `doc-distiller`'s post-approval job; the rationale lives once in
 `references/planning-artifacts.md`. Its `status` is transcribed from the file,
-never decided by the grep.
+never decided by the grep. Its `units` name **every** unit the document has —
+two here because the invented doc is that short — because `DISTILL`'s subject
+is the whole document and the applier bounds any span edit the distiller's
+remedy uses to the hull of exactly these digests.
 
 `B4` is bulk retirement — the replacement for the retired `POLICY` verdict. It
 names an **inclusion rule**, not files: the engine expands `{"set":

@@ -41,25 +41,52 @@ key plans normally, and the planner says so.
 
 ## The audit (run these steps, in order)
 
-1. **Plan the chunks.** `python3 -m doclifecycle bloat-plan --repo . >
-   bloat-plan.json` partitions every indexed document into bounded chunks
+Every artifact this audit writes — the plan, the verdicts, the report — goes to
+`${TMPDIR:-/tmp}/`, never the work tree: `fixing-docs`' applier confines a run to its
+approval set's paths, so an audit artifact sitting in the tree reads as an unaccounted
+change and the apply refuses (`apply-working-tree-not-confined`). The steps and the
+invocation templates below reuse that same destination; only the filename changes per
+artifact.
+
+1. **Plan the chunks.** Requires `.doc-lifecycle/registry.json` — this whole
+   audit is a walk of the *registered* corpus, and an unregistered repo has
+   none. No registry yet: **bootstrapping-docs** writes one for a repo with no
+   doc set; for a repo whose docs exist but nothing classifies them yet, run
+   its `migration-draft --registry-only` step (**scheduling-doc-sync**'s
+   "Migration to the registry contract" is the one owner of that sequence).
+   `python3 -m doclifecycle bloat-plan --repo . >
+   "${TMPDIR:-/tmp}/bloat-plan.json"` partitions every indexed document into bounded chunks
    (`--max-documents`, `--max-units`), content-addressed so an unchanged chunk
-   keeps its id. For a dispatched sweep, `scripts/plan-chunks.py` plans from
+   keeps its id, and refuses outright (`registry-missing`) when there is none.
+   For a dispatched sweep, `scripts/plan-chunks.py` plans from
    the repository's `.md` files and `.doc-lifecycle/audit-scope.json` instead,
    adding the dispatch ergonomics the engine has no opinion about: per-chunk
-   turn budgets, `--emit-prompt` slices, and `--results-dir` resume. Either
+   turn budgets, `--emit-prompt` slices, and `--results-dir` resume. It does
+   **not** read the registry, so it plans an unregistered or unauditable
+   corpus without complaint — check the registry exists yourself before
+   dispatching a sweep with it, or every chunk's model invocation is spent
+   before `bloat-audit` refuses at the end. Either
    way `bloat-audit` re-derives every fact from the registry, so a chunk plan
-   is a work order, never an authority.
+   is a work order, never an authority. `plan-chunks.py --emit-prompt`/
+   `--emit-turns` read a `bloat-plan` manifest too (its chunks carry
+   `documents`, bare paths, rather than `plan-chunks.py`'s own per-doc
+   `docs: [{"path","lines","hint"}]`) — the dispatch prompt renders whichever
+   fields a chunk's dialect supplies; the turn budget falls back to the floor
+   only for `plan-chunks.py`'s own dialect; a `bloat-plan` chunk has no
+   `turns` to fall back from and the script says so rather than guessing.
 2. **Judge each chunk.** Small scope (≲2 chunks): sweep inline with the
    reference rules. Large scope: never sweep inline — the manifest is your
    work order as orchestrator (do not enumerate or read the corpus yourself),
    and you dispatch **one subagent per pending chunk, in concurrent waves of
    several, never serially** (chunks are independent; a serial walk of a
    bootstrap-scale manifest is hours of avoidable wall-clock). Render each
-   dispatch with `--emit-prompt` and point the subagent at (i)
-   `output-contract.md` and (ii) only the reference file(s) its chunk's kinds
-   need. Each subagent writes `{"chunk": "<id>", "verdicts": [...]}` to
-   `chunks/<id>.json`.
+   dispatch with `--emit-prompt` (which requires `--results-dir`, the same
+   out-of-work-tree directory `plan-chunks.py` was planned with — the
+   rendered prompt names an absolute path under it, never a bare relative
+   one) and point the subagent at (i) `output-contract.md` and (ii) only the
+   reference file(s) its chunk's kinds need. Each subagent writes
+   `{"chunk": "<id>", "verdicts": [...]}` to the out-of-tree path the prompt
+   names, e.g. `<dir>/chunks/<id>.json` — never a path inside the repository.
 3. **Name the content.** A verdict about one document names the **unit
    digests** it covers, from `python3 -m doclifecycle segment --repo . --path
    <path>` — copied verbatim, never invented or abbreviated. A bulk
@@ -68,7 +95,7 @@ key plans normally, and the planner says so.
    assembled envelope. A failing chunk is re-dispatched fresh **once**, then
    you stop and name it.
 5. **Run the audit.** `python3 -m doclifecycle bloat-audit --repo . --verdicts
-   bloat-verdicts.json > bloat-report.json` checks every verdict against the
+   "${TMPDIR:-/tmp}/bloat-verdicts.json" > "${TMPDIR:-/tmp}/bloat-report.json"` checks every verdict against the
    whole-repository context index — membership, destinations, units,
    file-bound `DISTILL` status — expands each `scope` into one finding per
    member, and writes the validated report. It fails closed: any problem
@@ -98,13 +125,18 @@ the workflow's, not yours.
 # it matches); the chunking keys are documented in the script docstring.
 # Chunk ids are content-addressed, so --results-dir resume skips only chunks
 # whose docs are unchanged; each chunk carries its model-invocation turn budget.
+# <dir> is outside the work tree (e.g. "${TMPDIR:-/tmp}/bloat") — same confinement
+# reason as the plan/verdicts/report artifacts above.
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
   --out <dir>/manifest.json --results-dir <dir>/chunks
 
 # render one chunk's dispatch prompt / turn budget (slice verbatim — the
-# executor never opens the manifest)
+# executor never opens the manifest). --results-dir is required for
+# --emit-prompt: the rendered prompt names an absolute path under it as the
+# write destination, not the bare "chunks/<id>.json" a work-tree-rooted
+# executor would resolve straight into the repository.
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
-  --emit-prompt <id> --manifest <dir>/manifest.json
+  --emit-prompt <id> --manifest <dir>/manifest.json --results-dir <dir>/chunks
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py \
   --emit-turns <id> --manifest <dir>/manifest.json
 
@@ -115,13 +147,13 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-
 # assemble every chunk result into the verdicts envelope (refuses partial
 # assembly; --allow-partial skips missing chunks loudly)
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py \
-  --assemble <dir>/chunks --manifest <dir>/manifest.json --out bloat-verdicts.json
+  --assemble <dir>/chunks --manifest <dir>/manifest.json --out <dir>/bloat-verdicts.json
 
 # shape-check the envelope, then audit it
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py \
-  bloat-verdicts.json
-python3 -m doclifecycle bloat-audit --repo . --verdicts bloat-verdicts.json \
-  > bloat-report.json
+  <dir>/bloat-verdicts.json
+python3 -m doclifecycle bloat-audit --repo . --verdicts <dir>/bloat-verdicts.json \
+  > <dir>/bloat-report.json
 ```
 
 ## The contract
