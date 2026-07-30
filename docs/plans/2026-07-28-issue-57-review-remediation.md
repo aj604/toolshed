@@ -95,7 +95,7 @@ class PolicyBrandEligibility(ApprovalTestCase):
 - Test: `tests/engine/applier_test.py`
 
 **Interfaces:**
-- Produces: problem codes `plan-record-not-executed` (an approval record no usable operation names) and `plan-remedy-incomplete` (a composite remedy missing a required leg); a module table `REQUIRED_REMEDY_OPERATIONS = {MERGE_DOC: (OP_MOVE, OP_RETIRE)}` beside `RECORD_REMEDIES` (MERGE-DOC is today's only composite; the table makes the next one a one-line change).
+- Produces: problem codes `plan-record-not-executed` (an approval record no usable operation names) and `plan-remedy-incomplete` (a composite remedy missing a required leg); a module table `REQUIRED_REMEDY_OPERATIONS` beside `RECORD_REMEDIES`, carrying `MERGE_DOC: (OP_MOVE, OP_RETIRE)` and `DISTILL: (OP_RETIRE,)`, with `DESTINATION_REQUIRED_OPERATIONS` adding `DISTILL: (OP_CREATE,)` for a record that names a destination (MERGE-DOC was the only composite when this was written; the DISTILL legs landed with the review fix, and the table made each a one-line change as intended).
 
 - [x] **Step 1: Write failing tests** in `applier_test.py`, following its existing fixture idiom (the suite already builds approval+plan pairs; the review reproduction built a 2-record approval with a 1-record plan from these same fixtures):
 

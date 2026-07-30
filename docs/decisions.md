@@ -44,8 +44,9 @@
 - Decided (drift): `detecting-doc-drift` moves to the per-unit verdicts shape
   (`{schema_version, documents[]}`) the CI lane (`doc-audit.yml`) already used, retiring the legacy
   wrapped shape no consumer took. `validate-drift-output.py` gains the engine's own repository-relative
-  source rule in preflight — a ported, differentially-tested `source_spelling_problem` (zero divergence
-  over 1013 spellings against the engine's own predicate) — so an ordinary bad path spelling in
+  source rule in preflight — a ported `source_spelling_problem` mirroring the engine's
+  `paths.repository_relative_problem`, with the spellings it must agree on pinned case by case in
+  `validate-drift-output_test.py`'s `SourceSpelling` — so an ordinary bad path spelling in
   `evidence.source` is refused before the run instead of silently costing a document's coverage once
   it reaches the engine.
 - Decided (fixing-docs cites, not restates): `fixing-docs/SKILL.md` now points at the engine README's
