@@ -36,4 +36,4 @@ RULESET_VERSION = 6
 # `tests/engine/report_test.py` fails loudly when the two drift. Every release
 # therefore expires prior reports: cheaper than reasoning about which releases
 # could have changed a verdict, and re-running an audit is cheap.
-PLUGIN_VERSION = "0.43.0"
+PLUGIN_VERSION = "0.43.1"
