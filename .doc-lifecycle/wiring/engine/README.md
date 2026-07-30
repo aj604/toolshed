@@ -535,9 +535,11 @@ field in the first place.
 ```json
 "examined": [
   {"scope": "docs/architecture.md", "obligation": "assertions", "units": 9,
-   "classes": {"factual": 2, "non-assertive": 7}, "verdicts": {"VERIFIED": 2},
+   "classes": {"factual": 2, "non-assertive": 7}, "obligations": {"evidence": 2},
+   "verdicts": {"VERIFIED": 2},
    "verified": [{"unit": "…", "assertion_class": "factual", "location": "docs/architecture.md:14",
-                 "kind": "behavior", "tier": 2, "evidence": {"source": "src/app.py", "observed": "…"}}]}
+                 "obligation": "evidence", "kind": "behavior", "tier": 2,
+                 "evidence": {"source": "src/app.py", "observed": "…"}}]}
 ]
 ```
 
@@ -1257,7 +1259,7 @@ returns one entry per declared living document:
 {"documents": [
   {"path": "docs/architecture.md", "status": "ok", "verdicts": [
     {"unit": 4, "assertion_class": "factual",
-     "verdict": "STALE", "kind": "value", "tier": 3,
+     "obligation": "evidence", "verdict": "STALE", "kind": "value", "tier": 3,
      "evidence": {"source": "src/payment_service.py", "line": 7,
                   "observed": "FLAT_FEE_RATE = 0.025"},
      "fix": "The payment service charges a flat 2.5% rate."},
@@ -1288,12 +1290,12 @@ validates them: an unknown class, a class against a unit the document lacks or a
 structure, one unit answered twice, and a unit nobody answered for are all its verdicts
 (`classification-*`), not a second set derived here.
 
-Which of them are judged follows from the obligation each carries. Only `factual` owes evidence,
-so only it *must* be judged — a factual unit nobody judged is a hole in coverage. `non-assertive`
-prose asserts nothing the code could contradict, so a verdict against it is refused outright:
-that is the same category error a narrative document is protected from, inside a living one.
-`normative` and `rationale` sit between — a rule or an explanation can go stale, but neither
-owes evidence, so a verdict is accepted and not required.
+Which of them are judged follows from the obligation each carries. Every assertion must be
+judged: factual records `evidence`, normative records `governing-source` or `owner-judgment`,
+and rationale records `coherence`. Those four obligation strings are a closed vocabulary, and
+an obligation paired with the wrong class is refused. `non-assertive` prose alone asserts
+nothing the code could contradict, so it takes no obligation or verdict; attaching either is
+the same category error a narrative document is protected from, inside a living one.
 
 The verdicts themselves are the legacy skill's three, unchanged, because consumers switch on the
 strings: `VERIFIED` (someone read the code and the assertion holds — coverage, not a finding),
@@ -1359,14 +1361,16 @@ exactly what a STALE finding reports, and refusing it would refuse the finding.
 
 What the document says is never the model's to report. A record's `assertion` and `location`
 come from the segmentation — the unit's own text and line — so a verdict cannot misquote the
-passage it is about. The recorded class travels on the record too, as `assertion_class`.
+passage it is about. The recorded class and discharged obligation travel on the record too, as
+`assertion_class` and `obligation`.
 
 | Code | Refused because |
 |---|---|
-| `drift-verdict-invalid-shape` | not `{unit, assertion_class}` plus, when judged, all of `{verdict, kind, tier, evidence}` |
+| `drift-verdict-invalid-shape` | not `{unit, assertion_class}` plus, for every assertion, all of `{obligation, verdict, kind, tier, evidence}` |
 | `drift-verdict-unknown-ordinal` | `unit` is an integer, but this document has no assertion unit at that ordinal |
 | `drift-verdict-not-obligated` | a `non-assertive` unit was given a verdict |
-| `drift-verdict-owed` | a `factual` unit was left unjudged |
+| `drift-verdict-owed` | a factual, normative, or rationale unit was left unjudged |
+| `drift-verdict-invalid-obligation` | the obligation is unknown or does not belong to the assertion class |
 | `drift-unknown-verdict` | not one of the three |
 | `drift-verdict-unknown-kind` | not one of the six subject kinds |
 | `drift-verdict-invalid-tier` | not 1, 2, or 3 (and `true` is not tier 1) |

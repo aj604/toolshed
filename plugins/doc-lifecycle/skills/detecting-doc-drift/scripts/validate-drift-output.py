@@ -33,9 +33,15 @@ import sys
 import unicodedata
 
 ASSERTION_CLASSES = ("factual", "normative", "rationale", "non-assertive")
-# Only `factual` owes a verdict; `non-assertive` prose may not carry one.
-VERDICT_REQUIRED_CLASSES = ("factual",)
+# Every assertion owes a judgment; only non-assertive prose may not carry one.
+VERDICT_REQUIRED_CLASSES = ("factual", "normative", "rationale")
 VERDICT_FORBIDDEN_CLASSES = ("non-assertive",)
+
+OBLIGATIONS_BY_CLASS = {
+    "factual": ("evidence",),
+    "normative": ("governing-source", "owner-judgment"),
+    "rationale": ("coherence",),
+}
 
 VERDICTS = ("VERIFIED", "STALE", "UNVERIFIABLE")
 # The verdicts that assert someone read the code; both must cite where.
@@ -44,10 +50,10 @@ KINDS = ("command", "path", "symbol", "behavior", "structure", "value")
 TIERS = (1, 2, 3)
 
 VERDICT_FIELDS = ("unit", "assertion_class", "verdict", "kind", "tier",
-                  "evidence", "fix")
+                  "evidence", "obligation", "fix")
 REQUIRED_VERDICT_FIELDS = ("unit", "assertion_class")
 # Owed together by a judged unit, and refused together for an unjudged one.
-VERDICT_ONLY_FIELDS = ("verdict", "kind", "tier", "evidence")
+VERDICT_ONLY_FIELDS = ("verdict", "kind", "tier", "evidence", "obligation")
 
 EVIDENCE_FIELDS = ("source", "line", "observed", "command")
 EVIDENCE_CITATIONS = ("source", "command")
@@ -317,7 +323,7 @@ def validate_verdict(entry, where, errs):
     if not judged:
         if assertion_class in VERDICT_REQUIRED_CLASSES:
             errs.append(
-                f"{where}: a {assertion_class!r} unit carries an evidence "
+                f"{where}: a {assertion_class!r} unit carries a review "
                 f"obligation, so it must be judged: {list(VERDICT_ONLY_FIELDS)} "
                 f"are owed for it"
             )
@@ -329,6 +335,15 @@ def validate_verdict(entry, where, errs):
             f"{list(VERDICT_ONLY_FIELDS)}; this one is missing {missing}"
         )
         return None
+
+    obligation = entry["obligation"]
+    allowed_obligations = OBLIGATIONS_BY_CLASS[assertion_class]
+    if obligation not in allowed_obligations:
+        errs.append(
+            f"{where}: obligation {obligation!r} does not discharge a "
+            f"{assertion_class!r} assertion — expected one of "
+            f"{list(allowed_obligations)}"
+        )
 
     verdict = entry["verdict"]
     if verdict not in VERDICTS:

@@ -1,8 +1,24 @@
 # Decisions
 
-> As of 2026-07-29 — entries are dated and appended, newest first; a superseded decision stays
+> As of 2026-07-30 — entries are dated and appended, newest first; a superseded decision stays
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
+
+## 2026-07-30 — every living assertion discharges a closed review obligation (#154)
+- Evidence: the drift boundary accepted an unjudged `normative` or `rationale` classification,
+  so relabeling a stale factual assertion could remove the only judgment that kept a living
+  document from reporting clean. The classification remained reviewable data, but acted as a
+  model-authored waiver.
+- Decided: every factual, normative, and rationale unit is judged with the existing closed
+  `VERIFIED` / `STALE` / `UNVERIFIABLE` vocabulary and evidence contract. Each judgment records
+  the obligation it discharged: `evidence` for factual, `governing-source` or `owner-judgment`
+  for normative, and `coherence` for rationale. Unknown obligations, mismatched class/obligation
+  pairs, and partial judgment shapes fail the whole document closed. Only `non-assertive` takes
+  neither an obligation nor a verdict.
+- Consequence: the interactive audit contract, authoring skill, scheduler-adapter prompt,
+  standalone validator, audit engine, report coverage, and real-repository acceptance fixture
+  all use the same vocabulary. `RULESET_VERSION` advances to 8 because payloads accepted by the
+  prior policy can now produce coverage gaps.
 
 ## 2026-07-29 — the auto-apply lane and a scheduled bloat cadence are descoped, not implied (#57)
 - Evidence: issue #73 ("Auto-apply policy for mechanical remedies") is `CLOSED` `COMPLETED`, closed by

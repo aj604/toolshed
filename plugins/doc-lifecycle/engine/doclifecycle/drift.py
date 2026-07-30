@@ -51,6 +51,8 @@ from .digest import sha256_canonical, sha256_file
 from .finding import (
     FACTUAL,
     NON_ASSERTIVE,
+    NORMATIVE,
+    RATIONALE,
     build_finding,
     record_classifications,
 )
@@ -116,21 +118,34 @@ FINDING_VERDICTS = (VERDICT_STALE, VERDICT_UNVERIFIABLE)
 SUBJECT_KINDS = ("command", "path", "symbol", "behavior", "structure", "value")
 TIERS = (1, 2, 3)
 
-# Which classes are judged. Only `factual` carries an evidence obligation, so
-# only it must be: a factual unit nobody judged is a hole in coverage.
+# Which classes are judged. Every assertion carries an obligation, so a unit
+# nobody judged is a hole in coverage regardless of how the model classified
+# it.
 # `non-assertive` prose connects, illustrates, or signposts — it asserts nothing
 # the code could contradict, so a verdict against it is a claim nobody made.
-# `normative` and `rationale` sit between: a rule or an explanation can go
-# stale, but neither owes evidence, so a verdict is accepted and not required.
-VERDICT_REQUIRED_CLASSES = (FACTUAL,)
+VERDICT_REQUIRED_CLASSES = (FACTUAL, NORMATIVE, RATIONALE)
 VERDICT_FORBIDDEN_CLASSES = (NON_ASSERTIVE,)
 
+# The review obligation a judgment discharges. Classification selects the
+# closed set that is meaningful for that unit; the lane still records which
+# normative authority it consulted so a report reviewer can inspect the
+# judgment rather than infer it from the class.
+OBLIGATION_EVIDENCE = "evidence"
+OBLIGATION_GOVERNING_SOURCE = "governing-source"
+OBLIGATION_OWNER_JUDGMENT = "owner-judgment"
+OBLIGATION_COHERENCE = "coherence"
+OBLIGATIONS_BY_CLASS = {
+    FACTUAL: (OBLIGATION_EVIDENCE,),
+    NORMATIVE: (OBLIGATION_GOVERNING_SOURCE, OBLIGATION_OWNER_JUDGMENT),
+    RATIONALE: (OBLIGATION_COHERENCE,),
+}
+
 VERDICT_FIELDS = ("unit", "assertion_class", "verdict", "kind", "tier",
-                  "evidence", "fix")
+                  "evidence", "obligation", "fix")
 REQUIRED_VERDICT_FIELDS = ("unit", "assertion_class")
-# Owed by a unit whose class carries an evidence obligation, and refused for one
+# Owed by a unit whose class carries a review obligation, and refused for one
 # whose class does not.
-VERDICT_ONLY_FIELDS = ("verdict", "kind", "tier", "evidence")
+VERDICT_ONLY_FIELDS = ("verdict", "kind", "tier", "evidence", "obligation")
 # What a verdict may point at. `source`+`line` cite a place in the repository;
 # `command` cites a local tool that was run to settle a claim no file in the
 # repository can answer (#115). Exactly one of the two, because a verdict rests
@@ -743,9 +758,9 @@ def _validated_verdicts(segmentation, entries, boundary, path):
     is* — its assertion class — is validated by `finding.record_classifications`,
     the landed owner of that rule, which also refuses a class against structure
     and names every unit nobody answered for. *Whether it is still true* is a
-    verdict, and only the classes that carry an evidence obligation may have one:
-    connective prose and rationale are answers in themselves, and forcing a
-    verdict onto them would manufacture a claim nobody made.
+    verdict, and every assertion class carries a defined review obligation.
+    Only connective, non-assertive prose is an answer in itself; forcing a
+    verdict onto it would manufacture a claim nobody made.
 
     Exhaustive, like every other check on model output: one pass names every
     problem, so a re-prompt can address all of them. Any problem at all means
@@ -773,7 +788,8 @@ def _validated_verdicts(segmentation, entries, boundary, path):
 
     known = {u.digest: u for u in segmentation.units}
     by_ordinal = {u.ordinal: u.digest for u in segmentation.units}
-    drafts, shaped, verified, judged_counts = [], [], [], {}
+    drafts, shaped, verified = [], [], []
+    judged_counts, obligation_counts = {}, {}
 
     for i, entry in enumerate(entries):
         where = f"{path}:verdicts[{i}]"
@@ -782,8 +798,8 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         ):
             bad("drift-verdict-invalid-shape",
                 f"an answer is an object with {list(REQUIRED_VERDICT_FIELDS)}, "
-                f"plus {list(VERDICT_ONLY_FIELDS)} when the class carries an "
-                f"evidence obligation — nothing else",
+                f"plus {list(VERDICT_ONLY_FIELDS)} when the class carries a "
+                f"review obligation — nothing else",
                 where)
             continue
         # #116: a lane answers for a unit by the ordinal `segment` printed
@@ -831,11 +847,16 @@ def _validated_verdicts(segmentation, entries, boundary, path):
                     f"would record a claim nobody made",
                     where)
             continue
+        if assertion_class not in VERDICT_REQUIRED_CLASSES:
+            # `record_classifications` above owns and has already recorded the
+            # unknown-class problem. Do not interpret any accompanying fields
+            # through a class-specific obligation contract.
+            continue
         if not judged:
             if assertion_class in VERDICT_REQUIRED_CLASSES:
                 bad("drift-verdict-owed",
-                    f"a {assertion_class!r} unit carries an evidence "
-                    f"obligation, so it must be judged: "
+                    f"a {assertion_class!r} unit carries a review obligation, "
+                    f"so it must be judged: "
                     f"{list(VERDICT_ONLY_FIELDS)} are owed for it",
                     where)
             continue
@@ -846,7 +867,18 @@ def _validated_verdicts(segmentation, entries, boundary, path):
                 where)
             continue
 
-        verdict, valid = entry["verdict"], True
+        obligation = entry["obligation"]
+        allowed_obligations = OBLIGATIONS_BY_CLASS[assertion_class]
+        valid = True
+        if obligation not in allowed_obligations:
+            bad("drift-verdict-invalid-obligation",
+                f"{obligation!r} does not discharge a {assertion_class!r} "
+                f"assertion — its obligation is one of "
+                f"{list(allowed_obligations)}",
+                where)
+            valid = False
+
+        verdict = entry["verdict"]
         if verdict not in VERDICTS:
             bad("drift-unknown-verdict",
                 f"{verdict!r} is not a drift verdict — an assertion is one of "
@@ -900,6 +932,7 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         if not valid:
             continue
         judged_counts[verdict] = judged_counts.get(verdict, 0) + 1
+        obligation_counts[obligation] = obligation_counts.get(obligation, 0) + 1
         if unit not in known:
             continue
         unit_data = known[unit]
@@ -911,6 +944,7 @@ def _validated_verdicts(segmentation, entries, boundary, path):
             verified.append({
                 "unit": unit,
                 "assertion_class": assertion_class,
+                "obligation": obligation,
                 "location": f"{path}:{unit_data.line}",
                 "kind": entry["kind"],
                 "tier": tier,
@@ -920,6 +954,7 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         extra = {
             "assertion": unit_data.text,
             "assertion_class": assertion_class,
+            "obligation": obligation,
             "location": f"{path}:{unit_data.line}",
             "kind": entry["kind"],
             "tier": tier,
@@ -943,6 +978,7 @@ def _validated_verdicts(segmentation, entries, boundary, path):
         "obligation": OBLIGATION_ASSERTIONS,
         "units": len(segmentation.units),
         "classes": dict(sorted(classes.items())),
+        "obligations": dict(sorted(obligation_counts.items())),
         "verdicts": dict(sorted(judged_counts.items())),
         "verified": verified,
     }

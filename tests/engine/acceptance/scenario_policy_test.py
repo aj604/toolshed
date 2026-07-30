@@ -73,7 +73,7 @@ STALE_PREIMAGE = (
     "at a\nflat 2% rate."
 )
 STALE_POSTIMAGE = fixture.LIVING_FACTUAL_FIX
-STALE_FIRST_LINE, STALE_LAST_LINE = 3, 4
+STALE_FIRST_LINE, STALE_LAST_LINE = 5, 6
 
 # The narrative document's `> As of` line, and the refresh a remedy writes over
 # it. One line, and it is the whole of the record's approved units.

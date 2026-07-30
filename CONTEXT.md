@@ -26,7 +26,7 @@ A deterministically segmented structural unit of a living document (sentence, li
 _Avoid_: claim (legacy "every line is a claim"), line
 
 **Assertion class**:
-The model-assigned classification of an assertion unit — factual (needs evidence), normative (needs owner/source), rationale, or non-assertive prose (no obligation). Recorded in the report as reviewable data; determines the unit's evidence obligation, never its identity.
+The model-assigned classification of an assertion unit — factual (needs evidence), normative (needs a governing source or owner judgment), rationale (needs a coherence judgment), or non-assertive prose (no obligation). Recorded in the report as reviewable data; determines the unit's review obligation, never its identity or whether a living assertion is judged.
 _Avoid_: claim type
 
 ### Contracts (artifacts, not components)

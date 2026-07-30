@@ -11,14 +11,19 @@ description: 'Use when writing or editing a documentation file whose job is to t
 This is the spine: when any guideline conflicts with verifiability, verifiability wins. A
 smaller all-true doc beats a complete one with unverifiable parts.
 
-Every line is one of two kinds of claim:
+Every line has one of the document model's four assertion classes:
 
-- **Verifiable claim** — commands, paths, symbols, behavior (output included), structure,
-  values. Must be mechanically checkable against the repo *as it is now*.
-- **Rationale claim** — the "why", tradeoffs, rejected alternatives. Allowed, but only in
-  a marked section and **anchored** to a `file:line`, commit, or date.
+- **Factual** — commands, paths, symbols, behavior (output included), structure, values.
+  Must be mechanically checkable against current evidence.
+- **Normative** — instructions and rules. Must name or sit under a current governing source,
+  or record the current owner's judgment.
+- **Rationale** — the "why", tradeoffs, rejected alternatives. Must be marked and coherent
+  with current evidence from a governing decision or implementation source.
+- **Non-assertive** — connective prose or signposting. It carries no truth judgment, and is
+  the only class that does not.
 
-If a line is neither, cut it.
+If an assertion cannot discharge its obligation, cut it or mark it explicitly unverifiable;
+classification never makes a living assertion optional.
 
 Scope: as in the frontmatter above — README/runbook/CLAUDE.md/AGENTS.md/reference (incl. claim-style `docs/reference/architecture.md`); not a universal theory of documentation — tutorials/narrative-architecture/ADRs stay narrative (growing-docs), never claim-audited.
 
@@ -37,11 +42,15 @@ didn't produce is a fabricated claim, even when it's "just an example."
   pinning a fragile exact value.
 - Can't run it? Don't show output.
 
-### 2. Rationale must be marked and anchored
+### 2. Normative and rationale assertions need current authority
 
-Do not weave the "why" into prose as timeless fact. Put it in a marked section and anchor
-it: `> **Why (as of `bin/cli.js:34`):** reads the whole buffer because gzip ratio…`.
-Unanchored rationale can't be audited for relevance and will rot silently.
+An instruction is not current merely because it sounds deliberate. Point to the governing
+source, or record whose current owner supplied the judgment. If neither exists, do not present
+the rule as settled living guidance. Do not weave the "why" into prose as timeless fact.
+Put rationale in a marked section and anchor
+it to current evidence: `> **Why (current at `bin/cli.js:34`):** reads the whole buffer
+because gzip ratio…`. The anchor must let a reviewer judge whether the explanation still
+coheres with what exists now; otherwise the rationale is explicitly unverifiable.
 
 ### 3. No aspirational claims
 

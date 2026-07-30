@@ -129,14 +129,17 @@ jobs:
             drift-audit`, whose --verdicts contract is:
             {"documents": [{"path": <doc path from drift-plan.json>, "status": "ok",
             "verdicts": [{"unit": <unit ordinal, an integer>, "assertion_class":
-            "factual"|"normative"|"rationale"|"non-assertive", "verdict":
+            "factual"|"normative"|"rationale"|"non-assertive", "obligation":
+            "evidence"|"governing-source"|"owner-judgment"|"coherence", "verdict":
             "VERIFIED"|"STALE"|"UNVERIFIABLE", "kind":
             "command"|"path"|"symbol"|"behavior"|"structure"|"value", "tier": 1|2|3,
             "evidence": {"source": <repo path>, "line": <int>, "observed": <what you read>},
             "fix": <complete physical replacement text, STALE only>}]}]}.
-            "verdict", "kind", "tier", and "evidence" travel together — all four, or none: a
-            "factual" unit owes all four; a "non-assertive" unit takes none of them, because it
-            asserts nothing the code could contradict — carrying even one of the four on a
+            "obligation", "verdict", "kind", "tier", and "evidence" travel together — all five,
+            or none. Factual units use "evidence"; normative units use "governing-source" or
+            "owner-judgment"; rationale units use "coherence". Every one of those three classes
+            owes a judgment. A "non-assertive" unit takes none, because it asserts nothing the
+            code could contradict — carrying even one of the five on a
             non-assertive unit is refused outright (drift-verdict-not-obligated).
             A STALE fix is that unit's full replacement, not an editing instruction, and is
             copied byte-verbatim by downstream tools. When the source unit spans multiple
@@ -169,8 +172,8 @@ jobs:
             engine maps the ordinal back to the unit for you, so there is nothing to transcribe.
             Classify every assertion-capable unit — segment prints "assertion_capable" per unit,
             and only an assertion-capable unit may take a class other than "non-assertive"
-            (classification-not-assertion-capable). For every "factual" unit reach
-            a verdict with evidence per the shapes above. Documents with obligation "anchor" need
+            (classification-not-assertion-capable). For every factual, normative, and rationale
+            unit reach a verdict with current evidence per the obligation shapes above. Documents with obligation "anchor" need
             no verdicts from you — the engine checks those deterministically. Write the result to
             verdicts.json in the repository root. A document you could not examine still needs an
             entry with "status": "failed" and a "reason" — never silently omitted.

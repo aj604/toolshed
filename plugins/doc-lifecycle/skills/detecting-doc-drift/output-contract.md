@@ -18,6 +18,7 @@ left out.
         {
           "unit": 12,
           "assertion_class": "factual",
+          "obligation": "evidence",
           "verdict": "STALE",
           "kind": "command",
           "tier": 1,
@@ -31,6 +32,7 @@ left out.
         {
           "unit": 18,
           "assertion_class": "factual",
+          "obligation": "evidence",
           "verdict": "VERIFIED",
           "kind": "behavior",
           "tier": 2,
@@ -42,6 +44,30 @@ left out.
         {
           "unit": 19,
           "assertion_class": "non-assertive"
+        },
+        {
+          "unit": 20,
+          "assertion_class": "normative",
+          "obligation": "governing-source",
+          "verdict": "VERIFIED",
+          "kind": "behavior",
+          "tier": 2,
+          "evidence": {
+            "source": "CONTRIBUTING.md",
+            "line": 31,
+            "observed": "the governing review rule still requires two approvals"
+          }
+        },
+        {
+          "unit": 21,
+          "assertion_class": "rationale",
+          "obligation": "coherence",
+          "verdict": "UNVERIFIABLE",
+          "kind": "behavior",
+          "tier": 3,
+          "evidence": {
+            "observed": "no current decision or implementation source explains the stated tradeoff"
+          }
         }
       ]
     },
@@ -63,8 +89,12 @@ What each entry demonstrates:
   no `line`: a tool's output is not a file position. There is no `fix` — only STALE carries
   one. The command is a single read-only line, with no chaining or redirection.
 - **Unit 19** — a `non-assertive` unit. It is classified (leaving a capable unit out is refused)
-  but takes no `verdict`, `kind`, `tier`, or `evidence`: it asserts nothing the code could
+  but takes no `obligation`, `verdict`, `kind`, `tier`, or `evidence`: it asserts nothing the code could
   contradict, so a verdict would record a claim nobody made.
+- **Unit 20** — a normative assertion discharging its `governing-source` obligation against the
+  current rule. `owner-judgment` is the other valid normative obligation.
+- **Unit 21** — a rationale assertion whose required `coherence` judgment is UNVERIFIABLE because
+  no current evidence settles the explanation. Classification does not let it go unjudged.
 - **`docs/runbook.md`** — a `failed` entry. It carries a one-line `reason` and no `verdicts`,
   which is how the run declares a document it did not examine.
 

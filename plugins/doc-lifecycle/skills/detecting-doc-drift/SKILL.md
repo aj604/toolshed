@@ -65,10 +65,16 @@ which this one structurally is not.
    a unit. The parser is fixed and model-free, so the same bytes always yield the same units.
 3. **Classify every assertion-capable unit** — `factual`, `normative`, `rationale`, or
    `non-assertive`. Leaving one out is refused (`classification-missing`): an unclassified unit
-   is indistinguishable from one nobody found a claim in. Only `factual` owes a verdict.
-4. **Judge each factual unit** at the appropriate tier (below), tagged by `kind` — one of
+   is indistinguishable from one nobody found a claim in. Classification never waives a living
+   truth obligation: factual, normative, and rationale units must all be judged; only
+   non-assertive prose takes no verdict.
+4. **Judge each assertion** at the appropriate tier (below), tagged by `kind` — one of
    exactly: `command`, `path`, `symbol`, `behavior`, `structure`, `value` (use these strings
-   verbatim; automation switches on them). Pure prose is not a claim — **except** lines that
+   verbatim; automation switches on them) — and record the obligation discharged:
+   `evidence` for factual assertions, `governing-source` or `owner-judgment` for normative
+   assertions, and `coherence` for rationale. The governing source, owner judgment, or current
+   evidence that settles coherence is cited through the same evidence contract as a factual
+   judgment. Pure prose is not a claim — **except** lines that
    *sound* factual but name no checkable thing ("robust", "production-ready", "reasonably
    fast", "handles most workloads"). Extract those too, kind `value`: they become
    `UNVERIFIABLE`. Do not skip them — an unbacked quality claim is the most common drift a
@@ -173,13 +179,16 @@ no `verdicts`, which is how you declare a document you did not examine — a gap
 indistinguishable from a document nobody thought about. Narrative (`anchor`) documents get no
 entry at all; the engine checks their `As of` anchors itself.
 
-A verdict's fields are exactly `unit`, `assertion_class`, `verdict`, `kind`, `tier`,
+A verdict's fields are exactly `unit`, `assertion_class`, `obligation`, `verdict`, `kind`, `tier`,
 `evidence`, `fix`. Two are always required: `unit` is the `ordinal` `segment` printed for that
 unit, and `assertion_class` is one of `factual` / `normative` / `rationale` / `non-assertive`.
 
-`verdict`, `kind`, `tier`, and `evidence` travel together — all four, or none. A `factual` unit
-owes all four; a `non-assertive` unit takes none of them, because it asserts nothing the code
-could contradict. `verdict` is one of `VERIFIED` / `STALE` / `UNVERIFIABLE`; `kind` is one of
+`obligation`, `verdict`, `kind`, `tier`, and `evidence` travel together — all five, or none.
+Every factual, normative, and rationale unit owes all five; a `non-assertive` unit takes none of
+them, because it asserts nothing the code could contradict. `obligation` is `evidence` for a
+factual unit, `governing-source` or `owner-judgment` for a normative unit, and `coherence` for a
+rationale unit; any other value or class/obligation pairing is refused. `verdict` is one of
+`VERIFIED` / `STALE` / `UNVERIFIABLE`; `kind` is one of
 `command` / `path` / `symbol` / `behavior` / `structure` / `value`; `tier` is the integer `1`,
 `2`, or `3` — literal enum values, no invented ones.
 
@@ -210,8 +219,8 @@ On success the validator prints a `summary:` line as JSON, recomputed from your 
 (`verified` / `stale` / `unverifiable`, counted across every document), that automation can
 gate on.
 
-See **output-contract.md** for a worked example: a STALE `command` unit, a VERIFIED `behavior`
-unit citing a command, a `non-assertive` unit, and a `failed` document entry.
+See **output-contract.md** for a worked example covering all four assertion classes and a
+`failed` document entry.
 
 ## Modes
 

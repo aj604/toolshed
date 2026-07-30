@@ -161,13 +161,14 @@ class DriftRepoTestCase(RepoTestCase):
             "kind": "value",
             "tier": 2,
             "evidence": evidence(),
+            "obligation": "evidence",
             "fix": "The fee is 2.5% of the amount, in `src/fees.py`.",
         }
         entry.update(overrides)
         return entry
 
     def unit_entry(self, root, path, text, assertion_class):
-        """An answer for a unit that carries no evidence obligation."""
+        """An unjudged classification answer."""
         return {"unit": self.claim_unit(root, path, text).digest,
                 "assertion_class": assertion_class}
 
@@ -739,10 +740,14 @@ class AssertionClasses(DriftRepoTestCase):
         entries = {
             MIXED_CONNECTIVE: self.unit_entry(root, MIXED, MIXED_CONNECTIVE,
                                               NON_ASSERTIVE),
-            MIXED_RATIONALE: self.unit_entry(root, MIXED, MIXED_RATIONALE,
-                                             RATIONALE),
-            MIXED_NORMATIVE: self.unit_entry(root, MIXED, MIXED_NORMATIVE,
-                                             NORMATIVE),
+            MIXED_RATIONALE: self.verdict(
+                root, path=MIXED, text=MIXED_RATIONALE,
+                assertion_class=RATIONALE, obligation="coherence",
+                verdict="VERIFIED", fix=None),
+            MIXED_NORMATIVE: self.verdict(
+                root, path=MIXED, text=MIXED_NORMATIVE,
+                assertion_class=NORMATIVE, obligation="governing-source",
+                verdict="VERIFIED", fix=None),
         }
         for text, entry in overrides:
             entries[text] = entry
@@ -770,10 +775,70 @@ class AssertionClasses(DriftRepoTestCase):
         report = self.mixed_audit(root, (MIXED_NORMATIVE, self.verdict(
             root, path=MIXED, text=MIXED_NORMATIVE,
             assertion_class=NORMATIVE, kind="behavior",
+            obligation="governing-source",
             fix="Every endpoint must carry two integration tests.")))
 
         self.assertEqual(sorted(r.extra["path"] for r in report.records),
                          sorted([LIVING, MIXED]))
+        normative = next(r for r in report.records
+                         if r.extra["path"] == MIXED)
+        self.assertEqual(normative.extra["obligation"], "governing-source")
+
+    def test_a_normative_unit_without_its_obligation_is_a_coverage_gap(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root, (MIXED_NORMATIVE, self.unit_entry(
+            root, MIXED, MIXED_NORMATIVE, NORMATIVE)))
+
+        self.assertIn("drift-verdict-owed", self.gap_for(report))
+
+    def test_a_rationale_unit_without_its_obligation_is_a_coverage_gap(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root, (MIXED_RATIONALE, self.unit_entry(
+            root, MIXED, MIXED_RATIONALE, RATIONALE)))
+
+        self.assertIn("drift-verdict-owed", self.gap_for(report))
+
+    def test_each_assertion_class_accepts_the_closed_verdict_vocabulary(self):
+        cases = (
+            (FACTUAL, "evidence", LIVING_CLAIM),
+            (NORMATIVE, "owner-judgment", MIXED_NORMATIVE),
+            (RATIONALE, "coherence", MIXED_RATIONALE),
+        )
+        for assertion_class, obligation, text in cases:
+            for verdict in ("VERIFIED", "STALE", "UNVERIFIABLE"):
+                with self.subTest(assertion_class=assertion_class,
+                                  verdict=verdict):
+                    root = (self.drift_repo() if text == LIVING_CLAIM
+                            else self.mixed_repo())
+                    entry = self.verdict(
+                        root, path=MIXED if text != LIVING_CLAIM else LIVING,
+                        text=text, assertion_class=assertion_class,
+                        obligation=obligation, verdict=verdict,
+                        fix=("A current replacement." if verdict == "STALE"
+                             else None),
+                        evidence=(evidence() if verdict != "UNVERIFIABLE" else
+                                  {"observed": "no current authority found"}),
+                    )
+                    if text == LIVING_CLAIM:
+                        report = self.audit(
+                            root, verdicts=self.verdicts_for(root, entry))
+                        gap = report.incomplete
+                    else:
+                        report = self.mixed_audit(root, (text, entry))
+                        gap = [i for i in report.incomplete if i.scope == MIXED]
+                    self.assertEqual(len(gap), 0)
+
+    def test_an_obligation_for_a_different_assertion_class_is_refused(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root, (MIXED_RATIONALE, self.verdict(
+            root, path=MIXED, text=MIXED_RATIONALE,
+            assertion_class=RATIONALE, obligation="owner-judgment",
+            verdict="VERIFIED", fix=None)))
+
+        self.assertIn("drift-verdict-invalid-obligation", self.gap_for(report))
 
     def test_the_recorded_class_travels_on_the_finding(self):
         root = self.mixed_repo()
@@ -814,6 +879,16 @@ class AssertionClasses(DriftRepoTestCase):
 
         report = self.mixed_audit(root, (MIXED_RATIONALE, self.unit_entry(
             root, MIXED, MIXED_RATIONALE, "editorial")))
+
+        self.assertIn("classification-unknown-class", self.gap_for(report))
+
+    def test_an_unknown_class_with_judgment_fields_fails_shut(self):
+        root = self.mixed_repo()
+
+        report = self.mixed_audit(root, (MIXED_RATIONALE, self.verdict(
+            root, path=MIXED, text=MIXED_RATIONALE,
+            assertion_class="editorial", obligation="coherence",
+            verdict="VERIFIED", fix=None)))
 
         self.assertIn("classification-unknown-class", self.gap_for(report))
 
@@ -1368,20 +1443,32 @@ class RecordedCoverage(DriftRepoTestCase):
 
         self.assertEqual(report.records, ())
 
-    def test_the_classes_of_unjudged_units_are_recorded_too(self):
-        """A unit that owed no verdict was still classified, and the class is
-        the answer — it is what says nobody was asked to judge it."""
+    def test_every_class_and_discharged_obligation_is_recorded(self):
+        """Non-assertive prose is classified but unjudged; every assertion's
+        judgment records which review obligation it discharged."""
         root = self.drift_repo(**{MIXED: MIXED_TEXT})
         report = self.audit(root, verdicts=self.verdicts_for(
             root,
             self.unit_entry(root, MIXED, MIXED_CONNECTIVE, NON_ASSERTIVE),
-            self.unit_entry(root, MIXED, MIXED_RATIONALE, RATIONALE),
-            self.unit_entry(root, MIXED, MIXED_NORMATIVE, NORMATIVE),
+            self.verdict(root, path=MIXED, text=MIXED_RATIONALE,
+                         assertion_class=RATIONALE, obligation="coherence",
+                         verdict="VERIFIED", fix=None),
+            self.verdict(root, path=MIXED, text=MIXED_NORMATIVE,
+                         assertion_class=NORMATIVE,
+                         obligation="owner-judgment", verdict="VERIFIED",
+                         fix=None),
             path=MIXED,
         ))
 
-        self.assertEqual(self.coverage(report, MIXED)["classes"],
+        coverage = self.coverage(report, MIXED)
+        self.assertEqual(coverage["classes"],
                          {NON_ASSERTIVE: 1, NORMATIVE: 1, RATIONALE: 1})
+        self.assertEqual(coverage["obligations"],
+                         {"coherence": 1, "owner-judgment": 1})
+        self.assertEqual(
+            {item["obligation"] for item in coverage["verified"]},
+            {"coherence", "owner-judgment"},
+        )
 
     def test_a_narrative_document_records_the_anchor_it_was_checked_against(self):
         """A narrative document that passes produces no record either, and
