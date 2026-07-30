@@ -101,6 +101,19 @@ LEGACY_FIELDS = {
 }
 
 SCHEMA_VERSION = 1
+
+
+def _whole_number(value):
+    """An integer, and not a bool — `True == 1` in Python, but not in a schema.
+
+    Spelled here rather than imported: this validator is a stdlib-only script
+    the skill dispatches without the engine on the path. The engine's own copy
+    is `report.whole_number`, and the two answer the same question so a payload
+    this accepts is one the engine accepts.
+    """
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 SUMMARY_KEYS = ("cut", "condense", "extract_and_move",
                 "merge_doc", "retire_doc", "distill")
 SUMMARY_OF = {CUT: "cut", CONDENSE: "condense",
@@ -384,7 +397,10 @@ def envelope_errors(data):
         errs.append(f"{name!r} is not an envelope key — {ENVELOPE}, and the "
                     f"engine refuses any other key")
     version = data.get("schema_version", SCHEMA_VERSION)
-    if version != SCHEMA_VERSION:
+    # `_whole_number` first, matching the engine's `report.whole_number`: a bare
+    # `!=` accepts `True` and `1.0`, both equal to `1` in Python, so an envelope
+    # declaring either passed a check whose own message says integer version.
+    if not _whole_number(version) or version != SCHEMA_VERSION:
         errs.append(f"schema_version {version!r} is not supported; this "
                     f"contract is integer version {SCHEMA_VERSION}")
     if not isinstance(data.get("verdicts"), list):
@@ -430,7 +446,14 @@ def chunk_doc_paths(chunk):
     """
     docs = chunk.get("docs")
     if isinstance(docs, list):
-        return [d.get("path") for d in docs if isinstance(d, dict)]
+        # The `path` must be a string, not merely present: the `documents`
+        # branch below already filters that way, and a chunk carrying
+        # `docs: [{}]` yielded `[None]`, which `', '.join(...)` at the
+        # --allow-partial notice raised an uncaught TypeError on — a traceback
+        # out of the assembler instead of a diagnosis, on the one path whose
+        # whole job is surviving an incomplete fan-out.
+        return [d["path"] for d in docs
+                if isinstance(d, dict) and isinstance(d.get("path"), str)]
     documents = chunk.get("documents")
     if isinstance(documents, list):
         return [p for p in documents if isinstance(p, str)]

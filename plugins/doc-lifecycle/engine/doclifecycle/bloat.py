@@ -53,7 +53,10 @@ from .finding import Finding, build_finding
 from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import DOCUMENTATION, authorize_path
 from .registry import compile_glob
-from .report import EvidenceBoundary, Lineage, current_lineage, state_from_content, validate_report
+from .report import (
+    EvidenceBoundary, Lineage, current_lineage, state_from_content, validate_report,
+    whole_number,
+)
 from .results import STATUS_OK, Invalid, Problem
 
 # The verdicts, carried over from the skill this absorbs so a reviewer reading
@@ -309,7 +312,10 @@ def _verdict_list(payload):
         ),)
 
     version = payload.get("schema_version", ARTIFACT_SCHEMA_VERSION)
-    if version != ARTIFACT_SCHEMA_VERSION:
+    # `whole_number` first: a bare `!=` accepts `True` and `1.0`, both of which
+    # compare equal to `1`, so an envelope declaring either passed a check whose
+    # own message says it reads an *integer* version.
+    if not whole_number(version) or version != ARTIFACT_SCHEMA_VERSION:
         return None, (Problem(
             code="bloat-verdicts-invalid-shape",
             message=(

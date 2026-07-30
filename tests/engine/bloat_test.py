@@ -1115,6 +1115,24 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
             "bloat-verdicts-invalid-shape", [p.code for p in result.problems]
         )
 
+    def test_a_schema_version_that_is_not_an_integer_is_invalid(self):
+        """`True == 1` and `1.0 == 1` in Python, but not in a schema. A bare
+        `!=` against the supported version let both through, so an envelope
+        declaring either passed a check whose own message promises it read an
+        *integer* version. Found by review on the split stack."""
+        repo = self.corpus()
+        for version in (True, 1.0, "1"):
+            with self.subTest(schema_version=version):
+                result = bloat.audit_bloat(
+                    repo, self.envelope(repo, schema_version=version)
+                )
+
+                self.assertIsInstance(result, Invalid)
+                self.assertIn(
+                    "bloat-verdicts-invalid-shape",
+                    [p.code for p in result.problems],
+                )
+
     def test_schema_version_is_optional(self):
         repo = self.corpus()
 

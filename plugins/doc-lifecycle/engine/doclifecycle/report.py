@@ -377,9 +377,20 @@ def _printable(value):
     return _nonempty_str(value) and not any(c in value for c in "\n\r\x00")
 
 
-def _whole_number(value):
-    """An integer, and not a bool — `True == 1` in Python, but not in a schema."""
+def whole_number(value):
+    """An integer, and not a bool — `True == 1` in Python, but not in a schema.
+
+    Public because `bloat.py` reads an untrusted `schema_version` at its own
+    seam and needs this exact question answered the same way: a plain `!=`
+    against the supported version accepts `True` and `1.0`, since both compare
+    equal to `1`, and the envelope then passes a check whose message promises
+    it read an *integer* version.
+    """
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+# The name this module's own call sites have always used.
+_whole_number = whole_number
 
 
 def _scan(value):

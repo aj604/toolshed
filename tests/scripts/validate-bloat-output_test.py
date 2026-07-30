@@ -117,6 +117,17 @@ class Envelope(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("schema_version", r.stderr)
 
+    def test_schema_version_that_is_not_an_integer_refused(self):
+        # `True == 1` and `1.0 == 1` in Python, but not in a schema. A bare
+        # `!=` accepted both, so an envelope the engine refuses validated
+        # clean here — the two ends of the same contract disagreeing. Found by
+        # review on the split stack.
+        for version in (True, 1.0, "1"):
+            with self.subTest(schema_version=version):
+                r = run(envelope([cut()], schema_version=version))
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("schema_version", r.stderr)
+
     def test_extra_envelope_key_refused(self):
         r = run(envelope([cut()], summary={"cut": 1}))
         self.assertEqual(r.returncode, 1)
@@ -575,6 +586,24 @@ class Assembly(SeamFixture):
         self.assertEqual([v["id"] for v in payload["verdicts"]], ["B1", "B2"])
         final = run_argv(out)
         self.assertEqual(final.returncode, 0, final.stderr)
+
+    def test_allow_partial_survives_a_chunk_doc_missing_its_path(self):
+        # `chunk_doc_paths` filtered its `docs` dialect only for `isinstance
+        # dict`, never for the `path` being a string, so a chunk carrying
+        # `docs: [{}]` yielded `[None]` and the notice's `', '.join(...)`
+        # raised an uncaught TypeError — a traceback out of the assembler
+        # instead of a diagnosis, on the one path whose whole job is surviving
+        # an incomplete fan-out. Found by review on the split stack.
+        manifest = os.path.join(self.tmp.name, "malformed-manifest.json")
+        with open(manifest, "w", encoding="utf-8") as fh:
+            json.dump({"chunks": [{"id": "c-aaa", "docs": [{}]}]}, fh)
+        out = os.path.join(self.tmp.name, "bloat-verdicts.json")
+
+        r = run_argv("--assemble", self.chunks_dir, "--manifest", manifest,
+                     "--out", out, "--allow-partial")
+
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("UNSWEPT", r.stderr)
 
     def test_missing_chunk_refused_by_name(self):
         self.write_chunk("c-aaa.json", self.first_result())
