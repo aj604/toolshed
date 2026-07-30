@@ -46,7 +46,7 @@ from typing import Dict, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .cache import cache_key, get as cache_get, put as cache_put
-from .context import KIND_PRECEDENCE, build_context_index
+from .context import KIND_PRECEDENCE, LIFECYCLE_STATUSES, build_context_index
 from .digest import sha256_canonical
 from .finding import Finding, build_finding
 from .inventory import DEFAULT_REGISTRY_PATH
@@ -82,7 +82,11 @@ PROPOSAL_VERDICTS = (CONDENSE, EXTRACT_AND_MOVE)
 # made, and a scope-wide move would need a per-document destination.
 SCOPE_VERDICTS = (RETIRE_DOC,)
 
-DISTILL_STATUSES = ("pending-implementation", "ready")
+# Owned by context.py, not repeated here: `_status()` checks a verdict's
+# status *against* the planning document's own file-bound marker, so the set
+# of legal values has to be the one thing both sides read, never two lists
+# that could quietly disagree.
+DISTILL_STATUSES = LIFECYCLE_STATUSES
 
 # A destination must be a document content can durably live in. Planning
 # documents are temporary and end in distillation or retirement, so nothing is
@@ -555,7 +559,7 @@ class _Recorder:
             "duplicate_search": self._duplicate_search(path, units),
             "destination": destination,
             "proposal": self._proposal(raw, where, verdict),
-            "status": self._status(raw, where, verdict),
+            "status": self._status(raw, where, verdict, path, document),
         }
         self._reject_sample(raw, where, scoped=False)
         if destination is not None:
@@ -888,15 +892,31 @@ class _Recorder:
                      f"proposal", where)
         return None
 
-    def _status(self, raw, where, verdict):
+    def _status(self, raw, where, verdict, path, document):
         status = raw.get("status")
         if verdict == DISTILL:
+            if document.kind != "planning":
+                self.bad("bloat-distill-not-planning",
+                         f"{DISTILL} classifies a planning document, and "
+                         f"{path} is registered as {document.kind!r} — a "
+                         f"lifecycle status is not a fact about any other "
+                         f"kind", where)
+                return None
             if status not in DISTILL_STATUSES:
                 self.bad("bloat-unknown-status",
                          f"a {DISTILL} verdict's status must be one of "
                          f"{list(DISTILL_STATUSES)}, not {status!r} — whether the "
                          f"work landed decides whether anything may be applied "
                          f"at all", where)
+                return None
+            file_status = self.index.lifecycle_status(path)
+            if status != file_status:
+                self.bad("bloat-status-not-file-bound",
+                         f"the planning document's own marker says "
+                         f"{file_status!r} — lifecycle state lives in the file "
+                         f"(CONTEXT.md: content-coupled facts stay in the "
+                         f"file), and a verdict may report it, never assert it",
+                         where)
                 return None
             return status
         if status is not None:
