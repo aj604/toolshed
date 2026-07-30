@@ -30,9 +30,10 @@ It also carries the release manifest: the gate criteria issue #77 names, each
 mapped to the suites that discharge it. Discovery running a shrinking set of
 suites is green; discovery no longer running `install-parity_test.py` is not.
 
-Detection is structural, not name-based: a file is a suite when it declares a
-TestCase subclass carrying test methods. A rename that hides a suite from
-discovery must not also hide it from the guard.
+Detection is structural, not name-based: a repository candidate is a tracked
+file or an untracked file Git does not ignore, and it is a suite when it
+declares a TestCase subclass carrying test methods. A rename that hides a
+suite from discovery must not also hide it from the guard.
 
 What it still cannot see, stated so nobody reads a clean run as more than it
 is: it reads `release.yml`'s command *text*, so a step that runs a discovery
@@ -113,7 +114,7 @@ GATE_MANIFEST = {
 }
 
 
-# --- what the tree holds -------------------------------------------------
+# --- what the repository holds ------------------------------------------
 
 def _read(path):
     with open(path, encoding="utf-8") as handle:
@@ -255,34 +256,66 @@ def scan_file(path):
 SKIP_DIRS = (".git", "node_modules", "__pycache__", ".doc-lifecycle/wiring/engine")
 
 
+def _physical_candidates(repo_root):
+    """The archive fallback when `repo_root` has no Git metadata."""
+    candidates = set()
+    for dirpath, dirnames, filenames in os.walk(repo_root):
+        rel_dir = _rel(dirpath, repo_root)
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in SKIP_DIRS
+            and not _under(f"{rel_dir}/{d}".lstrip("./"), SKIP_DIRS))
+        for name in filenames:
+            if name.endswith(".py"):
+                candidates.add(_rel(os.path.join(dirpath, name), repo_root))
+    return candidates
+
+
+def repository_candidates(repo_root):
+    """Python files that belong to this repository's candidate set.
+
+    Git's tracked files plus its untracked, nonignored files are the source of
+    truth in a checkout. That excludes an ignored nested worktree or generated
+    copy without inventing a directory-name convention, but keeps an untracked
+    orphan visible to the guard. A source archive has no Git metadata, so its
+    physical files are the equivalent complete candidate set.
+    """
+    result = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        capture_output=True, cwd=repo_root)
+    if result.returncode:
+        return _physical_candidates(repo_root)
+
+    candidates = set()
+    for item in result.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        if not item:
+            continue
+        rel = os.path.normpath(item).replace(os.sep, "/")
+        if rel == ".." or rel.startswith("../") or os.path.isabs(rel):
+            continue
+        full = os.path.join(repo_root, rel)
+        if rel.endswith(".py") and os.path.isfile(full):
+            candidates.add(rel)
+    return candidates
+
+
 def suites_in_tree(repo_root, non_gate_roots=NON_GATE_ROOTS):
-    """Every suite in the repository, as repo-relative paths, minus the
-    declared non-gate roots.
+    """Every suite among repository candidates, as repo-relative paths,
+    minus the declared non-gate roots.
 
     The whole repository, not just `tests/`: a suite in `.github/scripts/` is
     exactly as unwired as one in an undiscovered `tests/` subdirectory, and
     scanning only the directory the gate already covers would find neither.
     """
     found, unreadable = set(), set()
-    for dirpath, dirnames, filenames in os.walk(repo_root):
-        rel_dir = _rel(dirpath, repo_root)
-        dirnames[:] = sorted(
-            d for d in dirnames
-            if d not in SKIP_DIRS
-            and not _under(f"{rel_dir}/{d}".lstrip("./"), SKIP_DIRS)
-            and not _under(f"{rel_dir}/{d}".lstrip("./"), non_gate_roots))
-        for name in sorted(filenames):
-            if not name.endswith(".py"):
-                continue
-            full = os.path.join(dirpath, name)
-            rel = _rel(full, repo_root)
-            if _under(rel, non_gate_roots) or _under(rel, SKIP_DIRS):
-                continue
-            scanned = scan_file(full)
-            if scanned["unreadable"]:
-                unreadable.add(rel)
-            elif scanned["suite"]:
-                found.add(rel)
+    for rel in sorted(repository_candidates(repo_root)):
+        if _under(rel, non_gate_roots) or _under(rel, SKIP_DIRS):
+            continue
+        scanned = scan_file(os.path.join(repo_root, rel))
+        if scanned["unreadable"]:
+            unreadable.add(rel)
+        elif scanned["suite"]:
+            found.add(rel)
     return found, unreadable
 
 
