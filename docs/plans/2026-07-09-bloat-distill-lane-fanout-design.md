@@ -1,5 +1,7 @@
 # doc-bloat distill-lane fan-out: per-group matrix apply, deterministic merge
 
+> Status: ready
+
 **Date:** 2026-07-09. **Status:** approved (architecture user-approved in session; user
 constraint: no turn caps on apply invocations — quality over wall-clock bounds). **Prior
 designs:** `2026-07-06-detecting-doc-bloat-rearchitecture-design.md` (moved DISTILL authoring

@@ -37,6 +37,7 @@ a destination a reviewer cannot re-derive is a destination nobody can check.
 """
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
@@ -55,6 +56,57 @@ from .segment import segment_text
 # legitimate destination" a fact about the document model rather than a
 # preference.
 KIND_PRECEDENCE = ("living", "narrative", "planning")
+
+# `> Status: <pending-implementation|ready>`, a planning document's own
+# lifecycle marker — matched against the segmenter's normalized block-quote
+# text, where the `> ` marker is already gone. Mirrors drift.py's `As of`
+# narrative anchor (`ANCHOR_PREFIX`) exactly: the first block-quote unit whose
+# text starts with this prefix, found via the segmenter, never a literal
+# line-1 read.
+STATUS_PREFIX = "Status:"
+STATUS_PATTERN = re.compile(r"^Status:\s*(\S+)\s*$")
+# The only two lifecycle states a planning document may declare. Owned here,
+# not in bloat.py: a verdict's `status` is checked *against* the file, so the
+# set of legal values has to be one thing both sides agree on, not two lists
+# that could drift apart.
+LIFECYCLE_STATUSES = ("pending-implementation", "ready")
+# Fail-safe default for an absent or malformed marker. Never `ready`: what a
+# marker nobody can read is worth is "not done", so the report says that.
+#
+# What this does *not* do, said plainly because the mechanism invites the
+# stronger reading: it unlocks nothing. A record's lifecycle status does not
+# survive minting — `approval.RECORD_FIELDS` has no such field — and neither
+# the applier nor the approval set ever consults one, so a `ready` default
+# would not have authorized an operation. What it decides is whether the
+# *report* is honest about a plan's state: `bloat.py`'s
+# `bloat-status-not-file-bound` refuses a verdict whose claimed status is not
+# this one, so a model cannot report a plan as finished that the file does not
+# say is finished. That a `pending-implementation` DISTILL is not acted on is
+# the fixing skill's conduct rule, not something the applier enforces.
+DEFAULT_LIFECYCLE_STATUS = "pending-implementation"
+
+
+def _lifecycle_status(units):
+    """A planning document's own `> Status:` marker, fail-safe by default.
+
+    The file is the authority for a planning document's lifecycle state, so
+    this is the only place that state is ever read from — never asked of a
+    model. Absent, malformed, or carrying a value outside
+    `LIFECYCLE_STATUSES` (e.g. `> Status: shipped`) all collapse to
+    `DEFAULT_LIFECYCLE_STATUS`: a marker that cannot be trusted is never
+    actionable.
+    """
+    marker = next(
+        (u for u in units
+         if u.kind == "block_quote" and u.text.startswith(STATUS_PREFIX)),
+        None,
+    )
+    if marker is None:
+        return DEFAULT_LIFECYCLE_STATUS
+    match = STATUS_PATTERN.match(marker.text)
+    if match is None or match.group(1) not in LIFECYCLE_STATUSES:
+        return DEFAULT_LIFECYCLE_STATUS
+    return match.group(1)
 
 
 @dataclass(frozen=True)
@@ -109,6 +161,10 @@ class IndexedDocument:
     document_digest: str
     segmentation_digest: str
     units: Tuple[str, ...]
+    # The file-bound lifecycle state (`_lifecycle_status`), set only for
+    # `kind == "planning"` — `None` for every other kind, which carries no
+    # such marker at all rather than a default value for one.
+    lifecycle_status: Optional[str] = None
 
     def to_dict(self):
         return {
@@ -118,6 +174,7 @@ class IndexedDocument:
             "document_digest": self.document_digest,
             "segmentation_digest": self.segmentation_digest,
             "units": list(self.units),
+            "lifecycle_status": self.lifecycle_status,
         }
 
 
@@ -209,6 +266,21 @@ class ContextIndex:
 
     def document(self, path):
         return self._by_path.get(path)
+
+    def lifecycle_status(self, path):
+        """A planning document's file-bound lifecycle state.
+
+        Read at index time from the document's own `> Status:` marker
+        (`_lifecycle_status`) — the file is the authority, so this is never
+        recomputed from anything a model said. `None` for a path the index
+        does not hold, or one that is not a planning document: lifecycle
+        state is not a fact about any other kind, so there is no default to
+        report for it.
+        """
+        document = self._by_path.get(path)
+        if document is None or document.kind != "planning":
+            return None
+        return document.lifecycle_status
 
     def context_digest(self, path):
         """What could have changed *this* document's bloat verdict.
@@ -329,6 +401,10 @@ def build_context_index(repo_root, registry_path=DEFAULT_REGISTRY_PATH):
             document_digest=document.digest,
             segmentation_digest=segmentation.digest,
             units=tuple(unit.digest for unit in segmentation.units),
+            lifecycle_status=(
+                _lifecycle_status(segmentation.units)
+                if document.kind == "planning" else None
+            ),
         ))
         for unit in segmentation.units:
             units.setdefault(unit.digest, IndexedUnit(

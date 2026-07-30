@@ -40,6 +40,7 @@ auto-apply policy off it.
 import datetime
 import json
 import os
+import posixpath
 import re
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
@@ -1045,22 +1046,78 @@ def _verdict_entries(payload, plan):
     return entries, tuple(problems)
 
 
+def _names_a_file(path):
+    """Whether this path's last segment is a filename carrying an extension.
+
+    Asked of the last segment, and of it with any leading dot removed, because
+    `FILE_EXTENSION` anchors on the end of the string and a directory whose own
+    name *begins* with a dot matches it whole: `.github`, `.claude`, `.vscode`
+    are all "a dot then up to six word characters". Read as file spellings,
+    their trailing '/' survived into a candidate that
+    `repository_relative_problem` then refused as non-canonical — so an anchor
+    on `.github/` was silently dropped and stopped being checked, the failure
+    the canonical path policy exists to prevent (issue #57 review).
+
+    A leading dot is part of the name, never the extension; an extension is a
+    dot with something before it inside the same segment. `.hidden.md` still
+    names a file, because the `.md` is a dot with `hidden` in front of it.
+    """
+    segment = path.rsplit("/", 1)[-1]
+    return bool(FILE_EXTENSION.search(segment[1:] if segment.startswith(".")
+                                      else segment))
+
+
 def _anchor_references(text):
     """The repository paths an `As of (...)` anchor names, in order.
 
     Backticked tokens only. An anchor writes its references in code spans, and
     reading unbackticked prose as filenames would open paths a sentence merely
-    mentioned.
+    mentioned. Whether what is left looks like a repository-relative path is
+    `paths.py`'s question, not this one's — the same principle drift.py:701-705
+    states for `evidence.source` — so a token with any spelling problem is
+    skipped here as prose the extractor never claimed, not refused: this is a
+    candidate extractor, and a token it drops silently is simply not a
+    reference.
+
+    That question is asked of the *normalized* candidate, because the two
+    answers it can give are not the same kind of answer. `./docs/guide.md`,
+    `docs//guide.md` and `docs/./guide.md` are one file spelled untidily; a
+    backslash, a drive letter, a leading dash, whitespace, an absolute path or
+    a `..` are a different file, or none. Asking on the token as written
+    conflated them, and a narrative document anchored on `./docs/guide.md`
+    reported clean — the anchor silently stopped being checked (issue #57
+    review). What is *stored* is still the token the anchor wrote, so the
+    finding points a reader at the string that is actually in the document.
+
+    A `..` component is skipped before normalization rather than cancelled by
+    it: `a/../b` is `b` only when `a` is not a symlink, so letting normpath
+    resolve one would be a claim about the filesystem this function has not
+    looked at.
     """
     references = []
     for token in BACKTICKED.findall(text):
         token = LINE_SUFFIX.sub("", token.strip())
-        if not token or " " in token:
+        if not token:
             continue
-        if token.startswith(("/", "~")) or ".." in token.split("/"):
-            continue                       # not a repository-relative path
         if "/" not in token and not FILE_EXTENSION.search(token):
             continue                       # a commit id or a bare word
+        candidate = token
+        if token.endswith("/") and not _names_a_file(token[:-1]):
+            # A directory anchor spells itself with one trailing '/' (#93):
+            # that slash means "everything beneath", the directory's own
+            # canonical form here, not a non-canonical file spelling — so the
+            # canonical check reads the directory name underneath it.
+            candidate = token[:-1]
+        if ".." in candidate.split("/"):
+            continue                       # traversal, before it can cancel
+        if not candidate.endswith("/"):
+            # Only where a trailing '/' is not part of the spelling: on posix
+            # `docs/guide.md/` names a directory and `docs/guide.md` a file,
+            # so normalizing that one away would answer about a different
+            # path than the anchor wrote.
+            candidate = posixpath.normpath(candidate)
+        if repository_relative_problem(candidate) is not None:
+            continue                       # not a repository-relative path
         if token not in references:
             references.append(token)
     return references

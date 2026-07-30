@@ -5,8 +5,9 @@ Tests the script as a subprocess against fixtures built in a tempdir — no
 dependence on the real repo except FixtureEndToEnd, which pins the committed
 plan-swarm fixture. Covers the inventory layer absorbed from list-docs.py
 (git ls-files path and walk fallback, exclude/include globs), doc-kind hints,
-affinity grouping under the caps, policy-scope chunks, resume planning, and
-the max_chunks ceiling. Run: python3 tests/scripts/plan-chunks_test.py
+affinity grouping under the caps, resume planning, the max_chunks ceiling, and
+the retired `policy_scope` knob (noted, never a chunk kind).
+Run: python3 tests/scripts/plan-chunks_test.py
 """
 
 import json
@@ -62,20 +63,12 @@ def manifest(result):
     return json.loads(result.stdout)
 
 
-def sweep_chunks(m):
-    return [c for c in m["chunks"] if c["kind"] == "sweep"]
-
-
-def policy_chunks(m):
-    return [c for c in m["chunks"] if c["kind"] == "policy"]
-
-
 def paths_of(chunk):
     return [d["path"] for d in chunk["docs"]]
 
 
-def all_sweep_paths(m):
-    return sorted(p for c in sweep_chunks(m) for p in paths_of(c))
+def all_paths(m):
+    return sorted(p for c in m["chunks"] for p in paths_of(c))
 
 
 class InventoryDefaults(unittest.TestCase):
@@ -91,7 +84,7 @@ class InventoryDefaults(unittest.TestCase):
             git_init(root)
             r = run(root)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(all_sweep_paths(manifest(r)),
+            self.assertEqual(all_paths(manifest(r)),
                              ["README.md", "docs/guide.md"])
 
     def test_md_only_walk_fallback(self):
@@ -99,7 +92,7 @@ class InventoryDefaults(unittest.TestCase):
             self.build(root)  # no git init => filesystem-walk fallback
             r = run(root)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(all_sweep_paths(manifest(r)),
+            self.assertEqual(all_paths(manifest(r)),
                              ["README.md", "docs/guide.md"])
 
     def test_exclude_include_whitelist_wins(self):
@@ -113,7 +106,7 @@ class InventoryDefaults(unittest.TestCase):
                                 "include": ["tests/fixtures/b.md", "Makefile"]})
             r = run(root, cfg)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(all_sweep_paths(manifest(r)),
+            self.assertEqual(all_paths(manifest(r)),
                              ["Makefile", "README.md", "docs/guide.md",
                               "tests/fixtures/b.md"])
 
@@ -143,11 +136,11 @@ class InventoryDefaults(unittest.TestCase):
 
 class Hints(unittest.TestCase):
     def hint_of(self, m, path):
-        for c in sweep_chunks(m):
+        for c in m["chunks"]:
             for d in c["docs"]:
                 if d["path"] == path:
                     return d["hint"]
-        raise AssertionError(f"{path} not in any sweep chunk")
+        raise AssertionError(f"{path} not in any chunk")
 
     def test_as_of_anchor_is_narrative_wherever_it_sits(self):
         with tempfile.TemporaryDirectory() as root:
@@ -193,7 +186,7 @@ class Hints(unittest.TestCase):
             write(root, "README.md", "a\nb\nc")
             git_init(root)
             m = manifest(run(root))
-            (chunk,) = sweep_chunks(m)
+            (chunk,) = m["chunks"]
             self.assertEqual(chunk["docs"][0]["lines"], 3)
 
 
@@ -216,7 +209,6 @@ class MalformedConfig(unittest.TestCase):
             self.assert_config_error(root, "{not json", "scope.json")
             self.assert_config_error(root, {"exclude": "tests/**"}, "exclude")
             self.assert_config_error(root, {"include": {"a": 1}}, "include")
-            self.assert_config_error(root, {"policy_scope": "docs"}, "policy_scope")
             self.assert_config_error(root, {"chunking": []}, "chunking")
             self.assert_config_error(root, {"chunking": {"max_docs": 0}}, "max_docs")
             self.assert_config_error(
@@ -238,7 +230,45 @@ class MalformedConfig(unittest.TestCase):
             git_init(root)
             r = run(root)  # no --config
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(all_sweep_paths(manifest(r)), ["README.md"])
+            self.assertEqual(all_paths(manifest(r)), ["README.md"])
+
+
+class RetiredPolicyScope(unittest.TestCase):
+    """`policy_scope` retired with POLICY; a declaring install still plans."""
+
+    def swarm(self, root):
+        for i in range(4):
+            write(root, f"docs/superpowers/plans/p{i}.md", "# ephemeral")
+        write(root, "README.md", "# readme")
+
+    def test_declared_policy_scope_is_noted_and_its_docs_are_swept(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.swarm(root)
+            git_init(root)
+            cfg = config(root, {"policy_scope": ["docs/superpowers"]})
+            r = run(root, cfg)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("policy_scope", r.stderr)
+            self.assertIn("RETIRE-DOC", r.stderr)
+            m = manifest(r)
+            self.assertEqual(all_paths(m), sorted(
+                ["README.md"] + [f"docs/superpowers/plans/p{i}.md"
+                                 for i in range(4)]))
+            for c in m["chunks"]:
+                self.assertNotIn("kind", c)
+                self.assertNotIn("files", c)
+                self.assertNotIn("dir", c)
+
+    def test_a_non_list_policy_scope_is_ignored_not_fatal(self):
+        # The knob is dead: no shape of it may fail a run that would otherwise
+        # plan, because a consumer's audit-scope.json is never rewritten for them.
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "README.md", "# readme")
+            git_init(root)
+            cfg = config(root, {"policy_scope": "docs/superpowers"})
+            r = run(root, cfg)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("policy_scope", r.stderr)
 
 
 class Grouping(unittest.TestCase):
@@ -249,9 +279,9 @@ class Grouping(unittest.TestCase):
             git_init(root)
             cfg = config(root, {"chunking": {"max_docs": 3}})
             m = manifest(run(root, cfg))
-            sizes = [len(paths_of(c)) for c in sweep_chunks(m)]
+            sizes = [len(paths_of(c)) for c in m["chunks"]]
             self.assertEqual(sorted(sizes, reverse=True), [3, 3, 1])
-            for c in sweep_chunks(m):
+            for c in m["chunks"]:
                 self.assertEqual(paths_of(c), sorted(paths_of(c)))
 
     def test_max_lines_splits_and_oversized_doc_isolated(self):
@@ -262,7 +292,7 @@ class Grouping(unittest.TestCase):
             git_init(root)
             cfg = config(root, {"chunking": {"max_lines": 10}})
             m = manifest(run(root, cfg))
-            for c in sweep_chunks(m):
+            for c in m["chunks"]:
                 if "docs/big.md" in paths_of(c):
                     self.assertEqual(paths_of(c), ["docs/big.md"])
 
@@ -272,10 +302,10 @@ class Grouping(unittest.TestCase):
             write(root, "docs/plans/p.md", "# a plan")
             git_init(root)
             m = manifest(run(root))
-            for c in sweep_chunks(m):
+            for c in m["chunks"]:
                 hints = {d["hint"] for d in c["docs"]}
                 self.assertEqual(len(hints), 1)
-            self.assertEqual(len(sweep_chunks(m)), 2)
+            self.assertEqual(len(m["chunks"]), 2)
 
     def test_same_hint_small_dirs_coalesce_under_caps(self):
         with tempfile.TemporaryDirectory() as root:
@@ -283,8 +313,8 @@ class Grouping(unittest.TestCase):
             write(root, "b/y.md", "# y")
             git_init(root)
             m = manifest(run(root))
-            self.assertEqual(len(sweep_chunks(m)), 1)
-            self.assertEqual(all_sweep_paths(m), ["a/x.md", "b/y.md"])
+            self.assertEqual(len(m["chunks"]), 1)
+            self.assertEqual(all_paths(m), ["a/x.md", "b/y.md"])
 
     def test_ids_deterministic_and_membership_addressed(self):
         with tempfile.TemporaryDirectory() as root:
@@ -302,60 +332,6 @@ class Grouping(unittest.TestCase):
             self.assertNotEqual(ids1, ids3)
 
 
-class PolicyChunks(unittest.TestCase):
-    def swarm(self, root):
-        for i in range(10):
-            write(root, f"docs/superpowers/plans/p{i}.md", "# ephemeral")
-        write(root, "README.md", "# readme")
-
-    def test_policy_dir_becomes_single_chunk_with_files(self):
-        with tempfile.TemporaryDirectory() as root:
-            self.swarm(root)
-            git_init(root)
-            cfg = config(root, {"policy_scope": ["docs/superpowers"]})
-            m = manifest(run(root, cfg))
-            (p,) = policy_chunks(m)
-            self.assertEqual(p["dir"], "docs/superpowers")
-            self.assertEqual(len(p["files"]), 10)
-            self.assertEqual(p["files"], sorted(p["files"]))
-            self.assertEqual(all_sweep_paths(m), ["README.md"])
-
-    def test_policy_scope_respects_exclude(self):
-        with tempfile.TemporaryDirectory() as root:
-            self.swarm(root)
-            git_init(root)
-            cfg = config(root, {"policy_scope": ["docs/superpowers"],
-                                "exclude": ["docs/superpowers/plans/p0.md"]})
-            m = manifest(run(root, cfg))
-            (p,) = policy_chunks(m)
-            self.assertEqual(len(p["files"]), 9)
-            self.assertNotIn("docs/superpowers/plans/p0.md", p["files"])
-
-    def test_declared_dir_with_no_docs_notes_and_omits(self):
-        with tempfile.TemporaryDirectory() as root:
-            write(root, "README.md", "# readme")
-            git_init(root)
-            cfg = config(root, {"policy_scope": ["docs/empty"]})
-            r = run(root, cfg)
-            self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(policy_chunks(manifest(r)), [])
-            self.assertIn("docs/empty", r.stderr)
-
-    def test_longest_prefix_wins_for_nested_scopes(self):
-        with tempfile.TemporaryDirectory() as root:
-            write(root, "docs/superpowers/plans/a.md", "# a")
-            write(root, "docs/superpowers/specs/b.md", "# b")
-            git_init(root)
-            cfg = config(root, {"policy_scope": ["docs/superpowers",
-                                                 "docs/superpowers/specs"]})
-            m = manifest(run(root, cfg))
-            by_dir = {p["dir"]: p["files"] for p in policy_chunks(m)}
-            self.assertEqual(by_dir["docs/superpowers"],
-                             ["docs/superpowers/plans/a.md"])
-            self.assertEqual(by_dir["docs/superpowers/specs"],
-                             ["docs/superpowers/specs/b.md"])
-
-
 class ResumeAndCeiling(unittest.TestCase):
     def test_pending_excludes_chunks_with_results(self):
         with tempfile.TemporaryDirectory() as root:
@@ -368,13 +344,35 @@ class ResumeAndCeiling(unittest.TestCase):
             results = os.path.join(root, "chunks")
             os.makedirs(results)
             write(root, f"chunks/{done_id}.json",
-                  json.dumps({"chunk": done_id, "records": []}))
+                  json.dumps({"chunk": done_id, "verdicts": []}))
             r = run(root, results_dir=results)
             m2 = manifest(r)
             self.assertEqual(len(m2["chunks"]), 2)  # chunks always complete
             self.assertNotIn(done_id, m2["pending"])
             self.assertEqual(len(m2["pending"]), 1)
             self.assertIn("resume", r.stderr)
+
+    def test_a_legacy_records_chunk_does_not_mark_the_chunk_done(self):
+        # Chunk ids are content-addressed, so an unchanged sweep keeps its id
+        # across the `records` -> `verdicts` schema migration. Matching on
+        # `chunk` alone dropped the chunk from `pending` while the assembler
+        # later refused the file for carrying no `verdicts` — a resume that
+        # could not redispatch without deleting the cached file by hand.
+        # Found by review on the split stack.
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "a/x.md", "# x")
+            write(root, "docs/plans/p.md", "# plan")
+            git_init(root)
+            m1 = manifest(run(root))
+            stale_id = m1["chunks"][0]["id"]
+            results = os.path.join(root, "chunks")
+            os.makedirs(results)
+            write(root, f"chunks/{stale_id}.json",
+                  json.dumps({"chunk": stale_id, "records": []}))
+
+            m2 = manifest(run(root, results_dir=results))
+
+            self.assertIn(stale_id, m2["pending"])
 
     def test_pending_equals_all_ids_without_results_dir(self):
         with tempfile.TemporaryDirectory() as root:
@@ -395,11 +393,53 @@ class ResumeAndCeiling(unittest.TestCase):
             self.assertIn("5", r.stderr)
 
 
-def run_emit(root, manifest_path, flag, chunk_id):
-    return subprocess.run(
-        [sys.executable, SCRIPT, "--root", root, flag, chunk_id,
-         "--manifest", manifest_path],
-        capture_output=True, text=True)
+def run_emit(root, manifest_path, flag, chunk_id, results_dir=None):
+    cmd = [sys.executable, SCRIPT, "--root", root, flag, chunk_id,
+           "--manifest", manifest_path]
+    if results_dir is not None:
+        cmd += ["--results-dir", results_dir]
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+class EmitPromptResultsDirConfinement(unittest.TestCase):
+    """The rendered prompt *states* the results path is outside the work tree
+    and tells the executor to write nothing into the repository. `abspath`
+    makes a path absolute, which is not the same as making it external, so a
+    --results-dir under --root left that claim false and the executor's result
+    landing as an unaccounted repository change the applier refuses. Found by
+    review on the split stack."""
+
+    def manifest_for(self, root):
+        path = os.path.join(root, "manifest.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(run(root).stdout)
+        return path, manifest(run(root))["chunks"][0]["id"]
+
+    def test_a_results_dir_inside_the_repository_is_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            write(root, "docs/a.md", "alpha")
+            git_init(root)
+            man, cid = self.manifest_for(root)
+            inside = os.path.join(root, "chunks")
+            os.makedirs(inside)
+
+            r = run_emit(root, man, "--emit-prompt", cid, results_dir=inside)
+
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("inside the repository", r.stderr)
+
+    def test_a_results_dir_outside_the_repository_renders(self):
+        # The honest path the refusal must not close.
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as outside:
+            write(root, "docs/a.md", "alpha")
+            git_init(root)
+            man, cid = self.manifest_for(root)
+
+            r = run_emit(root, man, "--emit-prompt", cid, results_dir=outside)
+
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn(outside, r.stdout)
 
 
 class ContentAddressedIds(unittest.TestCase):
@@ -426,7 +466,7 @@ class ContentAddressedIds(unittest.TestCase):
             self.assertEqual(m2["pending"], [m2["chunks"][0]["id"]])
 
     def test_resume_ignores_garbage_or_mismatched_result_files(self):
-        # An invalid result that survived a failed CI retry must not mask the
+        # An invalid result that survived a failed retry must not mask the
         # chunk as done — resume trusts a result only if it parses and names
         # this chunk.
         with tempfile.TemporaryDirectory() as root:
@@ -440,11 +480,11 @@ class ContentAddressedIds(unittest.TestCase):
             m2 = manifest(run(root, results_dir=results))
             self.assertEqual(m2["pending"], [cid])
             write(root, f"chunks/{cid}.json",
-                  json.dumps({"chunk": "c-someoneelse", "records": []}))
+                  json.dumps({"chunk": "c-someoneelse", "verdicts": []}))
             m3 = manifest(run(root, results_dir=results))
             self.assertEqual(m3["pending"], [cid])
             write(root, f"chunks/{cid}.json",
-                  json.dumps({"chunk": cid, "records": []}))
+                  json.dumps({"chunk": cid, "verdicts": []}))
             m4 = manifest(run(root, results_dir=results))
             self.assertEqual(m4["pending"], [])
 
@@ -459,9 +499,7 @@ class ContentAddressedIds(unittest.TestCase):
 class TurnBudgets(unittest.TestCase):
     def turns_of(self, m, member_path):
         for c in m["chunks"]:
-            paths = (c["files"] if c["kind"] == "policy"
-                     else [d["path"] for d in c["docs"]])
-            if member_path in paths:
+            if member_path in paths_of(c):
                 return c["turns"]
         raise AssertionError(f"{member_path} not in any chunk")
 
@@ -482,8 +520,7 @@ class TurnBudgets(unittest.TestCase):
 
     def test_line_volume_adds_one_turn_per_full_600_lines(self):
         with tempfile.TemporaryDirectory() as root:
-            # single planning doc, 1250 lines: 12 + 4 + 2 = 18 -> clamp 20;
-            # use 8 living docs of 300 lines: 12 + 16 + 4 = 32
+            # 8 living docs of 300 lines: 12 + 16 + 4 = 32
             for i in range(8):
                 write(root, f"docs/d{i}.md", "\n".join(["x"] * 300))
             git_init(root)
@@ -499,16 +536,6 @@ class TurnBudgets(unittest.TestCase):
             m = manifest(run(root))
             self.assertEqual(self.turns_of(m, "docs/plans/p0.md"), 40)
 
-    def test_policy_chunk_gets_flat_20(self):
-        with tempfile.TemporaryDirectory() as root:
-            for i in range(30):
-                write(root, f"docs/superpowers/plans/p{i}.md", "# e")
-            git_init(root)
-            cfg = config(root, {"policy_scope": ["docs/superpowers"]})
-            m = manifest(run(root, cfg))
-            self.assertEqual(
-                self.turns_of(m, "docs/superpowers/plans/p0.md"), 20)
-
 
 class EmitPrompt(unittest.TestCase):
     def plan_to_file(self, root):
@@ -518,43 +545,56 @@ class EmitPrompt(unittest.TestCase):
         with open(out, encoding="utf-8") as f:
             return out, json.load(f)
 
-    def test_sweep_prompt_carries_slice_verbatim_no_manifest_hunt(self):
-        with tempfile.TemporaryDirectory() as root:
+    def test_prompt_carries_slice_verbatim_no_manifest_hunt(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as results:
             write(root, "docs/plans/p.md", "\n".join(["x"] * 40))
             write(root, "docs/guide.md", "# guide")
             git_init(root)
             path, m = self.plan_to_file(root)
             chunk = next(c for c in m["chunks"]
                          if c["docs"][0]["path"] == "docs/plans/p.md")
-            r = run_emit(root, path, "--emit-prompt", chunk["id"])
+            r = run_emit(root, path, "--emit-prompt", chunk["id"], results)
             self.assertEqual(r.returncode, 0, r.stderr)
             prompt = r.stdout
             self.assertIn("docs/plans/p.md", prompt)
             self.assertIn("40", prompt)          # line count shown
             self.assertIn("planning", prompt)    # hint shown
-            self.assertIn(f"chunks/{chunk['id']}.json", prompt)
+            # The write destination is absolute and outside the work tree —
+            # not the bare relative "chunks/<id>.json" a work-tree-rooted
+            # executor would resolve straight into the repository.
+            expected_out = os.path.join(
+                os.path.abspath(results), chunk["id"] + ".json")
+            self.assertIn(expected_out, prompt)
+            self.assertNotIn(f" chunks/{chunk['id']}.json", prompt)
             self.assertIn("doc-lifecycle:detecting-doc-bloat", prompt)
             self.assertNotIn("manifest.json", prompt)
             self.assertNotIn("docs/guide.md", prompt)  # other chunks excluded
 
-    def test_policy_prompt_lists_files_verbatim_and_names_policy(self):
+    def test_prompt_requires_results_dir(self):
         with tempfile.TemporaryDirectory() as root:
-            for i in range(3):
-                write(root, f"docs/superpowers/plans/p{i}.md", "# e")
-            write(root, ".doc-lifecycle/audit-scope.json",
-                  json.dumps({"policy_scope": ["docs/superpowers"]}))
+            write(root, "docs/a.md", "x")
             git_init(root)
             path, m = self.plan_to_file(root)
-            (p,) = [c for c in m["chunks"] if c["kind"] == "policy"]
-            r = run_emit(root, path, "--emit-prompt", p["id"])
+            r = run_emit(root, path, "--emit-prompt", m["chunks"][0]["id"])
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("--results-dir", r.stderr)
+
+    def test_prompt_names_the_engine_verdict_seam_and_unit_source(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as results:
+            write(root, "docs/a.md", "x")
+            git_init(root)
+            path, m = self.plan_to_file(root)
+            chunk_id = m["chunks"][0]["id"]
+            r = run_emit(root, path, "--emit-prompt", chunk_id, results)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertIn("POLICY", r.stdout)
-            self.assertIn("docs/superpowers", r.stdout)
-            for i in range(3):
-                self.assertIn(f"docs/superpowers/plans/p{i}.md", r.stdout)
-            # Same scope fence as the sweep prompt — GREEN run (b) showed an
-            # executor enumerating the tree when the policy variant lacked it.
-            self.assertIn("do not enumerate", r.stdout)
+            prompt = r.stdout
+            self.assertIn('"verdicts"', prompt)
+            self.assertNotIn('"records"', prompt)
+            self.assertIn("doclifecycle segment", prompt)
+            self.assertIn("units", prompt)
+            self.assertNotIn("POLICY", prompt)
 
     def test_emit_turns_prints_the_budget(self):
         with tempfile.TemporaryDirectory() as root:
@@ -575,20 +615,80 @@ class EmitPrompt(unittest.TestCase):
             self.assertIn("c-nope", r.stderr)
 
 
+class EngineManifestDialect(unittest.TestCase):
+    """The engine's `bloat-plan` manifest: {"documents": [<path>, ...]} per
+    chunk, no per-doc "lines"/"hint", no per-chunk "turns" — a different but
+    legitimate work order for the same --emit-prompt/--emit-turns seam
+    validate-bloat-output.py's chunk_doc_paths() already reads both dialects
+    for."""
+
+    def engine_manifest(self, root, chunk_id, documents):
+        path = os.path.join(root, "engine-manifest.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"schema_version": 1, "chunks": [
+                {"id": chunk_id, "documents": documents, "unit_count": 3},
+            ]}, f)
+        return path
+
+    def test_emit_prompt_renders_bare_paths_no_lines_or_hint(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as results:
+            path = self.engine_manifest(root, "c-engine1",
+                                         ["README.md", "docs/guide.md"])
+            r = run_emit(root, path, "--emit-prompt", "c-engine1", results)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("README.md", r.stdout)
+            self.assertIn("docs/guide.md", r.stdout)
+            expected_out = os.path.join(
+                os.path.abspath(results), "c-engine1.json")
+            self.assertIn(expected_out, r.stdout)
+
+    def test_emit_turns_fails_loudly_not_silently_to_floor(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = self.engine_manifest(root, "c-engine2", ["README.md"])
+            r = run_emit(root, path, "--emit-turns", "c-engine2")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("c-engine2", r.stderr)
+            self.assertIn("turns", r.stderr)
+
+    def test_emit_turns_honors_a_stamped_turns_value_even_in_this_dialect(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "engine-manifest.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"chunks": [
+                    {"id": "c-engine3", "documents": ["README.md"],
+                     "turns": 25},
+                ]}, f)
+            r = run_emit(root, path, "--emit-turns", "c-engine3")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(r.stdout.strip(), "25")
+
+    def test_neither_dialect_dies_naming_the_chunk(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as results:
+            path = os.path.join(root, "bad-manifest.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"chunks": [{"id": "c-bad"}]}, f)
+            r = run_emit(root, path, "--emit-prompt", "c-bad", results)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("c-bad", r.stderr)
+
+
 class FixtureEndToEnd(unittest.TestCase):
-    def test_plan_swarm_fixture_plans_as_answer_key_says(self):
+    def test_plan_swarm_fixture_sweeps_every_doc(self):
         root = os.path.normpath(os.path.join(
             os.path.dirname(__file__), "..", "fixtures", "plan-swarm"))
         r = run(root)
         self.assertEqual(r.returncode, 0, r.stderr)
         m = manifest(r)
-        policy = policy_chunks(m)
-        self.assertEqual(len(policy), 1)
-        self.assertEqual(policy[0]["dir"], "docs/superpowers")
-        self.assertEqual(len(policy[0]["files"]), 10)
-        sweep = sweep_chunks(m)
-        self.assertEqual(len(sweep), 3)
-        self.assertEqual(len(m["pending"]), 4)
+        paths = all_paths(m)
+        self.assertEqual(len(paths), 15)
+        # The fixture's config still declares the retired knob; its docs are
+        # planned as ordinary sweep members and the run says so.
+        self.assertIn("policy_scope", r.stderr)
+        self.assertIn("docs/superpowers/plans/2026-06-01-limiter-tests-plan.md",
+                      paths)
+        self.assertEqual(len(m["pending"]), len(m["chunks"]))
 
 
 if __name__ == "__main__":

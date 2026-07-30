@@ -1,5 +1,7 @@
 # Shadow-mode parity gate, second cycle (issue #117)
 
+> Status: ready
+
 **Status:** criteria re-registered 2026-07-27 in their own commit, before this cycle runs and
 before any comparison output exists. Verdict recorded in a later commit.
 **Amended by:** `docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md` — the G4 blocker

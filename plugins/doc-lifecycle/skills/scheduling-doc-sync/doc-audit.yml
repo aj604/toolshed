@@ -96,13 +96,19 @@ jobs:
       # absent, so ANTHROPIC_API_KEY alone also works. The allowedTools list is ergonomics, not
       # the boundary — the job's read-only permissions and credential-free checkout are.
       #
-      # The output contract here is the *new* engine's per-unit verdicts shape
-      # (doclifecycle/drift.py's `load_verdicts`), not the legacy detecting-doc-drift skill's
-      # wrapped claim/location/fix records — the skill has not been migrated to the new
-      # document model yet (issue #57's tree has no ticket for that), so the shape is spelled
-      # out here in full rather than left to a skill whose stated contract would be wrong for
-      # this lane. The skill is still useful for verification method (tiers, escalation), which
-      # is why it is invoked for procedure and overridden for output shape.
+      # The output contract here is the engine's per-unit verdicts shape
+      # (doclifecycle/drift.py's `load_verdicts`), which the detecting-doc-drift skill now
+      # carries natively — it is no longer an override of a skill whose contract was wrong for
+      # this lane. The prompt still spells the shape out in full for the same reason every
+      # other terminal state of this lane states itself: a headless run states its own output
+      # contract rather than depending on a plugin version resolved at run time, so a reader of
+      # the log can see what was asked for without resolving the skill that was loaded. The
+      # prompt below tells the model to write verdicts.json in the repository root — that is a
+      # deliberate exception to the skill's own "every artifact goes to ${TMPDIR:-/tmp}/, never
+      # the work tree" rule (detecting-doc-drift/SKILL.md's "The audit" section documents the
+      # carve-out and why: this checkout is throwaway and no apply ever runs against it, unlike
+      # the interactive sessions that rule protects). The step below that runs `drift-audit`
+      # reads verdicts.json from the same root path, so the two must keep agreeing.
       - name: Audit documentation drift (headless, full corpus)
         if: steps.plan.outcome == 'success'
         id: model
@@ -116,22 +122,29 @@ jobs:
             Use the doc-lifecycle:detecting-doc-drift skill's verification method (tiers,
             escalation, "verified means you ran the command", and its rules for authoring a
             fix — a fix that names a file is settled by opening that file) to audit this
-            repository's documentation, but write your answer in the *engine's* verdicts shape, not that
-            skill's — this run validates through `python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py
+            repository's documentation, and write your answer in the engine's verdicts shape —
+            the same shape the skill itself now carries, restated here because a headless run
+            states its own output contract rather than depending on a plugin version resolved
+            at run time — this run validates through `python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py
             drift-audit`, whose --verdicts contract is:
             {"documents": [{"path": <doc path from drift-plan.json>, "status": "ok",
             "verdicts": [{"unit": <unit ordinal, an integer>, "assertion_class":
             "factual"|"normative"|"rationale"|"non-assertive", "verdict":
-            "VERIFIED"|"STALE"|"UNVERIFIABLE" (omit for non-assertive), "kind":
+            "VERIFIED"|"STALE"|"UNVERIFIABLE", "kind":
             "command"|"path"|"symbol"|"behavior"|"structure"|"value", "tier": 1|2|3,
             "evidence": {"source": <repo path>, "line": <int>, "observed": <what you read>},
             "fix": <complete physical replacement text, STALE only>}]}]}.
+            "verdict", "kind", "tier", and "evidence" travel together — all four, or none: a
+            "factual" unit owes all four; a "non-assertive" unit takes none of them, because it
+            asserts nothing the code could contradict — carrying even one of the four on a
+            non-assertive unit is refused outright (drift-verdict-not-obligated).
             A STALE fix is that unit's full replacement, not an editing instruction, and is
             copied byte-verbatim by downstream tools. When the source unit spans multiple
             physical lines without sharing any of those lines with another unit, preserve its
             existing soft wrap with embedded LF; use non-empty LF-separated lines only, with no
             CR or NUL. A single-line or shared-line unit cannot introduce embedded LF.
-            VERIFIED and STALE each need a citation — exactly one of "source" (a repository
+            "evidence" is mandatory for every judged unit, VERIFIED included. VERIFIED and STALE
+            each further need a citation inside it — exactly one of "source" (a repository
             path) or "command" (the single command line you ran) for a tool this run declares.
             Never both: a verdict rests on one place a reader goes, so evidence carrying a
             "source" and a "command" together is refused outright. Run
@@ -144,7 +157,8 @@ jobs:
             redirection, no command substitution, and no pattern that needs a quote or an escape.
             A "command" citation is {"command": ..., "observed": ...} and nothing else: drop the
             "line" the shape above pairs with "source", because a line number points into a file
-            and a tool's output is not one.
+            and a tool's output is not one. UNVERIFIABLE needs no citation — neither "source" nor
+            "command" — but its evidence still carries "observed".
             Nothing else is reachable: the probe refuses an undeclared tool and
             any invocation that is not a --help/--version read. A claim no declared tool can
             settle is genuinely UNVERIFIABLE here, and the report's evidence boundary says why.
@@ -153,7 +167,9 @@ jobs:
             --path <path>` to get its assertion units, and answer for each by its "ordinal" field
             (the small integer printed alongside it) — never its 64-character "digest": the
             engine maps the ordinal back to the unit for you, so there is nothing to transcribe.
-            Classify every unit, and for every "factual" unit reach
+            Classify every assertion-capable unit — segment prints "assertion_capable" per unit,
+            and only an assertion-capable unit may take a class other than "non-assertive"
+            (classification-not-assertion-capable). For every "factual" unit reach
             a verdict with evidence per the shapes above. Documents with obligation "anchor" need
             no verdicts from you — the engine checks those deterministically. Write the result to
             verdicts.json in the repository root. A document you could not examine still needs an

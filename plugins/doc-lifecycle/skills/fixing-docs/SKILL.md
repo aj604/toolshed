@@ -33,11 +33,12 @@ already meets that bar and is placed byte-verbatim.
 
 ### 1. Mint the approval set
 
-Semantic approval is a person naming record digests from one report. That act mints
-the artifact; the names alone are not it.
+The input is one **engine report** — `drift-audit` or `bloat-audit` output — plus the
+record **digests** a person selected from it. That selection is the semantic approval,
+and minting is what turns it into the artifact; the names alone are not it.
 
 ```bash
-python3 -m doclifecycle mint-approval --report report.json --repo . \
+python3 -m doclifecycle mint-approval --report "${TMPDIR:-/tmp}/report.json" --repo . \
   --record <record digest> --minter <who approved> --out /tmp/approval.json
 ```
 
@@ -47,104 +48,58 @@ report can renumber. Repeat it once per approved record. Write the artifact
 would-be-tracked path, because a `git add -A` in the change it authorizes would
 commit the authority next to the diff.
 
-Minting refuses before it mints — an unapprovable report, an unknown record, a
-selection that takes one leg of a mutually exclusive reconciliation group, a target
-outside the declared roots, a preimage that moved. **A refusal is the answer, not an
-obstacle**: report it and stop.
+That same placement rule covers every audit artifact you carry into this flow, not just
+the approval set — the report, the verdicts/plan the detecting skill produced, and the
+edit plan you author in step 2. Step 3's confinement check (below) compares the working
+tree against the approval set's paths, so a `drift-report.json` or `verdicts.json` left
+sitting in the tree reads as an unaccounted change and the run refuses before it applies
+anything. `detecting-doc-drift` and `detecting-doc-bloat` write their artifacts to
+`${TMPDIR:-/tmp}/` for exactly this reason; keep them there rather than moving them into
+the repo to "review before minting."
+
+Minting refuses before it mints; what it refuses, and in what order, is the engine
+README's **Approval sets** section. **A refusal is the answer, not an obstacle**:
+report it and stop.
 
 ### 2. Author the edit plan
 
-An edit plan is a separate artifact (`artifact: edit-plan`) bound to exactly one
-approval set by digest. Every operation names the approved record it comes from, the
-target class it writes (`documentation` — the only declarable one), the exact
-preimage of what it replaces, and the plan declares the sha256 postimage of every
-written path.
+This is the one artifact you author, and its shape is not yours to remember. The closed
+operation vocabulary, each operation's exact field set, the preimage and postimage
+rules, and which operations each finding code's remedy is made of (`RECORD_REMEDIES`)
+are the engine README's **The applier** section, over
+`${CLAUDE_PLUGIN_ROOT}/engine/doclifecycle/applier.py`. Read each operation's field set
+there and build the operation from it — never from memory, an older plan, or an example.
 
-The operation vocabulary is closed — `replace`, `delete`, `insert`,
-`create-document`, `retire-document`, `move-with-provenance` — and **the remedy
-belongs to the record, not to you**:
+Three rules are yours rather than the engine's, and each one is a way an authorized run
+still lands an unauthorized diff.
 
-| Finding code | The operations its remedy is made of |
-|---|---|
-| `STALE`, `UNVERIFIABLE` | `replace`, `delete`, `insert` |
-| `ANCHOR-STALE` | `replace`, `delete`, `insert` |
-| `CUT` | `delete` |
-| `CONDENSE` | `replace`, `delete`, `insert` |
-| `EXTRACT-AND-MOVE` | `move-with-provenance` |
-| `MERGE-DOC` | `move-with-provenance` + `retire-document` |
-| `RETIRE-DOC` | `retire-document` |
-| `DISTILL` | `create-document`, `replace`, `insert`, `delete`, `retire-document` |
+**The remedy belongs to the record, not to you.** The finding code decides which operations
+its plan may carry; a plan that picks the operation puts the choice back with the model, and
+the engine refuses it (`plan-operation-not-record-remedy`). When the fix seems to need an
+operation the code does not authorize, that is something to surface for the next audit, not
+a plan to widen.
 
-Picking an operation the code does not list is `plan-operation-not-record-remedy` and
-the run refuses. A positioned operation — `replace`, `insert`, `delete` — may name only
-the record's own document, and must lie within the hull of that record's approved
-assertion units — first line through last — or it is
-`plan-span-outside-approved-units` / `plan-target-not-record-target`. The record's units
-locate nothing in its `destination`, so there is no passage to bound an edit there:
-a destination is written whole, by `create-document`, or by a move's append. Widen
-nothing: an adjacent passage the approval did not cover is a separate record's business
-even when the two sit one paragraph apart.
+**Widen nothing.** A positioned operation may name only the record's own document, and must
+lie inside that record's approved assertion units. An adjacent passage the approval did not
+cover is a separate record's business even when the two sit one paragraph apart, and even
+when the report drafted that neighbour's text.
 
 **The text inside the operation is the report's, not yours.** A `STALE` record's `fix`
 and a `CONDENSE` record's `proposal` are complete replacement text drafted to the
-writing-docs bar — place them byte-verbatim and stop at their final character. The hull
-bounds *where* you may write; nothing bounds *what*, so authoring your own sentence
+writing-docs bar — place them byte-verbatim and stop at their final character. The approved
+units bound *where* you may write; nothing bounds *what*, so authoring your own sentence
 inside an approved span produces a diff the applier certifies and no reviewer approved.
-Compose text only where the record supplies none (a merged remainder, a distillation's
-residue), and route it through **writing-docs**.
-
-A STALE `fix` may itself contain LF when its approved assertion unit was soft-wrapped. That LF,
-the list marker, and continuation indentation are part of the approved replacement: copy the
-whole string byte-verbatim into the operation's `text`, including every embedded line break.
-Never collapse or re-wrap it while planning. The audit method already made the authoring judgment;
-the engine README's **The applier** section owns the replacement mechanics.
-
-This is the one artifact you author, so here is the whole shape — a `STALE` record
-remedied by a single `replace`:
-
-```json
-{
-  "artifact": "edit-plan",
-  "schema_version": 1,
-  "approval_digest": "<the approval set's own digest, verbatim>",
-  "operations": [
-    {
-      "op": "replace",
-      "record": "<the approved record's digest>",
-      "target_class": "documentation",
-      "path": "docs/architecture.md",
-      "start_line": 7,
-      "end_line": 7,
-      "preimage": "The service charges a flat 2% fee.",
-      "text": "The service charges a flat 2.5% fee."
-    }
-  ],
-  "postimages": {"docs/architecture.md": "<sha256 of the file's bytes after the plan>"},
-  "digest": "<sha256 of everything above except digest, canonical JSON>"
-}
-```
-
-**A span's `preimage` is `"\n".join` of lines `start_line`..`end_line`, with no trailing
-newline** — the applier splits the document on `\n` and compares that join, so a preimage
-carrying the line's own newline is `apply-preimage-mismatch` even when the text is right.
-`text` replaces those lines under the same rule. (`retire-document` is the exception: its
-preimage is the whole file's bytes, final newline and all.) Each field set is exact and
-closed —
-`delete` is the `replace` fields minus `text`, `insert` takes `after_line` and `text`
-with no span and no preimage, `create-document` takes `path` and `text` only,
-`retire-document` takes `path` and the whole document as `preimage`, and
-`move-with-provenance` is `delete`'s fields plus `destination` (it carries no `text` —
-what moves is the preimage). Every one also carries `op`, `record`, and `target_class`.
-An extra or a missing field is `plan-invalid-operation`, so build each op from its own
-row rather than by editing the example above. `postimages` names every written path (`null` for a retired
-document) and is re-derived, not believed: compute it from the bytes your operations
-produce, or it is `plan-postimages-not-derived`.
+A `fix` may itself contain LF when its assertion unit was soft-wrapped; that LF, the list
+marker, and the continuation indentation are part of the approved replacement, so copy the
+whole string in and never collapse or re-wrap it while planning. Compose text only where
+the record supplies none (a merged remainder, a distillation's residue), and route it
+through **writing-docs**.
 
 ### 3. Run the applier
 
 ```bash
-python3 -m doclifecycle apply-plan --repo . --plan plan.json \
-  --approval /tmp/approval.json --report report.json \
+python3 -m doclifecycle apply-plan --repo . --plan "${TMPDIR:-/tmp}/plan.json" \
+  --approval /tmp/approval.json --report "${TMPDIR:-/tmp}/report.json" \
   [--audit-config-digest <sha256>]
 ```
 
@@ -155,14 +110,16 @@ an unrelated edit sitting in the tree refuses the run: outside the approval's sc
 `apply-working-tree-not-confined`, inside it as `apply-working-tree-not-clean`. Commit or
 discard first.
 
-Exit codes: `0` applied (or already applied — the no-op verdict is derived, so
-re-running an interrupted lane is safe), `1` invalid, `2` usage, `3` stale.
+Re-running an interrupted lane is safe: the no-op verdict is derived from the bytes on
+disk, never declared by the plan. The exit codes and every refusal code the run can
+return are the engine README's — **The applier**, and **Approval sets** for the authority
+check it runs first.
 
 `already_applied: true` on a run you have not made before is a **tripwire, not a
 success**: the bytes were already on disk, which means something other than the applier
 put them there. Say so rather than presenting the diff as this run's work.
 
-### 4. Present the staged diff for change approval
+### 4. Present the working-tree diff for change approval
 
 The applier never stages and never commits. **Change approval — a person accepting the
 produced diff — is the only thing that lands anything**, so the run ends by showing the
@@ -182,7 +139,8 @@ The approval set itself never enters the repository. Its digest and rendered sum
 | The verdict is **invalid** (exit 1) | Stop and report every problem. An invalid artifact is a forgery or a bug, not a state to work around. |
 | The report is `clean`, or a record you were given is not in it | Stop. The inputs disagree; never guess which record was meant. |
 | A record you were **not** given is obviously right | Surface it. Unapproved is unapproved, and an unminted record cannot reach a plan at all. |
-| A record's code is not in the remedy table above — `POLICY`, or anything a newer detector emits | Stop and surface it. `RECORD_REMEDIES` is closed and fail-shut: a code nobody listed authorizes **no** operation, so there is no plan to write. `POLICY` in particular is a legacy bulk verdict the bloat engine replaced with enumerable scopes, and its records expand to one per file — approve those instead. |
+| A record's code authorizes no operations — `POLICY`, `ANCHOR-MISSING`, `ANCHOR-MALFORMED`, `ANCHOR-UNVERIFIABLE`, `ANCHOR-FUTURE-DATED`, `ANCHOR-UNRESOLVABLE-REFERENCE`, or anything a newer detector emits | Stop and surface it. `RECORD_REMEDIES` is closed and fail-shut: a code nobody listed authorizes **no** operation, so there is no plan to write. `POLICY` is a legacy bulk verdict the bloat engine retired in favor of enumerable `RETIRE-DOC` scopes. Five of the six `ANCHOR-*` codes need a `> As of` line a human authors, not a span edit anyone approved — minting refuses to select one of them at all, so you will not carry one this far into the flow. **`ANCHOR-STALE` is not one of these five**: its remedy rewrites the anchor line like any other span edit, so do not lump it in with its siblings just because the family name matches — check a record's own code against this table, never the `ANCHOR-` prefix alone, before deciding it is a dead end. |
+| Audit artifacts (report, verdicts, plan) sitting in the work tree | Move them to `${TMPDIR:-/tmp}/` (or another git-ignored path), do **not** commit them. Committing moves `base_commit` and stales the approval you just minted — the recovery is re-running the audit, which re-dirties the tree the same way. Relocate, never commit. |
 
 **Never edit the approval set, the report, or the plan's declared digests to make a
 refusal go away.** Repairing a stale `base_commit`, recomputing a digest over altered
@@ -244,7 +202,11 @@ force it through, and never re-edit a landed result it flagged as a collision.
 
 A `DISTILL` record whose `status` is `pending-implementation` is never actionable: there
 is no landed code to verify claims against, so skip it with a note even when it was
-approved.
+approved. **The planning document's own `> Status:` marker is the authority for that
+status**, not the record and not your reading of the plan — the engine refuses a verdict
+whose status disagrees with the file, and an absent or malformed marker reads as
+`pending-implementation`. So "the plan is really done, the marker is just out of date" is
+something to surface, never something you decide.
 
 ## Red flags — STOP
 
@@ -262,8 +224,8 @@ approved.
   reading stale → same forgery, other side. The artifact gets remade, not the repository.
 - About to mint with an absent reviewer's name because "they already approved this
   morning" → minting is their act. Re-run the audit and hand it back.
-- Attaching a `retire-document` (or any operation the table does not list) to a
-  record's plan because it is what the fix "really needs" → the remedy is the record's;
+- Attaching a `retire-document` (or any operation the record's code does not authorize)
+  to a record's plan because it is what the fix "really needs" → the remedy is the record's;
   a plan that picks the operation puts the choice back with the model.
 - An operation reaching a passage outside the approved record's units → out of scope,
   even one paragraph away, even when the report drafted that neighbour's text for you.
@@ -281,7 +243,7 @@ approved.
 | "The report already lists the record, so it's approved" | A report is proof of what was examined, not authority. Only an approval set authorizes, and only a person or a configured auto-apply policy mints one. |
 | "The ID list I was handed *is* the approval" | It is how an approval set is minted, never a substitute for one. Mint it and let the engine validate it. |
 | "The lane is blocked / it ships today — minting costs minutes I don't have" | Minting is one command over digests the report already carries; the flow is a couple of minutes, and it is the same couple of minutes whether or not anyone is waiting. Deadline pressure is when an unauthorized diff is least likely to be caught, which is exactly why it is not when the rule bends. |
-| "I'll place my own wording in the approved span — it reads better than the report's `fix`" | The hull bounds where, not what. Text you authored inside an approved span is a diff the applier certified and nobody approved. |
+| "I'll place my own wording in the approved span — it reads better than the report's `fix`" | The approved units bound where you write, not what. Text you authored inside an approved span is a diff the applier certified and nobody approved. |
 | "It's one line — the applier is overkill for this" | The applier is what makes it one *reviewable* line: preimage checked, scope confined, provenance recorded. A hand edit is an unauthorized diff of exactly the same size. |
 | "The approval went stale on an unrelated commit — the doc didn't change" | Stale authorizes nothing, and you do not get to decide which staleness was harmless. Re-run the audit and mint afresh; it is cheap. |
 | "I'll just fix the base_commit field so it validates" | That is forging authority. The digest exists so every tamper is "delete one field". |

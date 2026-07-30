@@ -15,8 +15,8 @@ wrote by comparing the scratch tree against the install, refuses the run whole i
 lies outside what `apply-upgrade.py` owns, and is vendored precisely because both upgrade jobs
 must run it from a copy of the install's own tooling taken before the regeneration wrote the
 release's copy of it),
-`scripts/render-report.py` (that lane's run surface, plus `detecting-doc-bloat`'s in-session
-`bloat-triage` rendering — its only two consumers since #77),
+`scripts/render-report.py` (the upgrade lane's run surface — its only consumer;
+`detecting-doc-bloat` now summarizes its report by hand rather than through a subcommand here),
 `scripts/render-audit-summary.py` (the audit lane's run-surface rendering — #71),
 `scripts/render-apply-summary.py` (the apply lane's run surface — its refusals, its
 staged path list, and the PR title, body, and commit message that carry the approval set's digest
@@ -141,7 +141,7 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   open notice issue per release), `stage-upgrade_test.py` that
   lane's path authority in both directions (the manifest step's refusals, and the credentialed
   step re-deriving them from a manifest edited in between), `render-report_test.py` that lane's
-  run-surface strings (and `bloat-triage`, which `detecting-doc-bloat` renders in session), and
+  run-surface strings, and
   `apply-upgrade_test.py` that workflow's
   deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
   unextractable knobs). Three suites cover the
@@ -152,7 +152,7 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   grant naming a Bash executable beyond `git`/`python3`, since those patterns are prefix-matched,
   #118),
   `install-parity_test.py`
-  (the dogfooded `.github/` install is byte-identical to what `apply-upgrade.py` would lay down
+  (the dogfooded install (`.doc-lifecycle/` plus the three lane workflows under `.github/workflows/`) is byte-identical to what `apply-upgrade.py` would lay down
   from the plugin with this install's knobs, plus a whole-tree comparison of the vendored engine),
   and `engine-capability_test.py` (the engine's
   applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the

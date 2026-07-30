@@ -1,6 +1,6 @@
 # Docs as checkable claims — how doc-lifecycle thinks
 
-> As of 2026-07-27 (doc-lifecycle 0.28.0; skill files under `plugins/doc-lifecycle/skills/`, applier contract in `plugins/doc-lifecycle/engine/README.md`)
+> As of 2026-07-29 (doc-lifecycle 0.44.0; skill files under `plugins/doc-lifecycle/skills/`, applier contract in `plugins/doc-lifecycle/engine/README.md`)
 
 Five minutes here explains every skill in the plugin. Each principle below names the
 skill file that enforces it, so none of this is aspiration — you can go read the rule.
@@ -39,8 +39,9 @@ enum, cited evidence — and stop. One skill applies them, `fixing-docs`, and on
 authorized: every record carries an ID, you approve a subset of IDs, and that selection is
 minted into an **approval set** — the artifact the applier treats as its sole authority, a
 report on its own being worth nothing. Drift and bloat land through the same door and the
-same gate: each approved `STALE` record's drafted fix at its location, each approved bloat
-record's span and nothing beside it. No "while I'm here" cleanups, no rewording the
+same gate: each approved `STALE` record's drafted fix at the unit it names (`location` is
+a display string the engine derives for readers; the unit digest is what anchors the edit),
+and each approved bloat record's span and nothing beside it. No "while I'm here" cleanups, no rewording the
 proposal text. That discipline has one written owner, the applier contract in
 `plugins/doc-lifecycle/engine/README.md` (its "Approval sets" and "The applier" sections),
 which `fixing-docs` cites. A fix that also lands its author's opinions stops being
@@ -49,13 +50,20 @@ reviewable; this one stays reviewable by construction.
 ## 4. Automation is a graduation, not a default
 
 Installing the plugin schedules **nothing**. The skills run when you ask, in your
-session, with you approving. Unattended operation exists — a nightly drift sync and a
-weekly bloat sweep as GitHub Actions — but only after you explicitly install it via
-`scheduling-doc-sync`, and it keeps the same shape: its output is **pull requests, never
-direct commits to your default branch** (`skills/scheduling-doc-sync/SKILL.md` forbids a
-direct-commit mode outright; the only direct push is a marker bump on a no-drift night).
-Past its blast-radius cap the nightly files a labeled issue instead of an oversized PR,
-and the bloat sweep only ever opens **draft** PRs.
+session, with you approving. Unattended operation exists — but only after you explicitly
+install it via `scheduling-doc-sync`, as three GitHub Actions with the write authority
+split out of the schedule: a **nightly drift audit** that holds `contents: read`, no
+credential, and opens no PR, no commit, no issue — it stops at a published report; a
+**manual apply dispatch**, never scheduled, that a person triggers by naming the record
+digests they approve, and which opens one **real pull request** (never a draft) for you
+to merge; and a **weekly self-upgrade check** that compares your installed version to the
+plugin's latest release and, when one is available, files a notice issue naming it — the
+schedule never opens a PR on its own. A PR only appears once a person dispatches the same
+workflow by hand naming the target version; that dispatch clones the target release,
+regenerates the wiring, and opens the review PR (see [scheduling-doc-sync.md](scheduling-doc-sync.md)).
+There is no scheduled bloat sweep — bloat auditing stays interactive
+(`docs/guides/auditing-doc-bloat.md`).
+Merging is still the only thing that lands anything; the schedule can only ever propose.
 
 Run the loops by hand first. When the record shapes are familiar and the approvals feel
 routine, [turn on the schedule](scheduling-doc-sync.md) — that ordering is the intended

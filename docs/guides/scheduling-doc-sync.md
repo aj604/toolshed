@@ -1,6 +1,6 @@
 # Turning on nightly automation with `scheduling-doc-sync`
 
-> As of 2026-07-28 (doc-lifecycle 0.42.2, engine-based audit and apply lanes, install artifacts
+> As of 2026-07-29 (doc-lifecycle 0.44.0, engine-based audit and apply lanes, install artifacts
 > centralized under `.doc-lifecycle/`, and legacy upgrade cleanup;
 > `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`,
 > `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml`,
@@ -19,8 +19,14 @@ is the explicit opt-in.
 ## What you're signing up for, exactly
 
 Three GitHub Actions, installed by the skill (never hand-rolled YAML). The split between
-them is the whole design: **the one that runs on a schedule cannot write, and the one
-that writes cannot start without you.**
+them is the whole design: **nothing that runs on a schedule can touch your default branch
+or your wiring — only a job you dispatch yourself can.** Two of the
+three lanes run on a schedule — the nightly audit and the weekly upgrade check — and each
+holds only the narrowest write scope its job needs: the audit lane holds no write
+permission at all, and the upgrade lane's scheduled job holds only `issues: write`, enough
+to file one notice issue naming a newer release. The jobs that can commit, push, or open a
+pull request — the apply lane's `apply` job and the upgrade lane's `land`
+job — are gated `workflow_dispatch` only and unreachable from either schedule.
 
 **Nightly audit** (`doc-audit.yml`, default `0 1 * * *`) — read-only, every night:
 
@@ -46,10 +52,16 @@ that writes cannot start without you.**
   exactly the paths the engine's verified result named, and opens a **real pull
   request** — not a draft. Merging it is what lands anything.
 
-**Weekly self-upgrade** (`doc-sync-upgrade.yml`, default `0 2 * * 1`) — compares your
-installed version to the plugin's latest release, regenerates the wiring at a newer one,
-and opens a review PR. When you're already current it self-explains and stops. It runs no
-model at all; the regeneration is a tested script.
+**Weekly self-upgrade** (`doc-sync-upgrade.yml`, default `0 2 * * 1`) — on the schedule it
+only compares your installed version to the plugin's latest release; when one is newer it
+files a **notice issue** naming it and stops there (`issues: write` is its only write
+scope, one open notice per release). It never regenerates anything or opens a PR on its
+own. Regenerating the wiring and opening the review PR happens only when a person
+dispatches the same workflow by hand, naming the target version
+(`gh workflow run doc-sync-upgrade -f target=X.Y.Z`) — that run clones the target release,
+regenerates the wiring in a scratch copy, and a separate credentialed job stages exactly
+what changed and opens the PR. When you're already current, either path self-explains and
+stops. It runs no model at all; the regeneration is a tested script.
 
 **What the model can and can't do.** Every job that runs a model is read-only: no write
 token, no credential left behind by the checkout. It hands its work to the next job as an
@@ -132,19 +144,22 @@ gh workflow run doc-apply \
 - **Waivers:** `.doc-lifecycle/drift-waivers.json` records claims you've accepted as
   unverifiable, matched by the text you quoted. Reword the line and the waiver stops
   applying — new authorship is a new decision.
-- **Upgrades:** they arrive as a PR from `doc-sync-upgrade.yml`. To force one, re-run the
-  skill; your knobs and state files are preserved, and only the wiring, the pin, and the
-  lockfile change.
+- **Upgrades:** the weekly schedule only notices a newer release and files an issue; the PR
+  arrives once you (or anyone with dispatch access) run
+  `gh workflow run doc-sync-upgrade -f target=X.Y.Z` naming the version from that issue. To
+  upgrade from a local checkout instead, re-run the skill; your knobs and state files are
+  preserved, and only the wiring, the pin, and the lockfile change.
 - **If you installed before 0.40.0:** your wiring is still at `.github/doc-sync/`, and the
   upgrade lane cannot move it — that lane runs *your* installed copy of the path authority,
   which predates the new layout and refuses the change set. Re-run the skill from a local
   checkout to relocate; it carries your judgment files and the sync marker across byte-for-byte
   and leaves anything else in the old directory where it is, naming it on the run surface.
 
-## One-time cleanup after upgrading past 0.41.0
+## One-time cleanup after upgrading past 0.37.0
 
-If your install used the legacy write lanes, an upgrade past 0.41.0 can leave three legacy
-artifacts behind. After the upgrade succeeds, they are safe to remove:
+If your install used the legacy write lanes (removed at 0.38.0), an upgrade landing on
+0.38.0 or later can leave three legacy artifacts behind. After the upgrade succeeds, they
+are safe to remove:
 
 ```
 git rm --ignore-unmatch \

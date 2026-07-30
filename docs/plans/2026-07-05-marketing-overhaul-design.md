@@ -1,5 +1,7 @@
 # Marketing overhaul: onboarding guides + README restructure — design
 
+> Status: ready
+
 **Date:** 2026-07-05
 **Status:** approved (in-session), implemented in the same PR
 

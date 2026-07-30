@@ -10,32 +10,38 @@ that residue as **edit-plan operations**. You are not the applier: you write no
 file, `git rm` nothing, and stage nothing. The one component that writes is
 `doclifecycle/applier.py`, and it executes only what an approval set authorized.
 
-Input: one `DISTILL` record with `status: "ready"` (`id`, `digest`, `doc` = the
-artifact path, `destination` = the document the residue lands in, `evidence` =
-the landed-code proof; records carry **no payload** — authoring the residue is
-your job, and it happens only now, after a human approved this record's digest),
-plus the path of the report the record came from (context for step 4's
-sibling-collision dedup — the other records are context, never action items).
-You act only on that record.
+Input: one `DISTILL` record with `status: "ready"` (`id`, `digest`, `path` = the
+artifact path, `destination` = an object naming the document the residue lands
+in (`{"path", "kind", "set", "selected_by", "constraints"}`) or absent,
+`evidence` = the landed-code proof; records carry **no payload** — authoring
+the residue is your job, and it happens only now, after a human approved this
+record's digest), plus the path of the report the record came from (context
+for step 4's sibling-collision dedup — the other records are context, never
+action items). You act only on that record. Everywhere below, "the
+destination" means `destination.path` — the object's other fields are context,
+never a path to write.
 
 **Your write set is exactly two paths**, because that is what one record
-authorizes (`approval.Record.targets()`): the artifact at `doc`, and the record's
-`destination`. Residue that belongs anywhere else is **reported as unplaceable,
-never smuggled in** — it needs its own record, its own approval, its own plan.
+authorizes (`approval.ApprovedRecord.targets()`): the artifact at `path`, and
+the record's `destination.path`. Residue that belongs anywhere else is
+**reported as unplaceable, never smuggled in** — it needs its own record, its
+own approval, its own plan.
 
 A record with **no** `destination` authorizes one path, the artifact. Then the
 whole residue is unplaceable: draft it, report it in full, emit only the
 `retire-document` — and say plainly that retiring on that plan alone would be
 lossy, so a human can withhold it. Never widen the write set to compensate.
 
-A `DISTILL` record's `destination` is optional, and when it is there it names a
-document that **does not exist yet** (`bloat.RESIDUE_VERDICTS`): the audit
-refuses a destination that already exists, and the applier refuses any
-positioned edit — `insert`, `replace`, `delete` — on a destination, because the
-passage an approval bounds you to exists only on the record's own document. So
-residue for a destination is **exactly one `create-document`**, and residue
-belonging in a document that already exists is unplaceable under this record
-like anything else outside your two paths.
+A `DISTILL` record's `destination` is optional, and when it is there its
+`path` field names a document that **does not exist yet**
+(`bloat.RESIDUE_VERDICTS`): the audit refuses a destination that already
+exists, and the applier refuses any positioned edit — `insert`, `replace`,
+`delete` — on it, because the passage an approval bounds you to exists only on
+the record's own document. So residue for a destination is **exactly one
+`create-document`**, whose own `path` field is `destination.path` — never the
+destination object itself — and residue belonging in a document that already
+exists is unplaceable under this record like anything else outside your two
+paths.
 
 ## The procedure (in order, no steps skipped)
 
@@ -68,7 +74,7 @@ like anything else outside your two paths.
 4. **Dedup before emitting.** If a sibling record in the same report (e.g. an
    `EXTRACT-AND-MOVE`) is landing near-duplicate text where your residue goes,
    emit it once and note the collision in your report — never both.
-5. **Emit the residue as one `create-document` on the record's `destination`.**
+5. **Emit the residue as one `create-document` at `destination.path`.**
    Its `text` is the whole file, opening with growing-docs'
    `> As of <today> (<the anchor>)` first line, and it must meet the
    writing-docs bar (dense, anchored, no narrative; for an always-loaded target,
@@ -98,7 +104,7 @@ like anything else outside your two paths.
    content now lives, so the dispatcher can raise them for approval. They are
    outside your two authorized paths, so no operation of yours may touch them.
    Frozen records (`tests/baselines/`) are not references to repoint; say so.
-8. **Retire the artifact.** Emit `retire-document` on `doc`, carrying the
+8. **Retire the artifact.** Emit `retire-document` on `path`, carrying the
    artifact's exact current text as `preimage`.
 9. **Report.** Return, as JSON your dispatcher can fold into the edit plan:
    `operations` (each with `op`, `record` = the record digest, `target_class`:
@@ -121,9 +127,10 @@ like anything else outside your two paths.
 - `status` not `"ready"`, the artifact missing, or the landing re-verify
   failing → refuse; return the record with the reason. Never improvise.
 - **Every operation names one of your two authorized paths** — the artifact, or
-  the record's `destination`. Residue for a third document is reported, never
-  emitted: `plan-target-not-record-target` is the applier refusing exactly that,
-  and reaching for it anyway only turns a reportable gap into a failed run.
+  the record's `destination.path`. Residue for a third document is reported,
+  never emitted: `plan-target-not-record-target` is the applier refusing
+  exactly that, and reaching for it anyway only turns a reportable gap into a
+  failed run.
 - A `replace`, `delete`, or `insert` may name **only the artifact**, and must
   lie inside the hull of the record's approved assertion units. The destination
   has no hull — the record's units locate nothing there — so the applier

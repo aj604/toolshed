@@ -1,5 +1,12 @@
 # Docs A/B experiment — does doc quality move agent task performance?
 
+> Status: pending-implementation
+
+The harness (`tests/docs-ab/`) is built and committed (84b4f9c), but this pass found no
+committed evidence that the experiment's runs were executed to a recorded conclusion —
+results, if any exist, live in the gitignored `skill-workspaces/docs-ab/` the harness
+writes to. Marked pending rather than guessed ready.
+
 Design approved 2026-07-11. Tests the plugin's three load-bearing premises against
 measured agent behavior instead of authored conviction: the premises, the corpus that
 encodes them, and the plugin that implements them share one author, so this experiment

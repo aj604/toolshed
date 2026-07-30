@@ -1063,6 +1063,97 @@ class NarrativeAnchors(DriftRepoTestCase):
         self.assertEqual(record.extra["evidence"]["source"], "src/")
         self.assertIn("last changed", record.extra["evidence"]["observed"])
 
+    def test_a_dot_directory_anchor_is_still_checked(self):
+        """Issue #57 review: `FILE_EXTENSION` anchors on the end of the
+        string, so a directory whose own name begins with a dot matched it
+        whole — `.github` is "a dot then up to six word characters". Read as a
+        file spelling, the trailing '/' survived into the candidate, which
+        `repository_relative_problem` then refused as non-canonical, so the
+        reference was dropped and the anchor silently stopped being checked:
+        the exact failure the canonical path policy exists to prevent."""
+        for directory in (".github", ".claude", ".vscode"):
+            with self.subTest(directory=directory):
+                root = self.drift_repo(**{
+                    NARRATIVE: "# Tour\n\n"
+                               f"> As of 2026-01-01 (`{directory}/`)\n\nHi.\n"})
+                self.write(root, f"{directory}/config.yml", "on: push\n")
+                self.commit(root, "add a config beneath the dot directory")
+
+                report = self.audit(root)
+
+                record = self.anchor_records(report)["ANCHOR-STALE"]
+                self.assertEqual(
+                    record.extra["evidence"]["source"], f"{directory}/"
+                )
+
+    def test_no_unsafe_spelling_of_an_anchor_reference_is_accepted(self):
+        """Issue #57 review: the ad-hoc filter accepted spellings
+        `paths.repository_relative_problem` rejects — `paths.py` is the single
+        owner of what a repository-relative path is (drift.py:701-705), and an
+        anchor reference is no exception. A candidate with any path problem is
+        prose the extractor never claimed as a reference, so it is silently
+        skipped, not surfaced as ANCHOR-UNRESOLVABLE-REFERENCE."""
+        unsafe = {
+            "windows separator": r"docs\guide.md",
+            "windows separator, directory": "docs\\x/",
+            "trailing separator": "docs/guide.md/",
+            "leading dash": "-rf.md",
+            "drive letter": "C:/x/guide.md",
+            "drive letter, directory": "C:/x/",
+            "absolute": "/etc/passwd",
+            "home relative": "~/notes.md",
+            "traversal": "../x/",
+            "traversal, mid path": "docs/../../etc/passwd",
+            "cancelling traversal": "docs/../docs/guide.md",
+            "whitespace": "docs/my guide.md",
+        }
+        for name, reference in unsafe.items():
+            with self.subTest(spelling=name):
+                root = self.drift_repo(**{
+                    NARRATIVE: "# Tour\n\n"
+                               f"> As of 2026-01-01 (`{reference}`)\n\nHi.\n"})
+
+                report = self.audit(root)
+
+                self.assertEqual(report.records, ())
+
+    def test_a_non_canonical_spelling_of_a_real_path_is_still_checked(self):
+        """Issue #57 review: the ad-hoc filter's replacement over-corrected.
+        `./docs/guide.md`, `docs//guide.md` and `docs/./guide.md` all name the
+        file `docs/guide.md` and resolve on disk, but the canonical check ran
+        on the token as written, so the extractor dropped them and a narrative
+        document anchored on one reported *clean* — the anchor stopped being
+        checked at all. Normalizing the candidate first is what keeps the
+        refusal about hostile spellings rather than about punctuation."""
+        for spelling in ("./src/fees.py", "src//fees.py", "src/./fees.py"):
+            with self.subTest(spelling=spelling):
+                root = self.drift_repo(**{
+                    NARRATIVE: "# Tour\n\n"
+                               f"> As of 2026-01-01 (`{spelling}`)\n\nHi.\n"})
+                self.write(root, SOURCE, "RATE = 0.025\n")
+                self.commit(root, "raise the rate")
+
+                report = self.audit(root)
+
+                record = self.anchor_records(report)["ANCHOR-STALE"]
+                self.assertEqual(record.extra["evidence"]["source"], spelling)
+                self.assertIn("last changed", record.extra["evidence"]["observed"])
+
+    def test_a_bad_spelling_does_not_hide_a_real_reference_in_the_same_anchor(self):
+        """A malformed sibling is silently skipped as prose; it must not
+        swallow the canonical reference beside it."""
+        root = self.drift_repo(**{
+            NARRATIVE: "# Tour\n\n"
+                       f"> As of 2026-01-01 (`docs\\guide.md`, `{SOURCE}`)\n\nHi.\n"})
+        self.write(root, SOURCE, "RATE = 0.025\n")
+        self.commit(root, "raise the rate")
+
+        report = self.audit(root)
+
+        records = self.anchor_records(report)
+        self.assertNotIn("ANCHOR-UNRESOLVABLE-REFERENCE", records)
+        self.assertEqual(records["ANCHOR-STALE"].extra["references"], [SOURCE])
+
 
 class EvidencePointers(DriftRepoTestCase):
     def stale_record(self, root, **overrides):

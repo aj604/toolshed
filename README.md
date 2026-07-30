@@ -61,29 +61,38 @@ Two skills need no starting point because they trigger on the way: any edit to a
 
 ## What an audit hands you
 
-Not "the docs look a bit stale" — a machine-checkable record per claim. This is a record from the worked example in the drift skill's own [output contract](plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md):
+Not "the docs look a bit stale" — a machine-checkable record per claim. This is a real record from an actual run of `python3 -m doclifecycle drift-audit` (reproduced verbatim, against a small repo whose README still said `make reset` after the Makefile's target was renamed `clean`):
 
 ```json
 {
-  "claim": "Reset state = `make reset`",
-  "location": "CLAUDE.md:18",
+  "id": "DRIFT-001",
+  "digest": "e748c840071e26532216ed2c4381e3007bc532b58572d19123a8db2862e8bdf1",
+  "code": "STALE",
+  "path": "docs/README.md",
+  "units": ["239c43567bf0107d4104098d06a205a9800c289769dfada237743ec7849f3cb6"],
+  "assertion": "Reset state = `make reset`.",
+  "assertion_class": "factual",
+  "location": "docs/README.md:3",
   "kind": "command",
   "tier": 1,
-  "verdict": "STALE",
-  "evidence": "Makefile has `clean:`, no `reset` target",
-  "fix": "Reset state = `make clean`"
+  "evidence": {
+    "observed": "the Makefile defines `clean:`, no `reset` target",
+    "source": "Makefile",
+    "line": 1
+  },
+  "fix": "Reset state = `make clean`."
 }
 ```
 
 Three properties make this more than a report:
 
 - **Every verdict carries evidence** — including `VERIFIED`. "Looks consistent" is not a verdict.
-- **`fix` is the complete replacement line**, not an instruction — so `fixing-docs` can land it as a one-hunk diff without re-deciding anything.
+- **`fix` is the complete replacement text**, not an instruction — it may span multiple physical lines when the claim it corrects does — so `fixing-docs` can land it as a one-hunk diff without re-deciding anything.
 - **The shape is enforced mechanically** — a bundled validator ([`validate-drift-output.py`](plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py), stdlib-only) rejects malformed records and emits a recomputed `summary` line automation can gate on.
 
-Closing the loop is one more request — "apply that drift report" — and `fixing-docs` lands each approved `STALE` record's `fix` at its `location`, touching nothing the report didn't flag.
+Closing the loop is one more request — "apply that drift report" — and `fixing-docs` lands each approved `STALE` record's `fix` at the unit it names — `location` above is a display string the engine derives for readers; the `units` digest is what actually anchors the edit — touching nothing the report didn't flag.
 
-Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum, cited evidence, [their own validator](plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py) — and go through the same door: you approve fixes **by record ID**, and `fixing-docs` mints that selection into the approval set the applier will not write without — the ID is how you say it, the record's digest is what gets bound. The [bloat guide](docs/guides/auditing-doc-bloat.md) walks one end to end.
+Bloat audits emit the engine's own verdict envelope (`{"schema_version": 1, "verdicts": [...]}`) — ID'd records, a fixed six-verdict enum, cited evidence, [their own validator](plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py) — and go through the same door: you approve fixes **by record ID**, and `fixing-docs` mints that selection into the approval set the applier will not write without — the ID is how you say it, the record's digest is what gets bound. The [bloat guide](docs/guides/auditing-doc-bloat.md) walks one end to end.
 
 ## What's in it
 
@@ -94,7 +103,7 @@ Bloat audits emit the same contract shape — ID'd records, a fixed verdict enum
 | `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
 | `detecting-doc-drift` | skill | Auditing docs against the code for **accuracy** — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
 | `detecting-doc-bloat` | skill | Auditing docs for low-value content — redundant, verbose, duplicated, or past its useful form — emits a structured prune/condense/distill proposal. Read-only: it proposes, a human approves. |
-| `fixing-docs` | skill | Applying an audit report — drift and bloat records alike, through one door: the IDs you approve mint an approval set, which becomes an edit plan the applier (`python3 -m doclifecycle apply-plan`) lands, and you get the staged diff back. The approval set is the only authority; nothing the report didn't flag gets touched. |
+| `fixing-docs` | skill | Applying an audit report — drift and bloat records alike, through one door: the IDs you approve mint an approval set, which becomes an edit plan the applier (`python3 -m doclifecycle apply-plan`) lands, and you get the working-tree diff back — the applier never stages; committing it is the change approval. The approval set is the only authority; nothing the report didn't flag gets touched. |
 | `scheduling-doc-sync` | skill | Wiring a repo for unattended auditing — installs the nightly **read-only** audit Action (it publishes a report and can write nothing), the manual apply dispatch that lands exactly the records you approve and opens a real PR, and the weekly self-upgrade check. |
 | `llm-doc-writer` | agent | A dispatchable subagent that produces LLM-optimized documentation with maximum context efficiency. |
 | `doc-distiller` | agent | Handles one approved DISTILL record — verifies each durable claim, then returns the edit-plan operations that put the extractions in their living docs and retire the planning artifact, landed by the same applier as every other approved record. Dispatched by `fixing-docs`. |

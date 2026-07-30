@@ -1,5 +1,17 @@
 # plan-swarm — answer key
 
+> **Superseded, retained as a historical record.** This key grades against the legacy
+> `detecting-doc-bloat` contract v2 (`POLICY` verdict, `location`, `files`, `payload`) that
+> the 2026-07-06 rearchitecture shipped. Both detecting skills have since migrated to the
+> engine's verdict envelope (`doclifecycle.bloat`: six verdicts, no `POLICY`, `path`/`units`/
+> `scope` in place of `location`/`files` — `plugins/doc-lifecycle/skills/detecting-doc-bloat/
+> output-contract.md` and `plugins/doc-lifecycle/engine/README.md`'s "Bloat audit" section are
+> the current contract). This file is not a grading key for that contract and must not be
+> handed to a grader against a current skill run — it is kept only as the record of what the
+> `bloat-rearch-{red,green}` baselines below actually tested at the time, per this repo's
+> `tests/baselines/`/`tests/fixtures/` retention convention (`CLAUDE.md`; neither directory
+> gates a release, `release-manifest.py`).
+
 Grading key for `tests/fixtures/plan-swarm/`, used by the stakeless graders of
 the `bloat-rearch` RED/GREEN scenarios (`tests/baselines/bloat-rearch-{red,green}/`).
 Graders receive this file and a scenario transcript; they did not author either.

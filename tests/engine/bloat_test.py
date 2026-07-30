@@ -2,8 +2,9 @@
 """The bloat lane's deterministic machinery (issue #66).
 
 Seams under test: `bloat.plan_chunks()`, `bloat.merge_contention()`,
-`bloat.enumerate_scope()`, `bloat.record_verdicts()`, and the chunk cache
-seam (`bloat.load_chunk()` / `bloat.store_chunk()`) as library calls.
+`bloat.enumerate_scope()`, `bloat.record_verdicts()`, `bloat.audit_bloat()`,
+`bloat.load_bloat_verdicts()`, and the chunk cache seam (`bloat.load_chunk()` /
+`bloat.store_chunk()`) as library calls.
 
 Run: python3 tests/engine/bloat_test.py
 """
@@ -25,9 +26,15 @@ from support import (  # noqa: E402  (also puts the engine on sys.path)
 from finding_test import lineage as finding_lineage  # noqa: E402
 from report_test import GitRepoTestCase  # noqa: E402  (a real git repository)
 
-from doclifecycle import RULESET_VERSION, bloat  # noqa: E402
+from doclifecycle import ARTIFACT_SCHEMA_VERSION, RULESET_VERSION, bloat  # noqa: E402
+from doclifecycle.approval import (  # noqa: E402
+    MINTER_HUMAN,
+    ApprovalSet,
+    Minter,
+    mint_approval_set,
+)
 from doclifecycle.context import build_context_index  # noqa: E402
-from doclifecycle.report import EvidenceBoundary, current_lineage  # noqa: E402
+from doclifecycle.report import EvidenceBoundary, Report, current_lineage  # noqa: E402
 from doclifecycle.results import Invalid  # noqa: E402
 
 
@@ -203,6 +210,22 @@ class ScopeEnumeration(RepoTestCase):
         self.assertIsInstance(result, Invalid)
         self.assertEqual(problem_codes(result), ["bloat-scope-not-enumerable"])
 
+    def test_a_selector_whose_value_is_not_a_string_is_refused(self):
+        # Issue #57 review (parity audit): `{"glob": 123}` reached
+        # `registry.compile_glob` and raised `TypeError` out of a public seam,
+        # so bloat-audit produced a traceback and no report at all. `set` and
+        # `kind` degraded to `bloat-scope-empty`, which is a true statement
+        # about a rule nobody could have written on purpose; all three name the
+        # same fault now.
+        for rule in ({"glob": 123}, {"set": 123}, {"kind": None},
+                     {"glob": ""}, {"glob": ["docs/*.md"]}):
+            with self.subTest(rule=rule):
+                result = bloat.enumerate_scope(self.index(), rule)
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertEqual(problem_codes(result),
+                                 ["bloat-scope-not-enumerable"])
+
     def test_a_rule_matching_nothing_is_refused(self):
         result = bloat.enumerate_scope(self.index(), {"set": "adr"})
 
@@ -365,6 +388,38 @@ class DestinationsComeFromTheIndex(RecorderTestCase):
         self.assertEqual(problem_codes(result), ["bloat-destination-forbidden"])
 
 
+class MergingTheDocumentTheIndexOwnsIsRefused(RecorderTestCase):
+    """`docs/a.md` (living) owns SHARED; `docs/plans/p.md` (planning) copies
+    it. Judging the *owner* itself for MERGE-DOC used to empty the `owners`
+    set (`owners = {...} - {path}`) and fall through to the "no other
+    occurrence" branch — false, since the index's own `duplicate_search`
+    shows the content elsewhere, and worse, a wrong model-proposed
+    destination in that slot was silently accepted (`model-proposed`),
+    bypassing the index guard. Both directions are refused here instead.
+    """
+
+    def test_omitting_a_destination_for_the_owner_is_refused_accurately(self):
+        result = self.record([self.verdict(
+            verdict=bloat.MERGE_DOC, path="docs/a.md",
+            units=[self.unit("docs/a.md", SHARED)],
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-destination-self-owner"])
+        # The old message claimed no other occurrence existed; the index's
+        # own duplicate_search over these units says otherwise.
+        message = result.problems[0].message
+        self.assertNotIn("found no other occurrence", message)
+
+    def test_a_wrong_destination_for_the_owner_is_refused_not_accepted(self):
+        result = self.record([self.verdict(
+            verdict=bloat.MERGE_DOC, path="docs/a.md",
+            units=[self.unit("docs/a.md", SHARED)],
+            destination="docs/guides/g.md",
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-destination-self-owner"])
+
+
 class ContentionIsResolvedByTheIndex(RepoTestCase):
     """Two documents in two chunks, both folding into one living document."""
 
@@ -431,7 +486,10 @@ class ResidueDestinationsAreAuthorizedNotInventoried(RepoTestCase):
             ".doc-lifecycle/registry.json": REGISTRY,
             "docs/a.md": f"# A\n\n{SHARED}\n",
             "docs/guides/g.md": "# G\n\nGuide prose.\n",
-            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+            # `> Status: ready`, since `distill()` below defaults its verdict's
+            # own status to `ready` and, since #57's review remediation, that
+            # must equal the file's own marker or the recorder refuses it.
+            "docs/plans/p.md": f"> Status: ready\n\n# P\n\n{SHARED}\n",
             "docs/plans/other.md": "# Other\n\nA second plan.\n",
         })
         self.index = build_context_index(self.root)
@@ -585,7 +643,9 @@ class ResidueClassificationHasThreeLegs(RepoTestCase):
     def setUp(self):
         self.root = self.repo({
             ".doc-lifecycle/registry.json": self.REGISTRY,
-            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+            # `distill()` below always asserts `status: "ready"`, so the file
+            # must carry that marker or the file-bound cross-check refuses it.
+            "docs/plans/p.md": f"> Status: ready\n\n# P\n\n{SHARED}\n",
         })
         self.index = build_context_index(self.root)
         self.lineage = lineage()
@@ -705,6 +765,107 @@ class BulkJudgmentsAreEnumerated(RepoTestCase):
 
         self.assertEqual(problem_codes(result), ["bloat-scope-verdict-ineligible"])
 
+    def test_a_bulk_refusal_names_the_verdicts_id_alongside_the_index(self):
+        result = self.record(verdict=bloat.CONDENSE, id="P9")
+
+        problem = result.problems[0]
+        self.assertIn("verdicts[0]", problem.location)
+        self.assertIn("id='P9'", problem.location)
+
+
+class LifecycleStateIsFileBound(RecorderTestCase):
+    """A DISTILL verdict's `status` is checked against the file, not trusted.
+
+    The file is the authority; the model is a reporter. Three planning-
+    document variants replace `RecorderTestCase`'s single `docs/plans/p.md`:
+    one whose own `> Status:` marker says `ready`, one that says
+    `pending-implementation`, and one carrying no marker at all (the
+    fail-safe default). A verdict's `status` must equal whichever of those
+    the file actually states.
+    """
+
+    def setUp(self):
+        self.index = build_context_index(self.repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/guides/g.md": "# G\n\nGuide prose.\n",
+            "docs/plans/ready.md": f"> Status: ready\n\n# P\n\n{SHARED}\n",
+            "docs/plans/pending.md": (
+                f"> Status: pending-implementation\n\n# P\n\n{SHARED}\n"
+            ),
+            "docs/plans/none.md": f"# P\n\n{SHARED}\n",
+        }))
+        self.lineage = lineage()
+
+    def distill(self, path, **overrides):
+        entry = {
+            "id": "BLOAT-D1",
+            "verdict": bloat.DISTILL,
+            "path": path,
+            "units": [self.unit(path, SHARED)],
+            "evidence": "The design landed: src/fees.py:12 states the rate.",
+        }
+        entry.update(overrides)
+        return self.record([entry])
+
+    def test_ready_verdict_against_pending_marker_is_refused(self):
+        result = self.distill("docs/plans/pending.md", status="ready")
+
+        self.assertIn("bloat-status-not-file-bound", problem_codes(result))
+
+    def test_ready_verdict_against_absent_marker_is_refused(self):
+        # No marker reads as pending-implementation, so the model reporting
+        # `ready` is the same mismatch as reporting it against an explicit
+        # pending marker.
+        result = self.distill("docs/plans/none.md", status="ready")
+
+        self.assertIn("bloat-status-not-file-bound", problem_codes(result))
+
+    def test_ready_verdict_against_ready_marker_records(self):
+        # The honest path: the file says ready, the verdict says ready.
+        result = self.distill("docs/plans/ready.md", status="ready")
+
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        self.assertEqual(result.records()[0]["status"], "ready")
+
+    def test_pending_verdict_against_absent_marker_records(self):
+        # The fail-safe default: no marker == pending-implementation, and a
+        # verdict that honestly reports that is recorded, not refused.
+        result = self.distill("docs/plans/none.md", status="pending-implementation")
+
+        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+        self.assertEqual(result.records()[0]["status"], "pending-implementation")
+
+    def test_pending_verdict_against_ready_marker_is_refused(self):
+        # Symmetry: the model may not hold a plan back either — the record
+        # must state what the file states, in both directions.
+        result = self.distill("docs/plans/ready.md", status="pending-implementation")
+
+        self.assertIn("bloat-status-not-file-bound", problem_codes(result))
+
+    def test_the_refusal_names_the_verdicts_id_and_path_not_only_the_index(self):
+        # `verdicts[N]` alone is a position in the *assembled* envelope: a
+        # chunk worker's own id is renumbered on assembly
+        # (output-contract.md's `B1..Bn`), so an index by itself names
+        # neither an id a reviewer recognizes nor the document in question —
+        # re-prompting the right chunk meant opening the envelope and
+        # counting. The location must carry both alongside the index.
+        result = self.distill("docs/plans/pending.md", id="P7", status="ready")
+
+        problem = result.problems[0]
+        self.assertEqual(problem.code, "bloat-status-not-file-bound")
+        self.assertIn("verdicts[0]", problem.location)
+        self.assertIn("id='P7'", problem.location)
+        self.assertIn("path='docs/plans/pending.md'", problem.location)
+
+    def test_the_refusal_does_not_cite_a_file_the_plugin_never_ships(self):
+        # CONTEXT.md exists only at this repo's root, for the #57
+        # re-architecture's own vocabulary — it is never distributed with the
+        # plugin, so a shipped refusal citing it points a consumer nowhere.
+        result = self.distill("docs/plans/pending.md", status="ready")
+
+        self.assertNotIn("CONTEXT.md", result.problems[0].message)
+
 
 class RefusalsAreExhaustive(RecorderTestCase):
     def test_a_unit_that_is_not_in_the_document_is_refused(self):
@@ -731,6 +892,22 @@ class RefusalsAreExhaustive(RecorderTestCase):
         result = self.record([self.verdict(verdict=bloat.DISTILL)])
 
         self.assertEqual(problem_codes(result), ["bloat-unknown-status"])
+
+    def test_a_distill_verdict_against_a_non_planning_document_is_refused(self):
+        # DISTILL is the planning-artifact verdict — nothing else validated
+        # that a source path is actually planning-kind, so a verdict naming a
+        # living document must be refused before its status is even checked
+        # (docs/a.md carries no `> Status:` marker of its own; a
+        # bloat-status-not-file-bound refusal here would misreport a living
+        # document as if it were an unmarked plan).
+        result = self.record([self.verdict(
+            verdict=bloat.DISTILL,
+            path="docs/a.md",
+            units=[self.unit("docs/a.md", SHARED)],
+            status="ready",
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-distill-not-planning"])
 
     def test_a_condense_verdict_needs_its_replacement_line(self):
         result = self.record([self.verdict(verdict=bloat.CONDENSE)])
@@ -774,6 +951,220 @@ class CoverageIsDeclared(RepoTestCase):
         self.assertEqual(
             [i["scope"] for i in result.incomplete], ["docs/notes/stray.md"]
         )
+
+
+class LoadingBloatVerdicts(RepoTestCase):
+    """`load_bloat_verdicts`'s file-reader-only seam.
+
+    Mirrors `drift.load_verdicts` exactly: reading is a separate failure from
+    what the payload says, and this function does not look inside the payload
+    at all — that discipline moved to `audit_bloat` (`AuditBloatComposesTheReport`
+    below), the same split drift draws between `load_verdicts` and
+    `_verdict_entries`, so every call path into `audit_bloat` enforces it, not
+    just this file loader's.
+    """
+
+    def path(self, text):
+        root = self.repo({"verdicts.json": text})
+        return os.path.join(root, "verdicts.json")
+
+    def test_a_missing_file_is_unreadable(self):
+        result = bloat.load_bloat_verdicts(
+            os.path.join(tempfile.mkdtemp(), "absent.json")
+        )
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(
+            [p.code for p in result.problems], ["bloat-verdicts-unreadable"]
+        )
+
+    def test_unparseable_json_is_unreadable(self):
+        result = bloat.load_bloat_verdicts(self.path("{ not json"))
+
+        self.assertEqual(
+            [p.code for p in result.problems], ["bloat-verdicts-unreadable"]
+        )
+
+    def test_a_well_shaped_file_returns_the_envelope_unchanged(self):
+        result = bloat.load_bloat_verdicts(
+            self.path('{"schema_version": 1, "verdicts": [{"id": "B-1"}]}')
+        )
+
+        self.assertEqual(
+            result, {"schema_version": 1, "verdicts": [{"id": "B-1"}]}
+        )
+
+    def test_a_malformed_envelope_is_returned_unchanged_not_refused(self):
+        """Shape checking is not this function's job — `audit_bloat` owns it,
+        so nothing here can be routed around by a hand-built envelope."""
+        result = bloat.load_bloat_verdicts(self.path("[]"))
+
+        self.assertEqual(result, [])
+
+
+class AuditBloatComposesTheReport(GitRepoTestCase):
+    """`audit_bloat`'s one-call composition: index, lineage, verdicts, report.
+
+    A real git repository, exactly as `TheChunkCache` below uses — lineage
+    construction reads the repository's actual base commit, and a mocked one
+    would prove nothing about it.
+    """
+
+    def corpus(self):
+        return self.git_repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            "docs/a.md": f"# A\n\n{SHARED}\n",
+            "docs/plans/p.md": f"# P\n\n{SHARED}\n",
+        })
+
+    def verdict(self, repo, **overrides):
+        index = build_context_index(repo)
+        by_text = {u.text: u.digest for u in index.units}
+        entry = {
+            "id": "BLOAT-001",
+            "verdict": bloat.CUT,
+            "path": "docs/plans/p.md",
+            "units": [by_text[SHARED]],
+            "evidence": "The living document already states this.",
+        }
+        entry.update(overrides)
+        return entry
+
+    def envelope(self, repo, *verdicts, **overrides):
+        payload = {"verdicts": list(verdicts) or [self.verdict(repo)]}
+        payload.update(overrides)
+        return payload
+
+    def test_a_valid_verdict_list_yields_a_report_with_its_code(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, self.envelope(repo))
+
+        self.assertIsInstance(result, Report, result)
+        self.assertEqual(result.records[0].to_dict()["code"], bloat.CUT)
+
+    def test_the_lineage_carries_the_registry_digest(self):
+        repo = self.corpus()
+        index = build_context_index(repo)
+
+        result = bloat.audit_bloat(repo, self.envelope(repo))
+
+        self.assertEqual(result.lineage.registry_digest, index.registry_digest)
+
+    def test_the_report_validates_with_schema_version_and_hex_digests(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, self.envelope(repo))
+
+        payload = result.to_dict()
+        self.assertEqual(payload["schema_version"], ARTIFACT_SCHEMA_VERSION)
+        digest = payload["records"][0]["digest"]
+        self.assertEqual(len(digest), 64)
+        int(digest, 16)  # raises ValueError if not hex
+
+    def test_invalid_verdicts_return_invalid_preserving_recorder_codes(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(
+            repo, self.envelope(repo, self.verdict(repo, evidence=""))
+        )
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn("bloat-missing-evidence", [p.code for p in result.problems])
+
+    def test_a_bare_list_is_not_a_valid_envelope(self):
+        """`audit_bloat` takes the envelope, not a bare list — an in-process
+        caller that hand-unwraps `load_bloat_verdicts`' payload and skips
+        straight to a list is refused here, not silently accepted."""
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, [self.verdict(repo)])
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn(
+            "bloat-verdicts-invalid-shape", [p.code for p in result.problems]
+        )
+
+    def test_an_envelope_missing_the_verdicts_key_is_invalid(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, {"not": "verdicts"})
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn(
+            "bloat-verdicts-invalid-shape", [p.code for p in result.problems]
+        )
+
+    def test_an_unexpected_top_level_key_is_invalid(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, self.envelope(repo, extra=True))
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn(
+            "bloat-verdicts-invalid-shape", [p.code for p in result.problems]
+        )
+
+    def test_an_unsupported_schema_version_is_invalid(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, self.envelope(repo, schema_version=99))
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn(
+            "bloat-verdicts-invalid-shape", [p.code for p in result.problems]
+        )
+
+    def test_a_schema_version_that_is_not_an_integer_is_invalid(self):
+        """`True == 1` and `1.0 == 1` in Python, but not in a schema. A bare
+        `!=` against the supported version let both through, so an envelope
+        declaring either passed a check whose own message promises it read an
+        *integer* version. Found by review on the split stack."""
+        repo = self.corpus()
+        for version in (True, 1.0, "1"):
+            with self.subTest(schema_version=version):
+                result = bloat.audit_bloat(
+                    repo, self.envelope(repo, schema_version=version)
+                )
+
+                self.assertIsInstance(result, Invalid)
+                self.assertIn(
+                    "bloat-verdicts-invalid-shape",
+                    [p.code for p in result.problems],
+                )
+
+    def test_schema_version_is_optional(self):
+        repo = self.corpus()
+
+        result = bloat.audit_bloat(repo, {"verdicts": [self.verdict(repo)]})
+
+        self.assertIsInstance(result, Report, result)
+
+    def test_an_invalid_registry_invalidates_the_run(self):
+        repo = self.git_repo({
+            ".doc-lifecycle/registry.json": "{ not json",
+            "docs/a.md": "# A\n\nAlpha.\n",
+        })
+
+        result = bloat.audit_bloat(repo, {"verdicts": []})
+
+        self.assertIsInstance(result, Invalid)
+
+    def test_a_cut_records_digest_is_mintable_by_a_human(self):
+        """End-to-end mintability: this is what makes fixing-docs' step 1 real
+        for bloat, exactly as it already is for drift."""
+        repo = self.corpus()
+        report = bloat.audit_bloat(repo, self.envelope(repo))
+        self.assertIsInstance(report, Report, report)
+        digest = report.records[0].digest
+
+        approval = mint_approval_set(
+            report, [digest], repo_root=repo,
+            minter=Minter(kind=MINTER_HUMAN, id="reviewer@example.com"),
+        )
+
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        self.assertEqual([r.digest for r in approval.records], [digest])
 
 
 class TheChunkCache(GitRepoTestCase):

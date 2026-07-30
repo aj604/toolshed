@@ -312,20 +312,28 @@ jobs:
       # Two reasons this prompt does not defer to an authoring skill or to the doc-distiller
       # agent, and both are worth stating where the next editor will look:
       #
-      #   1. `DISTILL` is not applyable end to end today. A DISTILL record can never carry a
-      #      `destination` (`bloat.DESTINATION_VERDICTS` is EXTRACT-AND-MOVE and MERGE-DOC
-      #      only), and the applier resolves `create-document`'s allowed targets from exactly
-      #      that field — so the residue half of the remedy refuses as
-      #      `plan-target-not-record-target` while the `retire-document` half would execute.
-      #      Deferring to the distiller before that is fixed buys a lossy retirement: the
-      #      planning artifact deleted and its residue stranded. Refusing the plan is the safe
-      #      outcome, and is what happens today.
-      #   2. The edit-plan contract has a single owner — `fixing-docs/SKILL.md` (aj604/toolshed#70,
-      #      landed) carries the worked edit-plan example and is authoritative for its shape,
-      #      including the trailing-newline rule below. This prompt is reconciled against that
-      #      owner rather than deferring to the skill at run time: the headless model authors
-      #      from this prompt alone — it is not driven to read the skill — so the contract has to
-      #      travel inline. When `fixing-docs/SKILL.md` changes, re-reconcile this copy against it.
+      #   1. A DISTILL record *may* carry a `destination` (`bloat.RESIDUE_VERDICTS` is DISTILL
+      #      only — its destination is optional, checked as an unwritten path rather than looked
+      #      up in the inventory). Every DISTILL owes `retire-document`, via the applier's
+      #      `REQUIRED_REMEDY_OPERATIONS`; a record that also names a destination owes
+      #      `create-document` in addition, via `DESTINATION_REQUIRED_OPERATIONS`. Both halves
+      #      are refused as `plan-remedy-incomplete`: a plan authoring only `retire-document`
+      #      for a destinationed DISTILL skips the residue, and a plan authoring only
+      #      `create-document` leaves the planning artifact standing beside it. A
+      #      destination-less DISTILL named no residue to author — the retirement alone is its
+      #      whole approved remedy. Deferring to the distiller (or authoring this prompt
+      #      carelessly) still needs care that the plan for a destinationed record actually
+      #      lands the residue before the retirement executes.
+      #   2. The edit-plan contract has a single owner — the engine README's "The applier"
+      #      section, over `doclifecycle/applier.py` itself (aj604/toolshed#70 landed the
+      #      contract there; a later pass moved fixing-docs/SKILL.md off carrying its own worked
+      #      example, and handed authority to that README section outright — see fixing-docs'
+      #      "Author the edit plan" step). This prompt is reconciled against that owner rather
+      #      than deferring to it at run time: the headless model authors from this prompt alone
+      #      — it is not driven to read the README or the skill — so the contract, including the
+      #      trailing-newline rule below (`applier.py`'s span-preimage check, which joins a
+      #      document's lines with "\n" and compares byte-for-byte), has to travel inline. When
+      #      the engine README's applier section changes, re-reconcile this copy against it.
       #
       # Nothing here is trusted either way — `apply-plan` re-derives every claim below against
       # the approval set, the record's own remedy table, and the repository.
@@ -350,11 +358,21 @@ jobs:
              "operations": [ ... ], "postimages": {<path>: <sha256 of the file after the plan,
              or null for a retired document>}, "digest": <see below>}
 
-            One operation per approved remedy, each an object with:
+            One or more operations per approved remedy — most remedies are a single operation,
+            but two are composite. MERGE-DOC requires both a "move-with-provenance" and a
+            "retire-document" for the same record together. DISTILL requires a
+            "retire-document" for every record, plus a "create-document" when that record
+            names a destination. Any missing leg is refused as plan-remedy-incomplete. Each
+            operation is an object with:
               "op": "replace" | "delete" | "insert" | "create-document" | "retire-document" |
                     "move-with-provenance"
               "record": the approved record's digest (from the approval set's "records")
-              "path": the record's own document
+              "path": the record's own document — except "create-document", whose path is the
+                      record's own "destination", a plain string on an approval-set record
+                      (the report's nested {"path","kind"} form is flattened at mint). The
+                      residue is authored *there*, which is the whole point of the
+                      destination; a creation aimed at the record's own document is refused,
+                      and the applier binds this per operation
               "target_class": "documentation"
               span operations ("replace", "delete", "move-with-provenance") carry 1-based
               "start_line" and "end_line" plus "preimage": the exact current text of those
@@ -372,16 +390,26 @@ jobs:
             may only
             be one of the operations that record's finding code authorizes; a positioned
             operation must lie within the approved units' own passage; every preimage must be
-            the exact current text; and every written path must be in the approval set's
-            "scope"."paths". Read each target with Read before you write its preimage.
+            the exact current text; every written path must be in the approval set's
+            "scope"."paths"; every approved record must be executed by at least one operation
+            (a record naming none is refused as plan-record-not-executed); MERGE-DOC's move
+            and retirement must both appear, together, for the same record; and every DISTILL
+            must carry its retirement, plus its creation when the record names a destination
+            (plan-remedy-incomplete otherwise). Read each target with Read before you write its
+            preimage.
 
             Finally stamp the plan's digest with the engine's own canonical digest, which is
             what binds the plan to review:
             python3 -c 'import json,sys; sys.path.insert(0,".doc-lifecycle/wiring/engine"); from doclifecycle.digest import sha256_canonical as d; p=json.load(open("edit-plan.json")); p.pop("digest",None); p["digest"]=d(p); json.dump(p,open("edit-plan.json","w"))'
 
-            If you cannot author a correct operation for an approved record, write the plan
-            without it and say so — a partial plan is refused honestly; a guessed preimage is
-            not.
+            If you cannot author a correct operation for every approved record, do not write a
+            partial plan: the applier refuses wholesale a plan that names an approved record but
+            executes none of it (plan-record-not-executed), and the edit-plan shape above carries
+            no field to explain why one is missing — there is no channel to "say so" in the
+            output. Stop instead — do not write edit-plan.json at all, so the run fails loudly at
+            the upload step rather than proposing a plan you know is incomplete. A guessed
+            preimage and a silently dropped record are both wrong in the same way; refuse to
+            write either.
           claude_args: --allowedTools "Read,Grep,Glob,Write,Bash(python3 *)"
 
       - name: Upload the edit plan

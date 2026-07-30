@@ -1,5 +1,7 @@
 # detecting-doc-bloat Rearchitecture Implementation Plan
 
+> Status: ready
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rebuild `detecting-doc-bloat` as a thin router over a deterministic chunking harness, move DISTILL payload authoring post-approval into the doc-distiller, add the bulk `POLICY` verdict, and ship contract v2 through every consumer — per the approved design `docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md`.

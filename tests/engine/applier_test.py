@@ -18,6 +18,7 @@ from approval_test import (
     DOC_A_TEXT,
     DOC_B,
     DOC_B_TEXT,
+    FILES,
     HUMAN,
     PLAN_DOC,
     PLAN_DOC_TEXT,
@@ -239,11 +240,24 @@ class AppliesApprovedPlan(ApplierTestCase):
             "path": new_doc,
             "text": content,
         }
-        plan = self.plan(approval, [op], {new_doc: sha256_text(content)})
+        # DISTILL owes its retirement as well as its creation, so the plan
+        # carries both legs; a creation alone is `plan-remedy-incomplete`.
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op, retire_op], {
+            new_doc: sha256_text(content), PLAN_DOC: None,
+        })
         result = self.apply(plan, approval, report=report)
         self.assertEqual(result.status, STATE_CLEAN, result)
         self.assertEqual(self.read(self.repo, new_doc), content)
-        self.assertEqual(self.status_paths(self.repo), [new_doc])
+        self.assertEqual(
+            self.status_paths(self.repo), sorted([new_doc, PLAN_DOC])
+        )
 
     def test_retire_document_lands(self):
         units = self.units(self.repo, PLAN_DOC)
@@ -553,7 +567,18 @@ class TypedRefusals(ApplierTestCase):
             "path": DOC_B,
             "text": "clobbered\n",
         }
-        plan = self.plan(approval, [op], {DOC_B: sha256_text("clobbered\n")})
+        # The retirement leg keeps the plan complete, so the refusal under
+        # test is the create-over-existing one and not `plan-remedy-incomplete`.
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op, retire_op], {
+            DOC_B: sha256_text("clobbered\n"), PLAN_DOC: None,
+        })
         before = self.tree(self.repo)
         result = self.apply(plan, approval, report=report)
         self.assert_untouched(before, result, ["apply-create-exists"])
@@ -580,9 +605,23 @@ class TypedRefusals(ApplierTestCase):
             "path": destination,
             "text": "# Residue\n\nA claim about the repo.\n",
         }
+        # Both legs, so the destination refusals below are what this plan is
+        # stopped by rather than `plan-remedy-incomplete`.
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
         plan = self.plan(
-            approval, [op],
-            {destination: sha256_text("# Residue\n\nA claim about the repo.\n")},
+            approval, [op, retire_op],
+            {
+                destination: sha256_text(
+                    "# Residue\n\nA claim about the repo.\n"
+                ),
+                PLAN_DOC: None,
+            },
         )
         return report, approval, plan
 
@@ -843,6 +882,85 @@ class Confinement(ApplierTestCase):
         self.assertEqual(self.staged_paths(self.repo), [])
         self.assertIn("rolled back", result.problems[0].message)
 
+    def test_concurrent_write_outside_the_written_paths_rolls_back(self):
+        # Post-write confinement compares the diff against what this plan's
+        # operations actually wrote, not against the approval's broader scope.
+        #
+        # The in-scope-but-unwritten variant of this test is no longer
+        # constructible, and deliberately so: it needed a DISTILL plan
+        # carrying `create-document` alone, which left the source in scope and
+        # unwritten. Requiring the retirement of every DISTILL closed that —
+        # `_written_paths` now covers every one of a record's targets for each
+        # required remedy (a move contributes both its ends, and DISTILL
+        # contributes source and destination), so a complete plan writes its
+        # whole derived scope. What remains reachable, and what this covers,
+        # is a concurrent write mid-run to a path the plan never wrote: it
+        # must refuse and roll this run's own write back rather than certify
+        # a diff carrying somebody else's change.
+        from unittest import mock
+        from doclifecycle.repository import worktree_changes as real
+
+        new_doc = "docs/adr-fees.md"
+        content = "# ADR: flat fees\n\nWe charge a flat rate.\n"
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-002", "DISTILL", PLAN_DOC, units,
+            destination={"path": new_doc},
+        )
+        report, approval = self.approve([record])
+        self.assertIn(PLAN_DOC, approval.scope.paths)
+        op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": new_doc,
+            "text": content,
+        }
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op, retire_op], {
+            new_doc: sha256_text(content), PLAN_DOC: None,
+        })
+        # Both of the record's targets are written, so the derived scope and
+        # the written set now coincide — the concurrent write has to come from
+        # outside both for this check to be what catches it.
+        self.assertEqual(
+            set(approval.scope.paths), {PLAN_DOC, new_doc}
+        )
+        before = self.tree(self.repo)
+        calls = []
+
+        def racing(repo_root):
+            changed, problem = real(repo_root)
+            calls.append(changed)
+            if len(calls) < 2 or problem is not None:
+                return changed, problem
+            # DOC_B is neither written by this plan nor inside the approval's
+            # scope — the concurrent writer lands unapproved content there
+            # while this run is mid-flight.
+            return tuple(sorted(set(changed) | {DOC_B})), None
+
+        with mock.patch(
+            "doclifecycle.applier.worktree_changes", side_effect=racing
+        ):
+            result = self.apply(plan, approval, report=report)
+        self.assertIsInstance(result, Invalid, result)
+        # Outside the approval's scope as well as this plan's written set, so
+        # the refusal names the scope breach; the in-scope-but-unwritten
+        # variant would have been `apply-working-tree-not-clean`, and is the
+        # case the DISTILL retirement requirement made unreachable.
+        self.assertIn("apply-unconfined-change", codes(result))
+        # This run's own write (the new document) was rolled back: the tree
+        # is exactly as it was found, and nothing rode into a certified diff.
+        self.assertEqual(before, self.tree(self.repo))
+        self.assertEqual(self.staged_paths(self.repo), [])
+        self.assertIn("rolled back", result.problems[0].message)
+
     def test_preexisting_change_outside_the_scope_refuses_the_run(self):
         report, approval, plan, _ = self.replace_fixture()
         self.write(self.repo, DOC_B, DOC_B_TEXT + "dirty\n")
@@ -984,6 +1102,372 @@ class RemedyBinding(ApplierTestCase):
         )
 
 
+class PlanCompleteness(ApplierTestCase):
+    """An approval set is the whole mandate: every record must be executed,
+    and a composite remedy must land every leg it is made of."""
+
+    def test_plan_omitting_an_approved_record_is_refused(self):
+        # The approval selects both R-1 (docs/a.md) and R-2 (docs/b.md); the
+        # plan only carries R-1's operation. Silently dropping R-2 must be a
+        # refusal, not a clean run that under-reports what it did.
+        one, two = self.two_findings()
+        report, approval = self.approve([one, two])
+        post = DOC_A_TEXT.replace(OLD_SENTENCE, NEW_SENTENCE)
+        op = {
+            "op": "replace",
+            "record": one["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "start_line": 3,
+            "end_line": 3,
+            "preimage": OLD_SENTENCE,
+            "text": NEW_SENTENCE,
+        }
+        plan = self.plan(approval, [op], {DOC_A: sha256_text(post)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-record-not-executed"])
+        problem = next(
+            p for p in result.problems if p.code == "plan-record-not-executed"
+        )
+        self.assertIn(DOC_B, problem.message)
+
+    def test_merge_doc_plan_with_only_the_retirement_leg_is_refused(self):
+        # The reproduction that destroyed the source: a MERGE-DOC record
+        # authorizes a move and a retirement together, and a plan carrying
+        # only the retirement deletes the document and moves nothing.
+        units = self.units(self.repo, DOC_A)
+        record = self.finding(
+            "BLOAT-010", "MERGE-DOC", DOC_A, units, destination={"path": DOC_B},
+        )
+        report, approval = self.approve([record])
+        op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "preimage": DOC_A_TEXT,
+        }
+        plan = self.plan(approval, [op], {DOC_A: None})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-remedy-incomplete"])
+
+    def test_distill_plan_that_creates_no_residue_is_refused(self):
+        # Issue #57 review: the same shape as the MERGE-DOC reproduction
+        # above, reached through DISTILL. A DISTILL record naming a
+        # destination was approved as "author the residue there, then retire
+        # the plan"; a plan carrying only the retirement destroys the planning
+        # artifact and writes nothing — and reported `clean`.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-012", "DISTILL", PLAN_DOC, units,
+            destination={"path": "docs/residue.md"},
+        )
+        report, approval = self.approve([record])
+        op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op], {PLAN_DOC: None})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-remedy-incomplete"])
+        problem = next(
+            p for p in result.problems if p.code == "plan-remedy-incomplete"
+        )
+        self.assertIn("docs/residue.md", problem.message)
+
+    def test_distill_plan_that_creates_the_residue_applies(self):
+        # The honest path the refusal above must not close: the residue is
+        # authored at the destination and the planning artifact retires.
+        residue = "docs/residue.md"
+        content = "# Flat fees\n\nWe charge a flat rate.\n"
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-013", "DISTILL", PLAN_DOC, units,
+            destination={"path": residue},
+        )
+        report, approval = self.approve([record])
+        create_op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": residue,
+            "text": content,
+        }
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [create_op, retire_op], {
+            PLAN_DOC: None, residue: sha256_text(content),
+        })
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertEqual(self.read(self.repo, residue), content)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, PLAN_DOC)))
+
+    def test_distill_that_creates_the_residue_and_never_retires_is_refused(self):
+        # The other half of the composite, and the one the honest-path test
+        # above cannot see: it carries both legs, so it never asks whether the
+        # retirement is *required*. A plan carrying only the creation authored
+        # the residue and left the planning artifact standing — the document
+        # duplicated rather than distilled, and the run reporting `clean`.
+        residue = "docs/residue.md"
+        content = "# Flat fees\n\nWe charge a flat rate.\n"
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-015", "DISTILL", PLAN_DOC, units,
+            destination={"path": residue},
+        )
+        report, approval = self.approve([record])
+        op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": residue,
+            "text": content,
+        }
+        plan = self.plan(approval, [op], {residue: sha256_text(content)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-remedy-incomplete"])
+        problem = next(
+            p for p in result.problems if p.code == "plan-remedy-incomplete"
+        )
+        self.assertIn("retire-document", problem.message)
+
+    def test_destination_less_distill_with_no_retirement_is_refused(self):
+        # Retirement is what a distillation *is*, destination or not: a record
+        # naming none proposed no residue, so a plan that neither writes one
+        # nor retires the artifact has executed nothing anybody approved.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding("BLOAT-016", "DISTILL", PLAN_DOC, units)
+        report, approval = self.approve([record])
+        line = PLAN_DOC_TEXT.split("\n")[2]
+        revised = line + " Revised."
+        op = {
+            "op": "replace",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "start_line": 3,
+            "end_line": 3,
+            "preimage": line,
+            "text": revised,
+        }
+        post = PLAN_DOC_TEXT.replace(line, revised, 1)
+        plan = self.plan(approval, [op], {PLAN_DOC: sha256_text(post)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-remedy-incomplete"])
+
+    def test_destination_less_distill_may_retire_and_create_nothing(self):
+        # The exemption the conditional requirement must keep: a distillation
+        # that named no destination proposed no residue, so retiring the
+        # planning artifact alone is the whole approved remedy.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding("BLOAT-014", "DISTILL", PLAN_DOC, units)
+        report, approval = self.approve([record])
+        op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op], {PLAN_DOC: None})
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, PLAN_DOC)))
+
+    def test_merge_doc_plan_with_both_legs_applies(self):
+        # The honest path: a move and its paired retirement, together, are
+        # the one merge a reviewer approved, and land clean.
+        units = self.units(self.repo, DOC_A)
+        record = self.finding(
+            "BLOAT-011", "MERGE-DOC", DOC_A, units, destination={"path": DOC_B},
+        )
+        report, approval = self.approve([record])
+        # The move's span is bounded by the hull of the record's approved
+        # units, which does not include the "# Fees" heading (not assertion-
+        # capable) — lines 3..5, the two sentences. The retirement still
+        # carries the whole document as its preimage: what the move does not
+        # carry to the destination is simply gone once the source is retired.
+        moved = "\n".join(DOC_A_TEXT.split("\n")[2:5])
+        post_dest = DOC_B_TEXT + moved + "\n"
+        move_op = {
+            "op": "move-with-provenance",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "destination": DOC_B,
+            "start_line": 3,
+            "end_line": 5,
+            "preimage": moved,
+        }
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "preimage": DOC_A_TEXT,
+        }
+        plan = self.plan(approval, [move_op, retire_op], {
+            DOC_A: None,
+            DOC_B: sha256_text(post_dest),
+        })
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, DOC_A)))
+        self.assertEqual(self.read(self.repo, DOC_B), post_dest)
+
+    def test_move_and_retire_from_different_records_on_one_path_is_refused(self):
+        # The move+retire exemption must be scoped to a single approved
+        # record. Here two *different* records both target docs/a.md — an
+        # EXTRACT-AND-MOVE (moves one unit to docs/b.md) and an unrelated
+        # RETIRE-DOC (retires the whole document) — and nothing in approval
+        # validation forbids selecting both together. A plan carrying one
+        # operation from each passes binding (each operation matches its own
+        # record) and completeness (neither code is a composite in
+        # `REQUIRED_REMEDY_OPERATIONS`), so only the conflict check stands
+        # between this and silently discarding everything the move did not
+        # carry out — exactly the exemption's blast radius if it keyed only
+        # on op-type and path instead of the record the two operations share.
+        #
+        # The two records' approved units are disjoint (unit[1] vs unit[0])
+        # so reconciliation treats them as independent and both are
+        # selectable together — the scenario the exemption must still refuse
+        # is not ruled out at mint time.
+        units = self.units(self.repo, DOC_A)
+        move_record = self.finding(
+            "BLOAT-014", "EXTRACT-AND-MOVE", DOC_A, [units[1]],
+            destination={"path": DOC_B},
+        )
+        retire_record = self.finding(
+            "BLOAT-015", "RETIRE-DOC", DOC_A, [units[0]],
+        )
+        report, approval = self.approve([move_record, retire_record])
+        moved = "Refunds reverse the fee at the rate charged."
+        move_op = {
+            "op": "move-with-provenance",
+            "record": move_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "destination": DOC_B,
+            "start_line": 5,
+            "end_line": 5,
+            "preimage": moved,
+        }
+        retire_op = {
+            "op": "retire-document",
+            "record": retire_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "preimage": DOC_A_TEXT,
+        }
+        plan = self.plan(approval, [move_op, retire_op], {
+            DOC_A: None,
+            DOC_B: sha256_text(DOC_B_TEXT + moved + "\n"),
+        })
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-conflicting-operations"])
+
+    def test_merge_doc_both_legs_plus_a_stray_third_op_on_the_source_is_refused(self):
+        # Even a genuine MERGE-DOC record's own move+retire pair does not
+        # open the source path to a third, unrelated operation riding along
+        # on the same exemption — a stray CUT record's delete, also on
+        # docs/a.md, keeps this refused. The two records' approved units are
+        # disjoint (unit[0] vs unit[1]) so both are selectable together.
+        units = self.units(self.repo, DOC_A)
+        merge_record = self.finding(
+            "BLOAT-016", "MERGE-DOC", DOC_A, [units[0]],
+            destination={"path": DOC_B},
+        )
+        cut_record = self.finding("BLOAT-017", "CUT", DOC_A, [units[1]])
+        report, approval = self.approve([merge_record, cut_record])
+        moved = DOC_A_TEXT.split("\n")[2]
+        move_op = {
+            "op": "move-with-provenance",
+            "record": merge_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "destination": DOC_B,
+            "start_line": 3,
+            "end_line": 3,
+            "preimage": moved,
+        }
+        retire_op = {
+            "op": "retire-document",
+            "record": merge_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "preimage": DOC_A_TEXT,
+        }
+        delete_op = {
+            "op": "delete",
+            "record": cut_record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "start_line": 5,
+            "end_line": 5,
+            "preimage": "Refunds reverse the fee at the rate charged.",
+        }
+        plan = self.plan(approval, [move_op, retire_op, delete_op], {
+            DOC_A: None,
+            DOC_B: sha256_text(DOC_B_TEXT + moved + "\n"),
+        })
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-conflicting-operations"])
+
+    def test_full_coverage_plan_still_applies(self):
+        # Every approved record named -> clean, unaffected by the new checks.
+        one, two = self.two_findings()
+        report, approval = self.approve([one, two])
+        post_a = DOC_A_TEXT.replace(OLD_SENTENCE, NEW_SENTENCE)
+        five_times = "The worker retries a failed job five times."
+        three_times = "The worker retries a failed job three times."
+        post_b = DOC_B_TEXT.replace(three_times, five_times)
+        ops = [
+            {
+                "op": "replace",
+                "record": one["digest"],
+                "target_class": "documentation",
+                "path": DOC_A,
+                "start_line": 3,
+                "end_line": 3,
+                "preimage": OLD_SENTENCE,
+                "text": NEW_SENTENCE,
+            },
+            {
+                "op": "replace",
+                "record": two["digest"],
+                "target_class": "documentation",
+                "path": DOC_B,
+                "start_line": 3,
+                "end_line": 3,
+                "preimage": three_times,
+                "text": five_times,
+            },
+        ]
+        plan = self.plan(approval, ops, {
+            DOC_A: sha256_text(post_a), DOC_B: sha256_text(post_b),
+        })
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertEqual(self.read(self.repo, DOC_A), post_a)
+        self.assertEqual(self.read(self.repo, DOC_B), post_b)
+
+
 class AlreadyAppliedIsDerived(ApplierTestCase):
     """"Already applied" is computed from the baseline, never declared."""
 
@@ -1066,10 +1550,17 @@ class DistillationLandsItsResidue(ApplierTestCase):
         "(`docs/a.md`).\n"
     )
 
+    # `audited_record()` below submits `status: "ready"`, which after #57's
+    # review remediation must equal the planning document's own file-bound
+    # marker — the shared `PLAN_DOC_TEXT` fixture carries none, so this class
+    # writes its own variant rather than mutating the constant every other
+    # `approval_test`/`applier_test` fixture also reads.
+    PLAN_DOC_TEXT_READY = "> Status: ready\n\n" + PLAN_DOC_TEXT
+
     def setUp(self):
-        super().setUp()
-        # The lineage a bloat chunk runs under: the record's digest commits to
-        # it, so the report it travels in is validated under the same one.
+        self.repo = self.git_repo(
+            files={**FILES, PLAN_DOC: self.PLAN_DOC_TEXT_READY}
+        )
         self.lineage = self.lineage_for(
             self.repo, audit_mode="chunk",
             evidence_boundary=EvidenceBoundary(("docs/**",)),
@@ -1108,7 +1599,7 @@ class DistillationLandsItsResidue(ApplierTestCase):
                 "record": record["digest"],
                 "target_class": "documentation",
                 "path": PLAN_DOC,
-                "preimage": PLAN_DOC_TEXT,
+                "preimage": self.PLAN_DOC_TEXT_READY,
             },
         ]
         plan = self.plan(approval, ops, {
@@ -1179,6 +1670,32 @@ class LoadEditPlan(ApplierTestCase):
         result = load_edit_plan(path)
         self.assertIsInstance(result, Invalid)
         self.assertEqual(codes(result), ["plan-unparseable"])
+
+    def test_a_deeply_nested_plan_is_a_verdict_not_a_traceback(self):
+        # A RecursionError is not a ValueError. On this interpreter, no
+        # bomb text and no lowered recursion limit reliably makes the C
+        # accelerated decoder raise one (report_test.py's equivalent
+        # "decoder itself cannot survive" case only passes today via a
+        # separate post-parse scan report.py has and this loader does not)
+        # — so the exception is forced directly, the same way
+        # `worktree_changes` is mocked elsewhere in this suite to reach an
+        # otherwise-unreachable branch. Before this loader owned a
+        # dedicated nesting code, a RecursionError here fell into the same
+        # except tuple as a syntax error and came back mislabeled
+        # `plan-unparseable`.
+        from unittest import mock
+
+        path = os.path.join(self.repo, "..", "plan.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{}")
+        self.addCleanup(os.remove, path)
+
+        with mock.patch("doclifecycle.digest.json.loads",
+                         side_effect=RecursionError):
+            result = load_edit_plan(path)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertEqual(codes(result), ["plan-nesting-too-deep"])
 
 
 if __name__ == "__main__":

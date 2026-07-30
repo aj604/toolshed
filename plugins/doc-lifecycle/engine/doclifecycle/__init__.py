@@ -28,7 +28,12 @@ ARTIFACT_SCHEMA_VERSION = 1
 # 6: a STALE verdict over a soft-wrapped assertion unit may carry LF-separated
 # replacement text, so applying the worker-authored fix preserves physical-line
 # shape instead of collapsing the passage to one long line (#126).
-RULESET_VERSION = 6
+# 7: planning lifecycle state is file-bound and verdicts report it rather than
+# asserting it; a DISTILL verdict against a non-planning document is refused;
+# anchor reference candidates are resolved through the canonical path policy;
+# and post-write confinement compares the diff to the plan's own written paths
+# (#57 review remediation).
+RULESET_VERSION = 7
 
 # The published plugin version this engine ships inside. Pinned in lineage, so
 # it must track `plugins/doc-lifecycle/.claude-plugin/plugin.json` — the engine
@@ -36,4 +41,4 @@ RULESET_VERSION = 6
 # `tests/engine/report_test.py` fails loudly when the two drift. Every release
 # therefore expires prior reports: cheaper than reasoning about which releases
 # could have changed a verdict, and re-running an audit is cheap.
-PLUGIN_VERSION = "0.43.0"
+PLUGIN_VERSION = "0.44.0"
