@@ -367,7 +367,10 @@ jobs:
               "op": "replace" | "delete" | "insert" | "create-document" | "retire-document" |
                     "move-with-provenance"
               "record": the approved record's digest (from the approval set's "records")
-              "path": the record's own document
+              "path": the record's own document — except "create-document", whose path is the
+                      record's own "destination"."path" (the residue is authored *there*, which
+                      is the whole point of the destination; a creation aimed at the record's
+                      own document is refused, and the applier binds this per operation)
               "target_class": "documentation"
               span operations ("replace", "delete", "move-with-provenance") carry 1-based
               "start_line" and "end_line" plus "preimage": the exact current text of those
