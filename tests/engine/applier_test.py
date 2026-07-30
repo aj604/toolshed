@@ -239,11 +239,24 @@ class AppliesApprovedPlan(ApplierTestCase):
             "path": new_doc,
             "text": content,
         }
-        plan = self.plan(approval, [op], {new_doc: sha256_text(content)})
+        # DISTILL owes its retirement as well as its creation, so the plan
+        # carries both legs; a creation alone is `plan-remedy-incomplete`.
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op, retire_op], {
+            new_doc: sha256_text(content), PLAN_DOC: None,
+        })
         result = self.apply(plan, approval, report=report)
         self.assertEqual(result.status, STATE_CLEAN, result)
         self.assertEqual(self.read(self.repo, new_doc), content)
-        self.assertEqual(self.status_paths(self.repo), [new_doc])
+        self.assertEqual(
+            self.status_paths(self.repo), sorted([new_doc, PLAN_DOC])
+        )
 
     def test_retire_document_lands(self):
         units = self.units(self.repo, PLAN_DOC)
@@ -553,7 +566,18 @@ class TypedRefusals(ApplierTestCase):
             "path": DOC_B,
             "text": "clobbered\n",
         }
-        plan = self.plan(approval, [op], {DOC_B: sha256_text("clobbered\n")})
+        # The retirement leg keeps the plan complete, so the refusal under
+        # test is the create-over-existing one and not `plan-remedy-incomplete`.
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op, retire_op], {
+            DOC_B: sha256_text("clobbered\n"), PLAN_DOC: None,
+        })
         before = self.tree(self.repo)
         result = self.apply(plan, approval, report=report)
         self.assert_untouched(before, result, ["apply-create-exists"])
@@ -580,9 +604,23 @@ class TypedRefusals(ApplierTestCase):
             "path": destination,
             "text": "# Residue\n\nA claim about the repo.\n",
         }
+        # Both legs, so the destination refusals below are what this plan is
+        # stopped by rather than `plan-remedy-incomplete`.
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
         plan = self.plan(
-            approval, [op],
-            {destination: sha256_text("# Residue\n\nA claim about the repo.\n")},
+            approval, [op, retire_op],
+            {
+                destination: sha256_text(
+                    "# Residue\n\nA claim about the repo.\n"
+                ),
+                PLAN_DOC: None,
+            },
         )
         return report, approval, plan
 
@@ -843,18 +881,21 @@ class Confinement(ApplierTestCase):
         self.assertEqual(self.staged_paths(self.repo), [])
         self.assertIn("rolled back", result.problems[0].message)
 
-    def test_concurrent_write_to_an_unwritten_scope_path_fails_and_rolls_back(self):
-        # A DISTILL record's scope is its source and its destination
-        # (`derived_scope_paths` puts both of `record.targets()` in scope),
-        # but the remedy this plan carries — `create-document` — writes only
-        # the destination; the source stays in scope without this plan ever
-        # writing it (`_binding_problems` requires a `create-document` op to
-        # target `record.destination`, never `record.path`). That gap is
-        # exactly what the post-write confinement check must close: a
-        # concurrent change landing on the source is inside the approval's
-        # scope, so the scope-only check would wave it through, and only a
-        # comparison against what this plan's operations actually wrote
-        # catches it — same as the already-applied branch already does.
+    def test_concurrent_write_outside_the_written_paths_rolls_back(self):
+        # Post-write confinement compares the diff against what this plan's
+        # operations actually wrote, not against the approval's broader scope.
+        #
+        # The in-scope-but-unwritten variant of this test is no longer
+        # constructible, and deliberately so: it needed a DISTILL plan
+        # carrying `create-document` alone, which left the source in scope and
+        # unwritten. Requiring the retirement of every DISTILL closed that —
+        # `_written_paths` now covers every one of a record's targets for each
+        # required remedy (a move contributes both its ends, and DISTILL
+        # contributes source and destination), so a complete plan writes its
+        # whole derived scope. What remains reachable, and what this covers,
+        # is a concurrent write mid-run to a path the plan never wrote: it
+        # must refuse and roll this run's own write back rather than certify
+        # a diff carrying somebody else's change.
         from unittest import mock
         from doclifecycle.repository import worktree_changes as real
 
@@ -874,7 +915,22 @@ class Confinement(ApplierTestCase):
             "path": new_doc,
             "text": content,
         }
-        plan = self.plan(approval, [op], {new_doc: sha256_text(content)})
+        retire_op = {
+            "op": "retire-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "preimage": PLAN_DOC_TEXT,
+        }
+        plan = self.plan(approval, [op, retire_op], {
+            new_doc: sha256_text(content), PLAN_DOC: None,
+        })
+        # Both of the record's targets are written, so the derived scope and
+        # the written set now coincide — the concurrent write has to come from
+        # outside both for this check to be what catches it.
+        self.assertEqual(
+            set(approval.scope.paths), {PLAN_DOC, new_doc}
+        )
         before = self.tree(self.repo)
         calls = []
 
@@ -883,17 +939,21 @@ class Confinement(ApplierTestCase):
             calls.append(changed)
             if len(calls) < 2 or problem is not None:
                 return changed, problem
-            # PLAN_DOC is in `approval.scope.paths` (the record's source)
-            # but not in `_written_paths` for this plan's operations — the
-            # concurrent writer lands unapproved content there.
-            return tuple(sorted(set(changed) | {PLAN_DOC})), None
+            # DOC_B is neither written by this plan nor inside the approval's
+            # scope — the concurrent writer lands unapproved content there
+            # while this run is mid-flight.
+            return tuple(sorted(set(changed) | {DOC_B})), None
 
         with mock.patch(
             "doclifecycle.applier.worktree_changes", side_effect=racing
         ):
             result = self.apply(plan, approval, report=report)
         self.assertIsInstance(result, Invalid, result)
-        self.assertIn("apply-working-tree-not-clean", codes(result))
+        # Outside the approval's scope as well as this plan's written set, so
+        # the refusal names the scope breach; the in-scope-but-unwritten
+        # variant would have been `apply-working-tree-not-clean`, and is the
+        # case the DISTILL retirement requirement made unreachable.
+        self.assertIn("apply-unconfined-change", codes(result))
         # This run's own write (the new document) was rolled back: the tree
         # is exactly as it was found, and nothing rode into a certified diff.
         self.assertEqual(before, self.tree(self.repo))
@@ -1152,6 +1212,61 @@ class PlanCompleteness(ApplierTestCase):
         self.assertEqual(result.status, STATE_CLEAN, result)
         self.assertEqual(self.read(self.repo, residue), content)
         self.assertFalse(os.path.exists(os.path.join(self.repo, PLAN_DOC)))
+
+    def test_distill_that_creates_the_residue_and_never_retires_is_refused(self):
+        # The other half of the composite, and the one the honest-path test
+        # above cannot see: it carries both legs, so it never asks whether the
+        # retirement is *required*. A plan carrying only the creation authored
+        # the residue and left the planning artifact standing — the document
+        # duplicated rather than distilled, and the run reporting `clean`.
+        residue = "docs/residue.md"
+        content = "# Flat fees\n\nWe charge a flat rate.\n"
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-015", "DISTILL", PLAN_DOC, units,
+            destination={"path": residue},
+        )
+        report, approval = self.approve([record])
+        op = {
+            "op": "create-document",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": residue,
+            "text": content,
+        }
+        plan = self.plan(approval, [op], {residue: sha256_text(content)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-remedy-incomplete"])
+        problem = next(
+            p for p in result.problems if p.code == "plan-remedy-incomplete"
+        )
+        self.assertIn("retire-document", problem.message)
+
+    def test_destination_less_distill_with_no_retirement_is_refused(self):
+        # Retirement is what a distillation *is*, destination or not: a record
+        # naming none proposed no residue, so a plan that neither writes one
+        # nor retires the artifact has executed nothing anybody approved.
+        units = self.units(self.repo, PLAN_DOC)
+        record = self.finding("BLOAT-016", "DISTILL", PLAN_DOC, units)
+        report, approval = self.approve([record])
+        line = PLAN_DOC_TEXT.split("\n")[2]
+        revised = line + " Revised."
+        op = {
+            "op": "replace",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": PLAN_DOC,
+            "start_line": 3,
+            "end_line": 3,
+            "preimage": line,
+            "text": revised,
+        }
+        post = PLAN_DOC_TEXT.replace(line, revised, 1)
+        plan = self.plan(approval, [op], {PLAN_DOC: sha256_text(post)})
+        before = self.tree(self.repo)
+        result = self.apply(plan, approval, report=report)
+        self.assert_untouched(before, result, ["plan-remedy-incomplete"])
 
     def test_destination_less_distill_may_retire_and_create_nothing(self):
         # The exemption the conditional requirement must keep: a distillation

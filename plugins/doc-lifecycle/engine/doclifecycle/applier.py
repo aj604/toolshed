@@ -130,24 +130,32 @@ RECORD_REMEDIES = {
 # with no move is a deletion; a move with no retirement is a duplication).
 #
 # MERGE-DOC's requirement is unconditional — one move and one retirement,
-# together, are the one merge a reviewer approved. DISTILL's is not, and the
-# record's own `destination` is what decides it: see
-# `DESTINATION_CONDITIONAL_CODES`. Only the creation is required of a
-# distillation, never DISTILL's three span operations, since which span edits
-# a given residue needs is chosen per record rather than required whole.
+# together, are the one merge a reviewer approved.
+#
+# DISTILL's retirement is unconditional too, and for the same reason: retiring
+# the planning artifact is what a distillation *is*. A plan that edits or
+# writes and never retires leaves the artifact standing — the document
+# duplicated rather than distilled, and the run reporting `clean`. What is
+# conditional is the *creation*, which only a record naming a destination
+# proposed at all; see `DESTINATION_REQUIRED_OPERATIONS`. DISTILL's three span
+# operations are never required, since which span edits a given residue needs
+# is chosen per record rather than required whole.
 REQUIRED_REMEDY_OPERATIONS = {
     MERGE_DOC: (OP_MOVE, OP_RETIRE),
-    DISTILL: (OP_CREATE,),
+    DISTILL: (OP_RETIRE,),
 }
 
-# Codes whose requirement above applies only to a record that names a
-# destination. A DISTILL record carrying one was approved as "author the
-# residue there, then retire the planning artifact", and a plan carrying only
+# Operations required *in addition* of a record that names a destination. A
+# DISTILL record carrying one was approved as "author the residue there, then
+# retire the planning artifact", so both legs are owed: a plan carrying only
 # the retirement is the MERGE-DOC shape reached through a different code — the
-# source destroyed, nothing written, and the run reporting success. A
-# destination-less DISTILL proposed no residue at all, and retiring the
-# planning artifact alone is the whole approved remedy; that stays exempt.
-DESTINATION_CONDITIONAL_CODES = (DISTILL,)
+# source destroyed and nothing written — while a plan carrying only the
+# creation writes the residue and leaves the artifact behind. A
+# destination-less DISTILL proposed no residue at all, so retiring the
+# planning artifact alone remains the whole approved remedy.
+DESTINATION_REQUIRED_OPERATIONS = {
+    DISTILL: (OP_CREATE,),
+}
 
 # Why each composite remedy is one act, in that code's own terms — the sentence
 # a `plan-remedy-incomplete` refusal ends on. A code with a requirement and no
@@ -159,8 +167,18 @@ REMEDY_INCOMPLETE_REASON = {
     ),
     DISTILL: (
         "this distillation was approved to author its residue at "
-        "{destination} and then retire the planning artifact; a retirement "
-        "with no creation destroys the artifact and writes nothing"
+        "{destination} and then retire the planning artifact — both legs, or "
+        "it is a different change: a retirement with no creation destroys the "
+        "artifact and writes nothing, and a creation with no retirement "
+        "leaves the artifact standing beside its own residue"
+    ),
+    # The destination-less shape, whose whole remedy is the retirement — there
+    # is no creation to name, so DISTILL's reason above would describe a plan
+    # this record never proposed.
+    (DISTILL, None): (
+        "this distillation named no destination, so retiring the planning "
+        "artifact is the whole remedy it was approved for; a plan that "
+        "retires nothing has executed none of it"
     ),
 }
 
@@ -457,9 +475,12 @@ def _completeness_problems(usable, by_digest, bad):
     name the record and still execute only part of what was approved.
     MERGE-DOC is the case this closes — a retirement with no move destroys
     the source and moves nothing; a move with no retirement leaves the
-    duplicate that was supposed to go away — and a DISTILL record naming a
-    destination is that same shape: retiring the planning artifact without
-    authoring the residue destroys the source and writes nothing.
+    duplicate that was supposed to go away — and DISTILL is that same shape
+    from both sides: retiring the planning artifact without authoring the
+    residue destroys the source and writes nothing, while authoring the
+    residue and never retiring leaves the artifact standing beside it. The
+    retirement is owed by every DISTILL, the creation only by one that named
+    a destination to write.
     """
     ops_by_record = {}
     for _, operation in usable:
@@ -476,20 +497,25 @@ def _completeness_problems(usable, by_digest, bad):
                 f"did not do",
                 "operations")
             continue
-        required = REQUIRED_REMEDY_OPERATIONS.get(record.code)
-        if required is None:
-            continue
-        if record.code in DESTINATION_CONDITIONAL_CODES and (
-                record.destination is None):
+        required = tuple(REQUIRED_REMEDY_OPERATIONS.get(record.code, ()))
+        if record.destination is not None:
+            required += DESTINATION_REQUIRED_OPERATIONS.get(record.code, ())
+        if not required:
             continue
         missing = [op for op in required if op not in ops]
         if missing:
+            # A code whose remedy differs with and without a destination
+            # explains itself per shape; everything else has one reason.
+            reason = REMEDY_INCOMPLETE_REASON.get(
+                (record.code, None) if record.destination is None else
+                record.code,
+                REMEDY_INCOMPLETE_REASON[record.code],
+            )
             bad("plan-remedy-incomplete",
                 f"approved record {record.record_id} ({record.code!r} at "
                 f"{record.path!r}) carries {sorted(set(ops))} and is missing "
                 f"{missing} — "
-                + REMEDY_INCOMPLETE_REASON[record.code].format(
-                    destination=record.destination),
+                + reason.format(destination=record.destination),
                 "operations")
 
 
