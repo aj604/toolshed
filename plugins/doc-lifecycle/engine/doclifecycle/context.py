@@ -70,9 +70,19 @@ STATUS_PATTERN = re.compile(r"^Status:\s*(\S+)\s*$")
 # set of legal values has to be one thing both sides agree on, not two lists
 # that could drift apart.
 LIFECYCLE_STATUSES = ("pending-implementation", "ready")
-# Fail-safe default for an absent or malformed marker. Never `ready`: a plan
-# nobody has git-approved as done must never read as the state that unlocks
-# DISTILL's remedy set.
+# Fail-safe default for an absent or malformed marker. Never `ready`: what a
+# marker nobody can read is worth is "not done", so the report says that.
+#
+# What this does *not* do, said plainly because the mechanism invites the
+# stronger reading: it unlocks nothing. A record's lifecycle status does not
+# survive minting — `approval.RECORD_FIELDS` has no such field — and neither
+# the applier nor the approval set ever consults one, so a `ready` default
+# would not have authorized an operation. What it decides is whether the
+# *report* is honest about a plan's state: `bloat.py`'s
+# `bloat-status-not-file-bound` refuses a verdict whose claimed status is not
+# this one, so a model cannot report a plan as finished that the file does not
+# say is finished. That a `pending-implementation` DISTILL is not acted on is
+# the fixing skill's conduct rule, not something the applier enforces.
 DEFAULT_LIFECYCLE_STATUS = "pending-implementation"
 
 
