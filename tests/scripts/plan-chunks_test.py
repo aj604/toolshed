@@ -371,11 +371,12 @@ class ResumeAndCeiling(unittest.TestCase):
             self.assertIn("5", r.stderr)
 
 
-def run_emit(root, manifest_path, flag, chunk_id):
-    return subprocess.run(
-        [sys.executable, SCRIPT, "--root", root, flag, chunk_id,
-         "--manifest", manifest_path],
-        capture_output=True, text=True)
+def run_emit(root, manifest_path, flag, chunk_id, results_dir=None):
+    cmd = [sys.executable, SCRIPT, "--root", root, flag, chunk_id,
+           "--manifest", manifest_path]
+    if results_dir is not None:
+        cmd += ["--results-dir", results_dir]
+    return subprocess.run(cmd, capture_output=True, text=True)
 
 
 class ContentAddressedIds(unittest.TestCase):
@@ -482,31 +483,48 @@ class EmitPrompt(unittest.TestCase):
             return out, json.load(f)
 
     def test_prompt_carries_slice_verbatim_no_manifest_hunt(self):
-        with tempfile.TemporaryDirectory() as root:
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as results:
             write(root, "docs/plans/p.md", "\n".join(["x"] * 40))
             write(root, "docs/guide.md", "# guide")
             git_init(root)
             path, m = self.plan_to_file(root)
             chunk = next(c for c in m["chunks"]
                          if c["docs"][0]["path"] == "docs/plans/p.md")
-            r = run_emit(root, path, "--emit-prompt", chunk["id"])
+            r = run_emit(root, path, "--emit-prompt", chunk["id"], results)
             self.assertEqual(r.returncode, 0, r.stderr)
             prompt = r.stdout
             self.assertIn("docs/plans/p.md", prompt)
             self.assertIn("40", prompt)          # line count shown
             self.assertIn("planning", prompt)    # hint shown
-            self.assertIn(f"chunks/{chunk['id']}.json", prompt)
+            # The write destination is absolute and outside the work tree —
+            # not the bare relative "chunks/<id>.json" a work-tree-rooted
+            # executor would resolve straight into the repository.
+            expected_out = os.path.join(
+                os.path.abspath(results), chunk["id"] + ".json")
+            self.assertIn(expected_out, prompt)
+            self.assertNotIn(f" chunks/{chunk['id']}.json", prompt)
             self.assertIn("doc-lifecycle:detecting-doc-bloat", prompt)
             self.assertNotIn("manifest.json", prompt)
             self.assertNotIn("docs/guide.md", prompt)  # other chunks excluded
 
-    def test_prompt_names_the_engine_verdict_seam_and_unit_source(self):
+    def test_prompt_requires_results_dir(self):
         with tempfile.TemporaryDirectory() as root:
             write(root, "docs/a.md", "x")
             git_init(root)
             path, m = self.plan_to_file(root)
+            r = run_emit(root, path, "--emit-prompt", m["chunks"][0]["id"])
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("--results-dir", r.stderr)
+
+    def test_prompt_names_the_engine_verdict_seam_and_unit_source(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as results:
+            write(root, "docs/a.md", "x")
+            git_init(root)
+            path, m = self.plan_to_file(root)
             chunk_id = m["chunks"][0]["id"]
-            r = run_emit(root, path, "--emit-prompt", chunk_id)
+            r = run_emit(root, path, "--emit-prompt", chunk_id, results)
             self.assertEqual(r.returncode, 0, r.stderr)
             prompt = r.stdout
             self.assertIn('"verdicts"', prompt)
@@ -532,6 +550,65 @@ class EmitPrompt(unittest.TestCase):
             r = run_emit(root, path, "--emit-prompt", "c-nope")
             self.assertEqual(r.returncode, 2)
             self.assertIn("c-nope", r.stderr)
+
+
+class EngineManifestDialect(unittest.TestCase):
+    """The engine's `bloat-plan` manifest: {"documents": [<path>, ...]} per
+    chunk, no per-doc "lines"/"hint", no per-chunk "turns" — a different but
+    legitimate work order for the same --emit-prompt/--emit-turns seam
+    validate-bloat-output.py's chunk_doc_paths() already reads both dialects
+    for."""
+
+    def engine_manifest(self, root, chunk_id, documents):
+        path = os.path.join(root, "engine-manifest.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"schema_version": 1, "chunks": [
+                {"id": chunk_id, "documents": documents, "unit_count": 3},
+            ]}, f)
+        return path
+
+    def test_emit_prompt_renders_bare_paths_no_lines_or_hint(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as results:
+            path = self.engine_manifest(root, "c-engine1",
+                                         ["README.md", "docs/guide.md"])
+            r = run_emit(root, path, "--emit-prompt", "c-engine1", results)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("README.md", r.stdout)
+            self.assertIn("docs/guide.md", r.stdout)
+            expected_out = os.path.join(
+                os.path.abspath(results), "c-engine1.json")
+            self.assertIn(expected_out, r.stdout)
+
+    def test_emit_turns_fails_loudly_not_silently_to_floor(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = self.engine_manifest(root, "c-engine2", ["README.md"])
+            r = run_emit(root, path, "--emit-turns", "c-engine2")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("c-engine2", r.stderr)
+            self.assertIn("turns", r.stderr)
+
+    def test_emit_turns_honors_a_stamped_turns_value_even_in_this_dialect(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "engine-manifest.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"chunks": [
+                    {"id": "c-engine3", "documents": ["README.md"],
+                     "turns": 25},
+                ]}, f)
+            r = run_emit(root, path, "--emit-turns", "c-engine3")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(r.stdout.strip(), "25")
+
+    def test_neither_dialect_dies_naming_the_chunk(self):
+        with tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as results:
+            path = os.path.join(root, "bad-manifest.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"chunks": [{"id": "c-bad"}]}, f)
+            r = run_emit(root, path, "--emit-prompt", "c-bad", results)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("c-bad", r.stderr)
 
 
 class FixtureEndToEnd(unittest.TestCase):

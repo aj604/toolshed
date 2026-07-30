@@ -158,7 +158,9 @@ class VerdictShape(unittest.TestCase):
             cut(id="B2", verdict="CONDENSE", proposal="one dense line"),
             cut(id="B3", verdict="EXTRACT-AND-MOVE",
                 destination="docs/runbook.md", proposal="the line to land"),
-            cut(id="B4", verdict="MERGE-DOC", destination="README.md"),
+            # A destination other than cut()'s own README.md: a move to the
+            # judged document is bloat-destination-is-source at the engine.
+            cut(id="B4", verdict="MERGE-DOC", destination="docs/overview.md"),
             cut(id="B5", verdict="RETIRE-DOC"),
             distill(id="B6"),
         ]
@@ -199,6 +201,17 @@ class VerdictShape(unittest.TestCase):
         # refuses anything but 64 lowercase hex (finding-invalid-unit).
         for bad in ("README.md:12-15", "the intro paragraph", UNIT[:16],
                     UNIT.upper(), UNIT + "0"):
+            r = run(envelope([cut(units=[bad])]))
+            self.assertEqual(r.returncode, 1, f"{bad!r}: {r.stdout}{r.stderr}")
+            self.assertIn("digest", r.stderr)
+
+    def test_a_unit_carrying_trailing_or_leading_whitespace_is_refused(self):
+        # Transcription corruption, and the exact thing the digest seam exists
+        # to catch: `"<64 hex>\n"` is not the digest `segment` printed, and the
+        # *unstripped* value is what flows on to bloat-audit — which refuses it
+        # with `bloat-unknown-unit`. A `$`-anchored `.match()` against a
+        # `.strip()`ped copy passed both a trailing LF and a leading space.
+        for bad in (UNIT + "\n", " " + UNIT, UNIT + " ", UNIT + "\t"):
             r = run(envelope([cut(units=[bad])]))
             self.assertEqual(r.returncode, 1, f"{bad!r}: {r.stdout}{r.stderr}")
             self.assertIn("digest", r.stderr)
@@ -307,8 +320,28 @@ class ScopeRetirement(unittest.TestCase):
         self.assert_fails([scope_retire(sample="docs/superpowers/plans/a.md")],
                           "sample")
 
+    def test_empty_sample_is_valid(self):
+        # The engine records this finding fine (`sample: []`, verified against
+        # `bloat-audit`), and reading no members is a legitimate bulk judgment
+        # made from the enumeration alone — the scope is what authorizes, and
+        # the sample never was. Refusing it here failed the *whole* assembly,
+        # since --allow-partial forgives a missing chunk and never an invalid
+        # one, so one false red discarded an entire fan-out.
+        r = run(envelope([scope_retire(sample=[])]))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_sample_members_must_still_be_non_blank_strings(self):
+        for bad in ([""], ["   "], ["docs/a.md", None], [42],
+                    ["docs/a.md", ""]):
+            r = run(envelope([scope_retire(sample=bad)]))
+            self.assertEqual(r.returncode, 1, f"{bad!r}: {r.stdout}{r.stderr}")
+            self.assertIn("sample", r.stderr)
+
     def test_sample_refused_on_a_single_document_verdict(self):
         self.assert_fails([cut(sample=["README.md"])], "sample")
+
+    def test_empty_sample_still_refused_on_a_single_document_verdict(self):
+        self.assert_fails([cut(sample=[])], "sample")
 
 
 class DistillStatus(unittest.TestCase):
@@ -332,6 +365,72 @@ class DistillStatus(unittest.TestCase):
 
     def test_status_forbidden_off_distill(self):
         self.assert_fails([cut(status="ready")], "status")
+
+
+class DestinationSpelling(unittest.TestCase):
+    """The destination checks a shape check can make on its own.
+
+    Each was verified against `python3 -m doclifecycle bloat-audit` first: the
+    engine refuses all of them today, so catching them here only moves the
+    refusal a seam earlier. The one deliberate omission is recorded below.
+    """
+
+    def assert_fails(self, verdicts, fragment):
+        r = run(envelope(verdicts))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(fragment, r.stderr)
+
+    def test_a_move_to_the_judged_document_itself_is_refused(self):
+        # bloat-destination-is-source.
+        for code in ("EXTRACT-AND-MOVE", "MERGE-DOC"):
+            over = {"verdict": code, "destination": "README.md"}
+            if code == "EXTRACT-AND-MOVE":
+                over["proposal"] = "the line to land"
+            r = run(envelope([cut(**over)]))
+            self.assertEqual(r.returncode, 1, f"{code}: {r.stdout}{r.stderr}")
+            self.assertIn("the document being judged", r.stderr)
+
+    def test_residue_destination_equal_to_the_artifact_is_refused(self):
+        # bloat-destination-is-source, in the distillation's own words.
+        self.assert_fails(
+            [distill(destination="docs/plans/old-design.md")],
+            "the planning artifact being distilled")
+
+    def test_destination_traversing_out_of_the_repository_is_refused(self):
+        # bloat-destination-unauthorized for a residue path,
+        # bloat-destination-not-a-document for a move: an index path comes from
+        # a tree walk, so no document is ever spelled with a '..' component.
+        self.assert_fails([cut(verdict="MERGE-DOC",
+                               destination="docs/../../escape.md")], "'..'")
+        self.assert_fails([distill(destination="docs/../../escape.md")], "'..'")
+
+    def test_residue_destination_with_whitespace_is_refused(self):
+        # A residue destination goes through the engine's `authorize_path`,
+        # which refuses whitespace outright (bloat-destination-unauthorized).
+        for bad in ("docs/my residue.md", "docs/residue .md"):
+            r = run(envelope([distill(destination=bad)]))
+            self.assertEqual(r.returncode, 1, f"{bad!r}: {r.stdout}{r.stderr}")
+            self.assertIn("whitespace", r.stderr)
+
+    def test_a_move_destination_may_carry_whitespace(self):
+        # Deliberately NOT refused. A move destination is only ever checked
+        # against the index, and a whitespace-bearing path *can* be an indexed
+        # document — verified: with `docs/my guide.md` on disk and classified,
+        # bloat-audit accepts MERGE-DOC into it and records the destination.
+        # Refusing it here would be a fresh false red of exactly the kind the
+        # empty-sample check was.
+        r = run(envelope([cut(verdict="MERGE-DOC",
+                              destination="docs/my guide.md")]))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_legitimate_destination_still_validates(self):
+        r = run(envelope([
+            cut(id="B1", verdict="MERGE-DOC", destination="docs/readme.md"),
+            cut(id="B2", verdict="EXTRACT-AND-MOVE",
+                destination="docs/runbook.md", proposal="the line to land"),
+            distill(id="B3", destination="docs/reference/cache.md"),
+        ]))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
 class SeamFixture(unittest.TestCase):

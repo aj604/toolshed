@@ -55,12 +55,20 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 # `report.DIGEST`, mirrored: a unit is a sha256 of its content, so anything
 # else — a file:line, a paraphrase, a truncated digest — is refusable on sight.
 # The engine refuses it too (`finding-invalid-unit`); catching it here is the
 # whole point of a seam check where the verdict was produced.
-UNIT_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+#
+# Matched with `fullmatch`, never `match`, and against the *unstripped* value:
+# `$` matches before a trailing newline, so `"<64 hex>\n"` — the shape a copied
+# digest arrives in when a transcription picks up its line ending — passed a
+# `^...$` `.match()`. That value is the one that flows on to the engine, which
+# looks it up verbatim and refuses it (`bloat-unknown-unit`), so trimming a
+# copy before checking it would validate a string nobody downstream ever sees.
+UNIT_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 CUT = "CUT"
 CONDENSE = "CONDENSE"
@@ -152,11 +160,68 @@ def check_bulk(where, verdict, code, errs):
                     f"{scope!r} — a scope nobody can expand into a file list "
                     f"cannot be reviewed or applied")
 
+    # An *empty* sample is a real answer, and the engine records the finding
+    # for it (`_reject_sample` requires only a list of non-blank strings): a
+    # bulk judgment made from the enumeration alone read no member, and says
+    # so. Requiring a member here would refuse a verdict bloat-audit accepts —
+    # and because assembly forgives a *missing* chunk but never an invalid one,
+    # a single false red like that discards a whole fan-out.
     sample = verdict.get("sample")
-    if sample is not None and not path_list(sample):
+    if sample is not None and not (isinstance(sample, list)
+                                   and all(nonempty_str(p) for p in sample)):
         errs.append(f"{where}: sample must be a list of paths — it records "
                     f"which members were read, and never stands in for the "
-                    f"enumeration")
+                    f"enumeration; an empty list is a legitimate answer, a "
+                    f"blank or non-string entry names no member")
+
+
+def check_destination_spelling(where, code, path, destination, errs):
+    """The three destination faults a shape check can settle by itself.
+
+    Everything else about a destination is the index's: whether it is a
+    document, who owns the duplicated content, whether its kind accepts
+    content, whether a residue path is free. These three need none of that,
+    and each is refused by the engine today — the wording below is the
+    engine's own, so a worker reads one explanation rather than two.
+
+    Deliberately *not* checked here: the rest of
+    `paths.repository_relative_problem` (an absolute path, a drive letter, a
+    backslash, non-NFC form, a leading-dash component) and — for a move —
+    whitespace. A move destination is only ever looked up in the index, and an
+    indexed document may legitimately be spelled with a space in it
+    (`bloat-audit` accepts `MERGE-DOC` into `docs/my guide.md` when that file
+    is classified), so a blanket spelling port here would refuse verdicts the
+    engine records. Whitespace is refused only on a residue destination, which
+    the engine puts through `authorize_path` and which therefore cannot carry
+    any.
+    """
+    if nonempty_str(path) and destination == path:
+        if code in RESIDUE_VERDICTS:
+            errs.append(f"{where}: {destination} is the planning artifact "
+                        f"being distilled — its residue cannot be the "
+                        f"document the same record retires")
+        else:
+            errs.append(f"{where}: {destination} is the document being judged "
+                        f"— a move to itself changes nothing and would read as "
+                        f"an approved edit")
+        return
+
+    if ".." in destination.split("/"):
+        errs.append(f"{where}: {destination!r} traverses with '..' — a "
+                    f"repository-relative path names a location inside the "
+                    f"repository and never walks out of one, and no document "
+                    f"the index holds is spelled that way")
+        return
+
+    if code in RESIDUE_VERDICTS:
+        bad = next((c for c in destination
+                    if c.isspace() or unicodedata.category(c) == "Zs"), None)
+        if bad is not None:
+            errs.append(f"{where}: {destination!r} contains whitespace "
+                        f"(U+{ord(bad):04X}) — whitespace makes a path "
+                        f"ambiguous to quote and impossible to distinguish by "
+                        f"eye, and a residue document is one this "
+                        f"distillation authors, so name it without any")
 
 
 def check_one_document(where, verdict, code, errs):
@@ -169,7 +234,7 @@ def check_one_document(where, verdict, code, errs):
                     f"<path>` prints for that document")
     else:
         for unit in units:
-            if not UNIT_DIGEST.match(unit.strip()):
+            if not UNIT_DIGEST.fullmatch(unit):
                 errs.append(f"{where}: {unit!r} is not an assertion unit — a "
                             f"unit is the 64-character sha256 digest `segment` "
                             f"prints, copied verbatim; a line number, a quote, "
@@ -188,6 +253,9 @@ def check_one_document(where, verdict, code, errs):
         if destination is not None and not nonempty_str(destination):
             errs.append(f"{where}: {code}'s destination must be a document "
                         f"path, or absent")
+        elif destination is not None:
+            check_destination_spelling(where, code, verdict.get("path"),
+                                       destination, errs)
     elif destination is not None:
         errs.append(f"{where}: {code} moves nothing, so it names no "
                     f"destination — only "
