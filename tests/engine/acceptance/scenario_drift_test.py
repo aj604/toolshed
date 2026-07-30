@@ -34,7 +34,12 @@ from doclifecycle.drift import (  # noqa: E402
     audit_drift,
     plan_drift_audit,
 )
-from doclifecycle.finding import FACTUAL, NORMATIVE, RATIONALE  # noqa: E402
+from doclifecycle.finding import (  # noqa: E402
+    FACTUAL,
+    NON_ASSERTIVE,
+    NORMATIVE,
+    RATIONALE,
+)
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import validate_report  # noqa: E402
 from doclifecycle.results import (  # noqa: E402
@@ -75,17 +80,17 @@ class DriftScenarioTestCase(fixture.AcceptanceFixtureTestCase):
     def verdicts(self, repo, plan, stale=(fixture.LIVING_FACTUAL,), fixes=None):
         """A lane's answer for every living document the plan declared.
 
-        The fixture's own prose supplies three of the four assertion classes:
-        its normative sentence and its rationale sentence carry no evidence
-        obligation and so are classified and left unjudged, and everything else
-        is factual and VERIFIED against the fixture's evidence source — except
-        the texts named in `stale`, so a scenario states only what it is about.
+        The fixture's own living prose supplies all four assertion classes.
+        Every assertion is judged against its matching current evidence; only
+        the non-assertive signpost remains unjudged.
         """
         stale_fixes = {fixture.LIVING_FACTUAL: fixture.LIVING_FACTUAL_FIX}
         stale_fixes.update(fixes or {})
-        unjudged = {
-            fixture.LIVING_NORMATIVE: NORMATIVE,
-            fixture.LIVING_RATIONALE: RATIONALE,
+        governed = {
+            fixture.LIVING_NORMATIVE: (
+                NORMATIVE, "governing-source", 1,
+            ),
+            fixture.LIVING_RATIONALE: (RATIONALE, "coherence", 2),
         }
         documents = []
         for planned in plan.documents:
@@ -96,12 +101,26 @@ class DriftScenarioTestCase(fixture.AcceptanceFixtureTestCase):
             for unit in segmentation.units:
                 if not unit.assertion_capable:
                     continue
-                if unit.text in unjudged:
+                if unit.text == fixture.LIVING_NON_ASSERTIVE:
                     entries.append({"unit": unit.digest,
-                                    "assertion_class": unjudged[unit.text]})
+                                    "assertion_class": NON_ASSERTIVE})
+                elif unit.text in governed:
+                    assertion_class, obligation, line = governed[unit.text]
+                    entries.append({
+                        "unit": unit.digest,
+                        "assertion_class": assertion_class,
+                        "obligation": obligation,
+                        "verdict": "VERIFIED", "kind": "behavior", "tier": 2,
+                        "evidence": {
+                            "source": fixture.EVIDENCE_AUTHORITY,
+                            "line": line,
+                            "observed": unit.text,
+                        },
+                    })
                 elif unit.text in stale:
                     entries.append({
                         "unit": unit.digest, "assertion_class": FACTUAL,
+                        "obligation": "evidence",
                         "verdict": "STALE", "kind": "value", "tier": 3,
                         "evidence": {"source": fixture.EVIDENCE_SOURCE,
                                      "line": 7, "observed": OBSERVED_RATE},
@@ -110,6 +129,7 @@ class DriftScenarioTestCase(fixture.AcceptanceFixtureTestCase):
                 else:
                     entries.append({
                         "unit": unit.digest, "assertion_class": FACTUAL,
+                        "obligation": "evidence",
                         "verdict": "VERIFIED", "kind": "behavior", "tier": 2,
                         "evidence": {"source": fixture.EVIDENCE_SOURCE,
                                      "line": 7, "observed": OBSERVED_RATE},
@@ -279,6 +299,72 @@ class AFailedChunkIsNeverClean(DriftScenarioTestCase):
         self.assertIn("not-examined", result.stderr)
 
 
+class EveryLivingAssertionIsJudged(DriftScenarioTestCase):
+    """Issue #154: classification cannot waive a living truth obligation."""
+
+    def architecture_coverage(self, report):
+        return next(e.detail for e in report.examined
+                    if e.scope == fixture.LIVING_DOC)
+
+    def test_the_real_repository_corpus_covers_all_four_assertion_classes(self):
+        repo = self.build_fixture()
+
+        coverage = self.architecture_coverage(self.full_report(repo))
+
+        self.assertEqual(coverage["classes"], {
+            FACTUAL: 1,
+            NON_ASSERTIVE: 1,
+            NORMATIVE: 1,
+            RATIONALE: 1,
+        })
+
+    def test_the_report_preserves_each_discharged_obligation(self):
+        repo = self.build_fixture()
+
+        report = self.full_report(repo)
+        coverage = self.architecture_coverage(report)
+        stale = next(r for r in report.records
+                     if r.extra["path"] == fixture.LIVING_DOC)
+
+        self.assertEqual(coverage["obligations"], {
+            "coherence": 1,
+            "evidence": 1,
+            "governing-source": 1,
+        })
+        self.assertEqual(stale.extra["obligation"], "evidence")
+        self.assertEqual(
+            {item["obligation"] for item in coverage["verified"]},
+            {"coherence", "governing-source"},
+        )
+
+    def test_relabeling_a_stale_fact_cannot_remove_its_judgment(self):
+        for assertion_class in (NORMATIVE, RATIONALE):
+            with self.subTest(assertion_class=assertion_class):
+                repo = self.build_fixture()
+                plan = plan_drift_audit(repo, mode=MODE_FULL)
+                payload = self.verdicts(repo, plan)
+                architecture = next(
+                    d for d in payload["documents"]
+                    if d["path"] == fixture.LIVING_DOC
+                )
+                factual = next(
+                    v for v in architecture["verdicts"]
+                    if v["assertion_class"] == FACTUAL
+                )
+                index = architecture["verdicts"].index(factual)
+                architecture["verdicts"][index] = {
+                    "unit": factual["unit"],
+                    "assertion_class": assertion_class,
+                }
+
+                report = audit_drift(repo, mode=MODE_FULL, verdicts=payload)
+
+                self.assertEqual(report.status, STATE_PARTIAL)
+                gap = next(i for i in report.incomplete
+                           if i.scope == fixture.LIVING_DOC)
+                self.assertIn("drift-verdict-owed", gap.reason)
+
+
 class TheNarrativeDocument(DriftScenarioTestCase):
     """Third acceptance criterion: dated honestly, never line-verified."""
 
@@ -360,7 +446,7 @@ class FollowableEvidence(DriftScenarioTestCase):
 
         record = self.stale_record(self.full_report(repo))
 
-        self.assertEqual(record.extra["location"], f"{fixture.LIVING_DOC}:3")
+        self.assertEqual(record.extra["location"], f"{fixture.LIVING_DOC}:5")
         self.assertEqual(record.extra["assertion"], fixture.LIVING_FACTUAL)
 
     def test_its_fix_preserves_the_assertion_units_soft_wrap(self):

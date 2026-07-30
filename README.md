@@ -57,7 +57,7 @@ Start with **[the principles](docs/guides/principles.md)** — one page on the m
 | Docs exist — accurate, but heavy | "audit the docs for bloat" | [Auditing and fixing bloat](docs/guides/auditing-doc-bloat.md) |
 | The drift loop feels routine — audit it unattended | "set up doc sync" | [Turning on the nightly](docs/guides/scheduling-doc-sync.md) |
 
-Two skills need no starting point because they trigger on the way: any edit to a README / runbook / `CLAUDE.md` invokes `writing-docs` (every line a verifiable claim), and "should we document X?" invokes `growing-docs` (demand signals grow docs; calendars don't).
+Two skills need no starting point because they trigger on the way: any edit to a README / runbook / `CLAUDE.md` invokes `writing-docs` (every assertion discharges its review obligation), and "should we document X?" invokes `growing-docs` (demand signals grow docs; calendars don't).
 
 ## What an audit hands you
 
@@ -72,6 +72,7 @@ Not "the docs look a bit stale" — a machine-checkable record per claim. This i
   "units": ["239c43567bf0107d4104098d06a205a9800c289769dfada237743ec7849f3cb6"],
   "assertion": "Reset state = `make reset`.",
   "assertion_class": "factual",
+  "obligation": "evidence",
   "location": "docs/README.md:3",
   "kind": "command",
   "tier": 1,
@@ -100,7 +101,7 @@ Bloat audits emit the engine's own verdict envelope (`{"schema_version": 1, "ver
 |-----------|------|-------------|
 | `bootstrapping-docs` | skill | Pointing at an undocumented repo — produces the smallest high-leverage doc set, then deliberately stops, recording deferrals in `docs/doc-scope.md`. |
 | `growing-docs` | skill | Baseline docs exist but a demand signal says they fall short — writes the one artifact that absorbs the signal, then stops. The demand-driven counterpart to `bootstrapping-docs`. |
-| `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every line a verifiable claim, rationale marked and anchored; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
+| `writing-docs` | skill | Writing or editing a repo-tracking doc (README, runbook, CLAUDE.md/AGENTS.md, reference), human- or agent-facing — every assertion carries current evidence, governing authority, or a coherence judgment; carries the agent-density bar and routes heavy agent docs to the `llm-doc-writer` agent. |
 | `detecting-doc-drift` | skill | Auditing docs against the code for **accuracy** — extracts each claim, verifies it at the cheapest sufficient tier, emits a structured, parseable record. |
 | `detecting-doc-bloat` | skill | Auditing docs for low-value content — redundant, verbose, duplicated, or past its useful form — emits a structured prune/condense/distill proposal. Read-only: it proposes, a human approves. |
 | `fixing-docs` | skill | Applying an audit report — drift and bloat records alike, through one door: the IDs you approve mint an approval set, which becomes an edit plan the applier (`python3 -m doclifecycle apply-plan`) lands, and you get the working-tree diff back — the applier never stages; committing it is the change approval. The approval set is the only authority; nothing the report didn't flag gets touched. |
@@ -110,7 +111,7 @@ Bloat audits emit the engine's own verdict envelope (`{"schema_version": 1, "ver
 
 ## Why this works where "keep the docs updated" doesn't
 
-The suite shares one contract: **a repo-tracking doc is a set of claims** — verifiable against the repo as it is now, or rationale explicitly marked and anchored. That bar is what makes drift *detectable*, bloat *judgeable*, and fixes *reviewable*; the full argument, with pointers into the skill files that enforce it, is one page: **[docs/guides/principles.md](docs/guides/principles.md)**.
+The suite shares one contract: **every assertion in a repo-tracking doc discharges a current review obligation** — evidence for facts, governing authority for rules, and coherence evidence for rationale; only non-assertive prose is unjudged. That bar is what makes drift *detectable*, bloat *judgeable*, and fixes *reviewable*; the full argument, with pointers into the skill files that enforce it, is one page: **[docs/guides/principles.md](docs/guides/principles.md)**.
 
 The same contract is what lets the pieces compose instead of fight:
 

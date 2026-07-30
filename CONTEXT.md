@@ -26,7 +26,7 @@ A deterministically segmented structural unit of a living document (sentence, li
 _Avoid_: claim (legacy "every line is a claim"), line
 
 **Assertion class**:
-The model-assigned classification of an assertion unit — factual (needs evidence), normative (needs owner/source), rationale, or non-assertive prose (no obligation). Recorded in the report as reviewable data; determines the unit's evidence obligation, never its identity.
+The model-assigned classification of an assertion unit — factual (needs evidence), normative (needs a governing source or owner judgment), rationale (needs a coherence judgment), or non-assertive prose (no obligation). Recorded in the report as reviewable data; determines the unit's review obligation, never its identity or whether a living assertion is judged.
 _Avoid_: claim type
 
 ### Contracts (artifacts, not components)
@@ -84,7 +84,7 @@ _Avoid_: merge (as if it approved the model's judgment)
 The shared typed vocabulary for what documentation is (kinds, sets, assertions) that all components and the authoring skills build on.
 
 **Document kind**:
-The truth obligation a document carries. Exactly three: living (must be currently true, assertions carry evidence), narrative (must be honestly dated; as-of/anchors valid, never line-verified), planning (temporary; carries lifecycle state as a `> Status: <pending-implementation|ready>` block-quote marker, absent meaning pending; ends in distillation or retirement). Every document has exactly one kind.
+The truth obligation a document carries. Exactly three: living (must be currently true; every assertion discharges its class's review obligation), narrative (must be honestly dated; as-of/anchors valid, never line-verified), planning (temporary; carries lifecycle state as a `> Status: <pending-implementation|ready>` block-quote marker, absent meaning pending; ends in distillation or retirement). Every document has exactly one kind.
 _Avoid_: document type, category, policy collection (as a kind)
 
 **Document set**:

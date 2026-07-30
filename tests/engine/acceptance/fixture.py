@@ -33,7 +33,7 @@ REGISTRY_PATH = ".doc-lifecycle/registry.json"
 AUTO_APPLY_POLICY_PATH = ".doc-lifecycle/auto-apply-policy.json"
 AUTO_APPLY_POLICY_ID = "acceptance-fixture-nightly"
 
-# Living: factual + normative assertions, plus a prompt-injection attempt
+# Living: all four assertion classes, plus a prompt-injection attempt
 # embedded in an HTML comment — content a model-driven audit must read without
 # obeying.
 LIVING_DOC = "docs/architecture.md"
@@ -55,6 +55,7 @@ LIVING_FACTUAL_FIX = (
     "The payment service lives at `src/payment_service.py` and calculates fees "
     "at a\nflat 2.5% rate."
 )
+LIVING_NON_ASSERTIVE = "The details follow."
 LIVING_NORMATIVE = "New endpoints must include an integration test before merging."
 LIVING_RATIONALE = (
     "The flat rate exists because the upstream processor bills a single "
@@ -138,6 +139,7 @@ SYMLINK_PATHS = (SYMLINK_ABS_DOC, SYMLINK_REL_DOC, SYMLINK_DIR)
 # commits so a later drift scenario can find the claim stale. Carries its own
 # prompt-injection attempt, this time in a source comment rather than a doc.
 EVIDENCE_SOURCE = "src/payment_service.py"
+EVIDENCE_AUTHORITY = "config/documentation-authority.txt"
 
 # Consumer-side state a scheduled install carries between runs, at the layout
 # aj604/toolshed#133 moved them to. The first two are live in this repo's own
@@ -178,6 +180,8 @@ _REGISTRY_JSON = """{
 """
 
 _LIVING_DOC_TEXT = """# Architecture
+
+The details follow.
 
 The payment service lives at `src/payment_service.py` and calculates fees at a
 flat 2% rate.
@@ -278,6 +282,10 @@ def calculate_fee(amount):
     return amount * FLAT_FEE_RATE
 '''
 
+_EVIDENCE_AUTHORITY_TEXT = """New endpoints must include an integration test before merging.
+The flat rate exists because the upstream processor bills a single per-transaction fee.
+"""
+
 _AUTO_APPLY_POLICY_JSON = """{
   "artifact": "auto-apply-policy",
   "schema_version": 1,
@@ -349,6 +357,7 @@ def build():
     for hostile_path in HOSTILE_DOCS:
         _write(root, hostile_path, _HOSTILE_DOC_TEXT)
     _write(root, EVIDENCE_SOURCE, _EVIDENCE_SOURCE_V1)
+    _write(root, EVIDENCE_AUTHORITY, _EVIDENCE_AUTHORITY_TEXT)
 
     # Symlink / traversal attempts. Targets are real, ordinary, read-only
     # paths present on every POSIX box (macOS and Linux CI alike) so the

@@ -33,7 +33,10 @@ ARTIFACT_SCHEMA_VERSION = 1
 # anchor reference candidates are resolved through the canonical path policy;
 # and post-write confinement compares the diff to the plan's own written paths
 # (#57 review remediation).
-RULESET_VERSION = 7
+# 8: every living assertion carries a review obligation; normative and
+# rationale classifications can no longer waive judgment, and every judgment
+# records the closed obligation it discharged (#154).
+RULESET_VERSION = 8
 
 # The published plugin version this engine ships inside. Pinned in lineage, so
 # it must track `plugins/doc-lifecycle/.claude-plugin/plugin.json` — the engine
@@ -41,4 +44,4 @@ RULESET_VERSION = 7
 # `tests/engine/report_test.py` fails loudly when the two drift. Every release
 # therefore expires prior reports: cheaper than reasoning about which releases
 # could have changed a verdict, and re-running an audit is cheap.
-PLUGIN_VERSION = "0.44.0"
+PLUGIN_VERSION = "0.44.1"

@@ -30,6 +30,7 @@ def rec(**over):
         "verdict": "VERIFIED",
         "kind": "command",
         "tier": 1,
+        "obligation": "evidence",
         "evidence": {
             "source": "Makefile",
             "line": 12,
@@ -83,6 +84,10 @@ class ValidCases(unittest.TestCase):
         r = run(payload(schema_version=1))
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_a_judged_unit_records_the_obligation_it_discharges(self):
+        r = run(payload(doc(verdicts=[rec(obligation="evidence")])))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_empty_documents_list_passes(self):
         r = run({"documents": []})
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -102,13 +107,15 @@ class ValidCases(unittest.TestCase):
         r = run(payload(entry))
         self.assertEqual(r.returncode, 0, r.stderr)
 
-    def test_normative_unit_may_be_unjudged(self):
-        entry = doc(verdicts=[{"unit": 2, "assertion_class": "normative"}])
+    def test_normative_unit_with_owner_judgment_passes(self):
+        entry = doc(verdicts=[rec(assertion_class="normative",
+                                  obligation="owner-judgment")])
         r = run(payload(entry))
         self.assertEqual(r.returncode, 0, r.stderr)
 
-    def test_rationale_unit_may_be_judged(self):
-        entry = doc(verdicts=[rec(assertion_class="rationale")])
+    def test_rationale_unit_with_coherence_judgment_passes(self):
+        entry = doc(verdicts=[rec(assertion_class="rationale",
+                                  obligation="coherence")])
         r = run(payload(entry))
         self.assertEqual(r.returncode, 0, r.stderr)
 
@@ -203,6 +210,18 @@ class EnumViolations(unittest.TestCase):
         r = run(payload(doc(verdicts=[rec(assertion_class="prose")])))
         self.assertEqual(r.returncode, 1)
         self.assertIn("assertion_class", r.stderr)
+
+    def test_unknown_obligation_rejected(self):
+        r = run(payload(doc(verdicts=[rec(obligation="best-effort")])))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("obligation", r.stderr)
+
+    def test_obligation_for_a_different_class_rejected(self):
+        r = run(payload(doc(verdicts=[rec(
+            assertion_class="rationale", obligation="owner-judgment",
+        )])))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("obligation", r.stderr)
 
     def test_invalid_entry_status_rejected(self):
         r = run(payload(doc(status="skipped")))
@@ -355,6 +374,25 @@ class FieldRules(unittest.TestCase):
         r = run(payload(entry))
         self.assertEqual(r.returncode, 1)
         self.assertIn("factual", r.stderr)
+
+    def test_normative_unit_without_a_judgment_rejected(self):
+        entry = doc(verdicts=[{"unit": 1, "assertion_class": "normative"}])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("normative", r.stderr)
+
+    def test_rationale_unit_without_a_judgment_rejected(self):
+        entry = doc(verdicts=[{"unit": 1, "assertion_class": "rationale"}])
+        r = run(payload(entry))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("rationale", r.stderr)
+
+    def test_judgment_without_an_obligation_rejected(self):
+        bad = rec()
+        del bad["obligation"]
+        r = run(payload(doc(verdicts=[bad])))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("obligation", r.stderr)
 
     def test_partially_judged_unit_rejected(self):
         bad = rec()

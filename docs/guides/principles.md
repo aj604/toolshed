@@ -1,6 +1,6 @@
 # Docs as checkable claims — how doc-lifecycle thinks
 
-> As of 2026-07-29 (doc-lifecycle 0.44.0; skill files under `plugins/doc-lifecycle/skills/`, applier contract in `plugins/doc-lifecycle/engine/README.md`)
+> As of 2026-07-30 (doc-lifecycle 0.44.1; skill files under `plugins/doc-lifecycle/skills/`, applier contract in `plugins/doc-lifecycle/engine/README.md`)
 
 Five minutes here explains every skill in the plugin. Each principle below names the
 skill file that enforces it, so none of this is aspiration — you can go read the rule.
@@ -8,12 +8,16 @@ skill file that enforces it, so none of this is aspiration — you can go read t
 ## 1. A repo-tracking doc is a set of claims
 
 A README, runbook, or CLAUDE.md exists to be *true of the repo as it is now*. So every
-line is one of two things (`skills/writing-docs/SKILL.md`):
+assertion unit has one of four classes (`skills/writing-docs/SKILL.md`):
 
-- a **verifiable claim** — a command, path, symbol, behavior, or structure you can check
-  against the code today;
-- a **rationale claim** — the "why", allowed only in a marked section and anchored to a
-  `file:line`, commit, or date, so its relevance can be audited later.
+- **factual** — a command, path, symbol, behavior, structure, or value checked against
+  current evidence;
+- **normative** — a rule checked against a current governing source or owner judgment;
+- **rationale** — the "why", checked for coherence with current evidence;
+- **non-assertive** — connective prose or signposting, the only class that takes no judgment.
+
+Classification never waives a living truth obligation. The first three classes are always
+`VERIFIED`, `STALE`, or `UNVERIFIABLE`; only non-assertive prose remains unjudged.
 
 Anything else — invented example output, an aspirational "supports X", prose the reader
 could infer from one obvious file — gets cut. Tutorials and design narratives are exempt

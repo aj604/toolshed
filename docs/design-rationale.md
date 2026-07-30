@@ -9,10 +9,10 @@ provenance anchor to the text that decided it.
 
 ## Suite contract
 
-- **Rationale claims are relevance-checked, never truth-checked.** The drift engine
-  checks a marked+anchored rationale claim's anchor — does the decision still apply,
-  is the code it references still there — never the claim's truth. Automation never
-  silently rewrites rationale.
+- **Rationale claims are coherence-checked, never treated as facts.** The audit engine
+  requires a judgment against current evidence — does the decision still apply, does
+  the explanation cohere with the implementation it references — or reports the
+  rationale UNVERIFIABLE. Automation never silently rewrites rationale.
   (docs/plans/2026-06-09-documentation-skills-suite-design.md @ 09f4300, Decision 2)
 
 ## Sync and bloat automation

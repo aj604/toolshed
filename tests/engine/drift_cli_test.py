@@ -18,6 +18,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from drift_test import (  # noqa: E402
     LIVING,
+    MIXED,
+    MIXED_CONNECTIVE,
+    MIXED_NORMATIVE,
+    MIXED_RATIONALE,
+    MIXED_TEXT,
     NARRATIVE,
     DriftRepoTestCase,
 )
@@ -95,6 +100,43 @@ class TheAuditCommand(DriftCommandTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["status"], "findings")
+
+    def test_all_four_assertion_classes_reach_the_command_contract(self):
+        root = self.drift_repo(**{MIXED: MIXED_TEXT})
+        payload = {"documents": [
+            {"path": LIVING, "status": "ok", "verdicts": [
+                self.verdict(root, verdict="VERIFIED", fix=None),
+            ]},
+            {"path": MIXED, "status": "ok", "verdicts": [
+                self.unit_entry(root, MIXED, MIXED_CONNECTIVE,
+                                "non-assertive"),
+                self.verdict(
+                    root, path=MIXED, text=MIXED_NORMATIVE,
+                    assertion_class="normative",
+                    obligation="governing-source", verdict="VERIFIED",
+                    fix=None,
+                ),
+                self.verdict(
+                    root, path=MIXED, text=MIXED_RATIONALE,
+                    assertion_class="rationale", obligation="coherence",
+                    verdict="VERIFIED", fix=None,
+                ),
+            ]},
+        ]}
+        path = self.verdicts_file(root, payload)
+
+        result = run_command("drift-audit", "--repo", root, "--verdicts", path)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        examined = json.loads(result.stdout)["examined"]
+        classes = {
+            assertion_class
+            for entry in examined
+            for assertion_class in entry.get("classes", {})
+        }
+        self.assertEqual(
+            classes, {"factual", "normative", "rationale", "non-assertive"},
+        )
 
     def test_a_partial_run_exits_four_and_names_what_it_skipped(self):
         root = self.drift_repo()

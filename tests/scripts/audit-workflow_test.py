@@ -229,6 +229,19 @@ class StaleFixPrompt(unittest.TestCase):
         self.assertIn("preserve its existing soft wrap with embedded LF", prompt)
         self.assertIn("copied byte-verbatim", prompt)
 
+    def test_the_prompt_requires_every_living_assertion_obligation(self):
+        prompt = " ".join("\n".join(jobs()["audit"]).split())
+
+        for obligation in (
+            "evidence", "governing-source", "owner-judgment", "coherence",
+        ):
+            with self.subTest(obligation=obligation):
+                self.assertIn(obligation, prompt)
+        self.assertIn(
+            "Every one of those three classes owes a judgment", prompt,
+        )
+        self.assertIn("A \"non-assertive\" unit takes none", prompt)
+
 
 class RenderScriptWired(unittest.TestCase):
     def test_publish_job_renders_through_the_tested_script(self):

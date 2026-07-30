@@ -76,15 +76,16 @@ class SegmentingTheFixturesDocuments(fixture.AcceptanceFixtureTestCase):
         result = segment_document(repo, fixture.LIVING_DOC)
 
         self.assertEqual(
-            [(u.kind, u.text) for u in result.units][:4],
+            [(u.kind, u.text) for u in result.units][:5],
             [
                 ("heading", fixture.LIVING_HEADING),
+                ("sentence", fixture.LIVING_NON_ASSERTIVE),
                 ("sentence", fixture.LIVING_FACTUAL),
                 ("sentence", fixture.LIVING_NORMATIVE),
                 ("sentence", fixture.LIVING_RATIONALE),
             ],
         )
-        self.assertEqual([u.kind for u in result.units[4:]], ["html_block"])
+        self.assertEqual([u.kind for u in result.units[5:]], ["html_block"])
 
     def test_a_hard_wrapped_claim_is_one_unit(self):
         """The factual claim is wrapped across two lines in the file."""
@@ -154,6 +155,8 @@ class TheFourAssertionClasses(fixture.AcceptanceFixtureTestCase):
         segmentation = segment_document(repo, fixture.LIVING_DOC)
         units = by_text(segmentation)
         return segmentation, [
+            {"unit": units[fixture.LIVING_NON_ASSERTIVE].digest,
+             "assertion_class": NON_ASSERTIVE},
             {"unit": units[fixture.LIVING_FACTUAL].digest,
              "assertion_class": FACTUAL},
             {"unit": units[fixture.LIVING_NORMATIVE].digest,
@@ -162,7 +165,7 @@ class TheFourAssertionClasses(fixture.AcceptanceFixtureTestCase):
              "assertion_class": RATIONALE},
         ]
 
-    def test_factual_normative_and_rationale_prose_are_distinguished(self):
+    def test_all_four_assertion_classes_are_distinguished(self):
         repo = self.build_fixture()
         segmentation, entries = self.living_classes(repo)
 
@@ -170,6 +173,7 @@ class TheFourAssertionClasses(fixture.AcceptanceFixtureTestCase):
 
         units = by_text(segmentation)
         self.assertEqual(result.by_unit(), {
+            units[fixture.LIVING_NON_ASSERTIVE].digest: NON_ASSERTIVE,
             units[fixture.LIVING_FACTUAL].digest: FACTUAL,
             units[fixture.LIVING_NORMATIVE].digest: NORMATIVE,
             units[fixture.LIVING_RATIONALE].digest: RATIONALE,
@@ -229,7 +233,7 @@ class TheFourAssertionClasses(fixture.AcceptanceFixtureTestCase):
         repo = self.build_fixture()
         segmentation, entries = self.living_classes(repo)
 
-        result = record_classifications(segmentation, entries[:2])
+        result = record_classifications(segmentation, entries[:-1])
 
         self.assertIsInstance(result, Invalid)
         self.assertEqual(
