@@ -210,6 +210,22 @@ class ScopeEnumeration(RepoTestCase):
         self.assertIsInstance(result, Invalid)
         self.assertEqual(problem_codes(result), ["bloat-scope-not-enumerable"])
 
+    def test_a_selector_whose_value_is_not_a_string_is_refused(self):
+        # Issue #57 review (parity audit): `{"glob": 123}` reached
+        # `registry.compile_glob` and raised `TypeError` out of a public seam,
+        # so bloat-audit produced a traceback and no report at all. `set` and
+        # `kind` degraded to `bloat-scope-empty`, which is a true statement
+        # about a rule nobody could have written on purpose; all three name the
+        # same fault now.
+        for rule in ({"glob": 123}, {"set": 123}, {"kind": None},
+                     {"glob": ""}, {"glob": ["docs/*.md"]}):
+            with self.subTest(rule=rule):
+                result = bloat.enumerate_scope(self.index(), rule)
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertEqual(problem_codes(result),
+                                 ["bloat-scope-not-enumerable"])
+
     def test_a_rule_matching_nothing_is_refused(self):
         result = bloat.enumerate_scope(self.index(), {"set": "adr"})
 
@@ -370,6 +386,38 @@ class DestinationsComeFromTheIndex(RecorderTestCase):
         result = self.record([self.verdict(destination="docs/a.md")])
 
         self.assertEqual(problem_codes(result), ["bloat-destination-forbidden"])
+
+
+class MergingTheDocumentTheIndexOwnsIsRefused(RecorderTestCase):
+    """`docs/a.md` (living) owns SHARED; `docs/plans/p.md` (planning) copies
+    it. Judging the *owner* itself for MERGE-DOC used to empty the `owners`
+    set (`owners = {...} - {path}`) and fall through to the "no other
+    occurrence" branch — false, since the index's own `duplicate_search`
+    shows the content elsewhere, and worse, a wrong model-proposed
+    destination in that slot was silently accepted (`model-proposed`),
+    bypassing the index guard. Both directions are refused here instead.
+    """
+
+    def test_omitting_a_destination_for_the_owner_is_refused_accurately(self):
+        result = self.record([self.verdict(
+            verdict=bloat.MERGE_DOC, path="docs/a.md",
+            units=[self.unit("docs/a.md", SHARED)],
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-destination-self-owner"])
+        # The old message claimed no other occurrence existed; the index's
+        # own duplicate_search over these units says otherwise.
+        message = result.problems[0].message
+        self.assertNotIn("found no other occurrence", message)
+
+    def test_a_wrong_destination_for_the_owner_is_refused_not_accepted(self):
+        result = self.record([self.verdict(
+            verdict=bloat.MERGE_DOC, path="docs/a.md",
+            units=[self.unit("docs/a.md", SHARED)],
+            destination="docs/guides/g.md",
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-destination-self-owner"])
 
 
 class ContentionIsResolvedByTheIndex(RepoTestCase):
@@ -717,6 +765,13 @@ class BulkJudgmentsAreEnumerated(RepoTestCase):
 
         self.assertEqual(problem_codes(result), ["bloat-scope-verdict-ineligible"])
 
+    def test_a_bulk_refusal_names_the_verdicts_id_alongside_the_index(self):
+        result = self.record(verdict=bloat.CONDENSE, id="P9")
+
+        problem = result.problems[0]
+        self.assertIn("verdicts[0]", problem.location)
+        self.assertIn("id='P9'", problem.location)
+
 
 class LifecycleStateIsFileBound(RecorderTestCase):
     """A DISTILL verdict's `status` is checked against the file, not trusted.
@@ -787,6 +842,29 @@ class LifecycleStateIsFileBound(RecorderTestCase):
         result = self.distill("docs/plans/ready.md", status="pending-implementation")
 
         self.assertIn("bloat-status-not-file-bound", problem_codes(result))
+
+    def test_the_refusal_names_the_verdicts_id_and_path_not_only_the_index(self):
+        # `verdicts[N]` alone is a position in the *assembled* envelope: a
+        # chunk worker's own id is renumbered on assembly
+        # (output-contract.md's `B1..Bn`), so an index by itself names
+        # neither an id a reviewer recognizes nor the document in question —
+        # re-prompting the right chunk meant opening the envelope and
+        # counting. The location must carry both alongside the index.
+        result = self.distill("docs/plans/pending.md", id="P7", status="ready")
+
+        problem = result.problems[0]
+        self.assertEqual(problem.code, "bloat-status-not-file-bound")
+        self.assertIn("verdicts[0]", problem.location)
+        self.assertIn("id='P7'", problem.location)
+        self.assertIn("path='docs/plans/pending.md'", problem.location)
+
+    def test_the_refusal_does_not_cite_a_file_the_plugin_never_ships(self):
+        # CONTEXT.md exists only at this repo's root, for the #57
+        # re-architecture's own vocabulary — it is never distributed with the
+        # plugin, so a shipped refusal citing it points a consumer nowhere.
+        result = self.distill("docs/plans/pending.md", status="ready")
+
+        self.assertNotIn("CONTEXT.md", result.problems[0].message)
 
 
 class RefusalsAreExhaustive(RecorderTestCase):

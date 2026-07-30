@@ -477,13 +477,21 @@ def enumerate_scope(index, rule):
     are both refused: a bulk judgment over an unknown or empty set is
     unfalsifiable.
     """
-    if not isinstance(rule, dict) or len(rule) != 1 or not set(rule) <= set(SCOPE_SELECTORS):
+    # The selector's *value* is checked here alongside its name, not left to
+    # each branch: a rule is model-supplied, and `{"glob": 123}` reached
+    # `compile_glob` and raised out of a public seam — no report, no Problem, a
+    # traceback. A selector naming something that is not a non-empty string
+    # names no set of documents whatever the selector is, so all three read the
+    # same refusal.
+    if not isinstance(rule, dict) or len(rule) != 1 or not set(rule) <= set(SCOPE_SELECTORS) or not all(
+            isinstance(v, str) and v != "" for v in rule.values()):
         return Invalid((Problem(
             code="bloat-scope-not-enumerable",
             message=(
                 f"a bulk scope must be exactly one of "
-                f"{list(SCOPE_SELECTORS)}, not {rule!r} — a scope nobody can "
-                f"expand into a file list cannot be reviewed or applied"
+                f"{list(SCOPE_SELECTORS)} naming a non-empty string, not "
+                f"{rule!r} — a scope nobody can expand into a file list cannot "
+                f"be reviewed or applied"
             ),
             location="scope",
         ),))
@@ -659,8 +667,27 @@ class _Recorder:
 
     # -- a verdict about one document ---------------------------------------
 
+    def _locate(self, where, record_id, path=None):
+        """A verdict's location, addressable without recounting the envelope.
+
+        `where` alone (`verdicts[N]`) is a position in the *assembled*
+        envelope — assembly renumbers every chunk worker's own id
+        (`output-contract.md`'s `B1..Bn`), so the index by itself names
+        neither the id a reviewer or a re-dispatched worker would recognize
+        nor the document a refusal is about. Both are appended when known, on
+        `drift._verdict_entries`'s `f"{where} command={command!r}"` pattern,
+        so relocating the right chunk for a re-prompt needs no recount.
+        """
+        located = where
+        if _nonempty(record_id):
+            located = f"{located} id={record_id!r}"
+        if _nonempty(path):
+            located = f"{located} path={path!r}"
+        return located
+
     def _one_document(self, raw, where, verdict, mark):
         path = raw.get("path")
+        where = self._locate(where, raw.get("id"), path)
         document = self.index.document(path) if _nonempty(path) else None
 
         if document is None:
@@ -708,6 +735,7 @@ class _Recorder:
 
     def _bulk(self, raw, where, verdict, mark):
         """Expand a bulk judgment into one finding per enumerated member."""
+        where = self._locate(where, raw.get("id"))
         scope = raw["scope"]
         if verdict not in SCOPE_VERDICTS:
             self.bad("bloat-scope-verdict-ineligible",
@@ -798,10 +826,28 @@ class _Recorder:
                          f"do", where)
             return None
 
-        owners = {
+        owners_including_self = {
             self.index.owner_of(unit) for unit in units
             if len(self.index.occurrences_of(unit)) > 1
-        } - {path}
+        }
+
+        if owners_including_self == {path}:
+            # Every duplicated unit in this group is owned by the document
+            # being judged — it is the original the other occurrence(s) point
+            # at, not a copy of one. There is no other document to fold into,
+            # regardless of what was proposed: accepting a model-proposed
+            # destination here would bypass the index guard this whole
+            # function exists to enforce.
+            self.bad("bloat-destination-self-owner",
+                     f"the index owns this content at {path} itself — this "
+                     f"document is not a duplicate, it is the original the "
+                     f"other occurrence(s) point back at, so there is no "
+                     f"other document for {verdict} to fold it into; naming "
+                     f"a destination here asserts a merge the index does "
+                     f"not support", where)
+            return None
+
+        owners = owners_including_self - {path}
 
         if len(owners) > 1:
             # The group's content is owned in more than one place, so no single
@@ -1049,8 +1095,10 @@ class _Recorder:
                 self.bad("bloat-status-not-file-bound",
                          f"the planning document's own marker says "
                          f"{file_status!r} — lifecycle state lives in the file "
-                         f"(CONTEXT.md: content-coupled facts stay in the "
-                         f"file), and a verdict may report it, never assert it",
+                         f"(the registry owns classification; content-coupled "
+                         f"facts like lifecycle state stay in the document — "
+                         f"engine/README.md, \"The registry\"), and a verdict "
+                         f"may report it, never assert it",
                          where)
                 return None
             return status
