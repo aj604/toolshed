@@ -353,8 +353,8 @@ changed a verdict. It is proof of examination, never authority to change anythin
     "inventory_digest": "1ffcaa227f1de698d7b215f3cb011af6b08743a30b8f7a6bc88417a4557fa511",
     "audit_config_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "registry_digest": "1d9176534bcc15f5fe5062503110be01ea198bb8ce65179230af4b226f56d85e",
-    "ruleset_version": 1,
-    "plugin_version": "0.19.0",
+    "ruleset_version": "<current RULESET_VERSION, doclifecycle/__init__.py>",
+    "plugin_version": "<current PLUGIN_VERSION, doclifecycle/__init__.py>",
     "evidence_boundary": {"sources": ["src/**"], "excluded": [], "commands": ["gh"]}
   },
   "records": [
@@ -778,19 +778,51 @@ the reverse map from each unit's content digest to every place it occurs.
 python3 -m doclifecycle context-index --repo .
 ```
 
-Real output for a repository whose registry declares root `docs`, rules `docs/*.md → living`
-and `docs/plans/*.md → planning, set plans`, and whose `docs/fee-policy.md` and
-`docs/plans/p.md` each hold a heading and the same sentence
-`Every fee change ships with a migration note.` (abridged to the duplicated unit's entry;
-`documents`, `units`, and the other `occurrences` keys are omitted here, not from the output):
+Real output, fully reproducible — every digest below is re-derivable by building this exact
+fixture and running the command above. Neither command passes `--registry`, so the registry has
+to sit at the default path, `.doc-lifecycle/registry.json`, relative to `--repo`; the fenced file
+bodies below each end with a trailing newline, since the document digests are computed over that
+exact byte content. `.doc-lifecycle/registry.json`:
+
+```json
+{
+  "schema_version": 1,
+  "roots": ["docs"],
+  "sets": ["plans"],
+  "extensions": [".md"],
+  "rules": [
+    {"glob": "docs/*.md", "kind": "living"},
+    {"glob": "docs/plans/*.md", "kind": "planning", "set": "plans"}
+  ]
+}
+```
+
+`docs/fee-policy.md`:
+
+```
+# Fees
+
+Every fee change ships with a migration note.
+```
+
+`docs/plans/p.md`:
+
+```
+# Plan
+
+Every fee change ships with a migration note.
+```
+
+Output (abridged to the duplicated unit's entry; `documents` and `units` are omitted here for
+length, not from the real output):
 
 ```json
 {
   "status": "ok",
   "schema_version": 1,
   "registry_digest": "3613c1c8335b019b9685af1346bf6a78c86f1bf553f70b459fb7c613fd2179dc",
-  "inventory_digest": "4720cbf9091d991c78db3f4538130d4549bc7daa6574c8733c8fa84143d26a5a",
-  "digest": "f2def18aaec4e88f11f95bfd33354e7ac86b73fa4a99f10aeb80ec324737af6a",
+  "inventory_digest": "598123baaf9a4fbf82c840316507d1f04d5452ce7199b0b13fe785d5c343c2b8",
+  "digest": "8ca577cf57ec0283b6873d69caaa4deb604561407da12568a0e9cc74c61ca862",
   "occurrences": {
     "3bb14dce3f2909ce16065f0777ce8f1cd40e50c7dea80b9e5a7030956c5efdd6": [
       {"path": "docs/fee-policy.md", "ordinal": 1, "line": 3, "end_line": 3},
@@ -874,6 +906,14 @@ The legacy skill's `POLICY` verdict is deliberately absent. A bulk judgment no l
 a hand-declared directory whose file list the model echoes back: it declares an enumerable
 inclusion rule and the engine expands it (see *Deterministic scopes* below).
 
+Four module-level tuples name which verdicts require what, and every check below is stated in
+their terms: `PROPOSAL_VERDICTS` (`CONDENSE`, `EXTRACT-AND-MOVE`) must carry the replacement
+text; `DESTINATION_VERDICTS` (`EXTRACT-AND-MOVE`, `MERGE-DOC`) must name where content goes —
+derived from the index when the content is duplicated, model-proposed and checked otherwise;
+`RESIDUE_VERDICTS` (`DISTILL`) may optionally name a destination that does not exist yet, the
+distillation's residue; `SCOPE_VERDICTS` (`RETIRE-DOC`) are the only verdicts eligible for bulk
+expansion over an enumerated scope (see *Deterministic scopes*).
+
 **A `DISTILL` verdict's `status` is checked against the file, never taken as the model's word.**
 `record_verdicts()` refuses one against a document the registry does not classify `planning`
 (`bloat-distill-not-planning` — a lifecycle status is not a fact about any other kind), refuses a
@@ -889,16 +929,17 @@ is `bloat-status-forbidden` — only `DISTILL` carries one.
 python3 -m doclifecycle bloat-plan --repo . --max-documents 1
 ```
 
-Real output for the same two-document repository as above:
+Real output for the same two-document repository as above (the "Context index" section's
+fully-specified `registry.json` and two files):
 
 ```json
 {
   "status": "ok",
   "schema_version": 1,
-  "index_digest": "f2def18aaec4e88f11f95bfd33354e7ac86b73fa4a99f10aeb80ec324737af6a",
-  "digest": "7f8f658b26f7a8b5ec51ca998df04dc5db0d976f8c2b8685254989eb0db945dc",
+  "index_digest": "8ca577cf57ec0283b6873d69caaa4deb604561407da12568a0e9cc74c61ca862",
+  "digest": "0be6b35ca6fcd9b7ffadb6f05451ca8332f18ca5a0f1186f2946b2143b6b4462",
   "chunks": [
-    {"id": "c-135e93546e086eef", "documents": ["docs/fee-policy.md"], "unit_count": 2},
+    {"id": "c-d4f8c082bc7e9293", "documents": ["docs/fee-policy.md"], "unit_count": 2},
     {"id": "c-77f609c2fb738ce5", "documents": ["docs/plans/p.md"], "unit_count": 2}
   ]
 }
@@ -1060,6 +1101,51 @@ vocabulary: each of the index's unexamined scopes becomes an `incomplete` entry,
 never reports `clean` about it, and the absence of a bloat finding for a document nobody read
 cannot be mistaken for a verdict that it is lean. The state is derived from the content, for the
 same reason the contract re-derives it.
+
+### Refusals
+
+Every way `record_verdicts()` refuses a verdict, in one table — the sections above explain the
+reasoning behind the destination, scope, and status groups; this is the complete enumeration a
+caller (or a skill documenting the contract) can cite instead of restating.
+
+| Code | Refused because |
+|---|---|
+| `bloat-verdicts-unreadable` | the verdicts file could not be read (I/O, encoding, or JSON error) |
+| `bloat-verdicts-invalid-shape` | the payload isn't `{"verdicts": [...]}` (extra keys, missing key, wrong type), or `schema_version` isn't the one supported integer |
+| `bloat-invalid-shape` | the catch-all shape refusal: a verdict isn't an object; it carries a field outside `VERDICT_FIELDS`; a bulk verdict names `path`/`units`/`destination`/`proposal`/`status`, which belong to a single-document verdict; a residue destination is present but empty; `sample` isn't a list of non-empty paths; the verdicts list itself isn't a list |
+| `bloat-unknown-verdict` | `verdict` is not one of `bloat.VERDICTS` |
+| `bloat-missing-evidence` | no `evidence` string — a value judgment that doesn't say why is not reviewable |
+| `bloat-duplicate-id` | two verdicts share an `id` — records a reviewer cannot tell apart cannot be approved apart |
+| `bloat-unknown-document` | `path` is not a document this repository's index claims |
+| `bloat-document-outside-chunk` | a single-document verdict names a path outside the dispatched chunk's slice |
+| `bloat-unknown-unit` | a named unit digest does not occur in the document it is claimed against |
+| `bloat-scope-verdict-ineligible` | a bulk `scope` verdict's code is not in `SCOPE_VERDICTS` — only `RETIRE-DOC` applies uniformly to every member of a scope |
+| `bloat-scope-not-enumerable` | `scope` is not exactly one of `{"set"\|"glob"\|"kind"}` naming a non-empty string |
+| `bloat-scope-empty` | the enumerated scope covers no document in the repository |
+| `bloat-scope-member-empty` | an enumerated member holds no assertion unit, so no finding can bind to it |
+| `bloat-sampling-not-authority` | a `sample` list on a single-document verdict (sampling only prioritizes review of a bulk scope), or a forbidden field (`files`/`members`/`occurrences`/`contention` — `FORBIDDEN_VERDICT_FIELDS`) asserting membership the index alone enumerates |
+| `bloat-sample-outside-scope` | a `sample` entry names a path the enumeration does not cover |
+| `bloat-destination-forbidden` | a verdict outside `DESTINATION_VERDICTS`/`RESIDUE_VERDICTS` names a destination |
+| `bloat-destination-required` | content occurs nowhere else in the corpus and no destination was proposed |
+| `bloat-destination-self-owner` | the index already owns the content at the document being judged — there is no other document to fold it into |
+| `bloat-destination-ambiguous` | a duplicated-unit group is owned in more than one other document — no single destination is right for all of it |
+| `bloat-destination-contradicts-index` | the proposed destination disagrees with the index-derived owner of duplicated content |
+| `bloat-destination-not-a-document` | the proposed destination is not an indexed document |
+| `bloat-destination-is-source` | the destination is the document being judged (or, for `DISTILL`, the planning artifact the same record retires) |
+| `bloat-destination-kind-ineligible` | the destination's registry kind is not one content durably lives in (`DESTINATION_KINDS`: `living`, `narrative`) |
+| `bloat-destination-uncheckable` | the index carries no `repo_root`/registry to check a residue destination against — an unanswered safety question is a refusal |
+| `bloat-destination-unauthorized` | `paths.authorize_path` refused the residue path (canonical spelling, containment in a declared root, no symlinked component, no case-folded collision, documentation class) |
+| `bloat-destination-unclassified` | no registry rule claims the residue path — classification is closed-world |
+| `bloat-destination-occupied` | a document already sits at the proposed residue path, in the index or on disk |
+| `bloat-proposal-required` | a verdict in `PROPOSAL_VERDICTS` carries no replacement text |
+| `bloat-proposal-forbidden` | a verdict outside `PROPOSAL_VERDICTS` carries a `proposal` |
+| `bloat-distill-not-planning` | a `DISTILL` verdict names a document the registry does not classify `planning` |
+| `bloat-unknown-status` | a `DISTILL` verdict's `status` is not one of `context.LIFECYCLE_STATUSES` |
+| `bloat-status-not-file-bound` | the declared `status` disagrees with the planning document's own `> Status:` marker — the file is the authority, and a verdict may report it, never assert it |
+| `bloat-status-forbidden` | a non-`DISTILL` verdict carries a `status` |
+
+Any of these means the whole response records nothing (`record_verdicts` fails closed) — a
+half-trusted set of deletion proposals is one nobody can tell the trustworthy half of.
 
 ### Audit command
 

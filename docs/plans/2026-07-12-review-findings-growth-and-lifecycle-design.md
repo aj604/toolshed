@@ -1,5 +1,13 @@
 # Design: closing the six 2026-07-12 architecture-review findings
 
+> Status: pending-implementation
+
+F1a/F6/F3/F4/F1b landed (`docs/decisions.md`'s 2026-07-12 entry) but F5 (monthly full-audit
+drift lane) and F2 (narrative-doc claims in that audit) remain deferred with no evidence of
+landing since, and the `doc-sync.yml` lane F5's own design names has since been retired
+entirely (#77) — the document as a whole is not ready to distill while a real fraction of
+its design is still undelivered.
+
 **Status:** F1a, F6, F3, F4, F1b shipped in plugin v0.11.0. F5 (monthly full-audit drift lane)
 and F2 (narrative-doc claims in that audit) are the deferred follow-up — the full-audit lane is
 the heavy piece (reuses the bloat chunk-sweep architecture) and rides its own release; their

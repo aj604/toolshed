@@ -57,8 +57,12 @@ credential, and opens no PR, no commit, no issue — it stops at a published rep
 **manual apply dispatch**, never scheduled, that a person triggers by naming the record
 digests they approve, and which opens one **real pull request** (never a draft) for you
 to merge; and a **weekly self-upgrade check** that compares your installed version to the
-plugin's latest release and, when one is available, opens its own review PR. There is no
-scheduled bloat sweep — bloat auditing stays interactive (`docs/guides/auditing-doc-bloat.md`).
+plugin's latest release and, when one is available, files a notice issue naming it — the
+schedule never opens a PR on its own. A PR only appears once a person dispatches the same
+workflow by hand naming the target version; that dispatch clones the target release,
+regenerates the wiring, and opens the review PR (see [scheduling-doc-sync.md](scheduling-doc-sync.md)).
+There is no scheduled bloat sweep — bloat auditing stays interactive
+(`docs/guides/auditing-doc-bloat.md`).
 Merging is still the only thing that lands anything; the schedule can only ever propose.
 
 Run the loops by hand first. When the record shapes are familiar and the approvals feel

@@ -1,21 +1,27 @@
 # Documentation Skills Suite — Handoff
 
+> Status: pending-implementation
+
 **Last updated:** 2026-07-29
-**HEAD at handoff:** issue #57 review remediation under way — many workers landing tasks
-against `docs/plans/2026-07-28-issue-57-review-remediation.md` concurrently; see `git log`
+**HEAD at handoff:** issue #57 review remediation's implementation landed; two process steps
+(GitHub posting, the PR) remain — see `docs/plans/2026-07-28-issue-57-review-remediation.md`
+and `git log`
 **Repo:** `toolshed` (git)
 
-## Latest milestone (2026-07-29, in progress): issue #57 review remediation
+## Latest milestone (2026-07-29): issue #57 review remediation
 
-Closing the seven P1 and six Standards findings from the issue #57 release review: three
+Closed the seven P1 and six Standards findings from the issue #57 release review: three
 approval/applier authority holes, the skill→engine schema migration (both detecting
 skills cut over to the engine document model), a file-bound lifecycle-state contract for
 planning documents, and documentation/dedup cleanups — with the auto-apply lane and a
-scheduled bloat cadence explicitly descoped by the authoritative issue comment. Full task
-list, interfaces, and step-by-step instructions:
-`docs/plans/2026-07-28-issue-57-review-remediation.md` — its own `> Status:` marker and
-14 numbered tasks are the live tracker; this entry does not duplicate per-task status
-because tasks are landing concurrently as this file is written.
+scheduled bloat cadence explicitly descoped by the authoritative issue comment. A
+follow-on final whole-branch review found further gaps, closed in a second fix wave (see
+the plan's own commit history). Full task list, interfaces, and step-by-step instructions:
+`docs/plans/2026-07-28-issue-57-review-remediation.md` — its own `> Status: ready` marker
+and 57/59 checked tasks are the live tracker. What remains there is process, not code or
+docs: Task 14 Step 2's `#57` authoritative-comment amendment has not been posted (the two
+successor issues, #143 and #144, and the linking comment on #73 are done), and Step 3's
+pull request has not been opened yet.
 
 **How to resume:** read the plan doc's `> Status:` marker, then walk its numbered tasks
 top to bottom — a task whose described code/test/doc change is not yet in the tree is the
@@ -79,7 +85,8 @@ Landed four of the six 2026-07-12 architecture-review findings; design + rationa
 - **F1a** — `growing-docs`' first-time exemption now costs a dated `- seen:` tally line in
   `docs/doc-scope.md`; a matching item that already carries one **is** the second rediscovery.
 - **F6** — `growing-docs` description claims the direct "write an ADR/tutorial/walkthrough" ask.
-- **F3** — UNVERIFIABLE waiver file (`.github/doc-sync/drift-waivers.json`): detector stays
+- **F3** — UNVERIFIABLE waiver file (`.github/doc-sync/drift-waivers.json` at the time; relocated
+  to `.doc-lifecycle/drift-waivers.json` by #133): detector stays
   pure, `render-report.py` suppresses waived claims and surfaces unwaived ones (incl. on
   no-drift nights); installer + `apply-upgrade.py` seed only-if-absent.
 - **F4** — recurrence memory: `sync-gate.py stale-state` → `last-stales.json` on the PR branch;
@@ -293,7 +300,7 @@ Shipped as installer skill + Actions wiring (decisions + still-binding constrain
 
 Bloat/distillation pair + `doc-distiller`, on the drift pair's shape (decisions + still-binding constraints: `docs/decisions.md` 2026-07-03 doc-bloat entries); records: `tests/baselines/bloat-red/`, `tests/baselines/bloat-fixing-red/`; not yet deployed to `~/.claude` (see status table).
 
-**Spine extraction:** apply-only rules single-owned at `plugins/doc-lifecycle/references/apply-discipline.md`, cited by both fix skills (`docs/decisions.md` 2026-07-03 design entry); `fixing-doc-drift` targeted re-GREEN per the re-GREEN convention (behavior-affecting edits to a shipped GREEN skill get a targeted re-verify note in its baseline dir): `tests/baselines/fixing-drift-red/REGREEN-after-spine-extraction.md`.
+**Spine extraction:** apply-only rules single-owned at `plugins/doc-lifecycle/references/apply-discipline.md` (that file since deleted — #70 moved the discipline into the applier contract itself, `plugins/doc-lifecycle/engine/README.md`'s "Approval sets"/"The applier" sections, per `docs/decisions.md`'s 2026-07-27 "one fixing-docs door" entry), cited by both fix skills (`docs/decisions.md` 2026-07-03 design entry); `fixing-doc-drift` targeted re-GREEN per the re-GREEN convention (behavior-affecting edits to a shipped GREEN skill get a targeted re-verify note in its baseline dir): `tests/baselines/fixing-drift-red/REGREEN-after-spine-extraction.md`.
 
 **Tier boundary (detecting-doc-bloat, full-audit completeness):** four Haiku
 runs against the bloat fixture each missed exactly one of six planted findings,

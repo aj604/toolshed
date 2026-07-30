@@ -312,24 +312,27 @@ jobs:
       # Two reasons this prompt does not defer to an authoring skill or to the doc-distiller
       # agent, and both are worth stating where the next editor will look:
       #
-      #   1. `DISTILL` is not applyable end to end today. A DISTILL record can never carry a
-      #      `destination` (`bloat.DESTINATION_VERDICTS` is EXTRACT-AND-MOVE and MERGE-DOC
-      #      only), and the applier resolves `create-document`'s allowed targets from exactly
-      #      that field — so a plan that *attempts* the residue half refuses that operation as
-      #      `plan-target-not-record-target`. That is not a backstop against a lossy retirement,
-      #      though: DISTILL is deliberately absent from `REQUIRED_REMEDY_OPERATIONS` (the
-      #      composite-remedy completeness check MERGE-DOC uses), so a plan that authors only
-      #      `retire-document` for a DISTILL record — never attempting the residue at all — is
-      #      not caught by that check or any other, and applies cleanly: the planning artifact
-      #      deleted, its residue never authored. Deferring to the distiller (or authoring this
-      #      prompt carelessly) before that gap is closed can produce exactly that outcome; it
-      #      is not refused today.
-      #   2. The edit-plan contract has a single owner — `fixing-docs/SKILL.md` (aj604/toolshed#70,
-      #      landed) carries the worked edit-plan example and is authoritative for its shape,
-      #      including the trailing-newline rule below. This prompt is reconciled against that
-      #      owner rather than deferring to the skill at run time: the headless model authors
-      #      from this prompt alone — it is not driven to read the skill — so the contract has to
-      #      travel inline. When `fixing-docs/SKILL.md` changes, re-reconcile this copy against it.
+      #   1. A DISTILL record *may* carry a `destination` (`bloat.RESIDUE_VERDICTS` is DISTILL
+      #      only — its destination is optional, checked as an unwritten path rather than looked
+      #      up in the inventory). When it does, the applier's `REQUIRED_REMEDY_OPERATIONS`
+      #      requires the record's plan to carry `create-document`: a plan that authors only
+      #      `retire-document` for a destinationed DISTILL is refused as `plan-remedy-incomplete`,
+      #      so the residue half cannot be silently skipped. A destination-less DISTILL named no
+      #      residue to author — retiring the planning artifact alone is the whole approved
+      #      remedy — and stays exempt from that requirement, applying cleanly on the retirement
+      #      leg by itself. Deferring to the distiller (or authoring this prompt carelessly) still
+      #      needs care that the plan for a destinationed record actually lands the residue before
+      #      the retirement executes.
+      #   2. The edit-plan contract has a single owner — the engine README's "The applier"
+      #      section, over `doclifecycle/applier.py` itself (aj604/toolshed#70 landed the
+      #      contract there; a later pass moved fixing-docs/SKILL.md off carrying its own worked
+      #      example, and handed authority to that README section outright — see fixing-docs'
+      #      "Author the edit plan" step). This prompt is reconciled against that owner rather
+      #      than deferring to it at run time: the headless model authors from this prompt alone
+      #      — it is not driven to read the README or the skill — so the contract, including the
+      #      trailing-newline rule below (`applier.py`'s span-preimage check, which joins a
+      #      document's lines with "\n" and compares byte-for-byte), has to travel inline. When
+      #      the engine README's applier section changes, re-reconcile this copy against it.
       #
       # Nothing here is trusted either way — `apply-plan` re-derives every claim below against
       # the approval set, the record's own remedy table, and the repository.
