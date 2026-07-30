@@ -42,7 +42,7 @@ from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
-from .bloat import CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC
+from .bloat import VERDICTS as BLOAT_VERDICTS
 from .digest import load_strict_json, sha256_canonical
 from .finding import finding_digest
 from .inventory import DEFAULT_REGISTRY_PATH, load_registry
@@ -87,12 +87,13 @@ MINTER_KINDS = (MINTER_HUMAN, MINTER_POLICY)
 # is reached through. `policy.py`'s restricted `NEVER_ELIGIBLE_CODES` is an
 # alias of this tuple — one owner, so a class the eligibility table forgets to
 # name and a selection built by hand around the generic minter are refused by
-# the same rule. Every one of the six is a judgment that a passage or a whole
+# the same rule. Every bloat verdict is a judgment that a passage or a whole
 # document should stop existing or move; approving that is what a person is
 # for, and no standing policy performs semantic review.
-POLICY_NEVER_ELIGIBLE_CODES = (
-    CUT, CONDENSE, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC, DISTILL,
-)
+# *Every* bloat verdict, so this is `bloat.VERDICTS` rather than a hand-copy of
+# it: a seventh verdict added there is restricted the moment it exists, where a
+# re-listing would have admitted it silently and kept this guard green.
+POLICY_NEVER_ELIGIBLE_CODES = BLOAT_VERDICTS
 
 # The report states a selection can rest on. `clean` has nothing to approve;
 # `stale` describes a repository state that no longer exists, and `invalid`
@@ -444,6 +445,48 @@ def _policy_eligibility_problems(minter, records):
     ]
 
 
+def _remediable_problems(records):
+    """Every selected record whose finding code authorizes no operation.
+
+    The applier's `RECORD_REMEDIES` is closed and fail-shut: it maps a finding
+    code to the operations that code's approved remedy is made of, and a code
+    nobody listed there authorizes nothing. Five anchor codes are deliberately
+    absent — a missing, malformed, future-dated, unverifiable, or unresolvable
+    anchor needs one *authored*, which is not a span edit to a passage anybody
+    approved.
+
+    Nothing filtered on that here, so such a record minted cleanly and then no
+    plan could execute it: a plan omitting it is `plan-record-not-executed`,
+    and a plan attaching an operation to it is
+    `plan-operation-not-record-remedy` — each refusal pointing at what the
+    other refuses. Asked at the mint, the dead end is legible before anyone
+    authors a plan, and the operator re-selects instead of debugging a
+    contradiction.
+
+    The remedy table is imported at call time because `applier` imports this
+    module; naming the remediable codes a second time here is exactly how the
+    two would come apart.
+    """
+    from .applier import RECORD_REMEDIES
+
+    return [
+        Problem(
+            code="approval-record-not-remediable",
+            message=(
+                f"record {record.record_id} is a {record.code} finding, and "
+                f"{record.code} authorizes no remedy operation — the applier's "
+                f"remedy table names, per finding code, the operations an "
+                f"approval of it permits, and this code is deliberately absent "
+                f"from it. Approving it would mint a mandate no edit plan can "
+                f"execute; a finding like this is fixed by hand, not applied"
+            ),
+            location=f"records[{i}]",
+        )
+        for i, record in enumerate(records)
+        if record.code not in RECORD_REMEDIES
+    ]
+
+
 def _destination(record):
     """Where a report record's remedy writes what it moves, or None.
 
@@ -604,6 +647,10 @@ def mint_approval_set(report, selected, *, repo_root, minter,
         units=tuple(sorted(set(record.extra["units"]))),
         destination=_destination(record),
     ) for record in chosen)
+
+    problems = _remediable_problems(records)
+    if problems:
+        return Invalid(tuple(problems))
 
     problems = _policy_eligibility_problems(minter, records)
     if problems:

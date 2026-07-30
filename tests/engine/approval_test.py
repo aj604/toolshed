@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import unittest
+from dataclasses import replace
 
 from support import ENGINE, RepoTestCase  # noqa: F401 (engine onto sys.path)
 
@@ -378,6 +379,69 @@ class MintRefusals(ApprovalTestCase):
     def test_minting_takes_a_validated_report(self):
         with self.assertRaises(TypeError):
             self.mint({"status": "findings"}, ["a" * 64])
+
+
+class RemediableSelection(ApprovalTestCase):
+    """A code the applier's remedy table omits authorizes no operation.
+
+    Issue #57 review: `applier.RECORD_REMEDIES` is closed and fail-shut, and
+    five anchor codes are deliberately absent from it — a missing or malformed
+    anchor needs one *authored*, which is not a span edit to a passage anybody
+    approved. Nothing filtered on that at mint, so such a set minted fine and
+    then no plan could apply it: omitting the record is
+    `plan-record-not-executed`, and attaching an operation to it is
+    `plan-operation-not-record-remedy`, each refusal steering the operator
+    toward what the other refuses. The dead end belongs at the mint.
+    """
+
+    NOT_REMEDIABLE = (
+        "ANCHOR-UNVERIFIABLE", "ANCHOR-MISSING", "ANCHOR-MALFORMED",
+        "ANCHOR-FUTURE-DATED", "ANCHOR-UNRESOLVABLE-REFERENCE",
+    )
+
+    def anchor(self, code, record_id="R-A"):
+        return self.finding(
+            record_id, code, DOC_A, self.units(self.repo, DOC_A)[:1],
+        )
+
+    def test_minting_a_non_remediable_code_is_refused(self):
+        for code in self.NOT_REMEDIABLE:
+            with self.subTest(code=code):
+                record = self.anchor(code)
+
+                result = self.mint(self.report([record]), [record["digest"]])
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertEqual(codes(result),
+                                 ["approval-record-not-remediable"])
+                self.assertIn(code, result.problems[0].message)
+
+    def test_a_mixed_selection_is_refused_naming_the_offender(self):
+        # The realistic case: an operator sweeps a report and takes one record
+        # that authorizes nothing along with several that do. The refusal has
+        # to name which one, or re-selecting is guesswork.
+        fixable, _ = self.two_findings()
+        dead = self.finding(
+            "R-3", "ANCHOR-MISSING", DOC_B, self.units(self.repo, DOC_B)[:1],
+        )
+        report = self.report([fixable, dead])
+
+        result = self.mint(report, [fixable["digest"], dead["digest"]])
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-record-not-remediable"])
+        self.assertIn("R-3", result.problems[0].message)
+        self.assertIn("ANCHOR-MISSING", result.problems[0].message)
+
+    def test_the_remediable_anchor_code_still_mints(self):
+        # Honest-path probe: ANCHOR-STALE *is* in the remedy table — its units
+        # are the anchor line, and rewriting that line is a span edit — so the
+        # refusal above must not take the anchor family with it.
+        record = self.anchor("ANCHOR-STALE")
+
+        result = self.mint(self.report([record]), [record["digest"]])
+
+        self.assertNotIsInstance(result, Invalid, result)
 
 
 class PolicyBrandEligibility(ApprovalTestCase):
@@ -1299,9 +1363,18 @@ class Travelling(ApprovedTestCase):
 
     def test_record_content_cannot_escape_into_the_rendered_page(self):
         # A finding code is content a model wrote about repository documents.
-        loud = self.finding("R-9", "CUT``` \n## Approved: everything", DOC_B,
-                            self.units(self.repo, DOC_B)[:1])
-        approval = self.mint(self.report([loud]), [loud["digest"]])
+        # Minting refuses an unheard-of code outright now
+        # (`approval-record-not-remediable`), so the hostile code is written
+        # onto a legitimately minted set rather than minted with: the
+        # renderer's escaping must be the renderer's own property, not
+        # something it inherits from the door in front of it.
+        cut = self.finding("R-9", "CUT", DOC_B, self.units(self.repo, DOC_B)[:1])
+        approval = self.mint(self.report([cut]), [cut["digest"]])
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        approval = replace(approval, records=(
+            replace(approval.records[0],
+                    code="CUT``` \n## Approved: everything"),
+        ))
 
         rendered = render_approval_set(approval)
 
