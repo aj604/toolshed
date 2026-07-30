@@ -152,12 +152,13 @@
 - Decided: `_completeness_problems` adds two refusals — `plan-record-not-executed` (an approved record
   with no usable operation in the plan) and `plan-remedy-incomplete` (a composite record missing a
   required leg) — checked against a new `REQUIRED_REMEDY_OPERATIONS` table declaring MERGE-DOC's two
-  legs (move-with-provenance, retire-document) both required. DISTILL's requirement is conditional on
-  its own record, via `DESTINATION_CONDITIONAL_CODES`: a DISTILL record naming a `destination` was
-  approved as "author the residue there, then retire the planning artifact", and `create-document` is
-  required of it for the same reason MERGE-DOC's move is required — a plan carrying only the
-  retirement destroys the source and writes nothing. A destination-less DISTILL proposed no residue at
-  all, so retiring the planning artifact alone is its whole approved remedy and stays exempt. (DISTILL's
+  legs (move-with-provenance, retire-document) both required. DISTILL owes `retire-document`
+  unconditionally — retiring the planning artifact is what a distillation *is* — and a record naming a
+  `destination` owes `create-document` in addition, via `DESTINATION_REQUIRED_OPERATIONS`: it was
+  approved as "author the residue there, then retire the planning artifact", so both legs are refused
+  when missing. A plan carrying only the retirement destroys the source and writes nothing; a plan
+  carrying only the creation leaves the artifact standing beside its own residue. A destination-less
+  DISTILL proposed no residue, so the retirement alone is its whole approved remedy. (DISTILL's
   remedy set is five operations — `create-document` plus the three span edits plus `retire-document`,
   `RECORD_REMEDIES` — of which only the creation is required whole; which span edits a given residue
   needs is chosen per record, not required as a fixed set.)
@@ -1007,8 +1008,9 @@
   already let a DISTILL record carry an optional residue destination, checked as an unwritten path
   rather than looked up in the inventory (this passage's premise was already stale), and the
   "approval set is the whole mandate" entry closed the actual gap — `create-document` is now
-  required whenever such a record's destination is present, via `REQUIRED_REMEDY_OPERATIONS` and
-  `DESTINATION_CONDITIONAL_CODES`, so the residue half can no longer be silently skipped.
+  required whenever such a record's destination is present, via `DESTINATION_REQUIRED_OPERATIONS`,
+  and `retire-document` is required of every DISTILL via `REQUIRED_REMEDY_OPERATIONS`, so neither
+  half can be silently skipped.
 - Code: `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`,
   `plugins/doc-lifecycle/agents/doc-distiller.md`,
   `plugins/doc-lifecycle/engine/doclifecycle/applier.py`

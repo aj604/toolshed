@@ -314,15 +314,16 @@ jobs:
       #
       #   1. A DISTILL record *may* carry a `destination` (`bloat.RESIDUE_VERDICTS` is DISTILL
       #      only — its destination is optional, checked as an unwritten path rather than looked
-      #      up in the inventory). When it does, the applier's `REQUIRED_REMEDY_OPERATIONS`
-      #      requires the record's plan to carry `create-document`: a plan that authors only
-      #      `retire-document` for a destinationed DISTILL is refused as `plan-remedy-incomplete`,
-      #      so the residue half cannot be silently skipped. A destination-less DISTILL named no
-      #      residue to author — retiring the planning artifact alone is the whole approved
-      #      remedy — and stays exempt from that requirement, applying cleanly on the retirement
-      #      leg by itself. Deferring to the distiller (or authoring this prompt carelessly) still
-      #      needs care that the plan for a destinationed record actually lands the residue before
-      #      the retirement executes.
+      #      up in the inventory). Every DISTILL owes `retire-document`, via the applier's
+      #      `REQUIRED_REMEDY_OPERATIONS`; a record that also names a destination owes
+      #      `create-document` in addition, via `DESTINATION_REQUIRED_OPERATIONS`. Both halves
+      #      are refused as `plan-remedy-incomplete`: a plan authoring only `retire-document`
+      #      for a destinationed DISTILL skips the residue, and a plan authoring only
+      #      `create-document` leaves the planning artifact standing beside it. A
+      #      destination-less DISTILL named no residue to author — the retirement alone is its
+      #      whole approved remedy. Deferring to the distiller (or authoring this prompt
+      #      carelessly) still needs care that the plan for a destinationed record actually
+      #      lands the residue before the retirement executes.
       #   2. The edit-plan contract has a single owner — the engine README's "The applier"
       #      section, over `doclifecycle/applier.py` itself (aj604/toolshed#70 landed the
       #      contract there; a later pass moved fixing-docs/SKILL.md off carrying its own worked
@@ -358,9 +359,11 @@ jobs:
              or null for a retired document>}, "digest": <see below>}
 
             One or more operations per approved remedy — most remedies are a single operation,
-            but MERGE-DOC is composite and requires both a "move-with-provenance" and a
-            "retire-document" operation for the same record together; either leg alone is
-            refused as plan-remedy-incomplete. Each operation is an object with:
+            but two are composite. MERGE-DOC requires both a "move-with-provenance" and a
+            "retire-document" for the same record together. DISTILL requires a
+            "retire-document" for every record, plus a "create-document" when that record
+            names a destination. Any missing leg is refused as plan-remedy-incomplete. Each
+            operation is an object with:
               "op": "replace" | "delete" | "insert" | "create-document" | "retire-document" |
                     "move-with-provenance"
               "record": the approved record's digest (from the approval set's "records")
@@ -384,9 +387,11 @@ jobs:
             operation must lie within the approved units' own passage; every preimage must be
             the exact current text; every written path must be in the approval set's
             "scope"."paths"; every approved record must be executed by at least one operation
-            (a record naming none is refused as plan-record-not-executed); and MERGE-DOC's move
-            and retirement must both appear, together, for the same record (plan-remedy-incomplete
-            otherwise). Read each target with Read before you write its preimage.
+            (a record naming none is refused as plan-record-not-executed); MERGE-DOC's move
+            and retirement must both appear, together, for the same record; and every DISTILL
+            must carry its retirement, plus its creation when the record names a destination
+            (plan-remedy-incomplete otherwise). Read each target with Read before you write its
+            preimage.
 
             Finally stamp the plan's digest with the engine's own canonical digest, which is
             what binds the plan to review:

@@ -2219,14 +2219,18 @@ The order of refusals is the contract:
    (`plan-operation-not-record-remedy`). Without it the plan picks the operation, and the
    auto-apply policy's whole restriction — mechanical drift fixes yes, retirements and
    creations never — is unenforceable, because a policy-minted `STALE` record could be executed
-   as a `retire-document`. `MERGE-DOC` is the one remedy whose two operations are not
-   substitutes for each other: `REQUIRED_REMEDY_OPERATIONS` names both `move-with-provenance`
-   and `retire-document` as required together, so a plan that lands the move without the
+   as a `retire-document`. Two remedies are composite — their legs are not substitutes for one
+   another, and `REQUIRED_REMEDY_OPERATIONS` names what each owes. `MERGE-DOC` owes both
+   `move-with-provenance` and `retire-document`, so a plan that lands the move without the
    retirement (a duplication left behind) or the retirement without the move (a plain deletion)
-   is `plan-remedy-incomplete` — a different, unapproved change either way. `DISTILL`'s five-op
-   remedy is deliberately *not* in that table: which span edits a given residue needs is a
-   per-record choice, not a fixed shape every distillation must exercise whole, so a plan may
-   use any subset of it, so long as `plan-record-not-executed` sees at least one. A positioned
+   is `plan-remedy-incomplete` — a different, unapproved change either way. `DISTILL` owes
+   `retire-document` unconditionally, because retiring the planning artifact is what a
+   distillation *is*; a record that also named a `destination` owes `create-document` in
+   addition, via `DESTINATION_REQUIRED_OPERATIONS`. Both halves are refused: a retirement with
+   no creation destroys the artifact and writes nothing, and a creation with no retirement
+   leaves the artifact standing beside its own residue. What is *not* required is which of
+   `DISTILL`'s three span edits a given residue needs — that is a per-record choice, not a fixed
+   shape every distillation must exercise whole. A positioned
    operation on the record's own document must also lie
    within the hull of that record's approved units — their first line through their last, so
    the blank lines between two approved units stay editable —
