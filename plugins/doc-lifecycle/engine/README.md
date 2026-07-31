@@ -592,13 +592,18 @@ Note that `plugin_version` is compared, so every plugin release marks prior repo
 That is deliberate: cheaper than reasoning about which releases could have changed a verdict,
 and re-running an audit is cheap.
 
-Records are validated only as far as approval binding needs — a non-empty `id` and a sha256
+Records are structurally validated only as far as approval binding needs — a non-empty `id` and a sha256
 `digest`, both unique within the report; no `NaN`/`Infinity` anywhere inside (JSON defines
 neither, and the digest is taken over that encoding); and no nesting past 64 levels
 (`report-nesting-too-deep`), since the digest and the renderer both walk the structure and a
 few kilobytes of brackets must be a verdict rather than a stack overflow. Every other field the
 audit engine or `finding.py` puts on a record travels through untouched — and is
 neutralized at the rendering boundary rather than at the contract boundary; see Commands below.
+There is one repository-backed semantic check: when lineage is current, `RETIRE-DOC`, `DISTILL`,
+and `MERGE-DOC` records must bind the source document's complete deterministic unit set. Missing,
+duplicate, unknown, or unreadable units are typed `report-whole-document-*` problems. When lineage
+has moved, the report stays `stale` instead of reinterpreting an honestly complete old record
+against a new segmentation. Without `repo_root`, this check is necessarily unchecked.
 
 ### Commands
 
@@ -1036,6 +1041,19 @@ cannot express: the group is a deduplicated set of content digests, so `here` is
 copies *in this document* the finding is about — two identical sentences are one group member and
 two `here` entries — and `elsewhere` is what makes the redundancy claim checkable.
 
+`RETIRE-DOC`, `DISTILL`, and `MERGE-DOC` are whole-document judgments
+(`bloat.WHOLE_DOCUMENT_VERDICTS`): each retires its source, so its `units` must equal the
+document's complete current deterministic unit set. `record_verdicts()` checks that equality
+before building a finding. An omitted unit is `bloat-whole-document-units-incomplete`; a repeated
+identity is `bloat-whole-document-unit-duplicate`; and an extra, stale, or malformed identity is
+`bloat-unknown-unit`. The set includes structural units such as headings, not only
+assertion-capable prose. Passage remedies (`CUT`, `CONDENSE`, `EXTRACT-AND-MOVE`) keep their
+selected-unit hulls, and bulk `RETIRE-DOC` remains complete because scope enumeration supplies each
+member's units directly from the index. The same exact-set invariant is re-derived by
+repository-backed report validation, approval minting/read-back, and therefore the applier; a
+forged or legacy partial record cannot bypass the audit producer and amplify passage authority
+into document deletion.
+
 ### Deterministic scopes
 
 `enumerate_scope(index, rule)` expands exactly one of `{"set": …}`, `{"glob": …}`, or
@@ -1120,7 +1138,9 @@ caller (or a skill documenting the contract) can cite instead of restating.
 | `bloat-duplicate-id` | two verdicts share an `id` — records a reviewer cannot tell apart cannot be approved apart |
 | `bloat-unknown-document` | `path` is not a document this repository's index claims |
 | `bloat-document-outside-chunk` | a single-document verdict names a path outside the dispatched chunk's slice |
-| `bloat-unknown-unit` | a named unit digest does not occur in the document it is claimed against |
+| `bloat-unknown-unit` | a named unit identity is malformed or does not occur in the document it is claimed against (including an extra or stale identity on a whole-document verdict) |
+| `bloat-whole-document-unit-duplicate` | `RETIRE-DOC`, `DISTILL`, or `MERGE-DOC` repeats a unit identity instead of binding the deterministic unit set exactly once |
+| `bloat-whole-document-units-incomplete` | `RETIRE-DOC`, `DISTILL`, or `MERGE-DOC` omits one or more units from the source document's complete current deterministic unit set |
 | `bloat-scope-verdict-ineligible` | a bulk `scope` verdict's code is not in `SCOPE_VERDICTS` — only `RETIRE-DOC` applies uniformly to every member of a scope |
 | `bloat-scope-not-enumerable` | `scope` is not exactly one of `{"set"\|"glob"\|"kind"}` naming a non-empty string |
 | `bloat-scope-empty` | the enumerated scope covers no document in the repository |
@@ -1889,7 +1909,9 @@ mints, in this order, because each phase rests on the one before:
   `documentation` inside a declared root, through `paths.authorize_path` (the refusal is that
   module's own code: `path-outside-root`, `symlinked-path`, `path-forbidden-class`, …);
 - every target's text must still be what the record was written about
-  (`approval-preimage-mismatch`, `approval-preimage-unreadable`).
+  (`approval-preimage-mismatch`, `approval-preimage-unreadable`); for `RETIRE-DOC`, `DISTILL`,
+  and `MERGE-DOC`, the approved units must additionally equal the target's complete current
+  deterministic unit set (`approval-whole-document-units-incomplete`).
 
 **Nothing rides along.** The allowed mutation scope is a *derivation* of the selection —
 `derived_scope_paths()`: each selected record's document, plus the `destination` a move writes
@@ -1969,6 +1991,7 @@ when that matches, that the report still reconciles the same way — selection m
 | `approval-scope-changed` | a scope path no longer authorizes, or the declared roots moved |
 | `approval-preimage-mismatch` | a selected record's units are no longer in its document |
 | `approval-preimage-unreadable` | a selected record's document cannot be read as one |
+| `approval-whole-document-units-incomplete` | a whole-document record's units are not the source's complete current deterministic unit set |
 | `approval-report-changed` | the report supplied is not the one this binds to |
 | `approval-reconciliation-changed` | the report's records no longer group the same way |
 
@@ -1976,8 +1999,11 @@ The inventory digest is deliberately **not** compared, and it is the one excepti
 document content, so the applier's own writes move it — and a second subset of one report could
 then never be applied, which is exactly the partial-approval case this contract exists to
 support. The precise question is per-record and is asked directly by the preimage check: a
-subset whose targets were untouched validates, one whose targets were rewritten is stale and
-says which record and which document, and a deleted document fails the same check. Committing
+passage subset whose targets were untouched validates, one whose targets were rewritten is stale
+and says which record and which document, and a deleted document fails the same check. A
+whole-document record additionally expires if its unit set is no longer exact. If the inventory
+still matches the record's lineage, that mismatch is an invalid artifact that was never authority;
+if the inventory moved, it is stale and must be re-audited. Committing
 an apply still expires every approval set minted against the previous commit, via
 `approval-base-commit-changed`.
 

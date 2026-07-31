@@ -36,6 +36,7 @@ from .results import (
     Invalid,
     Problem,
 )
+from .segment import segment_document
 
 FIELDS = (
     "status", "schema_version", "lineage", "records", "examined", "incomplete",
@@ -54,6 +55,142 @@ CARRIED_STATES = DECLARABLE_STATES + (STATE_STALE,)
 # reader cannot know what "the declared scope" was, so nothing else it says is
 # interpretable.
 AUDIT_MODES = ("full", "incremental", "chunk")
+
+# A record carrying one of these verdicts authorizes a remedy that retires its
+# source document.  The narrow cross-lane invariant lives at the report
+# contract because every later authority boundary reads records through this
+# module: the claimed units must be the complete current deterministic unit
+# set, not merely a passage that happens still to exist.
+WHOLE_DOCUMENT_RECORD_CODES = ("RETIRE-DOC", "DISTILL", "MERGE-DOC")
+
+
+@dataclass(frozen=True)
+class WholeDocumentUnitDifference:
+    """How a whole-document record differs from the current unit identity set."""
+
+    malformed: bool
+    duplicates: Tuple[str, ...]
+    missing: Tuple[str, ...]
+    extra: Tuple[str, ...]
+
+    @property
+    def exact(self):
+        return not (
+            self.malformed or self.duplicates or self.missing or self.extra
+        )
+
+
+def whole_document_unit_difference(code, claimed, current):
+    """Return the exact-set difference for a whole-document code, else None."""
+    if code not in WHOLE_DOCUMENT_RECORD_CODES:
+        return None
+    malformed = not isinstance(claimed, (list, tuple))
+    values = list(claimed) if not malformed else []
+    strings = [unit for unit in values if isinstance(unit, str)]
+    malformed = malformed or len(strings) != len(values)
+    seen, repeated = set(), set()
+    for unit in strings:
+        if unit in seen:
+            repeated.add(unit)
+        seen.add(unit)
+    duplicates = tuple(sorted(repeated))
+    claimed_set = set(strings)
+    current_set = set(current)
+    return WholeDocumentUnitDifference(
+        malformed=malformed,
+        duplicates=duplicates,
+        missing=tuple(sorted(current_set - claimed_set)),
+        extra=tuple(sorted(claimed_set - current_set)),
+    )
+
+
+def _whole_document_record_shape_problems(records):
+    """Intrinsic whole-document record errors that need no repository."""
+    problems = []
+    for index, record in enumerate(records):
+        code = record.extra.get("code")
+        if code not in WHOLE_DOCUMENT_RECORD_CODES:
+            continue
+        location = f"records[{index}]"
+        path = record.extra.get("path")
+        units = record.extra.get("units")
+        if not _printable(path):
+            problems.append(Problem(
+                code="report-whole-document-target-unavailable",
+                message=f"{code} must name the document it retires",
+                location=location,
+            ))
+        if not (isinstance(units, list) and units and all(
+            isinstance(unit, str) and DIGEST.match(unit) for unit in units
+        )):
+            problems.append(Problem(
+                code="report-whole-document-units-incomplete",
+                message=(
+                    f"{code} must name a non-empty list of deterministic unit "
+                    f"identities before the report can carry it"
+                ),
+                location=location,
+            ))
+        elif len(units) != len(set(units)):
+            problems.append(Problem(
+                code="report-whole-document-unit-duplicate",
+                message=(
+                    f"{code} repeats a unit identity — a whole-document "
+                    f"record binds each deterministic identity exactly once"
+                ),
+                location=location,
+            ))
+    return tuple(problems)
+
+
+def _whole_document_record_problems(records, repo_root, registry_path):
+    """Whole-document records that do not bind the current exact unit set."""
+    problems = []
+    for index, record in enumerate(records):
+        code = record.extra.get("code")
+        if code not in WHOLE_DOCUMENT_RECORD_CODES:
+            continue
+        path = record.extra.get("path")
+        location = f"records[{index}]"
+        segmentation = segment_document(repo_root, path, registry_path)
+        if isinstance(segmentation, Invalid):
+            problems.append(Problem(
+                code="report-whole-document-target-unavailable",
+                message=(
+                    f"{code} would retire all of {path}, but its current "
+                    f"deterministic units cannot be read "
+                    f"({segmentation.problems[0].message}) — an unchecked "
+                    f"whole-document record is not report content"
+                ),
+                location=location,
+            ))
+            continue
+        difference = whole_document_unit_difference(
+            code,
+            record.extra.get("units"),
+            (unit.digest for unit in segmentation.units),
+        )
+        if difference.extra:
+            problems.append(Problem(
+                code="report-whole-document-unit-unknown",
+                message=(
+                    f"{code} names {len(difference.extra)} unit identity or "
+                    f"identities that the current {path} does not contain"
+                ),
+                location=location,
+            ))
+        if difference.missing:
+            problems.append(Problem(
+                code="report-whole-document-units-incomplete",
+                message=(
+                    f"{code} would retire all of {path}, but omits "
+                    f"{len(difference.missing)} current deterministic unit or "
+                    f"units — passage authority cannot become document "
+                    f"deletion"
+                ),
+                location=location,
+            ))
+    return tuple(problems)
 
 REQUIRED_LINEAGE_FIELDS = (
     "repository",           # which repository the report is about
@@ -199,8 +336,10 @@ class Record:
 
     The contract owns only what binds a record to approval — a display `id` and
     the `digest` an approval set selects it by. Everything else the audit
-    engine or `finding.py` puts on a record travels in `extra`,
-    untouched, so this module never becomes a second owner of record internals.
+    engine or `finding.py` puts on a record travels in `extra`, untouched. The
+    one repository-backed exception is the cross-lane authority invariant for
+    whole-document bloat records: when lineage is current, validation checks
+    that their units equal the document's complete deterministic unit set.
     """
 
     id: str
@@ -1307,6 +1446,8 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
 
     lineage = _lineage(payload["lineage"], bad) if "lineage" in payload else None
     records = _records(payload.get("records", []), bad)
+    if records is not None:
+        problems.extend(_whole_document_record_shape_problems(records))
     incomplete = _incomplete(payload.get("incomplete", []), bad)
     # Optional: a report that declares no scope says nothing about one, and is
     # read exactly as it was before the field existed.
@@ -1374,6 +1515,12 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     if problems:
         return Invalid(tuple(problems))
     reasons = _stale_reasons(lineage, current)
+    if not reasons:
+        whole_document_problems = _whole_document_record_problems(
+            records, repo_root, registry_path
+        )
+        if whole_document_problems:
+            return Invalid(whole_document_problems)
     # The declared scope, re-derived rather than trusted. Shape validation
     # above proves only that a scope is well-formed; this is what makes it a
     # claim about *this* repository, which is the whole reason it is in the

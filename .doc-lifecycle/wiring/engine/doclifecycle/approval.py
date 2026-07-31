@@ -34,7 +34,9 @@ which is exactly the partial-approval case this contract exists to support. The
 precise question is per-record and is asked directly: are this record's units
 still present in its document? A subset whose targets were untouched validates;
 one whose targets were rewritten is stale, and says which record and which
-document. A deleted document fails the same check.
+document. A deleted document fails the same check. For a whole-document bloat
+record, presence is not enough: its units must equal the complete current
+deterministic set, or passage authority could be amplified into deletion.
 """
 
 import json
@@ -54,11 +56,13 @@ from .report import (
     Lineage,
     Report,
     StaleReason,
+    WHOLE_DOCUMENT_RECORD_CODES,
     compare_lineage,
     current_lineage,
     lineage_digest,
     parse_lineage,
     parse_stale_reasons,
+    whole_document_unit_difference,
 )
 from .results import (
     STATE_CLEAN,
@@ -158,6 +162,7 @@ REPOSITORY_REASON_CODES = (
     "approval-scope-changed",
     "approval-preimage-mismatch",
     "approval-preimage-unreadable",
+    "approval-whole-document-units-incomplete",
 )
 REPORT_REASON_CODES = (
     "approval-report-changed",
@@ -500,6 +505,12 @@ def _destination(record):
     return destination if isinstance(destination, str) and destination else None
 
 
+def _approved_units(code, units):
+    """Canonical units, retaining whole-document duplicates for refusal."""
+    values = units if code in WHOLE_DOCUMENT_RECORD_CODES else set(units)
+    return tuple(sorted(values))
+
+
 def derived_scope_paths(records):
     """The only allowed mutation scope a given selection justifies.
 
@@ -568,6 +579,26 @@ def _preimage_problems(records, repo_root, registry_path):
             ))
             continue
         present = {unit.digest for unit in segmentation.units}
+        whole_document_difference = whole_document_unit_difference(
+            record.code, record.units, present
+        )
+        if (whole_document_difference is not None
+                and not whole_document_difference.exact):
+            problems.append(Problem(
+                code="approval-whole-document-units-incomplete",
+                message=(
+                    f"record {record.record_id} would retire all of {path}, "
+                    f"but its approved units are not the complete current "
+                    f"deterministic unit set (missing "
+                    f"{len(whole_document_difference.missing)}, extra "
+                    f"{len(whole_document_difference.extra)}, duplicate "
+                    f"{len(whole_document_difference.duplicates)}) — approve "
+                    f"a fresh whole-document finding rather than amplifying "
+                    f"passage authority into document deletion"
+                ),
+                location=path,
+            ))
+            continue
         missing = [unit for unit in record.units if unit not in present]
         if missing:
             problems.append(Problem(
@@ -644,7 +675,7 @@ def mint_approval_set(report, selected, *, repo_root, minter,
         record_id=record.id,
         code=record.extra["code"],
         path=record.extra["path"],
-        units=tuple(sorted(set(record.extra["units"]))),
+        units=_approved_units(record.extra["code"], record.extra["units"]),
         destination=_destination(record),
     ) for record in chosen)
 
@@ -879,7 +910,7 @@ def _approved_records(raw, bad, lineage):
                 continue
         records.append(ApprovedRecord(
             digest=entry["digest"], record_id=entry["id"], code=entry["code"],
-            path=entry["path"], units=tuple(sorted(set(units))),
+            path=entry["path"], units=_approved_units(entry["code"], units),
             destination=destination,
         ))
     if ok and _unsorted([r.digest for r in records], "records", bad):
@@ -1042,17 +1073,17 @@ def _scope_reasons(scope, repo_root, registry_path):
     return reasons
 
 
-def _preimage_reasons(records, repo_root, registry_path):
+def _preimage_reasons(problems):
     """Preimage drift, as stale reasons rather than problems.
 
-    The same check minting runs, read the other way round. At mint time a
-    target that has already moved means the selection was made against text
-    that is gone, and nothing should be minted. Here the artifact exists and
-    the question is whether it still stands — which is `stale`: the remedy is
-    to re-run the audit and approve again, not to fix the file.
+    The problems come from the same check minting runs, read the other way
+    round. At mint time a target that has already moved means the selection
+    was made against text that is gone, and nothing should be minted. Here the
+    artifact exists and the question is whether it still stands — which is
+    `stale`: re-run the audit and approve again rather than fixing the file.
     """
     reasons = []
-    for problem in _preimage_problems(records, repo_root, registry_path):
+    for problem in problems:
         reasons.append(StaleReason(
             code=problem.code,
             message=problem.message,
@@ -1255,7 +1286,22 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
             return Invalid(tuple(current_problems))
         reasons += _lineage_reasons(lineage, current)
         reasons += _scope_reasons(scope, repo_root, registry_path)
-        reasons += _preimage_reasons(records, repo_root, registry_path)
+        preimage_problems = _preimage_problems(
+            records, repo_root, registry_path
+        )
+        if lineage.inventory_digest == current.get("inventory_digest"):
+            forged_whole_document_authority = tuple(
+                problem for problem in preimage_problems
+                if problem.code == "approval-whole-document-units-incomplete"
+            )
+            if forged_whole_document_authority:
+                # With the same inventory the report was produced against,
+                # no document moved after minting. A partial whole-document
+                # record was never authority, so this is invalid rather than
+                # stale. When the inventory differs, the same exact-set
+                # mismatch remains the ordinary stale preimage lane below.
+                return Invalid(forged_whole_document_authority)
+        reasons += _preimage_reasons(preimage_problems)
 
     # A carried reason this run did not re-check still stands: clearing a
     # verdict must be at least as thorough as setting it.

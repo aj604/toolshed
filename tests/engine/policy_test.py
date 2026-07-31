@@ -149,8 +149,13 @@ class PolicyTestCase(ApprovalTestCase):
     def bloat(self, record_id="R-3", code="CUT", **extra):
         fields = dict(rationale="restates the heading")
         fields.update(extra)
+        units = (
+            self.whole_units(self.repo, DOC_B)
+            if code in bloat.WHOLE_DOCUMENT_VERDICTS
+            else self.units(self.repo, DOC_B)[:1]
+        )
         return self.finding(
-            record_id, code, DOC_B, self.units(self.repo, DOC_B)[:1], **fields
+            record_id, code, DOC_B, units, **fields
         )
 
     def eligibility(self, records, policy=None):

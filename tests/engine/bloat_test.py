@@ -303,7 +303,98 @@ class RecorderTestCase(RepoTestCase):
             "evidence": "The living document already states this.",
         }
         entry.update(overrides)
+        if entry["verdict"] in bloat.WHOLE_DOCUMENT_VERDICTS and "units" not in overrides:
+            entry["units"] = list(self.index.document(entry["path"]).units)
         return entry
+
+
+class WholeDocumentVerdictsBindEveryCurrentUnit(RecorderTestCase):
+    CASES = (
+        (bloat.RETIRE_DOC, {}),
+        (bloat.DISTILL, {"status": "pending-implementation"}),
+        (bloat.MERGE_DOC, {}),
+    )
+
+    def all_units(self, path="docs/plans/p.md"):
+        return list(self.index.document(path).units)
+
+    def test_each_whole_document_verdict_omitting_a_current_unit_is_refused(self):
+        for verdict, required in self.CASES:
+            with self.subTest(verdict=verdict):
+                result = self.record([self.verdict(
+                    verdict=verdict,
+                    units=[self.unit("docs/plans/p.md", SHARED)],
+                    **required,
+                )])
+
+                self.assertEqual(
+                    problem_codes(result),
+                    ["bloat-whole-document-units-incomplete"],
+                )
+
+    def test_a_duplicate_unit_identity_is_refused(self):
+        units = self.all_units()
+        result = self.record([self.verdict(
+            verdict=bloat.RETIRE_DOC, units=units + [units[0]],
+        )])
+
+        self.assertEqual(
+            problem_codes(result), ["bloat-whole-document-unit-duplicate"]
+        )
+
+    def test_an_extra_unit_from_another_document_is_refused(self):
+        guide_unit = self.unit("docs/guides/g.md", "Guide prose.")
+        result = self.record([self.verdict(
+            verdict=bloat.RETIRE_DOC, units=self.all_units() + [guide_unit],
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-unknown-unit"])
+
+    def test_a_stale_unit_identity_is_refused(self):
+        result = self.record([self.verdict(
+            verdict=bloat.RETIRE_DOC, units=self.all_units() + ["0" * 64],
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-unknown-unit"])
+
+    def test_a_non_identity_extra_unit_fails_shut(self):
+        result = self.record([self.verdict(
+            verdict=bloat.RETIRE_DOC, units=self.all_units() + [{}],
+        )])
+
+        self.assertEqual(problem_codes(result), ["bloat-unknown-unit"])
+
+    def test_each_complete_whole_document_verdict_records(self):
+        for verdict, required in self.CASES:
+            with self.subTest(verdict=verdict):
+                result = self.record([self.verdict(
+                    verdict=verdict, units=self.all_units(), **required,
+                )])
+
+                self.assertNotIsInstance(
+                    result, Invalid, getattr(result, "problems", None)
+                )
+
+    def test_passage_remedies_stay_bounded_to_selected_units(self):
+        for verdict, proposal in (
+            (bloat.CUT, None),
+            (bloat.CONDENSE, "Shorter."),
+            (bloat.EXTRACT_AND_MOVE, "Moved."),
+        ):
+            with self.subTest(verdict=verdict):
+                overrides = {"verdict": verdict}
+                if proposal is not None:
+                    overrides["proposal"] = proposal
+                if verdict == bloat.EXTRACT_AND_MOVE:
+                    overrides["destination"] = "docs/a.md"
+                result = self.record([self.verdict(**overrides)])
+                self.assertNotIsInstance(
+                    result, Invalid, getattr(result, "problems", None)
+                )
+                self.assertEqual(
+                    result.records()[0]["units"],
+                    [self.unit("docs/plans/p.md", SHARED)],
+                )
 
 
 class WhatAFindingExplains(RecorderTestCase):
@@ -366,13 +457,11 @@ class DestinationsComeFromTheIndex(RecorderTestCase):
             "docs/b.md": "# B\n\nA second owned claim.\n",
             "docs/plans/p.md": f"# P\n\n{SHARED}\n\nA second owned claim.\n",
         }))
-        by_text = {u.text: u.digest for u in index.units}
-
         result = bloat.record_verdicts(index, self.lineage, [{
             "id": "BLOAT-001",
             "verdict": bloat.MERGE_DOC,
             "path": "docs/plans/p.md",
-            "units": [by_text[SHARED], by_text["A second owned claim."]],
+            "units": list(index.document("docs/plans/p.md").units),
             "evidence": "Both claims are stated elsewhere.",
             "destination": "docs/a.md",
         }])
@@ -437,7 +526,7 @@ class MergingTheDocumentTheIndexOwnsIsRefused(RecorderTestCase):
     def test_omitting_a_destination_for_the_owner_is_refused_accurately(self):
         result = self.record([self.verdict(
             verdict=bloat.MERGE_DOC, path="docs/a.md",
-            units=[self.unit("docs/a.md", SHARED)],
+            units=list(self.index.document("docs/a.md").units),
         )])
 
         self.assertEqual(problem_codes(result), ["bloat-destination-self-owner"])
@@ -449,7 +538,7 @@ class MergingTheDocumentTheIndexOwnsIsRefused(RecorderTestCase):
     def test_a_wrong_destination_for_the_owner_is_refused_not_accepted(self):
         result = self.record([self.verdict(
             verdict=bloat.MERGE_DOC, path="docs/a.md",
-            units=[self.unit("docs/a.md", SHARED)],
+            units=list(self.index.document("docs/a.md").units),
             destination="docs/guides/g.md",
         )])
 
@@ -469,13 +558,12 @@ class ContentionIsResolvedByTheIndex(RepoTestCase):
         self.lineage = lineage()
 
     def merge_from(self, path, text):
-        digest = {u.text: u.digest for u in self.index.units}[text]
         chunk = bloat.Chunk(chunk_id="c-" + path, documents=(path,), unit_count=2)
         result = bloat.record_verdicts(self.index, self.lineage, [{
             "id": "BLOAT-" + path,
             "verdict": bloat.MERGE_DOC,
             "path": path,
-            "units": [digest],
+            "units": list(self.index.document(path).units),
             "evidence": "Duplicates the owning document.",
         }], chunk=chunk)
         self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
@@ -544,12 +632,11 @@ class ResidueDestinationsAreAuthorizedNotInventoried(RepoTestCase):
         return problem_codes(result)
 
     def distill(self, **overrides):
-        by_text = {u.text: u.digest for u in self.index.units}
         entry = {
             "id": "BLOAT-D1",
             "verdict": bloat.DISTILL,
             "path": "docs/plans/p.md",
-            "units": [by_text[SHARED]],
+            "units": list(self.index.document("docs/plans/p.md").units),
             "evidence": "The design landed: src/fees.py:12 states the rate.",
             "status": "ready",
         }
@@ -687,12 +774,11 @@ class ResidueClassificationHasThreeLegs(RepoTestCase):
         self.lineage = lineage()
 
     def distill(self, destination):
-        by_text = {u.text: u.digest for u in self.index.units}
         return bloat.record_verdicts(self.index, self.lineage, [{
             "id": "BLOAT-D1",
             "verdict": bloat.DISTILL,
             "path": "docs/plans/p.md",
-            "units": [by_text[SHARED]],
+            "units": list(self.index.document("docs/plans/p.md").units),
             "evidence": "The design landed: src/fees.py:12 states the rate.",
             "status": "ready",
             "destination": destination,
@@ -838,7 +924,7 @@ class LifecycleStateIsFileBound(RecorderTestCase):
             "id": "BLOAT-D1",
             "verdict": bloat.DISTILL,
             "path": path,
-            "units": [self.unit(path, SHARED)],
+            "units": list(self.index.document(path).units),
             "evidence": "The design landed: src/fees.py:12 states the rate.",
         }
         entry.update(overrides)
@@ -939,7 +1025,7 @@ class RefusalsAreExhaustive(RecorderTestCase):
         result = self.record([self.verdict(
             verdict=bloat.DISTILL,
             path="docs/a.md",
-            units=[self.unit("docs/a.md", SHARED)],
+            units=list(self.index.document("docs/a.md").units),
             status="ready",
         )])
 
@@ -1117,6 +1203,22 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
 
         self.assertIsInstance(result, Invalid)
         self.assertIn("bloat-missing-evidence", [p.code for p in result.problems])
+
+    def test_incomplete_whole_document_verdicts_are_refused_before_report_production(self):
+        repo = self.corpus()
+        for verdict in (bloat.RETIRE_DOC, bloat.DISTILL, bloat.MERGE_DOC):
+            with self.subTest(verdict=verdict):
+                overrides = {"verdict": verdict}
+                if verdict == bloat.DISTILL:
+                    overrides["status"] = "pending-implementation"
+                result = bloat.audit_bloat(
+                    repo, self.envelope(repo, self.verdict(repo, **overrides))
+                )
+                self.assertIsInstance(result, Invalid, result)
+                self.assertEqual(
+                    [p.code for p in result.problems],
+                    ["bloat-whole-document-units-incomplete"],
+                )
 
     def test_a_bare_list_is_not_a_valid_envelope(self):
         """`audit_bloat` takes the envelope, not a bare list — an in-process

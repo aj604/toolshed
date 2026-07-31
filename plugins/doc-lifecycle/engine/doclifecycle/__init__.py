@@ -39,7 +39,10 @@ ARTIFACT_SCHEMA_VERSION = 1
 # 9: bloat completion preserves an authentic, re-derivable chunk plan and
 # binds each received result to its verdict contents; incomplete fan-out can
 # no longer manufacture a clean report (#152).
-RULESET_VERSION = 9
+# 10: RETIRE-DOC, DISTILL, and MERGE-DOC bind the source document's complete
+# current deterministic unit set; incomplete or duplicate unit selections are
+# refused before a finding can become report or approval authority (#153).
+RULESET_VERSION = 10
 
 # The published plugin version this engine ships inside. Pinned in lineage, so
 # it must track `plugins/doc-lifecycle/.claude-plugin/plugin.json` — the engine
@@ -47,4 +50,4 @@ RULESET_VERSION = 9
 # `tests/engine/report_test.py` fails loudly when the two drift. Every release
 # therefore expires prior reports: cheaper than reasoning about which releases
 # could have changed a verdict, and re-running an audit is cheap.
-PLUGIN_VERSION = "0.44.2"
+PLUGIN_VERSION = "0.44.3"

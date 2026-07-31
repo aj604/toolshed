@@ -4,6 +4,38 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-30 — whole-document bloat authority binds every current unit (#153)
+- Evidence: `RETIRE-DOC`, `DISTILL`, and `MERGE-DOC` records could name one selected passage,
+  pass human approval and plan validation, then authorize `retire-document` over the complete
+  source. In the `MERGE-DOC` reproduction, the move preserved only the selected passage while the
+  paired retirement deleted unrelated, unselected content.
+- Decided: `record_verdicts()` treats those three codes as whole-document judgments and requires
+  their unit identities to equal the source document's complete current deterministic unit set,
+  structural units included. Missing units and duplicate identities have dedicated typed refusals;
+  the existing unknown-unit refusal covers extra, stale, or malformed identities. The invariant is
+  re-derived at every authority boundary: repository-backed report validation, approval minting,
+  approval read-back, and therefore the applier. A current-lineage mismatch is invalid; an honestly
+  complete record whose document later gains or loses a unit is stale. Structural-only report reads
+  cannot answer a repository question and remain explicitly unchecked.
+- Still binds: `CUT`, `CONDENSE`, and `EXTRACT-AND-MOVE` remain passage remedies bounded to their
+  selected unit hulls. Bulk `RETIRE-DOC` remains complete because deterministic scope enumeration
+  supplies each member's units from the index rather than model input.
+- Verified: focused public-seam regressions cover all three omission refusals before report
+  production, duplicates and foreign/stale identities, repository-backed report and approval
+  refusal of a forged one-unit retirement, byte-identical/unstaged refusal through the real
+  report→approval→plan→apply path, honest stale expiry after a document gains a unit, complete
+  records through human approval and deterministic application, unchanged passage remedies, and
+  deterministic bulk retirement.
+  `RULESET_VERSION` advances to 10 because verdicts accepted by the prior policy are now refused.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/bloat.py,
+  plugins/doc-lifecycle/engine/doclifecycle/report.py,
+  plugins/doc-lifecycle/engine/doclifecycle/approval.py,
+  plugins/doc-lifecycle/engine/doclifecycle/__init__.py,
+  plugins/doc-lifecycle/engine/README.md,
+  plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md,
+  tests/engine/bloat_test.py, tests/engine/report_test.py,
+  tests/engine/approval_test.py, tests/engine/applier_test.py
+
 ## 2026-07-30 — every living assertion discharges a closed review obligation (#154)
 - Evidence: the drift boundary accepted an unjudged `normative` or `rationale` classification,
   so relabeling a stale factual assertion could remove the only judgment that kept a living

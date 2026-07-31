@@ -452,7 +452,7 @@ class WhatThePolicyProvablyCannotMint(PolicyScenarioTestCase):
         report, _ = self.approvable(repo)
         record = build_finding(
             lineage=report.lineage, code="RETIRE-DOC", path=fixture.POLICY_DOC,
-            units=self.unit_digests(repo, fixture.POLICY_DOC)[:1],
+            units=self.all_unit_digests(repo, fixture.POLICY_DOC),
             record_id="BLOAT-002",
             extra={"rationale": "carries nothing another document lacks"},
         )
@@ -462,6 +462,11 @@ class WhatThePolicyProvablyCannotMint(PolicyScenarioTestCase):
         segmentation = segment_document(repo, path, fixture.REGISTRY_PATH)
         self.assertNotIsInstance(segmentation, Invalid, segmentation)
         return [u.digest for u in segmentation.units if u.assertion_capable]
+
+    def all_unit_digests(self, repo, path):
+        segmentation = segment_document(repo, path, fixture.REGISTRY_PATH)
+        self.assertNotIsInstance(segmentation, Invalid, segmentation)
+        return [unit.digest for unit in segmentation.units]
 
     def rebuild_report(self, report, records, repo):
         payload = report.to_dict()
