@@ -67,11 +67,15 @@
 - Decided (trust boundary): the model job holds `contents: read` plus `id-token: write` only,
   persists no checkout credential, receives no `GH_TOKEN`, and writes every plan, chunk result,
   envelope, report, sidecar, and cost artifact under `runner.temp`. The publish job is model-free
-  and read-only. Neither job can commit, push, open a pull request, or alter repository content.
+  and read-only. Because local Write and restricted Bash still make worktree mutation possible,
+  a trusted post-model step checks the original HEAD and every staged, unstaged, ignored, or
+  ordinary untracked file before assembly/audit. It fails without resetting or cleaning, so a
+  mutation cannot be laundered into a report. Neither job can commit, push, or open a pull request.
 - Decided (completion is report truth): deterministic assembly uses `--allow-partial` so each
   missing or invalid chunk is preserved inside #152's completion envelope; `bloat-audit`
   independently re-derives it and emits one typed incomplete entry per affected document.
-  `render-audit-summary.py summary --kind bloat` renders those report entries. `unswept.json` is
+  `render-audit-summary.py summary --audit-surface bloat` renders those report entries.
+  `unswept.json` is
   still uploaded for diagnosis but is never the authority, so deleting it cannot launder partial
   into clean.
 - Supersedes: the cadence half of the 2026-07-29 entry below, "the auto-apply lane and a scheduled
@@ -80,7 +84,8 @@
 - Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat-audit.yml`,
   `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/{apply-upgrade,render-audit-summary}.py`,
   `.github/workflows/doc-bloat-audit.yml`, `.doc-lifecycle/wiring/render-audit-summary.py`,
-  `tests/scripts/{bloat-audit-workflow,apply-upgrade,render-audit-summary}_test.py`
+  `tests/scripts/{bloat-audit-workflow,apply-upgrade,render-audit-summary}_test.py`,
+  `tests/baselines/scheduling-bloat-cadence-red/`
 
 ## 2026-07-30 — whole-document bloat authority binds every current unit (#153)
 - Evidence: `RETIRE-DOC`, `DISTILL`, and `MERGE-DOC` records could name one selected passage,

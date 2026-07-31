@@ -226,12 +226,20 @@ class RenderOutcomes(unittest.TestCase):
                 "reason": "chunk c-deadbeef is missing: result file was not produced",
             }],
         ))
-        proc = self.summary_run("--kind", "bloat", "--report", path)
+        proc = self.summary_run(
+            "--audit-surface", "bloat", "--report", path,
+        )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         text = self.summary_text()
         self.assertIn("Bloat audit: PARTIAL", text)
         self.assertIn("docs/runbook.md", text)
         self.assertIn("c-deadbeef", text)
+
+    def test_ambiguous_legacy_kind_flag_is_rejected(self):
+        path = self.write_report(report("clean"))
+        proc = self.summary_run("--kind", "bloat", "--report", path)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("unrecognized arguments", proc.stderr)
 
     def test_clean_report_says_clean(self):
         path = self.write_report(report("clean"))

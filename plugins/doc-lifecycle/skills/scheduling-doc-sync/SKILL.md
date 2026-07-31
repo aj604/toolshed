@@ -133,14 +133,17 @@ public plan and every complete, missing, or invalid chunk into #152's completion
 `--unswept-out` sidecar is uploaded for diagnosis, but the report's typed `incomplete` entries
 are the run surface's source of truth: deleting or omitting the sidecar cannot make an unswept
 document look examined. `publish` revalidates freshness and calls
-`render-audit-summary.py summary --kind bloat`.
+`render-audit-summary.py summary --audit-surface bloat`.
 
 Every plan, prompt result, envelope, sidecar, report, and cost artifact lives under
 `${{ runner.temp }}/doc-bloat-audit`, outside the checkout. The model job grants only
 `contents: read` plus `id-token: write`, drops the checkout credential, carries no `GH_TOKEN`,
 and allows `Task`, the read/skill tools, `Write` for the named out-of-tree result files, and
 only `Bash(git *)` / `Bash(python3 *)`. It never commits, pushes, opens a pull request, or edits
-repository content. The action and every artifact action are pinned to immutable SHAs.
+repository content. Because those local tools could still dirty the checkout, an immutable
+post-model workflow step checks that HEAD is still `GITHUB_SHA` and refuses staged, unstaged,
+ignored, or ordinary untracked files before completion assembly or `bloat-audit`. It never resets
+or cleans a mutation. The action and every artifact action are pinned to immutable SHAs.
 
 **Installed on the same registry condition as the other engine lanes.** A missing registry
 would make the public planner refuse before the sweep has a corpus, so Upgrade mode regenerates

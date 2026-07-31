@@ -7,6 +7,7 @@
 # reaches the report as typed #152 completion evidence, never as an empty-looking
 # clean sweep. Every generated artifact stays under runner.temp, outside the work
 # tree, and no repository write credential reaches the model or its Task workers.
+# A trusted post-model gate refuses any checkout mutation before assembly.
 name: doc-bloat-audit
 
 on:
@@ -23,6 +24,7 @@ concurrency:
 
 env:
   BLOAT_DIR: ${{ runner.temp }}/doc-bloat-audit
+  PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
   audit:
@@ -112,12 +114,45 @@ jobs:
             --execution-log "${{ steps.model.outputs.execution_file || '/home/runner/work/_temp/claude-execution-output.json' }}" \
             --out "${BLOAT_DIR}/audit-cost.json"
 
+      # The model has local Write and restricted Bash tools even though it has
+      # no repository credential. This step is part of the workflow definition
+      # GitHub loaded before the model ran, so it is the trusted boundary: fail
+      # closed on a moved HEAD or any staged, unstaged, ignored, or ordinary
+      # untracked checkout file. Never reset or clean here — that would launder
+      # a mutation into an apparently read-only report.
+      - name: Verify repository integrity before assembly
+        id: integrity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          dirty=0
+          if [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then
+            echo "::error::repository HEAD moved during the model fan-out"
+            dirty=1
+          fi
+          if ! git diff --quiet --; then
+            echo "::error::tracked worktree files changed during the model fan-out"
+            dirty=1
+          fi
+          if ! git diff --cached --quiet HEAD --; then
+            echo "::error::staged repository changes appeared during the model fan-out"
+            dirty=1
+          fi
+          if [ -n "$(git ls-files --others)" ]; then
+            echo "::error::untracked repository files appeared during the model fan-out"
+            dirty=1
+          fi
+          if [ "$dirty" -ne 0 ]; then
+            exit 1
+          fi
+
       # Assembly is deterministic. `--allow-partial` does not forgive a gap:
       # #152 binds each missing/invalid chunk and every affected document into
       # the envelope's completion evidence. The sidecar is presentation/debug
       # data only; bloat-audit derives partial from the envelope itself.
       - name: Assemble chunk completion evidence
-        if: always()
+        if: ${{ always() && steps.integrity.outcome == 'success' }}
         run: |
           set -euo pipefail
           if [ -f "${BLOAT_DIR}/manifest.json" ]; then
@@ -130,7 +165,7 @@ jobs:
           fi
 
       - name: Run the public bloat audit
-        if: always()
+        if: ${{ always() && steps.integrity.outcome == 'success' }}
         run: |
           set -uo pipefail
           if [ ! -f "${BLOAT_DIR}/bloat-verdicts.json" ]; then
@@ -229,6 +264,6 @@ jobs:
 
       - name: Render typed bloat summary
         run: |
-          python3 .doc-lifecycle/wiring/render-audit-summary.py summary --kind bloat \
+          python3 .doc-lifecycle/wiring/render-audit-summary.py summary --audit-surface bloat \
             --report "${BLOAT_DIR}/bloat-report.json" \
             --cost "${BLOAT_DIR}/audit-cost.json"

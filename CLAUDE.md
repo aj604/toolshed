@@ -136,7 +136,8 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   the 2026-07-09 distill-lane fan-out's at `tests/baselines/distill-fanout-red/` /
   `distill-fanout-green/`, and the fix-skill merge's at
   `tests/baselines/fixing-docs-merge-red/` / `fixing-docs-merge-green/`; the policy lane's retained
-  test-first record is at `tests/baselines/policy-lane-red/`;
+  test-first record is at `tests/baselines/policy-lane-red/`, and the scheduled bloat cadence's
+  at `tests/baselines/scheduling-bloat-cadence-red/`;
   method, status, and resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md`
   (2026-06-09 suite entry; 2026-06-20 `docs/reference/` shape; 2026-07-06 rearchitecture
   entry; 2026-07-07 scale-hardening entry; 2026-07-09 distill-fan-out entry).
@@ -179,8 +180,9 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   by `probe-evidence-tool.py` rather than typed into the YAML);
   `bloat-audit-workflow_test.py` guards the sibling bloat cadence (#144): registry/public-plan
   preflight before fan-out, the SHA-pinned read-only model action, one budgeted fresh Task per
-  chunk, out-of-tree artifacts, #152 completion assembly, and a report-derived typed partial
-  summary (the unswept sidecar is never the authority);
+  chunk, out-of-tree artifacts, a post-model fail-closed clean-worktree gate before #152
+  completion assembly, and a report-derived typed partial summary (the unswept sidecar is never
+  the authority);
   `probe-evidence-tool_test.py` covers that script itself (the declared list and its rendered
   flags, the refusals for an undeclared tool or a non-`--help`/`--version` invocation, and the
   credential scrub). Both suites sit alongside what `workflow-permissions_test.py` already

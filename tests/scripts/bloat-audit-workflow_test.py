@@ -3,6 +3,8 @@
 
 import os
 import re
+import subprocess
+import tempfile
 import unittest
 
 
@@ -17,6 +19,26 @@ class ScheduledBloatAuditContract(unittest.TestCase):
     def workflow_text(self):
         with open(WORKFLOW, encoding="utf-8") as stream:
             return stream.read()
+
+    def step_text(self, name):
+        """One top-level audit-job step, through the next sibling step."""
+        lines = self.workflow_text().splitlines()
+        marker = f"      - name: {name}"
+        start = lines.index(marker)
+        end = next(
+            (i for i in range(start + 1, len(lines))
+             if lines[i].startswith("      - name: ")),
+            len(lines),
+        )
+        return "\n".join(lines[start:end])
+
+    def step_script(self, name):
+        body = self.step_text(name).splitlines()
+        run = body.index("        run: |")
+        return "\n".join(
+            line[10:] if line.startswith("          ") else line
+            for line in body[run + 1:]
+        ) + "\n"
 
     def test_lane_preflights_then_budget_dispatches_and_reports_typed_gaps(self):
         text = self.workflow_text()
@@ -42,7 +64,9 @@ class ScheduledBloatAuditContract(unittest.TestCase):
         self.assertIn("--allow-partial", text)
         self.assertIn("--unswept-out \"${BLOAT_DIR}/unswept.json\"", text)
         self.assertIn(" bloat-audit ", text)
-        self.assertIn("render-audit-summary.py summary --kind bloat", text)
+        self.assertIn(
+            "render-audit-summary.py summary --audit-surface bloat", text,
+        )
 
         # Plans, chunk results, envelopes, reports, and cost data all live in
         # runner.temp. The checkout is evidence only, never artifact storage.
@@ -77,6 +101,99 @@ class ScheduledBloatAuditContract(unittest.TestCase):
             'Bash(git *),Bash(python3 *)"',
             text,
         )
+
+    def test_integrity_gate_orders_model_before_trusted_assembly(self):
+        text = self.workflow_text()
+        model = text.index("- name: Dispatch bounded bloat workers")
+        integrity = text.index("- name: Verify repository integrity before assembly")
+        assembly = text.index("- name: Assemble chunk completion evidence")
+        audit = text.index("- name: Run the public bloat audit")
+        self.assertLess(model, integrity)
+        self.assertLess(integrity, assembly)
+        self.assertLess(assembly, audit)
+
+        expected = "if: ${{ always() && steps.integrity.outcome == 'success' }}"
+        self.assertIn("id: integrity", self.step_text(
+            "Verify repository integrity before assembly"))
+        self.assertIn(expected, self.step_text(
+            "Assemble chunk completion evidence"))
+        self.assertIn(expected, self.step_text("Run the public bloat audit"))
+
+    def test_integrity_gate_checks_without_resetting_or_laundering(self):
+        script = self.step_script("Verify repository integrity before assembly")
+        self.assertIn('PYTHONDONTWRITEBYTECODE: "1"', self.workflow_text())
+        self.assertIn("git rev-parse HEAD", script)
+        self.assertIn("git diff --quiet", script)
+        self.assertIn("git diff --cached --quiet", script)
+        self.assertIn("git ls-files --others", script)
+        self.assertNotRegex(script, r"\bgit\s+(?:reset|restore|checkout|clean)\b")
+
+    def test_integrity_gate_rejects_every_repository_mutation_surface(self):
+        script = self.step_script("Verify repository integrity before assembly")
+
+        def repository():
+            tmp = tempfile.TemporaryDirectory()
+            self.addCleanup(tmp.cleanup)
+            subprocess.run(["git", "init", "-q"], cwd=tmp.name, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "audit@example.test"],
+                cwd=tmp.name, check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Audit Test"],
+                cwd=tmp.name, check=True,
+            )
+            with open(os.path.join(tmp.name, ".gitignore"), "w", encoding="utf-8") as f:
+                f.write("*.ignored\n")
+            with open(os.path.join(tmp.name, "tracked.md"), "w", encoding="utf-8") as f:
+                f.write("original\n")
+            subprocess.run(["git", "add", "."], cwd=tmp.name, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "fixture"], cwd=tmp.name, check=True,
+            )
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=tmp.name, text=True,
+            ).strip()
+            return tmp.name, head
+
+        def run_gate(root, expected_head):
+            env = dict(os.environ, GITHUB_SHA=expected_head)
+            return subprocess.run(
+                ["bash", "-e"], cwd=root, input=script, text=True,
+                capture_output=True, env=env,
+            )
+
+        def write_file(name, contents):
+            def mutate(root):
+                with open(os.path.join(root, name), "w", encoding="utf-8") as f:
+                    f.write(contents)
+            return mutate
+
+        def stage_tracked(root):
+            write_file("tracked.md", "staged\n")(root)
+            subprocess.run(["git", "add", "tracked.md"], cwd=root, check=True)
+
+        clean, head = repository()
+        self.assertEqual(run_gate(clean, head).returncode, 0)
+
+        cases = {
+            "tracked": write_file("tracked.md", "changed\n"),
+            "staged": stage_tracked,
+            "untracked": write_file("new.md", "new\n"),
+            "ignored-untracked": write_file(
+                "cache.ignored", "ignored but still inside the repository\n",
+            ),
+            "head-moved": lambda root: subprocess.run(
+                ["git", "commit", "-q", "--allow-empty", "-m", "moved"],
+                cwd=root, check=True,
+            ),
+        }
+        for label, mutate in cases.items():
+            with self.subTest(label=label):
+                root, expected_head = repository()
+                mutate(root)
+                proc = run_gate(root, expected_head)
+                self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
 
 if __name__ == "__main__":

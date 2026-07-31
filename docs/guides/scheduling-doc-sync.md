@@ -50,6 +50,9 @@ Mondays:
   retry.
 - Plans, chunk results, completion envelopes, reports, and cost data stay under the runner's
   temporary directory, never in the checkout.
+- After the workers and their retry stop, a trusted workflow step checks HEAD plus staged,
+  unstaged, ignored, and ordinary untracked files. Any repository mutation fails the run before
+  completion assembly; the lane never resets the checkout and publishes a laundered report.
 - Missing or invalid workers are not treated as clean. Their chunk ids and every affected
   document are bound into the report's typed `incomplete` entries and rendered as PARTIAL; the
   separate unswept sidecar is diagnostic data, not the source of truth.
