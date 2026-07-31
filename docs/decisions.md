@@ -1218,7 +1218,7 @@
 - Decided (F6 direct narrative ask): `growing-docs` description now claims the direct
   "write an ADR/tutorial/walkthrough" ask (it owns the narrative template; writing-docs scopes
   those out), closing the routing gap on the door to the rich half of the ecosystem.
-- Decided (F3 UNVERIFIABLE waiver): the detector stays pure (emits every UNVERIFIABLE);
+- Decided (F3 UNVERIFIABLE waiver): the audit engine stays pure (emits every UNVERIFIABLE);
   disposition is a run-surface concern. New consumer file `.github/doc-sync/drift-waivers.json`
   (`{file, claim}` exact-match identity — reworded → resurfaces, new authorship is a new
   decision) consumed by `render-report.py` pr-body/pr-title/no-drift-summary. A no-drift night
@@ -1438,7 +1438,7 @@
   bulk `POLICY` verdict with a mandatory `files` provenance array; ephemeral-artifact
   directories are declared config (`policy_scope` in audit-scope.json), selected by filter,
   never summarized file-by-file by the model. Budgets are structural, not prose: per-chunk
-  `--max-turns 15` (a flail detector), seam validation where each chunk is produced with one
+  `--max-turns 15` (a flail guard), seam validation where each chunk is produced with one
   fresh re-dispatch, chunk results as checkpoint, assembly that refuses partial results by
   name; the run-level `chunking.max_chunks` ceiling defaults to off — refusing legitimate
   large runs is worse than pricing them visibly. One skill with progressive disclosure
@@ -1488,7 +1488,7 @@
 
 ## 2026-07-03 — Doc bloat and distillation design
 - Decided: Added `detecting-doc-bloat`/`fixing-doc-bloat` as a second skill pair mirroring
-  `detecting-doc-drift`/`fixing-doc-drift`'s shape (contract-emitting detector + human-gated
+  `detecting-doc-drift`/`fixing-doc-drift`'s shape (report-emitting audit engine + human-gated
   applier), covering the value axis (drift covers accuracy). `DISTILL` retires a landed
   planning artifact by extracting its durable decisions into living docs plus one
   decision-log entry, then deleting it — chosen over keeping design docs verbatim forever or

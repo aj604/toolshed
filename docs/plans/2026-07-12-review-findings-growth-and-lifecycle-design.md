@@ -72,7 +72,7 @@ path, and detecting-doc-drift's handoff points at a bloat lens that doesn't exis
   `{"waivers": [{"file": <doc>, "claim": <exact text>, "reason": <one line>, "date": "YYYY-MM-DD"}]}`.
   Identity = (file, exact claim text). A reworded claim resurfaces by design — new authorship
   is a new decision.
-- **The detector stays pure** — it emits every UNVERIFIABLE; filtering is a run-surface
+- **The audit engine stays pure** — it emits every UNVERIFIABLE; filtering is a run-surface
   concern. Gate decisions unchanged (STALE-only). `render-report.py` gains `--waivers FILE`:
   - `pr-body` / `issue-body`: unwaived UNVERIFIABLE records listed with a
     to-waive-add-to-drift-waivers hint; waived ones collapse to a count.

@@ -140,7 +140,7 @@ A chunk executor loads only the references its chunk's doc kinds need.
   behavior, updated to v2 — rejects v1-shaped reports with a single legible
   "schema v1: regenerate with the current skill" error).
 
-Budget semantics: per-chunk `--max-turns` (~15) is a **flail detector, not a
+Budget semantics: per-chunk `--max-turns` (~15) is a **flail guard, not a
 work limiter** — total work scales by adding chunks. A chunk failing seam
 validation is re-dispatched fresh once; failing twice fails the run *naming the
 chunk*, with all valid chunks preserved as checkpoint. Spend is never lost; a

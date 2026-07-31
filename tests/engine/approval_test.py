@@ -535,7 +535,7 @@ class ReconciledSelection(ApprovalTestCase):
 
         Both write the same replacement, which is what makes them one edit
         rather than a contradiction: a remedy is the bytes a record puts in the
-        document, not the vocabulary its detector names the verdict with.
+        document, not the vocabulary its audit policy uses for the verdict.
         """
         units = self.units(self.repo, DOC_A)
         return (

@@ -38,7 +38,7 @@ elegant"; you can check "reset state = `make reset`".
 
 ## 3. Nothing edits your docs without your approval
 
-Both detectors are **read-only**. They emit structured records — a verdict from a fixed
+Both audit lanes are **read-only**. They emit structured records — a verdict from a fixed
 enum, cited evidence — and stop. One skill applies them, `fixing-docs`, and only what you
 authorized: every record carries an ID, you approve a subset of IDs, and that selection is
 minted into an **approval set** — the artifact the applier treats as its sole authority, a
