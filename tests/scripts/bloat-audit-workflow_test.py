@@ -13,6 +13,7 @@ WORKFLOW = os.path.join(
     ROOT, "plugins", "doc-lifecycle", "skills", "scheduling-doc-sync",
     "doc-bloat-audit.yml",
 )
+GUIDE = os.path.join(ROOT, "docs", "guides", "auditing-doc-bloat.md")
 
 
 class ScheduledBloatAuditContract(unittest.TestCase):
@@ -39,6 +40,20 @@ class ScheduledBloatAuditContract(unittest.TestCase):
             line[10:] if line.startswith("          ") else line
             for line in body[run + 1:]
         ) + "\n"
+
+    def test_bloat_guide_names_the_scheduled_report_and_human_apply_boundary(self):
+        with open(GUIDE, encoding="utf-8") as stream:
+            guide = stream.read()
+
+        self.assertNotIn("There is no scheduled bloat sweep", guide)
+        self.assertNotIn("unattended lane covers **drift** only", guide)
+        self.assertRegex(
+            guide,
+            r"(?s)weekly, read-only scheduled bloat audit.*typed report",
+        )
+        self.assertIn("[scheduling guide](scheduling-doc-sync.md)", guide)
+        self.assertRegex(guide, r"No scheduled lane\s+applies")
+        self.assertIn("`fixing-docs`", guide)
 
     def test_lane_preflights_then_budget_dispatches_and_reports_typed_gaps(self):
         text = self.workflow_text()
