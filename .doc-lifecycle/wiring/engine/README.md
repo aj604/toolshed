@@ -1160,8 +1160,12 @@ there is no planless bloat audit the way a drift run can leave living documents 
 a value judgment about the corpus has to have been made by someone. The file it names is the
 envelope a bloat lane returns: `{"verdicts": [...], "completion": {...}}`, optionally with a
 `schema_version` that must equal `ARTIFACT_SCHEMA_VERSION` when present — not a bare list.
-Completion is mandatory report evidence, not a presentation sidecar: it binds the current context
-index, planned chunk identities and membership, and which valid results supplied which verdict ids.
+Completion is mandatory report evidence, not a presentation sidecar: it carries the full public
+`bloat-plan` artifact (including the budgets needed to re-derive it), typed per-chunk
+`completion_state`, and which valid results supplied which verdict ids. Each complete result digest
+binds its received verdict contents, and the outer digest binds those contents again with every
+chunk outcome. The audit independently re-plans from the current index, so a caller cannot
+repartition the corpus or edit a verdict and regain clean coverage merely by recomputing digests.
 Missing or invalid chunk results become per-document `incomplete` entries naming the chunk and force
 partial; complete chunks become `examined` entries carrying the chunk and plan digest. A stale,
 duplicated, mismatched, or tampered completion artifact is invalid and records nothing.

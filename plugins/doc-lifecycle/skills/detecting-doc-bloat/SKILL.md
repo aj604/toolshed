@@ -58,13 +58,16 @@ artifact.
    "${TMPDIR:-/tmp}/bloat-plan.json"` partitions every indexed document into bounded chunks
    (`--max-documents`, `--max-units`), content-addressed so an unchanged chunk
    keeps its id, and refuses outright (`registry-missing`) when there is none.
-   For a dispatched sweep, `scripts/plan-chunks.py` plans from
-   the repository's `.md` files and `.doc-lifecycle/audit-scope.json` instead,
-   adding the dispatch ergonomics the engine has no opinion about: per-chunk
-   turn budgets, `--emit-prompt` slices, and `--results-dir` resume. On a
-   registered repository it also asks the public `context-index` command for
-   the current index digest and stamps that into the manifest; without that
-   binding, assembly refuses before any envelope can reach `bloat-audit`.
+   For a dispatched sweep, `scripts/plan-chunks.py` adds the dispatch
+   ergonomics the engine has no opinion about: per-chunk turn budgets,
+   `--emit-prompt` slices, and `--results-dir` resume. On a registered
+   repository it asks the public `bloat-plan` command for the authentic plan,
+   dispatches those exact chunk ids and members, and preserves that full plan
+   in `engine_plan`; assembly refuses a missing, edited, or differently
+   partitioned plan before any envelope can reach `bloat-audit`. The script's
+   legacy `.md`/`audit-scope.json` planner remains only for unregistered
+   inventory and prompt-planning uses; such a manifest cannot be assembled
+   into completion evidence.
    Either way `bloat-audit` re-derives every fact from the registry, so a
    chunk plan is a work order, never an authority. `plan-chunks.py --emit-prompt`/
    `--emit-turns` read a `bloat-plan` manifest too (its chunks carry

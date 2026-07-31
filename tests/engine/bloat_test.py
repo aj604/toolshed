@@ -34,6 +34,7 @@ from doclifecycle.approval import (  # noqa: E402
     mint_approval_set,
 )
 from doclifecycle.context import build_context_index  # noqa: E402
+from doclifecycle.digest import sha256_canonical  # noqa: E402
 from doclifecycle.report import EvidenceBoundary, Report, current_lineage  # noqa: E402
 from doclifecycle.results import Invalid  # noqa: E402
 
@@ -112,6 +113,41 @@ class ChunkPlanning(RepoTestCase):
         self.assertEqual(
             [c.chunk_id for c in first.chunks], [c.chunk_id for c in second.chunks]
         )
+
+    def test_plan_records_the_budgets_needed_to_rederive_it(self):
+        index = self.index({
+            "docs/a.md": "# A\n\nAlpha.\n",
+            "docs/b.md": "# B\n\nBeta.\n",
+        })
+
+        payload = bloat.plan_chunks(
+            index, max_documents=1, max_units=17,
+        ).to_dict()
+
+        self.assertEqual(payload["max_documents"], 1)
+        self.assertEqual(payload["max_units"], 17)
+
+    def test_serialized_plan_round_trips_through_the_public_parser(self):
+        plan = bloat.plan_chunks(self.index({
+            "docs/a.md": "# A\n\nAlpha.\n",
+            "docs/b.md": "# B\n\nBeta.\n",
+        }), max_documents=1, max_units=17)
+
+        parsed = bloat.chunk_plan_from_dict(plan.to_dict())
+
+        self.assertEqual(parsed, plan)
+
+    def test_public_plan_parser_refuses_a_tampered_shape(self):
+        plan = bloat.plan_chunks(self.index({
+            "docs/a.md": "# A\n\nAlpha.\n",
+        })).to_dict()
+        plan["chunks"][0]["documents"].append("docs/invented.md")
+
+        parsed = bloat.chunk_plan_from_dict(plan)
+
+        self.assertIsInstance(parsed, Invalid)
+        self.assertIn("bloat-completion-plan-invalid",
+                      [problem.code for problem in parsed.problems])
 
     def test_editing_one_document_re_keys_only_its_chunk(self):
         before = bloat.plan_chunks(self.index({
@@ -1033,34 +1069,15 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
     def envelope(self, repo, *verdicts, **overrides):
         entries = list(verdicts) or [self.verdict(repo)]
         plan = bloat.plan_repository_chunks(repo)
-        chunks = []
-        assigned = set()
+        outcomes = []
         for chunk in plan.chunks:
-            ids = [entry["id"] for entry in entries
-                   if entry.get("scope") is not None
-                   or entry.get("path") in chunk.documents]
-            assigned.update(ids)
-            chunks.append({
-                "id": chunk.chunk_id,
-                "documents": list(chunk.documents),
-                "result": "complete",
-                "verdict_ids": ids,
-                "reason": "",
-            })
-        plan_digest = bloat._plan_digest(plan.index_digest, chunks)
-        completion = {
-            "index_digest": plan.index_digest,
-            "plan_digest": plan_digest,
-            "chunks": chunks,
-        }
-        completion["digest"] = bloat._completion_content_digest(
-            plan.index_digest, plan_digest, chunks,
-        )
-        payload = {
-            "schema_version": ARTIFACT_SCHEMA_VERSION,
-            "verdicts": entries,
-            "completion": completion,
-        }
+            selected = [entry for entry in entries
+                        if entry.get("scope") is not None
+                        or entry.get("path") in chunk.documents]
+            outcomes.append(bloat.ChunkOutcome.complete(
+                chunk.chunk_id, selected,
+            ))
+        payload = bloat.assemble_bloat_input(plan, outcomes).to_dict()
         payload.update(overrides)
         return payload
 
@@ -1174,12 +1191,26 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
     def test_completion_from_a_stale_index_is_refused(self):
         repo = self.corpus()
         payload = self.envelope(repo)
-        payload["completion"]["index_digest"] = "0" * 64
+        completion = payload["completion"]
+        plan = completion["plan"]
+        plan["index_digest"] = "0" * 64
+        plan["digest"] = sha256_canonical({
+            "schema_version": plan["schema_version"],
+            "index_digest": plan["index_digest"],
+            "max_documents": plan["max_documents"],
+            "max_units": plan["max_units"],
+            "chunks": plan["chunks"],
+        })
+        completion["digest"] = sha256_canonical({
+            "plan_digest": plan["digest"],
+            "chunks": completion["chunks"],
+            "verdicts": payload["verdicts"],
+        })
 
         result = bloat.audit_bloat(repo, payload)
 
         self.assertIsInstance(result, Invalid)
-        self.assertIn("bloat-completion-index-mismatch",
+        self.assertIn("bloat-completion-plan-mismatch",
                       [problem.code for problem in result.problems])
 
     def test_tampered_completion_digest_is_refused(self):
@@ -1198,37 +1229,60 @@ class AuditBloatComposesTheReport(GitRepoTestCase):
         payload = self.envelope(repo)
         completion = payload["completion"]
         completion["chunks"].append(dict(completion["chunks"][0]))
-        completion["plan_digest"] = bloat._plan_digest(
-            completion["index_digest"], completion["chunks"],
-        )
-        completion["digest"] = bloat._completion_content_digest(
-            completion["index_digest"], completion["plan_digest"],
-            completion["chunks"],
-        )
+        completion["digest"] = sha256_canonical({
+            "plan_digest": completion["plan"]["digest"],
+            "chunks": completion["chunks"],
+            "verdicts": payload["verdicts"],
+        })
 
         result = bloat.audit_bloat(repo, payload)
 
         self.assertIsInstance(result, Invalid)
-        self.assertIn("bloat-completion-duplicate-chunk",
+        self.assertIn("bloat-completion-chunks-mismatch",
                       [problem.code for problem in result.problems])
 
-    def test_mismatched_membership_is_refused_with_recomputed_digests(self):
+    def test_repartitioned_plan_is_refused_after_all_digests_are_recomputed(self):
         repo = self.corpus()
         payload = self.envelope(repo)
         completion = payload["completion"]
-        completion["chunks"][0]["documents"] = ["docs/not-planned.md"]
-        completion["plan_digest"] = bloat._plan_digest(
-            completion["index_digest"], completion["chunks"],
-        )
-        completion["digest"] = bloat._completion_content_digest(
-            completion["index_digest"], completion["plan_digest"],
-            completion["chunks"],
-        )
+        plan = completion["plan"]
+        self.assertEqual(len(plan["chunks"]), 2)
+        plan["chunks"].reverse()
+        completion["chunks"].reverse()
+        plan["digest"] = sha256_canonical({
+            "schema_version": plan["schema_version"],
+            "index_digest": plan["index_digest"],
+            "max_documents": plan["max_documents"],
+            "max_units": plan["max_units"],
+            "chunks": plan["chunks"],
+        })
+        completion["digest"] = sha256_canonical({
+            "plan_digest": plan["digest"],
+            "chunks": completion["chunks"],
+            "verdicts": payload["verdicts"],
+        })
 
         result = bloat.audit_bloat(repo, payload)
 
         self.assertIsInstance(result, Invalid)
-        self.assertIn("bloat-completion-membership-mismatch",
+        self.assertIn("bloat-completion-plan-mismatch",
+                      [problem.code for problem in result.problems])
+
+    def test_changed_verdict_content_is_refused_after_outer_digest_is_recomputed(self):
+        repo = self.corpus()
+        payload = self.envelope(repo)
+        payload["verdicts"][0]["evidence"] = "attacker changed the judgment"
+        completion = payload["completion"]
+        completion["digest"] = sha256_canonical({
+            "plan_digest": completion["plan"]["digest"],
+            "chunks": completion["chunks"],
+            "verdicts": payload["verdicts"],
+        })
+
+        result = bloat.audit_bloat(repo, payload)
+
+        self.assertIsInstance(result, Invalid)
+        self.assertIn("bloat-completion-result-mismatch",
                       [problem.code for problem in result.problems])
 
     def test_malformed_completion_chunk_fails_shut_without_a_traceback(self):

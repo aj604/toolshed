@@ -63,9 +63,10 @@ this script's own dialect (`docs` present), and fails loudly (exit 2) for a
 `bloat-plan` manifest, which was never sized by this script's turn formula.
 
 Output (plan mode): manifest JSON {"schema": 1, "index_digest": "...",
-"chunks": [...], "pending": [ids]} to --out (stdout if omitted). A registered
-repository carries `index_digest`; without a valid public context index the
-field is absent and completion assembly refuses. A chunk is
+"engine_plan": {...}, "chunks": [...], "pending": [ids]} to --out (stdout if
+omitted). A registered repository carries the full public `bloat-plan`
+artifact; its exact ids and membership drive the decorated scheduler chunks.
+Without that authentic plan, completion assembly refuses. A scheduler chunk is
 {"id", "turns": N, "docs": [{"path", "lines", "hint"}]}. The run-surface
 report (doc count, chunk count, projected invocations, resume skips) always
 prints to stderr.
@@ -91,6 +92,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 DEFAULT_MAX_DOCS = 8
 DEFAULT_MAX_LINES = 1200
@@ -354,18 +356,20 @@ def plan(root, cfg):
     return len(sized), chunks
 
 
-def current_index_digest(root):
-    """The audit engine's current context-index digest, or None if unavailable.
+def current_engine_plan(root, max_documents):
+    """The audit engine's authentic chunk plan, or None if unavailable.
 
-    Planning still diagnoses an absent registry at the public `bloat-audit`
-    seam, as before.  A registered run carries this digest into its manifest so
-    assembly can bind completion to the same index the audit re-derives.
+    A registered scheduler run dispatches the exact chunk identities and
+    membership emitted by the public engine planner.  The scheduler adds only
+    prompt metadata; assembly preserves the engine artifact byte-for-value and
+    the audit independently re-derives it from the current index.
     """
     env = dict(os.environ)
     env["PYTHONPATH"] = (ENGINE + os.pathsep + env["PYTHONPATH"]
                          if env.get("PYTHONPATH") else ENGINE)
     result = subprocess.run(
-        [sys.executable, "-m", "doclifecycle", "context-index", "--repo", root],
+        [sys.executable, "-m", "doclifecycle", "bloat-plan", "--repo", root,
+         "--max-documents", str(max_documents)],
         capture_output=True, text=True, env=env,
     )
     if result.returncode != 0:
@@ -374,8 +378,26 @@ def current_index_digest(root):
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
         return None
-    digest = payload.get("digest") if isinstance(payload, dict) else None
-    return digest if isinstance(digest, str) else None
+    if (not isinstance(payload, dict) or payload.get("status") != "ok"
+            or not isinstance(payload.get("chunks"), list)
+            or not isinstance(payload.get("digest"), str)):
+        return None
+    return payload
+
+
+def dispatch_chunks(root, engine_plan):
+    """Decorate engine chunks with scheduler-only prompt and turn metadata."""
+    chunks = []
+    for chunk in engine_plan["chunks"]:
+        docs = []
+        for path in chunk["documents"]:
+            lines, _digest = read_doc(os.path.join(root, path))
+            docs.append({"path": path, "lines": lines,
+                         "hint": doc_hint(root, path)})
+        chunks.append({
+            "id": chunk["id"], "turns": turn_budget(docs), "docs": docs,
+        })
+    return chunks
 
 
 SWEEP_PROMPT = """\
@@ -400,7 +422,7 @@ Orchestration, retries, and assembly belong to whoever dispatched you.
 """
 
 
-def usable_result(results_dir, cid):
+def usable_result(results_dir, cid, manifest_path):
     """True only for a parseable *current-shape* result that names this chunk.
 
     An invalid file surviving a failed CI retry must not mask the chunk as
@@ -422,7 +444,8 @@ def usable_result(results_dir, cid):
     if not shaped:
         return False
     checked = subprocess.run(
-        [sys.executable, VERDICT_VALIDATOR, "--chunk", path],
+        [sys.executable, VERDICT_VALIDATOR, "--chunk", path,
+         "--manifest", manifest_path],
         capture_output=True, text=True,
     )
     return checked.returncode == 0
@@ -561,7 +584,13 @@ def main():
     config = args.config or os.path.join(
         args.root, ".doc-lifecycle", "audit-scope.json")
     cfg = load_config(config)
-    ndocs, chunks = plan(args.root, cfg)
+    engine_plan = current_engine_plan(args.root, cfg["max_docs"])
+    if engine_plan is None:
+        ndocs, chunks = plan(args.root, cfg)
+    else:
+        chunks = dispatch_chunks(args.root, engine_plan)
+        ndocs = sum(len(chunk["documents"])
+                    for chunk in engine_plan["chunks"])
 
     for key in cfg["retired"]:
         print(f"note: config {config} declares {key!r}, a retired key — "
@@ -574,8 +603,13 @@ def main():
 
     pending = [c["id"] for c in chunks]
     if args.results_dir:
-        pending = [c["id"] for c in chunks
-                   if not usable_result(args.results_dir, c["id"])]
+        with tempfile.NamedTemporaryFile(
+                "w", suffix=".json", encoding="utf-8") as manifest_file:
+            json.dump({"chunks": chunks}, manifest_file)
+            manifest_file.flush()
+            pending = [c["id"] for c in chunks if not usable_result(
+                args.results_dir, c["id"], manifest_file.name,
+            )]
 
     report = (f"{ndocs} doc(s) -> {len(chunks)} chunk(s); "
               f"projected invocations: {len(pending)}")
@@ -584,9 +618,9 @@ def main():
     print(report, file=sys.stderr)
 
     manifest = {"schema": 1, "chunks": chunks, "pending": pending}
-    index_digest = current_index_digest(args.root)
-    if index_digest is not None:
-        manifest["index_digest"] = index_digest
+    if engine_plan is not None:
+        manifest["index_digest"] = engine_plan["index_digest"]
+        manifest["engine_plan"] = engine_plan
     text = json.dumps(manifest, indent=2)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
