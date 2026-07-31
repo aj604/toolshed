@@ -15,6 +15,7 @@ README's warning). That is rendered as its own typed problem
 Usage:
     render-audit-summary.py cost --execution-log FILE --out FILE
     render-audit-summary.py summary --report FILE [--cost FILE]
+                                    [--kind doc|bloat]
 
 `cost` is best-effort and never fails the run: an absent or unreadable
 execution log, or one with no `result` event, writes
@@ -195,7 +196,7 @@ RENDERERS = {
 }
 
 
-def render(report_path, cost):
+def render(report_path, cost, kind="doc"):
     """The full Markdown body for one audit run, as a list of lines."""
     try:
         with open(report_path, encoding="utf-8") as f:
@@ -208,6 +209,8 @@ def render(report_path, cost):
             lines = render_missing_report(report_path)
         else:
             lines = renderer(payload)
+    if kind == "bloat" and lines and lines[0].startswith("## Doc audit:"):
+        lines[0] = lines[0].replace("## Doc audit:", "## Bloat audit:", 1)
     lines = list(lines) + _cost_lines(cost)
     return "\n".join(lines) + "\n"
 
@@ -232,6 +235,7 @@ def main():
     summary = sub.add_parser("summary")
     summary.add_argument("--report", required=True)
     summary.add_argument("--cost", default=None)
+    summary.add_argument("--kind", choices=("doc", "bloat"), default="doc")
 
     args = parser.parse_args()
 
@@ -249,7 +253,7 @@ def main():
             cost_data = {"available": False, "turns": None, "cost_usd": None,
                          "duration_ms": None}
 
-    text = render(args.report, cost_data)
+    text = render(args.report, cost_data, kind=args.kind)
     _write_summary(text)
     return 0
 

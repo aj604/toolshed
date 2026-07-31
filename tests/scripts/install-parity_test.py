@@ -34,7 +34,7 @@ PLUGIN_ROOT = ROOT / "plugins" / "doc-lifecycle"
 UPGRADE = PLUGIN_ROOT / "skills" / "scheduling-doc-sync" / "scripts" / "apply-upgrade.py"
 
 # The new engine is vendored wholesale rather than edited in place: the lanes that
-# run it (doc-audit.yml, doc-apply.yml, doc-policy-apply.yml) call
+# run it (doc-audit.yml, doc-bloat-audit.yml, doc-apply.yml, doc-policy-apply.yml) call
 # `.doc-lifecycle/wiring/engine/`, and
 # what they run must be the engine this repo sources and tests. Equivalence is a
 # directory-tree comparison, per issue #57's distribution decision.

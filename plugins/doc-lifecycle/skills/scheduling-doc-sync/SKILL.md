@@ -1,22 +1,25 @@
 ---
 name: scheduling-doc-sync
-description: Use when wiring a repo for automated/unattended documentation audit — "set up doc sync", "automate drift detection", "schedule nightly doc checks", "keep docs in sync automatically" — installs the doc-lifecycle GitHub Actions (a scheduled read-only audit, an optional policy apply lane, a manual apply dispatch, and a weekly upgrade check) instead of hand-rolling workflow YAML. Also the door for upgrading an existing install.
+description: Use when wiring a repo for automated/unattended documentation audit — "set up doc sync", "automate drift detection", "schedule nightly doc checks", "keep docs in sync automatically" — installs the doc-lifecycle GitHub Actions (scheduled read-only drift and bloat audits, an optional policy apply lane, a manual apply dispatch, and a weekly upgrade check) instead of hand-rolling workflow YAML. Also the door for upgrading an existing install.
 ---
 
 # Scheduling Doc Sync
 
 ## Overview
 
-Installs the shipped automation into a target repo — **four workflows**:
+Installs the shipped automation into a target repo — **five workflows**:
 
 - `doc-audit.yml` — the scheduled, read-only audit. Derives its scope from the registry, runs
   the audit engine, publishes a validated report as an artifact and a job summary. Writes
   nothing.
+- `doc-bloat-audit.yml` — the weekly, read-only bloat audit. Preflights the registry, plans
+  through the engine's public contract, fans its chunks out to budgeted workers, and publishes
+  the report's typed completion truth. Writes nothing.
 - `doc-apply.yml` — the manual apply dispatch. A reviewer names the record digests they approve
   from one audit run; the lane mints the approval set from that selection, plans, applies, and
   opens a pull request.
 - `doc-policy-apply.yml` — the audit-chained policy lane. It wakes only after a successful
-  scheduled audit and only acts when the consumer committed
+  scheduled drift audit and only acts when the consumer committed
   `.doc-lifecycle/auto-apply-policy.json`; the engine derives the eligible subset, and the lane
   opens a real pull request whose review is the semantic review. An absent policy is a clean
   opt-out, not a permissive default.
@@ -29,7 +32,7 @@ Installs the shipped automation into a target repo — **four workflows**:
 YAML; every lifecycle rule — scope, verdict contract, approval, application — lives in the
 `doclifecycle` engine package (`plugins/doc-lifecycle/engine/README.md`), vendored into the
 install and reached only through its public CLI. Every run-surface string lives in a shipped
-script: `render-audit-summary.py` for the audit lane, `render-apply-summary.py` for the apply
+script: `render-audit-summary.py` for the audit lanes, `render-apply-summary.py` for the apply
 lane, `render-report.py` for the upgrade lane; the upgrade lane's version comparison and the
 shape-check on its dispatched target live in `upgrade-gate.py`, and which paths an upgrade may
 write in `stage-upgrade.py`. Never inline audit or apply method into workflow YAML — that forks
@@ -67,7 +70,7 @@ requires the value end in `.git`, so a `#<ref>` fragment is rejected outright.
 The `plugins:` selector stays bare `doc-lifecycle@toolshed` (`claude-code-action` has no
 `@version` selector there — `doc-lifecycle@toolshed@0.7.0` is invalid).
 
-The four workflow templates are in this skill's base directory (announced when the skill
+The five workflow templates are in this skill's base directory (announced when the skill
 loads), and its own scripts one level down in `scripts/` — `upgrade-gate.py`,
 `stage-upgrade.py`, `render-report.py`, `render-audit-summary.py`, `render-apply-summary.py`,
 `probe-evidence-tool.py`. The chunk planner and the two output validators stay in the sibling
@@ -113,6 +116,35 @@ presence is exactly what switches this lane on: `apply-upgrade.py`'s `adopted_re
 it, and only then does Upgrade mode render `doc-audit.yml`'s `{{AUDIT_CRON}}`, copy
 `render-audit-summary.py`, and vendor the engine (see Upgrade mode's ownership table). Never
 hand-install it ahead of that door.
+
+## The bloat audit lane (`doc-bloat-audit.yml`)
+
+Two jobs with the same read-only trust split as `doc-audit.yml`, on a separate weekly cadence
+because bloat's work shape is different: `audit` preflights the registry and public
+`bloat-plan` contract before any model turn, then a repository-credential-free coordinator
+dispatches one
+fresh `Task` worker per pending chunk in parallel waves. `plan-chunks.py --emit-prompt` gives a
+worker only its slice and out-of-tree result path; `--emit-turns` supplies that Task's
+`max_turns`. One seam failure earns one fresh retry, never a wider budget guessed in YAML.
+
+After the workers stop, `validate-bloat-output.py --assemble --allow-partial` binds the full
+public plan and every complete, missing, or invalid chunk into #152's completion envelope;
+`bloat-audit` independently re-derives it and produces the report. The optional
+`--unswept-out` sidecar is uploaded for diagnosis, but the report's typed `incomplete` entries
+are the run surface's source of truth: deleting or omitting the sidecar cannot make an unswept
+document look examined. `publish` revalidates freshness and calls
+`render-audit-summary.py summary --kind bloat`.
+
+Every plan, prompt result, envelope, sidecar, report, and cost artifact lives under
+`${{ runner.temp }}/doc-bloat-audit`, outside the checkout. The model job grants only
+`contents: read` plus `id-token: write`, drops the checkout credential, carries no `GH_TOKEN`,
+and allows `Task`, the read/skill tools, `Write` for the named out-of-tree result files, and
+only `Bash(git *)` / `Bash(python3 *)`. It never commits, pushes, opens a pull request, or edits
+repository content. The action and every artifact action are pinned to immutable SHAs.
+
+**Installed on the same registry condition as the other engine lanes.** A missing registry
+would make the public planner refuse before the sweep has a corpus, so Upgrade mode regenerates
+this template only for an install holding `.doc-lifecycle/registry.json`.
 
 ## The apply lane (`doc-apply.yml`)
 
@@ -206,7 +238,7 @@ next upgrade and no longer. `state/` holds what the lanes wrote: only the carrie
 today, which a fresh install does not have, so the directory exists only in an install that came
 through the relocation (Upgrade mode).
 
-The four workflow files stay in `.github/workflows/` — GitHub reads workflows only from there —
+The five workflow files stay in `.github/workflows/` — GitHub reads workflows only from there —
 and are the only doc-lifecycle content left under `.github/`.
 
 ## Preflight (run all; report failures, don't silently skip)
@@ -231,6 +263,8 @@ and are the only doc-lifecycle content left under `.github/`.
 
 1. Confirm the knobs with the user (defaults are fine unattended):
    - audit cron: default `0 1 * * *` (01:00 UTC daily); replaces `{{AUDIT_CRON}}` in doc-audit.yml
+   - bloat audit cron: default `0 4 * * 1` (04:00 UTC Mondays); replaces
+     `{{BLOAT_AUDIT_CRON}}` in doc-bloat-audit.yml
    - upgrade cron: default `0 2 * * 1` (02:00 UTC Mondays); replaces `{{UPGRADE_CRON}}` in
      doc-sync-upgrade.yml
    - auto-apply policy: default **disabled**. Enabling it is a separate explicit choice; confirm
@@ -242,12 +276,14 @@ and are the only doc-lifecycle content left under `.github/`.
    knob either — it's read from the plugin manifest, not chosen (next step).
 2. Resolve the version being installed: `jq -r .version "$CLAUDE_PLUGIN_ROOT/.claude-plugin/plugin.json"`
    (the bare semver — no `v` prefix).
-3. Confirm `.doc-lifecycle/registry.json` is landed. The audit and apply lanes are closed-world
+3. Confirm `.doc-lifecycle/registry.json` is landed. Both audit and both apply lanes are closed-world
    over it and fail on every run without one. Absent → stop and run Migration mode (below), or
    **bootstrapping-docs**' registry step for a repo with no docs yet; never hand-install ahead
    of that door.
-4. Copy the four workflow templates, replacing the literal placeholders in each:
+4. Copy the five workflow templates, replacing the literal placeholders in each:
    - `doc-audit.yml` → `.github/workflows/doc-audit.yml`: `{{AUDIT_CRON}}`.
+   - `doc-bloat-audit.yml` → `.github/workflows/doc-bloat-audit.yml`:
+     `{{BLOAT_AUDIT_CRON}}`.
    - `doc-apply.yml` → `.github/workflows/doc-apply.yml`: no placeholder to replace.
    - `doc-policy-apply.yml` → `.github/workflows/doc-policy-apply.yml`: no placeholder to replace.
    - `doc-sync-upgrade.yml` → `.github/workflows/doc-sync-upgrade.yml`: `{{UPGRADE_CRON}}`.
@@ -266,7 +302,7 @@ and are the only doc-lifecycle content left under `.github/`.
 6. Vendor the engine: copy `$CLAUDE_PLUGIN_ROOT/engine/` wholesale to `.doc-lifecycle/wiring/engine/`.
    It is one package whose modules import each other, so a partially-refreshed tree is a version
    that was never tested — copy all of it, never a subset. `.doc-lifecycle/wiring/engine/doc-lifecycle.py`
-   is what both lanes invoke.
+   is what all four registry-bound engine lanes invoke.
 7. Seed the audit scope — **only if absent**: write `.doc-lifecycle/audit-scope.json` with the
    starter `{"exclude": [], "include": []}` (empty arrays — a valid no-op default the human
    tunes). `plan-chunks.py` (the sibling `detecting-doc-bloat` skill's own copy) reads it to pick
@@ -298,22 +334,23 @@ and are the only doc-lifecycle content left under `.github/`.
     so on a fresh install always write it. `doc-sync-upgrade.yml` reads it to decide whether a
     newer release exists; it advances only when an upgrade PR merges.
 12. Tell the user, concretely:
-    - the fourteen always-installed files to commit, plus the vendored `engine/` tree: the four
-      workflows under `.github/workflows/` (`doc-audit.yml`, `doc-apply.yml`,
-      `doc-policy-apply.yml`, `doc-sync-upgrade.yml`); the six
+    - the fifteen always-installed files to commit, plus the vendored `engine/` tree: the five
+      workflows under `.github/workflows/` (`doc-audit.yml`, `doc-bloat-audit.yml`,
+      `doc-apply.yml`, `doc-policy-apply.yml`, `doc-sync-upgrade.yml`); the six
       scripts under `.doc-lifecycle/wiring/` (`upgrade-gate.py`, `stage-upgrade.py`,
       `render-report.py`, `render-audit-summary.py`,
       `render-apply-summary.py`, `probe-evidence-tool.py`); and, at `.doc-lifecycle/`, the
       three seeded state files (`audit-scope.json`, `drift-waivers.json`, `evidence-tools.json`)
-      and `installed-version`. When enabled, the consumer policy is a fifteenth file.
+      and `installed-version`. When enabled, the consumer policy is a sixteenth file.
       `.doc-lifecycle/state/` stays empty on a fresh install — the marker it holds arrives only
       from a relocation;
-    - the audit lane runs on its cron and writes nothing — it publishes a validated report as
-      the `audit-report` artifact and renders the run's job summary, whatever the outcome;
+    - both audit lanes run on their crons and write nothing — drift publishes `audit-report`,
+      bloat publishes `bloat-audit-report`, and each renders a typed job summary whatever the
+      outcome;
     - applying is a deliberate second step: read that run's report, then
       `gh workflow run doc-apply -f report_run_id=<id> -f report_digest=<digest> -f records="<digests>" -f base=main`
       — the digests you name are the approval, and the PR it opens is what a merge approves;
-    - when the policy is enabled, every successful scheduled audit automatically enters
+    - when the policy is enabled, every successful scheduled drift audit automatically enters
       `doc-policy-apply`; it stops on no eligible records and otherwise opens a real pull request
       whose review is the semantic review — it never pushes the default branch;
     - the weekly upgrade check only detects: when a newer plugin release ships it files one notice
@@ -323,8 +360,8 @@ and are the only doc-lifecycle content left under `.github/`.
     - upgrading is a separate, human decision: read the release, then
       `gh workflow run doc-sync-upgrade -f target=<X.Y.Z>`, which regenerates the wiring and opens
       a `doc-sync/upgrade` PR whose merge advances the pin;
-    - run them now with `gh workflow run doc-audit` and `gh workflow run doc-sync-upgrade` (the
-      latter with no `target` — the detecting half);
+    - run them now with `gh workflow run doc-audit`, `gh workflow run doc-bloat-audit`, and
+      `gh workflow run doc-sync-upgrade` (the latter with no `target` — the detecting half);
     - to upgrade from a local checkout instead, re-run this skill (see Upgrade mode — consumer
       state and knobs preserved; wiring + pin + lockfile refreshed).
 
@@ -380,7 +417,7 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | `.doc-lifecycle/audit-scope.json` | consumer (tuned config) | **Never touch.** A relocation carries it to this path once, and no upgrade rewrites it afterwards. |
 | `.doc-lifecycle/drift-waivers.json` | consumer (accepted-claim record) | **Never touch.** Seed `{"waivers": []}` only if absent (pre-0.11 installs lack it). |
 | `.doc-lifecycle/state/sync-marker` | legacy state | **Never touch.** No lane reads it. A relocation carries it here byte-for-byte, once; every upgrade after that leaves it alone (`stage-upgrade.py` authorizes it as a create only). |
-| `doc-audit.yml`, `doc-apply.yml`, `doc-policy-apply.yml` | plugin (wiring) | **Regenerate**, knobs preserved — but only for an install holding `.doc-lifecycle/registry.json`. An install without one is left exactly as it was. |
+| `doc-audit.yml`, `doc-bloat-audit.yml`, `doc-apply.yml`, `doc-policy-apply.yml` | plugin (wiring) | **Regenerate**, knobs preserved — but only for an install holding `.doc-lifecycle/registry.json`. An install without one is left exactly as it was. |
 | `.doc-lifecycle/wiring/render-audit-summary.py`, `render-apply-summary.py`, `probe-evidence-tool.py` | plugin (wiring) | **Overwrite**, on the same registry condition. |
 | `.doc-lifecycle/evidence-tools.json` | consumer (declared tools) | **Never touch.** Seed `{"tools": []}` only if absent, on the same registry condition — tool-free is what a consumer opts out of, never what an upgrade hands them. |
 | `.doc-lifecycle/auto-apply-policy.json` | consumer (standing authorization) | **Never touch and never seed on upgrade.** Absence keeps autonomous minting disabled; a relocation carries an existing file byte-for-byte. |
@@ -393,7 +430,11 @@ currently-installed workflow and substitutes it back into the new template:
   self-upgrade) is the one place it seeds a default (`0 2 * * 1`) and warns on stderr.
 - `doc-audit.yml` (registry installs only): its `cron:` → `{{AUDIT_CRON}}`. Absent on an install
   that adopted the registry before this lane existed, so it seeds `0 1 * * *` and warns, the same
-  shape `doc-sync-upgrade.yml` uses. `doc-apply.yml` and `doc-policy-apply.yml` have no knobs.
+  shape `doc-sync-upgrade.yml` uses.
+- `doc-bloat-audit.yml` (registry installs only): its `cron:` → `{{BLOAT_AUDIT_CRON}}`.
+  Absent before #144, so it seeds the weekly `0 4 * * 1` default and warns; a present but
+  unreadable cron refuses rather than overwriting the consumer's schedule.
+  `doc-apply.yml` and `doc-policy-apply.yml` have no knobs.
 
 A knob it can't extract fails the run red rather than default-guessing.
 
@@ -538,7 +579,7 @@ landing a file, never the door.
   `tests/scripts/workflow-permissions_test.py` fails the release if either happens.
 - **PR-only output.** Never configure a lane to commit doc edits directly to the default branch —
   not even if asked ("PRs are annoying"). The reviewable pull request *is* the product. The audit
-  lane writes nothing at all; the manual, policy, and upgrade lanes each land only through a PR a
+  lanes write nothing at all; the manual, policy, and upgrade lanes each land only through a PR a
   human merges, and none opens a draft.
 - **Semantic approval is a person naming record digests.** `doc-apply.yml` is
   `workflow_dispatch` only, and it applies exactly the records that dispatch named. Never wire a
@@ -547,8 +588,9 @@ landing a file, never the door.
   `policy-eligibility` and `policy-mint` commands select records for `doc-policy-apply.yml`.
   Absence of `.doc-lifecycle/auto-apply-policy.json` authorizes nothing; never seed or overwrite
   it during an upgrade. The policy lane may chain only a successful scheduled `doc-audit` run.
-- **All three engine lanes need a landed registry.** `.doc-lifecycle/registry.json` is what
-  switches `doc-audit.yml`, `doc-apply.yml`, and `doc-policy-apply.yml` on. Installing them
+- **All four engine lanes need a landed registry.** `.doc-lifecycle/registry.json` is what
+  switches `doc-audit.yml`, `doc-bloat-audit.yml`, `doc-apply.yml`, and
+  `doc-policy-apply.yml` on. Installing them
   without it ships wiring that fails on every run.
 - **Installs are pinned; only the upgrade workflow advances the pin.** Every model step is
   preceded by a `Pin plugin marketplace` step that clones `…/toolshed.git` at `v<version>` to a
@@ -566,7 +608,7 @@ landing a file, never the door.
   the regenerating job, never give the detecting job a scope beyond `issues: write`, and never
   move the release's `apply-upgrade.py` into the credentialed one
   (`tests/scripts/upgrade-workflow_test.py`).
-- **Don't customize the installed YAML beyond the audit-cron and upgrade-cron knobs.** Real
+- **Don't customize the installed YAML beyond the audit, bloat-audit, and upgrade cron knobs.** Real
   changes belong upstream in the plugin (aj604/toolshed) so every install gets them on next upgrade.
 - **Staging is an explicit path list, never `git add -A` — no exceptions.** Both credentialed
   jobs stage `--pathspec-from-file`: the apply lane the paths the engine's verified apply result
@@ -574,9 +616,9 @@ landing a file, never the door.
   manifest. Each then
   re-checks what landed, and a stray path stops the run before anything is committed or pushed.
   `workflow-permissions_test.py` asserts this over every shipped template with no exemption list.
-- **The report is a build artifact, never repo content.** The audit lane uploads
-  `drift-report.json` and its cost sidecar as artifacts; don't let a hand edit reintroduce either
-  as a committed file.
+- **Reports are build artifacts, never repo content.** The audit lanes upload their drift/bloat
+  reports, completion data, and cost sidecars from `runner.temp`; don't let a hand edit
+  reintroduce any of them as committed files.
 - **Typed engine exits are outcomes, not crashes.** `drift-audit` exits 1 (invalid) and 4
   (partial) are each a legitimate typed report, as are `validate-report`'s 1/3/4. The lanes
   capture them with `|| code=$?` and render each on the run surface — the runner's shell is
@@ -590,8 +632,9 @@ landing a file, never the door.
 
 - Writing audit or apply method inside a workflow prompt → invoke the skills by name and the
   engine by its CLI contract.
-- Installing `doc-audit.yml`, `doc-apply.yml`, or `doc-policy-apply.yml` into a repo with no
-  `.doc-lifecycle/registry.json` → closed-world; every run fails. Run Migration mode first.
+- Installing `doc-audit.yml`, `doc-bloat-audit.yml`, `doc-apply.yml`, or
+  `doc-policy-apply.yml` into a repo with no `.doc-lifecycle/registry.json` → closed-world;
+  every run fails. Run Migration mode first.
 - Overwriting an existing `.doc-lifecycle/audit-scope.json`, `drift-waivers.json`, or
   `evidence-tools.json` with the empty starter → consumer state, not wiring; seed only when absent.
 - Creating or changing `.doc-lifecycle/auto-apply-policy.json` without explicit authorization →

@@ -36,12 +36,51 @@
   renders and agreement between decision envelopes and the eligible summary, failing closed on a
   malformed envelope; it owns no finding codes, policy classes, or eligibility rules, and
   `policy-mint` independently derives the selection again before minting.
-- Supersedes: only the auto-apply-lane half of “2026-07-29 — the auto-apply lane and a scheduled
-  bloat cadence are descoped, not implied.” The scheduled bloat cadence remains descoped.
+- Supersedes: the auto-apply-lane half of “2026-07-29 — the auto-apply lane and a scheduled
+  bloat cadence are descoped, not implied.” The adjacent #144 decision separately supersedes the
+  scheduled-bloat half.
 - Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-policy-apply.yml,
   plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/render-apply-summary.py,
   plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py,
   .doc-lifecycle/auto-apply-policy.json, tests/scripts/policy-workflow_test.py
+## 2026-07-30 — bloat gets a separate, read-only, completion-bound cadence (#144)
+- Evidence: #77 retired the legacy `doc-bloat.yml` write lane, while `doc-audit.yml` schedules
+  drift only. The engine's `bloat-plan` / `bloat-audit` public seams and #152's completion
+  envelope were reachable interactively but no unattended run called them, so the registered
+  corpus had no recurring value audit. A missing or invalid chunk also needed to remain visible
+  through the run surface rather than depend on the optional `unswept.json` sidecar.
+- Decided (a sibling lane): `doc-bloat-audit.yml` is a separate weekly scheduler adapter, not a
+  second mode inside `doc-audit.yml`. Bloat has a Task fan-out, per-chunk turn budgets, retries,
+  and completion assembly; combining it with drift's one-model job would tangle unlike work
+  shapes and concurrency. The default is `0 4 * * 1`, after the nightly drift audit and weekly
+  upgrade check.
+- Decided (preflight before cost): the lane checks `.doc-lifecycle/registry.json` and runs the
+  public `bloat-plan` command before the first model turn. `plan-chunks.py` then decorates the
+  authentic plan with scheduler-only prompts and budgets; it does not own membership or scope.
+  This explicit preflight matters because that helper retains an unregistered-repository
+  prompt-planning fallback that must never burn a scheduled fan-out and fail only at assembly.
+- Decided (bounded headless workers): the pinned model action is a coordinator, never an inline
+  auditor. It renders `--emit-prompt` and `--emit-turns` for every pending chunk, dispatches one
+  fresh Task per chunk in parallel waves with the emitted `max_turns`, seam-validates the result,
+  and retries once with a fresh Task. It may use `Task`, the read/skill tools, `Write` for the
+  named out-of-tree result, and only `Bash(git *)` / `Bash(python3 *)`.
+- Decided (trust boundary): the model job holds `contents: read` plus `id-token: write` only,
+  persists no checkout credential, receives no `GH_TOKEN`, and writes every plan, chunk result,
+  envelope, report, sidecar, and cost artifact under `runner.temp`. The publish job is model-free
+  and read-only. Neither job can commit, push, open a pull request, or alter repository content.
+- Decided (completion is report truth): deterministic assembly uses `--allow-partial` so each
+  missing or invalid chunk is preserved inside #152's completion envelope; `bloat-audit`
+  independently re-derives it and emits one typed incomplete entry per affected document.
+  `render-audit-summary.py summary --kind bloat` renders those report entries. `unswept.json` is
+  still uploaded for diagnosis but is never the authority, so deleting it cannot launder partial
+  into clean.
+- Supersedes: the cadence half of the 2026-07-29 entry below, "the auto-apply lane and a scheduled
+  bloat cadence are descoped, not implied (#57)". The adjacent #143 decision separately
+  supersedes the autonomous auto-apply half.
+- Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat-audit.yml`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/{apply-upgrade,render-audit-summary}.py`,
+  `.github/workflows/doc-bloat-audit.yml`, `.doc-lifecycle/wiring/render-audit-summary.py`,
+  `tests/scripts/{bloat-audit-workflow,apply-upgrade,render-audit-summary}_test.py`
 
 ## 2026-07-30 — whole-document bloat authority binds every current unit (#153)
 - Evidence: `RETIRE-DOC`, `DISTILL`, and `MERGE-DOC` records could name one selected passage,

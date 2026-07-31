@@ -218,6 +218,21 @@ class RenderOutcomes(unittest.TestCase):
         self.assertIn("docs/runbook.md", text)
         self.assertIn("the chunk worker failed twice", text)
 
+    def test_bloat_summary_names_typed_completion_gaps_from_the_report(self):
+        path = self.write_report(report(
+            "partial",
+            incomplete=[{
+                "scope": "docs/runbook.md",
+                "reason": "chunk c-deadbeef is missing: result file was not produced",
+            }],
+        ))
+        proc = self.summary_run("--kind", "bloat", "--report", path)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        text = self.summary_text()
+        self.assertIn("Bloat audit: PARTIAL", text)
+        self.assertIn("docs/runbook.md", text)
+        self.assertIn("c-deadbeef", text)
+
     def test_clean_report_says_clean(self):
         path = self.write_report(report("clean"))
         proc = self.summary_run("--report", path)

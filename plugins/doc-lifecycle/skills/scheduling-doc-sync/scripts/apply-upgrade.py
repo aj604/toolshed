@@ -40,7 +40,7 @@ Layout (aj604/toolshed#133). Every artifact the plugin owns lives under
     .doc-lifecycle/wiring/                  plugin-owned, regenerated wholesale
     .doc-lifecycle/state/                   what the credentialed jobs write
 
-The workflow files stay in `.github/workflows/` because GitHub reads
+The five workflow files stay in `.github/workflows/` because GitHub reads
 workflows only from there; they are regenerated in place, never moved.
 
 Ownership (total on wiring, idempotent on state):
@@ -53,7 +53,8 @@ Ownership (total on wiring, idempotent on state):
 
     An install that has been through the migration door — one holding a landed
     .doc-lifecycle/registry.json — also owns the new engine's lanes:
-    .github/workflows/{doc-audit,doc-apply,doc-policy-apply}.yml regenerate, knobs preserved
+    .github/workflows/{doc-audit,doc-bloat-audit,doc-apply,doc-policy-apply}.yml
+                                                              regenerate, knobs preserved
     .doc-lifecycle/wiring/render-{audit,apply}-summary.py        overwrite
     .doc-lifecycle/wiring/probe-evidence-tool.py                 overwrite
     .doc-lifecycle/evidence-tools.json                           never touched
@@ -121,12 +122,13 @@ SCRIPTS = {
 }
 
 # The new engine's lanes. Held apart from the base wiring above because they are
-# not installable everywhere: both are closed-world over `.doc-lifecycle/registry.json`
+# not installable everywhere: all four are closed-world over `.doc-lifecycle/registry.json`
 # and would fail on every run in a repository that has not been through the
 # migration door. A landed registry is the one signal that the door was walked, so
 # it is what switches these on — never a flag a caller can assert.
 NEW_LANE_PLACEHOLDERS = {
     "doc-audit.yml": ["{{AUDIT_CRON}}"],
+    "doc-bloat-audit.yml": ["{{BLOAT_AUDIT_CRON}}"],
     # Manual dispatch only, so no schedule to preserve and nothing to substitute.
     "doc-apply.yml": [],
     # Audit-chained, with no consumer schedule of its own.
@@ -142,10 +144,14 @@ NEW_LANE_SCRIPTS = {
 # Early daily, so a morning reader finds the night's report already published.
 DEFAULT_AUDIT_CRON = "0 1 * * *"
 
+# Weekly, after Monday's version check and the nightly drift audit. Bloat is a
+# heavier Task fan-out and does not need the drift lane's daily cadence.
+DEFAULT_BLOAT_AUDIT_CRON = "0 4 * * 1"
+
 # The engine is vendored wholesale rather than script-by-script: it is one package
 # whose modules import each other, so a partially-refreshed tree is a version that
 # was never tested. Copied from the plugin's `engine/` to
-# `.doc-lifecycle/wiring/engine/`, whose `doc-lifecycle.py` is what both new lanes
+# `.doc-lifecycle/wiring/engine/`, whose `doc-lifecycle.py` is what all four lanes
 # invoke.
 ENGINE_DIR = "engine"
 
@@ -262,9 +268,10 @@ def read_knobs(repo):
     an upgrade vs a fresh install.
 
     Only the surviving templates declare knobs: the upgrade lane's cron, and (on an
-    install that adopted the registry) the audit lane's. A file that is present but
-    holds no readable cron raises rather than defaulting — a knob that cannot be
-    extracted is a consumer's choice about to be silently overwritten.
+    install that adopted the registry) the drift and bloat audit lanes' crons. A
+    file that is present but holds no readable cron raises rather than defaulting —
+    a knob that cannot be extracted is a consumer's choice about to be silently
+    overwritten.
     """
     wf = repo / ".github" / "workflows"
     knobs = {}
@@ -297,6 +304,20 @@ def read_knobs(repo):
                 file=sys.stderr,
             )
             knobs["{{AUDIT_CRON}}"] = DEFAULT_AUDIT_CRON
+
+        bloat = wf / "doc-bloat-audit.yml"
+        if bloat.is_file():
+            knobs["{{BLOAT_AUDIT_CRON}}"] = _extract(
+                bloat.read_text(), CRON_RE, "bloat audit cron", bloat,
+            )
+        else:
+            print(
+                f"warning: {bloat} absent (install predates the scheduled "
+                f"bloat audit lane); using default bloat audit cron "
+                f"{DEFAULT_BLOAT_AUDIT_CRON!r}",
+                file=sys.stderr,
+            )
+            knobs["{{BLOAT_AUDIT_CRON}}"] = DEFAULT_BLOAT_AUDIT_CRON
 
     return knobs
 
