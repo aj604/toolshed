@@ -797,6 +797,30 @@ class Freshness(ApprovedTestCase):
         self.assertEqual(result.status, STATE_CLEAN)
         self.assertEqual(result.stale_reasons, ())
 
+    def test_a_wording_only_release_keeps_prior_plugin_approval_fresh(self):
+        prior = self.lineage_for(self.repo, plugin_version="0.44.2")
+        record = self.finding(
+            "R-prior", "STALE", DOC_A, self.units(self.repo, DOC_A)[:1],
+            lineage=prior, fix="Fees: 2.5%.",
+        )
+        source = validate_report({
+            "status": STATE_FINDINGS,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "lineage": prior.to_dict(),
+            "records": [record],
+            "incomplete": [],
+        })
+        self.assertIsInstance(source, Report, source)
+        approval = self.mint(source, [record["digest"]])
+
+        result = validate_approval_set(
+            approval.to_dict(), report=source, repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertEqual(result.status, STATE_CLEAN)
+        self.assertEqual(result.stale_reasons, ())
+
     def test_it_keeps_its_digest_through_validation(self):
         self.assertEqual(self.check().digest, self.approval.digest)
 
@@ -859,6 +883,20 @@ class Freshness(ApprovedTestCase):
         )
 
         self.assertIn("approval-ruleset-changed", reasons(result))
+
+    def test_an_incompatible_plugin_makes_it_stale_naming_the_plugin(self):
+        incompatible = self.lineage_for(self.repo, plugin_version="0.0.1")
+        record = self.finding(
+            "R-1", "STALE", DOC_A, self.units(self.repo, DOC_A)[:1],
+            lineage=incompatible, fix="Fees: 2.5%.",
+        )
+
+        result = validate_approval_set(
+            self.rebuilt(record, lineage=incompatible), report=None,
+            repo_root=self.repo, audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertIn("approval-plugin-changed", reasons(result))
 
     def test_a_different_report_makes_it_stale_naming_the_report(self):
         # An honest re-run drifts: it finds a record this set never saw, so

@@ -36,10 +36,13 @@ applier — the only component that writes.
 | `doclifecycle/digest.py` | `sha256_file`, `sha256_canonical`, `load_strict_json()` — the canonical JSON form digests are taken over, and the one strict-JSON reader `load_report()`, `load_edit_plan()`, `load_approval_payload()`, and `load_approval_set()` each call with their own problem codes |
 | `doclifecycle/cli.py`, `__main__.py`, `doc-lifecycle.py` | argv parsing and exit codes only |
 
-`__init__.py` holds the three versions lineage pins: `ARTIFACT_SCHEMA_VERSION` (the shape of
-the payloads below), `RULESET_VERSION` (the audit policy), and `PLUGIN_VERSION` (which must
-track `plugins/doc-lifecycle/.claude-plugin/plugin.json`; `tests/engine/report_test.py` fails
-when they drift).
+`__init__.py` holds the release identity and the versions lineage pins:
+`ARTIFACT_SCHEMA_VERSION` (the shape of the payloads below), `RULESET_VERSION` (the audit
+policy), and `PLUGIN_COMPATIBILITY_VERSION` (the engine-compatibility marker written to the
+existing `plugin_version` lineage field). `PLUGIN_VERSION` must track
+`plugins/doc-lifecycle/.claude-plugin/plugin.json`; `tests/engine/report_test.py` fails when
+they drift. The compatibility marker changes only when a release makes prior artifacts unsafe
+to reuse for a reason not already expressed by the schema or ruleset versions.
 
 ## The registry
 
@@ -354,7 +357,7 @@ changed a verdict. It is proof of examination, never authority to change anythin
     "audit_config_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "registry_digest": "1d9176534bcc15f5fe5062503110be01ea198bb8ce65179230af4b226f56d85e",
     "ruleset_version": "<current RULESET_VERSION, doclifecycle/__init__.py>",
-    "plugin_version": "<current PLUGIN_VERSION, doclifecycle/__init__.py>",
+    "plugin_version": "<current PLUGIN_COMPATIBILITY_VERSION, doclifecycle/__init__.py>",
     "evidence_boundary": {"sources": ["src/**"], "excluded": [], "commands": ["gh"]}
   },
   "records": [
@@ -378,7 +381,7 @@ Every field below is required; omitting one is `report-missing-lineage-field`, n
 | `audit_config_digest` | the consumer configuration the run used | `lineage-audit-config-mismatch`, only when the caller supplies the current one |
 | `registry_digest` | the classification that decided the inventory | `lineage-registry-mismatch` |
 | `ruleset_version` | the audit policy applied; positive integer | `lineage-ruleset-mismatch` (vs `RULESET_VERSION`) |
-| `plugin_version` | the engine that applied it | `lineage-plugin-mismatch` (vs `PLUGIN_VERSION`) |
+| `plugin_version` | the engine compatibility marker that applied it | `lineage-plugin-mismatch` (vs `PLUGIN_COMPATIBILITY_VERSION`) |
 | `evidence_boundary` | `{"sources": [...], "excluded": [...], "commands": [...]}` — the declared limit of what the run could consult; `sources` non-empty | not compared |
 
 `schema_version` is lineage too — it pins the shape of everything above — but it lives at the
@@ -588,9 +591,10 @@ re-validating against a repository that matches on every field this run actually
 clears it. `invalid` never appears in a report at all — an invalid run has no content to
 report — so declaring it is `report-invalid-status`.
 
-Note that `plugin_version` is compared, so every plugin release marks prior reports stale.
-That is deliberate: cheaper than reasoning about which releases could have changed a verdict,
-and re-running an audit is cheap.
+The existing `plugin_version` field is compared against `PLUGIN_COMPATIBILITY_VERSION`, not
+the package's `PLUGIN_VERSION`. A wording-only release can therefore advance its published
+version without making prior artifacts stale; a release that changes compatibility advances
+the marker and prior artifacts still fail closed.
 
 Records are structurally validated only as far as approval binding needs — a non-empty `id` and a sha256
 `digest`, both unique within the report; no `NaN`/`Infinity` anywhere inside (JSON defines
@@ -1986,7 +1990,7 @@ when that matches, that the report still reconciles the same way — selection m
 | `approval-base-commit-changed` | HEAD |
 | `approval-registry-changed` | the registry digest |
 | `approval-ruleset-changed` | `RULESET_VERSION` |
-| `approval-plugin-changed` | `PLUGIN_VERSION` |
+| `approval-plugin-changed` | `PLUGIN_COMPATIBILITY_VERSION` |
 | `approval-audit-config-changed` | the consumer's audit configuration digest |
 | `approval-scope-changed` | a scope path no longer authorizes, or the declared roots moved |
 | `approval-preimage-mismatch` | a selected record's units are no longer in its document |
