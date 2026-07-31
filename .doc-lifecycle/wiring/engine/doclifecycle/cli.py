@@ -330,7 +330,7 @@ def _add_drift_scope_arguments(command):
     )
 
 
-def _positive(value):
+def _chunk_budget_argument(value):
     try:
         candidate = int(value)
     except (TypeError, ValueError):
@@ -444,11 +444,12 @@ def _parser():
     )
     _add_corpus_arguments(plan)
     plan.add_argument(
-        "--max-documents", type=_positive, default=DEFAULT_MAX_DOCUMENTS,
+        "--max-documents", type=_chunk_budget_argument,
+        default=DEFAULT_MAX_DOCUMENTS,
         help=f"documents per chunk (default: {DEFAULT_MAX_DOCUMENTS})",
     )
     plan.add_argument(
-        "--max-units", type=_positive, default=DEFAULT_MAX_UNITS,
+        "--max-units", type=_chunk_budget_argument, default=DEFAULT_MAX_UNITS,
         help=f"assertion units per chunk (default: {DEFAULT_MAX_UNITS})",
     )
     plan.set_defaults(

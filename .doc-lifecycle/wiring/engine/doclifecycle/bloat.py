@@ -219,6 +219,14 @@ def positive_chunk_budget(value, name):
     return value
 
 
+def _chunk_budgets(max_documents, max_units):
+    """Validate both public budgets once, before planning can observe them."""
+    return (
+        positive_chunk_budget(max_documents, "max_documents"),
+        positive_chunk_budget(max_units, "max_units"),
+    )
+
+
 def plan_chunks(index, max_documents=DEFAULT_MAX_DOCUMENTS,
                 max_units=DEFAULT_MAX_UNITS):
     """Partition the index into bounded chunks. Deterministic and total.
@@ -230,8 +238,12 @@ def plan_chunks(index, max_documents=DEFAULT_MAX_DOCUMENTS,
     coverage gap, so one that exceeds the unit budget alone gets a chunk to
     itself rather than being split or skipped.
     """
-    max_documents = positive_chunk_budget(max_documents, "max_documents")
-    max_units = positive_chunk_budget(max_units, "max_units")
+    max_documents, max_units = _chunk_budgets(max_documents, max_units)
+    return _plan_chunks(index, max_documents, max_units)
+
+
+def _plan_chunks(index, max_documents, max_units):
+    """Plan with budgets already validated by the public entrypoint."""
     groups = {}
     for document in index.documents:
         directory = document.path.rsplit("/", 1)[0] if "/" in document.path else ""
@@ -286,12 +298,11 @@ def plan_repository_chunks(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
     disagree with a CI invocation. An invalid registry invalidates the run, as
     it does everywhere else.
     """
-    max_documents = positive_chunk_budget(max_documents, "max_documents")
-    max_units = positive_chunk_budget(max_units, "max_units")
+    max_documents, max_units = _chunk_budgets(max_documents, max_units)
     index = build_context_index(repo_root, registry_path)
     if isinstance(index, Invalid):
         return index
-    return plan_chunks(index, max_documents=max_documents, max_units=max_units)
+    return _plan_chunks(index, max_documents, max_units)
 
 
 def chunk_plan_from_dict(raw):

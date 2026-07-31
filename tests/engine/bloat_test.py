@@ -91,26 +91,25 @@ class ChunkPlanning(RepoTestCase):
         self.assertTrue(all(len(c.documents) <= 2 for c in plan.chunks))
         self.assertEqual(len(plan.chunks), 3)
 
-    def test_both_public_planners_reject_non_positive_document_budgets(self):
+    def test_both_public_planners_reject_non_positive_budgets(self):
         repo = self.repo({
             ".doc-lifecycle/registry.json": REGISTRY,
             "docs/a.md": "# A\n\nAlpha.\n",
         })
         index = build_context_index(repo)
         planners = {
-            "index": lambda value: bloat.plan_chunks(
-                index, max_documents=value,
-            ),
-            "repository": lambda value: bloat.plan_repository_chunks(
-                repo, max_documents=value,
+            "index": lambda **budgets: bloat.plan_chunks(index, **budgets),
+            "repository": lambda **budgets: bloat.plan_repository_chunks(
+                repo, **budgets,
             ),
         }
 
         for seam, planner in planners.items():
-            for value in (0, -1):
-                with self.subTest(seam=seam, value=value):
-                    with self.assertRaisesRegex(ValueError, "max_documents"):
-                        planner(value)
+            for budget in ("max_documents", "max_units"):
+                for value in (0, -1):
+                    with self.subTest(seam=seam, budget=budget, value=value):
+                        with self.assertRaisesRegex(ValueError, budget):
+                            planner(**{budget: value})
 
     def test_a_document_larger_than_the_unit_budget_gets_its_own_chunk(self):
         big = "# Big\n\n" + "\n\n".join(f"Sentence {i}." for i in range(40)) + "\n"
@@ -121,25 +120,6 @@ class ChunkPlanning(RepoTestCase):
         by_document = {c.documents: c for c in plan.chunks}
         self.assertIn(("docs/a.md",), by_document)
         self.assertIn(("docs/b.md",), by_document)
-
-    def test_both_public_planners_reject_non_positive_unit_budgets(self):
-        repo = self.repo({
-            ".doc-lifecycle/registry.json": REGISTRY,
-            "docs/a.md": "# A\n\nAlpha.\n",
-        })
-        index = build_context_index(repo)
-        planners = {
-            "index": lambda value: bloat.plan_chunks(index, max_units=value),
-            "repository": lambda value: bloat.plan_repository_chunks(
-                repo, max_units=value,
-            ),
-        }
-
-        for seam, planner in planners.items():
-            for value in (0, -1):
-                with self.subTest(seam=seam, value=value):
-                    with self.assertRaisesRegex(ValueError, "max_units"):
-                        planner(value)
 
     def test_both_public_planners_fail_closed_on_non_integer_budgets(self):
         repo = self.repo({
