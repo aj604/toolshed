@@ -1,10 +1,11 @@
 # Turning on nightly automation with `scheduling-doc-sync`
 
-> As of 2026-07-29 (doc-lifecycle 0.44.0, engine-based audit and apply lanes, install artifacts
-> centralized under `.doc-lifecycle/`, and legacy upgrade cleanup;
+> As of 2026-07-30 (doc-lifecycle 0.44.6, engine-based audit, manual apply, and policy apply
+> lanes; install artifacts centralized under `.doc-lifecycle/`;
 > `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`,
 > `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml`,
 > `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-apply.yml`,
+> `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-policy-apply.yml`,
 > `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py`,
 > `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/stage-upgrade.py`)
 
@@ -18,15 +19,12 @@ is the explicit opt-in.
 
 ## What you're signing up for, exactly
 
-Three GitHub Actions, installed by the skill (never hand-rolled YAML). The split between
-them is the whole design: **nothing that runs on a schedule can touch your default branch
-or your wiring — only a job you dispatch yourself can.** Two of the
-three lanes run on a schedule — the nightly audit and the weekly upgrade check — and each
-holds only the narrowest write scope its job needs: the audit lane holds no write
-permission at all, and the upgrade lane's scheduled job holds only `issues: write`, enough
-to file one notice issue naming a newer release. The jobs that can commit, push, or open a
-pull request — the apply lane's `apply` job and the upgrade lane's `land`
-job — are gated `workflow_dispatch` only and unreachable from either schedule.
+Four GitHub Actions, installed by the skill (never hand-rolled YAML). The split between
+them is the whole design: **nothing writes your default branch directly.** The nightly audit
+writes nothing. If you explicitly configure the policy lane, a successful scheduled audit may
+produce a branch and a real pull request, but a person must still review and merge that PR before
+the default branch changes. The weekly upgrade schedule holds only `issues: write` and can file
+one notice issue; running release code and opening an upgrade PR still requires a human dispatch.
 
 **Nightly audit** (`doc-audit.yml`, default `0 1 * * *`) — read-only, every night:
 
@@ -51,6 +49,22 @@ job — are gated `workflow_dispatch` only and unreachable from either schedule.
 - Then a model authors an edit plan, and a separate credentialed job applies it, stages
   exactly the paths the engine's verified result named, and opens a **real pull
   request** — not a draft. Merging it is what lands anything.
+
+**Policy apply** (`doc-policy-apply.yml`) — chained only from a successful scheduled audit,
+and disabled unless you commit `.doc-lifecycle/auto-apply-policy.json`:
+
+- The engine revalidates the exact completed run's report against the current default branch,
+  then evaluates the standing policy. No workflow input or model selects records.
+- Only `drift-stale-mechanical` and `narrative-anchor-refresh` can be enabled. Bloat, creation,
+  retirement, movement, waived findings, missing evidence, and external command evidence remain
+  outside autonomous authority.
+- An absent policy or a report with no eligible records stops cleanly before the model and
+  writer jobs. A malformed policy fails closed with a typed refusal.
+- The model authors an edit-plan artifact with no repository credential. A separate model-free
+  job applies it through the deterministic engine, stages only the verified paths, and opens a
+  **real pull request**, never a draft or a direct default-branch write.
+- The PR body says **“No human selected these records.”** PR review is the semantic review for
+  what the policy minted, and merging remains change approval of the actual diff.
 
 **Weekly self-upgrade** (`doc-sync-upgrade.yml`, default `0 2 * * 1`) — on the schedule it
 only compares your installed version to the plugin's latest release; when one is newer it
@@ -78,15 +92,16 @@ what changed is that nothing reaches your default branch, your wiring, or your c
 without passing through a diff you merged.
 
 **Proof it behaves:** this repo dogfoods the install — `.github/workflows/doc-audit.yml`,
-`doc-apply.yml`, and `doc-sync-upgrade.yml`, with the vendored wiring under
+`doc-apply.yml`, `doc-policy-apply.yml`, and `doc-sync-upgrade.yml`, with the vendored wiring under
 `.doc-lifecycle/wiring/`.
 
 **Where it all lands.** Everything but the workflows lives under `.doc-lifecycle/`, split by who
 owns the bytes: the files you edit (`registry.json`, `audit-scope.json`, `drift-waivers.json`,
-`evidence-tools.json`) and the version lockfile sit at the root; `wiring/` holds the scripts and
-the vendored engine, which the upgrade lane regenerates wholesale — edit something there and the
-next upgrade reverts it; `state/` holds what the lanes wrote. Only the three workflow files stay
-in `.github/workflows/`, because GitHub reads workflows from nowhere else.
+`evidence-tools.json`, and optional `auto-apply-policy.json`) and the version lockfile sit at the
+root; `wiring/` holds the scripts and the vendored engine, which the upgrade lane regenerates
+wholesale — edit something there and the next upgrade reverts it; `state/` holds what the lanes
+wrote. Only the four workflow files stay in `.github/workflows/`, because GitHub reads workflows
+from nowhere else.
 
 ## Turning it on
 
@@ -96,17 +111,19 @@ The skill runs preflight first and reports anything missing rather than silently
 skipping: a GitHub remote, `gh auth status`, a model-auth secret
 (`CLAUDE_CODE_OAUTH_TOKEN` via `/install-github-app`, or `ANTHROPIC_API_KEY`), and the
 repo setting that lets Actions create PRs. It then confirms two knobs — the audit cron
-and the upgrade cron; defaults are fine — and stages thirteen files plus a vendored copy
-of the engine: the three workflows under `.github/workflows/`, six scripts under
+and the upgrade cron; defaults are fine — plus a separate policy choice whose default is
+disabled. It stages fourteen files plus a vendored copy of the engine: the four workflows under
+`.github/workflows/`, six scripts under
 `.doc-lifecycle/wiring/`, and — at `.doc-lifecycle/` — three starter state files
 (`audit-scope.json`, `drift-waivers.json`, `evidence-tools.json`) and the version
-lockfile.
+lockfile. Enabling policy apply adds the explicitly reviewed policy as a fifteenth file; neither
+install nor upgrade ever invents or overwrites one.
 
 If you have no registry yet, the skill stops and sends you through its migration door
 first — a guided, read-only sequence that drafts one from your existing layout, shows you
-the diff as globs, and dry-runs it until nothing is unclassified. Both audit lanes are
-closed-world over that file, so installing them without one would ship wiring that fails
-every night.
+the diff as globs, and dry-runs it until nothing is unclassified. The audit, manual apply, and
+policy apply lanes are closed-world over that file, so installing them without one would ship
+wiring that fails every night.
 
 First run without waiting for the cron:
 
@@ -134,6 +151,26 @@ gh workflow run doc-apply \
    approval set's digest, so what you approved and what landed are checkable against each
    other later.
 
+To enable policy apply, commit the standing declaration only after deciding which mechanical
+classes this repository permits:
+
+```json
+{
+  "artifact": "auto-apply-policy",
+  "schema_version": 1,
+  "id": "nightly-doc-sync",
+  "classes": [
+    "drift-stale-mechanical",
+    "narrative-anchor-refresh"
+  ]
+}
+```
+
+Save it as `.doc-lifecycle/auto-apply-policy.json`. The next successful scheduled audit enters
+`doc-policy-apply.yml` automatically. Read every resulting PR as a proposed change, not as an
+already-approved edit: “No human selected these records” means your PR review is the semantic
+review. Removing the file disables future policy runs without affecting the manual lane.
+
 ## Tuning and living with it
 
 - **Scope:** `.doc-lifecycle/registry.json` decides what counts as documentation and what
@@ -144,6 +181,8 @@ gh workflow run doc-apply \
 - **Waivers:** `.doc-lifecycle/drift-waivers.json` records claims you've accepted as
   unverifiable, matched by the text you quoted. Reword the line and the waiver stops
   applying — new authorship is a new decision.
+- **Auto-apply policy:** `.doc-lifecycle/auto-apply-policy.json` is standing authority and is
+  absent by default. The upgrade lane carries an existing file unchanged and never seeds one.
 - **Upgrades:** the weekly schedule only notices a newer release and files an issue; the PR
   arrives once you (or anyone with dispatch access) run
   `gh workflow run doc-sync-upgrade -f target=X.Y.Z` naming the version from that issue. To
@@ -180,8 +219,9 @@ alive.
 
 Both are one command or one deletion, and neither loses state:
 
-- Pause: `gh workflow disable doc-audit` (and/or `doc-apply`, `doc-sync-upgrade`);
+- Pause: `gh workflow disable doc-audit` (and/or `doc-apply`, `doc-policy-apply`,
+  `doc-sync-upgrade`);
   `gh workflow enable` reverses it.
-- Remove: delete the three `doc-*` files under `.github/workflows/`, and `.doc-lifecycle/wiring/`
+- Remove: delete the four `doc-*` files under `.github/workflows/`, and `.doc-lifecycle/wiring/`
   if you want the scripts gone too. Leave the judgment files at `.doc-lifecycle/` in place —
   they are your judgment, not the pipeline's, and a later reinstall resumes from them.

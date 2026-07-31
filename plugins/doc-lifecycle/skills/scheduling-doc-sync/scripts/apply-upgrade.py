@@ -34,12 +34,13 @@ Layout (aj604/toolshed#133). Every artifact the plugin owns lives under
 `.doc-lifecycle/`, in three tiers that make the ownership split legible:
 
     .doc-lifecycle/registry.json, audit-scope.json, drift-waivers.json,
-    .doc-lifecycle/evidence-tools.json      consumer judgment — never rewritten
+    .doc-lifecycle/evidence-tools.json, auto-apply-policy.json
+                                              consumer judgment — never rewritten
     .doc-lifecycle/installed-version        the version lockfile
     .doc-lifecycle/wiring/                  plugin-owned, regenerated wholesale
     .doc-lifecycle/state/                   what the credentialed jobs write
 
-The five workflow files stay in `.github/workflows/` because GitHub reads
+The workflow files stay in `.github/workflows/` because GitHub reads
 workflows only from there; they are regenerated in place, never moved.
 
 Ownership (total on wiring, idempotent on state):
@@ -52,7 +53,7 @@ Ownership (total on wiring, idempotent on state):
 
     An install that has been through the migration door — one holding a landed
     .doc-lifecycle/registry.json — also owns the new engine's lanes:
-    .github/workflows/{doc-audit,doc-apply}.yml                  regenerate, knobs preserved
+    .github/workflows/{doc-audit,doc-apply,doc-policy-apply}.yml regenerate, knobs preserved
     .doc-lifecycle/wiring/render-{audit,apply}-summary.py        overwrite
     .doc-lifecycle/wiring/probe-evidence-tool.py                 overwrite
     .doc-lifecycle/evidence-tools.json                           never touched
@@ -128,6 +129,8 @@ NEW_LANE_PLACEHOLDERS = {
     "doc-audit.yml": ["{{AUDIT_CRON}}"],
     # Manual dispatch only, so no schedule to preserve and nothing to substitute.
     "doc-apply.yml": [],
+    # Audit-chained, with no consumer schedule of its own.
+    "doc-policy-apply.yml": [],
 }
 
 NEW_LANE_SCRIPTS = {
@@ -162,7 +165,12 @@ STATE_DIR = "state"
 # relocation byte-for-byte and never rewritten afterwards. `registry.json` is
 # one of these too, but it is already at the new root — the new engine put it
 # there — so it is not part of what relocates.
-JUDGMENT_FILES = ("audit-scope.json", "drift-waivers.json", "evidence-tools.json")
+JUDGMENT_FILES = (
+    "audit-scope.json",
+    "drift-waivers.json",
+    "evidence-tools.json",
+    "auto-apply-policy.json",
+)
 
 # The lockfile: plugin-owned, but at the root rather than under `wiring/`,
 # because a human reads it to answer "what version am I on".

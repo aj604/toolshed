@@ -423,6 +423,69 @@ class ConfigDigest(ScriptTestCase):
         self.assertIn("apply-config-digest-unavailable", self.summary())
 
 
+class PolicyEligibility(ScriptTestCase):
+    def payload(self, eligible=True):
+        refusal = None if eligible else {
+            "code": "policy-never-eligible",
+            "message": "a bloat finding always needs a person",
+            "location": "DRIFT-001",
+        }
+        return {
+            "status": "ok",
+            "schema_version": 1,
+            "policy": {
+                "id": "toolshed-mechanical-doc-maintenance",
+                "classes": ["drift-stale-mechanical"],
+            },
+            "report_digest": REPORT_DIGEST,
+            "decisions": [{
+                "digest": RECORD_DIGEST,
+                "id": "DRIFT-001",
+                "code": "STALE" if eligible else "CUT",
+                "eligible_class": (
+                    "drift-stale-mechanical" if eligible else None
+                ),
+                "refusal": refusal,
+            }],
+            "eligible": [RECORD_DIGEST] if eligible else [],
+        }
+
+    def test_an_eligible_selection_enables_the_downstream_jobs(self):
+        payload = self.write("eligibility.json", self.payload())
+        out = self.path("output.txt")
+        proc = self.run_script(
+            "policy-eligibility", "--eligibility", payload, "--out", out)
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.read("output.txt"), "eligible=true\n")
+        self.assertIn("toolshed-mechanical-doc-maintenance", self.summary())
+        self.assertIn("DRIFT-001", self.summary())
+
+    def test_no_eligible_records_is_a_clean_stop_with_every_reason_visible(self):
+        payload = self.write("eligibility.json", self.payload(eligible=False))
+        out = self.path("output.txt")
+        proc = self.run_script(
+            "policy-eligibility", "--eligibility", payload, "--out", out)
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.read("output.txt"), "eligible=false\n")
+        self.assertIn("policy-never-eligible", self.summary())
+        self.assertIn("No branch and no pull request", self.summary())
+
+    def test_a_malformed_eligibility_artifact_refuses_without_an_output(self):
+        payload = self.write(
+            "eligibility.json",
+            {"status": "ok", "eligible": ["not-a-digest"]},
+        )
+        out = self.path("output.txt")
+        proc = self.run_script(
+            "policy-eligibility", "--eligibility", payload, "--out", out)
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-policy-eligibility-invalid", self.summary())
+        self.assertFalse(os.path.exists(out))
+
+
 class ApprovalDigestOutput(ScriptTestCase):
     def test_the_approval_digest_is_emitted_as_a_step_output(self):
         path = self.write("approval.json", approval())

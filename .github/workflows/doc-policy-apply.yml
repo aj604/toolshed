@@ -1,0 +1,417 @@
+# doc-policy-apply — the scheduler adapter's autonomous policy lane (aj604/toolshed#143).
+#
+# A successful scheduled doc-audit run is the only trigger. The first job downloads that exact
+# run's report, checks it against the current default branch, asks the engine's policy command
+# which records the consumer's standing declaration admits, and lets `policy-mint` derive the
+# selection again itself. An absent policy is a clean opt-out; an empty eligible set is a clean
+# stop. Neither reaches a model or a credentialed job.
+#
+# Three jobs, split by trust exactly as the manual apply lane is:
+#
+#   revalidate — deterministic and read-only. It binds the report to the completed audit run,
+#     revalidates its full lineage against the current default branch, renders every policy
+#     decision, and mints an approval set only when the configured policy admitted records.
+#   plan — the only model job. It holds `contents: read` plus `id-token: write` for model auth,
+#     no repository credential, and authors only an edit-plan artifact.
+#   apply — credentialed and model-free. The engine validates and executes the plan as data,
+#     checks every approved record was executed and every written path is confined, stages the
+#     explicit verified path list, and opens a real pull request. It never writes the default
+#     branch directly; merging the pull request is semantic review and change approval.
+#
+# The consumer opts in by committing `.doc-lifecycle/auto-apply-policy.json`. Merely installing
+# this template grants no autonomous authority: absence is a declaration too, and this lane
+# stops before downloading or interpreting a report when the file is absent.
+name: doc-policy-apply
+
+on:
+  workflow_run:
+    workflows: ["doc-audit"]
+    types: [completed]
+
+# Least privilege by default; each job widens only what it needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: doc-policy-apply
+  cancel-in-progress: false
+
+jobs:
+  # Deterministic and model-free. `actions: read` is only for the report artifact from the
+  # completed run named by the event. This job holds no repository write scope.
+  revalidate:
+    if: >-
+      github.event.workflow_run.event == 'schedule' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      configured: ${{ steps.config.outputs.configured }}
+      eligible: ${{ steps.eligibility.outputs.eligible }}
+      approval_digest: ${{ steps.approval.outputs.approval_digest }}
+    steps:
+      - name: Checkout the current default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # An absent standing policy authorizes nothing. Keep that normal opt-out from becoming a
+      # noisy nightly failure, while every present-but-invalid policy still reaches the engine
+      # below and refuses with its typed reason.
+      - name: Check whether this consumer configured autonomous minting
+        id: config
+        run: |
+          set -euo pipefail
+          if [ -f .doc-lifecycle/auto-apply-policy.json ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The run id is event data from GitHub, never a dispatch string. Cross-run artifact
+      # download requires the read-only actions scope above and the repository token only here,
+      # in a deterministic job that never invokes a model.
+      - name: Download the completed audit run's report
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: audit-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/dispatch
+
+      # Derive the current configuration from the same engine and default-branch checkout the
+      # report is about. A model-free audit is expected to be partial; its lineage is the output
+      # needed here, and a missing digest refuses through the tested renderer.
+      - name: Derive the current audit configuration digest
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          set -uo pipefail
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py drift-audit --repo . --mode full \
+            > "${RUNNER_TEMP}/current-lineage.json" || true
+          python3 .doc-lifecycle/wiring/render-apply-summary.py config-digest \
+            --report "${RUNNER_TEMP}/current-lineage.json" \
+            --out "${RUNNER_TEMP}/config-digest.txt"
+
+      # Revalidation happens before the policy is even read. A default branch that advanced,
+      # a changed registry/configuration/inventory, or a stale passage stops before an approval
+      # set exists. Partial is a typed report whose eligible records may still be considered;
+      # its coverage gaps travel into the eventual PR.
+      - name: Revalidate the report against the current default branch
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          set -uo pipefail
+          code=0
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py validate-report \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" --repo . \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
+            > "${RUNNER_TEMP}/revalidated.json" || code=$?
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage revalidation \
+            --payload "${RUNNER_TEMP}/revalidated.json" --exit-code "$code" \
+            --accept-exit-code 4
+
+      # This is the policy's public decision seam. It names every eligible record and every
+      # refusal; the renderer publishes those decisions and emits only a boolean indicating
+      # whether there is a subset worth handing to policy-mint. It never selects records itself.
+      - name: Evaluate the standing auto-apply policy
+        if: steps.config.outputs.configured == 'true'
+        id: eligibility
+        run: |
+          set -uo pipefail
+          code=0
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py policy-eligibility \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" --repo . \
+            --policy .doc-lifecycle/auto-apply-policy.json \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
+            > "${RUNNER_TEMP}/eligibility.json" || code=$?
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate \
+            --stage "policy eligibility" \
+            --payload "${RUNNER_TEMP}/eligibility.json" --exit-code "$code"
+          python3 .doc-lifecycle/wiring/render-apply-summary.py policy-eligibility \
+            --eligibility "${RUNNER_TEMP}/eligibility.json" --out "$GITHUB_OUTPUT"
+
+      # `policy-mint` re-derives the eligible selection from the policy and report; there is no
+      # `--record` flag through which this scheduler adapter could widen it. The engine's common
+      # approval producer then applies reconciliation, path, preimage, and policy-artifact
+      # refusals before writing the untracked approval set under RUNNER_TEMP.
+      - name: Mint the policy approval set
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          set -uo pipefail
+          code=0
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py policy-mint \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" --repo . \
+            --policy .doc-lifecycle/auto-apply-policy.json \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
+            --out "${RUNNER_TEMP}/approval.json" \
+            > "${RUNNER_TEMP}/mint-result.json" || code=$?
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage minting \
+            --payload "${RUNNER_TEMP}/mint-result.json" --exit-code "$code"
+
+      - name: Publish the approval digest to the credentialed job
+        if: steps.eligibility.outputs.eligible == 'true'
+        id: approval
+        run: |
+          set -euo pipefail
+          python3 .doc-lifecycle/wiring/render-apply-summary.py approval-digest \
+            --approval "${RUNNER_TEMP}/approval.json" --out "$GITHUB_OUTPUT"
+
+      # Render while the approval set still describes the unchanged checkout. After application
+      # its own preimages have legitimately moved, so a renderer invoked then would call it stale.
+      - name: Render the approval summary and trailers
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          set -uo pipefail
+          code=0
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py render-approval \
+            --approval "${RUNNER_TEMP}/approval.json" --repo . \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
+            > "${RUNNER_TEMP}/approval-summary.md" || code=$?
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage rendering \
+            --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code" || exit 1
+          code=0
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py render-approval \
+            --approval "${RUNNER_TEMP}/approval.json" --repo . \
+            --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/config-digest.txt")" \
+            --trailers > "${RUNNER_TEMP}/trailers.txt" || code=$?
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage rendering \
+            --payload "${RUNNER_TEMP}/approval.json" --exit-code "$code"
+
+      - name: Derive the branch name from the approval digest
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          set -euo pipefail
+          python3 .doc-lifecycle/wiring/render-apply-summary.py branch-name \
+            --approval "${RUNNER_TEMP}/approval.json" \
+            --out "${RUNNER_TEMP}/branch.txt"
+
+      # Upload one flat trusted bundle. The report starts under dispatch/ because it came from
+      # another run; copying it beside the other entries keeps download paths unambiguous.
+      - name: Flatten the report into the approval bundle root
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          set -euo pipefail
+          cp "${RUNNER_TEMP}/dispatch/drift-report.json" \
+             "${RUNNER_TEMP}/drift-report.json"
+
+      - name: Upload the policy approval bundle
+        if: steps.eligibility.outputs.eligible == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: policy-apply-approval
+          path: |
+            ${{ runner.temp }}/drift-report.json
+            ${{ runner.temp }}/approval.json
+            ${{ runner.temp }}/approval-summary.md
+            ${{ runner.temp }}/trailers.txt
+            ${{ runner.temp }}/config-digest.txt
+            ${{ runner.temp }}/branch.txt
+          if-no-files-found: error
+
+  # The only model gets the immutable approval bundle as data and no repository credential.
+  # no GH_TOKEN, no persisted checkout credential, and no repository write permission.
+  plan:
+    needs: revalidate
+    if: >-
+      needs.revalidate.outputs.configured == 'true' &&
+      needs.revalidate.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout the current default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Pin plugin marketplace
+        run: |
+          set -euo pipefail
+          VERSION=$(cat .doc-lifecycle/installed-version)
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch "v${VERSION}" \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
+
+      - name: Download the policy approval bundle
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: policy-apply-approval
+          path: ${{ runner.temp }}/apply
+
+      # The policy can mint only the engine's mechanical passage remedies. The prompt still
+      # states the complete plan contract for those remedies; `apply-plan` trusts none of it.
+      # It re-derives operation authority, exact preimages, unit confinement, postimages, the
+      # written path set, and that every approved record has at least one operation
+      # (`plan-record-not-executed`) before any byte is written.
+      - name: Author the mechanical edit plan
+        id: model
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
+          plugins: doc-lifecycle@toolshed
+          prompt: |
+            Author an edit plan that executes every record in the policy approval set at
+            ${{ runner.temp }}/apply/approval.json, against the report at
+            ${{ runner.temp }}/apply/drift-report.json. Apply nothing yourself. Do not edit a
+            documentation file and do not run git. Write only ./edit-plan.json.
+
+            The plan shape is:
+            {"artifact": "edit-plan", "schema_version": 1,
+             "approval_digest": <approval set "digest">,
+             "operations": [ ... ],
+             "postimages": {<written path>: <sha256 of its complete final bytes>},
+             "digest": <canonical digest described below>}
+
+            A policy approval may contain only mechanical passage remedies. Use one or more of
+            these operations for every approved record:
+              replace — {"op":"replace","record":<record digest>,
+                "target_class":"documentation","path":<record path>,
+                "start_line":<1-based>,"end_line":<inclusive>,
+                "preimage":<exact current text of those lines>,"text":<replacement>}
+              delete — the same fields except no "text"
+              insert — {"op":"insert","record":<record digest>,
+                "target_class":"documentation","path":<record path>,
+                "after_line":<0-based insertion boundary>,"text":<inserted text>}
+
+            Prefer the record's complete physical "fix" as replacement text. A span preimage
+            and replacement text carry no trailing newline: the applier compares the selected
+            lines joined by "\n". Read every target before writing its preimage. A positioned
+            operation must stay inside that record's approved unit passage, use only an
+            operation the record's code authorizes, and write only a path in the approval
+            set's scope. The postimages map must name exactly every written path and digest the
+            complete file bytes after all operations. Every approved record must execute at
+            least one operation; omitting one is refused as plan-record-not-executed.
+
+            Stamp the plan with the engine's canonical digest:
+            python3 -c 'import json,sys; sys.path.insert(0,".doc-lifecycle/wiring/engine"); from doclifecycle.digest import sha256_canonical as d; p=json.load(open("edit-plan.json")); p.pop("digest",None); p["digest"]=d(p); json.dump(p,open("edit-plan.json","w"))'
+
+            If you cannot author a correct operation for every approved record, do not write a
+            partial plan. Leave edit-plan.json absent so the upload fails loudly.
+          claude_args: --allowedTools "Read,Grep,Glob,Write,Bash(python3 *)"
+
+      - name: Upload the edit plan
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: policy-apply-plan
+          path: edit-plan.json
+          if-no-files-found: error
+
+  # Credentialed and model-free. The model artifact is extracted to its own directory so it
+  # cannot overwrite the trusted approval, trailers, branch, or report bundle.
+  apply:
+    needs: [revalidate, plan]
+    if: >-
+      needs.revalidate.outputs.configured == 'true' &&
+      needs.revalidate.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout the current default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Download the trusted policy approval bundle
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: policy-apply-approval
+          path: ${{ runner.temp }}/apply
+
+      - name: Download the model-authored edit plan separately
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: policy-apply-plan
+          path: ${{ runner.temp }}/plan
+
+      - name: Apply the plan through the deterministic engine
+        env:
+          EXPECTED_APPROVAL: ${{ needs.revalidate.outputs.approval_digest }}
+        run: |
+          set -uo pipefail
+          code=0
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py apply-plan --repo . \
+            --plan "${RUNNER_TEMP}/plan/edit-plan.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --report "${RUNNER_TEMP}/apply/drift-report.json" \
+            --audit-config-digest "$(cat "${RUNNER_TEMP}/apply/config-digest.txt")" \
+            --expected-digest "$EXPECTED_APPROVAL" \
+            > "${RUNNER_TEMP}/apply-result.json" || code=$?
+          python3 .doc-lifecycle/wiring/render-apply-summary.py gate --stage apply \
+            --payload "${RUNNER_TEMP}/apply-result.json" --exit-code "$code"
+
+      - name: Derive the explicit staged path list
+        run: |
+          set -euo pipefail
+          python3 .doc-lifecycle/wiring/render-apply-summary.py staged-paths \
+            --result "${RUNNER_TEMP}/apply-result.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --out "${RUNNER_TEMP}/staged-paths.txt"
+
+      - name: Stage exactly the verified paths
+        run: |
+          set -euo pipefail
+          git switch -c "$(cat "${RUNNER_TEMP}/apply/branch.txt")"
+          git add --pathspec-from-file="${RUNNER_TEMP}/staged-paths.txt" --pathspec-file-nul
+          git diff --cached --name-only -z --no-renames > "${RUNNER_TEMP}/staged.txt"
+          { git diff --name-only -z; \
+            git ls-files --others --exclude-standard -z; } \
+            > "${RUNNER_TEMP}/unstaged.txt"
+          python3 .doc-lifecycle/wiring/render-apply-summary.py verify-staged \
+            --paths "${RUNNER_TEMP}/staged-paths.txt" \
+            --staged "${RUNNER_TEMP}/staged.txt" \
+            --unstaged "${RUNNER_TEMP}/unstaged.txt"
+
+      - name: Render the commit message and pull request
+        run: |
+          set -euo pipefail
+          python3 .doc-lifecycle/wiring/render-apply-summary.py commit-message \
+            --result "${RUNNER_TEMP}/apply-result.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --trailers "${RUNNER_TEMP}/apply/trailers.txt" \
+            --out "${RUNNER_TEMP}/commit-message.txt"
+          python3 .doc-lifecycle/wiring/render-apply-summary.py pr-title \
+            --result "${RUNNER_TEMP}/apply-result.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --out "${RUNNER_TEMP}/pr-title.txt"
+          python3 .doc-lifecycle/wiring/render-apply-summary.py pr-body \
+            --result "${RUNNER_TEMP}/apply-result.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --report "${RUNNER_TEMP}/apply/drift-report.json" \
+            --approval-summary "${RUNNER_TEMP}/apply/approval-summary.md" \
+            --out "${RUNNER_TEMP}/pr-body.md"
+
+      - name: Commit and push the derived branch
+        run: |
+          set -euo pipefail
+          git config user.name "doc-lifecycle[bot]"
+          git config user.email "doc-lifecycle@users.noreply.github.com"
+          git commit -F "${RUNNER_TEMP}/commit-message.txt"
+          git push origin "HEAD:refs/heads/$(cat "${RUNNER_TEMP}/apply/branch.txt")"
+
+      # A real pull request, never a draft. The policy minted without a human selecting records,
+      # so PR review is the semantic review, and merging it is change approval of the actual diff.
+      - name: Open the real pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          gh pr create --base "$BASE" \
+            --head "$(cat "${RUNNER_TEMP}/apply/branch.txt")" \
+            --title "$(cat "${RUNNER_TEMP}/pr-title.txt")" \
+            --body-file "${RUNNER_TEMP}/pr-body.md" \
+            >> "$GITHUB_STEP_SUMMARY"
