@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Primary human lifecycle transaction (issue #158).
+"""Primary semantic-approval lifecycle transaction (issue #158).
 
 One REAL temporary repository carries a report produced by the bloat audit
-engine through strict-subset human approval, edit-plan construction, and the
-public deterministic applier. The approved DISTILL authors durable residue
-and retires its planning artifact in one apply; the skipped finding targets a
-hostile filename and remains outside mutation authority.
+engine through strict-subset semantic approval, edit-plan construction, and
+the public deterministic applier. The approved DISTILL authors durable
+residue and retires its planning artifact in one apply; the skipped finding
+targets a hostile filename and remains outside mutation authority.
 
 The companion refusals stay at those same public seams. No helper below writes
 an approved mutation: helpers create the committed starting repository and
@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 import unittest
+from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -40,6 +41,7 @@ from doclifecycle.finding import (  # noqa: E402
     NON_ASSERTIVE,
     NORMATIVE,
     RATIONALE,
+    Finding,
 )
 from doclifecycle.report import Report  # noqa: E402
 from doclifecycle.results import (  # noqa: E402
@@ -59,8 +61,19 @@ RESIDUE_TEXT = (
 )
 
 
-class HumanLifecycleScenario(DriftScenarioTestCase):
-    """The release gate's highest-level human transaction and its refusals."""
+@dataclass(frozen=True)
+class SemanticApprovalTransaction:
+    """Artifacts crossing the public semantic-approval transaction."""
+
+    report: Report
+    distill: Finding
+    skipped: Finding
+    approval: ApprovalSet
+    plan: dict
+
+
+class SemanticApprovalLifecycleScenario(DriftScenarioTestCase):
+    """The release gate's complete semantic-approval transaction."""
 
     def read(self, repo, path):
         with open(os.path.join(repo, path), encoding="utf-8") as handle:
@@ -138,12 +151,12 @@ class HumanLifecycleScenario(DriftScenarioTestCase):
         self.assertNotIsInstance(assembled, Invalid, assembled)
         return plan, assembled.to_dict()
 
-    def bloat_verdicts(self, repo, *, complete_distill=True):
+    def bloat_verdicts(self, repo, *, omit_distill_unit=False):
         """One approved DISTILL candidate and one hostile-path skipped CUT."""
         index = build_context_index(repo, fixture.REGISTRY_PATH)
         self.assertNotIsInstance(index, Invalid, index)
         planning_units = list(index.document(fixture.PLANNING_DOC).units)
-        if not complete_distill:
+        if omit_distill_unit:
             planning_units = planning_units[:-1]
         units_by_digest = {unit.digest: unit for unit in index.units}
         hostile_unit = next(
@@ -173,26 +186,31 @@ class HumanLifecycleScenario(DriftScenarioTestCase):
             },
         ]
 
-    def produced_report(self, repo, *, complete_distill=True):
+    def produced_report(self, repo, *, omit_distill_unit=False):
         _, payload = self.complete_bloat_input(
             repo,
             self.bloat_verdicts(
-                repo, complete_distill=complete_distill,
+                repo, omit_distill_unit=omit_distill_unit,
             ),
         )
         return bloat.audit_bloat(repo, payload, fixture.REGISTRY_PATH)
 
-    def human_approval(self, repo, report):
-        distill = next(
+    def record_for(self, report, path):
+        return next(
             record for record in report.records
-            if record.extra["path"] == fixture.PLANNING_DOC
+            if record.extra["path"] == path
         )
+
+    def skipped_hostile_record(self, report):
+        return self.record_for(report, fixture.HOSTILE_HOMOGLYPH_DOC)
+
+    def semantic_approval(self, repo, report, distill):
         approval = mint_approval_set(
             report, [distill.digest], repo_root=repo, minter=APPROVER,
             registry_path=fixture.REGISTRY_PATH,
         )
         self.assertIsInstance(approval, ApprovalSet, approval)
-        return distill, approval
+        return approval
 
     def edit_plan(self, repo, record, approval, *, retire=True,
                   hostile_record=None):
@@ -244,12 +262,17 @@ class HumanLifecycleScenario(DriftScenarioTestCase):
         }
         return dict(content, digest=sha256_canonical(content))
 
-    def transaction(self, repo):
+    def semantic_approval_transaction(self, repo):
         report = self.produced_report(repo)
         self.assertIsInstance(report, Report, report)
-        record, approval = self.human_approval(repo, report)
-        plan = self.edit_plan(repo, record, approval)
-        return report, record, approval, plan
+        distill = self.record_for(report, fixture.PLANNING_DOC)
+        skipped = self.skipped_hostile_record(report)
+        approval = self.semantic_approval(repo, report, distill)
+        plan = self.edit_plan(repo, distill, approval)
+        return SemanticApprovalTransaction(
+            report=report, distill=distill, skipped=skipped,
+            approval=approval, plan=plan,
+        )
 
     def apply(self, repo, report, approval, plan):
         return apply_edit_plan(
@@ -265,7 +288,7 @@ class HumanLifecycleScenario(DriftScenarioTestCase):
             result,
         )
 
-    def test_report_to_strict_human_approval_to_distill_apply(self):
+    def test_report_to_strict_semantic_approval_to_distill_apply(self):
         repo = self.ready_repo()
 
         # The same real corpus crosses the living-assertion audit boundary:
@@ -288,38 +311,41 @@ class HumanLifecycleScenario(DriftScenarioTestCase):
             for path in (*fixture.HOSTILE_DOCS, fixture.EXCLUDED_DOC,
                          fixture.LIVING_DOC)
         }
-        report, record, approval, plan = self.transaction(repo)
-        skipped = next(
-            item for item in report.records
-            if item.extra["path"] == fixture.HOSTILE_HOMOGLYPH_DOC
-        )
+        transaction = self.semantic_approval_transaction(repo)
 
         # Completion is produced by the public deterministic assembly, the
-        # whole-document record contains every current unit, and the human took
-        # exactly one of the two findings.
-        self.assertEqual(report.status, STATE_PARTIAL)
+        # whole-document record contains every current unit, and semantic
+        # approval selected exactly one of the two findings.
+        self.assertEqual(transaction.report.status, STATE_PARTIAL)
         context_index = build_context_index(repo, fixture.REGISTRY_PATH)
         self.assertEqual(
-            {entry.scope for entry in report.examined},
+            {entry.scope for entry in transaction.report.examined},
             {document.path for document in context_index.documents},
         )
         plan_digests = {
-            entry.detail["plan_digest"] for entry in report.examined
+            entry.detail["plan_digest"]
+            for entry in transaction.report.examined
         }
         self.assertEqual(len(plan_digests), 1)
         self.assertCountEqual(
-            record.extra["units"],
+            transaction.distill.extra["units"],
             list(context_index.document(fixture.PLANNING_DOC).units),
         )
-        self.assertEqual([item.digest for item in approval.skipped],
-                         [skipped.digest])
         self.assertEqual(
-            set(approval.scope.paths), {fixture.PLANNING_DOC, RESIDUE},
+            [item.digest for item in transaction.approval.skipped],
+            [transaction.skipped.digest],
+        )
+        self.assertEqual(
+            set(transaction.approval.scope.paths),
+            {fixture.PLANNING_DOC, RESIDUE},
         )
         self.assertNotIn(fixture.HOSTILE_HOMOGLYPH_DOC,
-                         approval.scope.paths)
+                         transaction.approval.scope.paths)
 
-        result = self.apply(repo, report, approval, plan)
+        result = self.apply(
+            repo, transaction.report, transaction.approval,
+            transaction.plan,
+        )
 
         self.assertIsInstance(result, ApplyResult, result)
         self.assertEqual(result.status, STATE_CLEAN)
@@ -345,7 +371,10 @@ class HumanLifecycleScenario(DriftScenarioTestCase):
         )
 
         applied_tree = self.tree(repo)
-        second = self.apply(repo, report, approval, plan)
+        second = self.apply(
+            repo, transaction.report, transaction.approval,
+            transaction.plan,
+        )
         self.assertEqual(second.status, STATE_CLEAN)
         self.assertTrue(second.already_applied)
         self.assertEqual(second.applied, ())
@@ -377,7 +406,7 @@ class HumanLifecycleScenario(DriftScenarioTestCase):
         repo = self.ready_repo()
         before = self.tree(repo)
 
-        result = self.produced_report(repo, complete_distill=False)
+        result = self.produced_report(repo, omit_distill_unit=True)
 
         self.assertIsInstance(result, Invalid, result)
         self.assertEqual(
@@ -388,11 +417,15 @@ class HumanLifecycleScenario(DriftScenarioTestCase):
 
     def test_omitting_the_approved_retirement_is_invalid_and_writes_nothing(self):
         repo = self.ready_repo()
-        report, record, approval, _ = self.transaction(repo)
-        incomplete = self.edit_plan(repo, record, approval, retire=False)
+        transaction = self.semantic_approval_transaction(repo)
+        incomplete = self.edit_plan(
+            repo, transaction.distill, transaction.approval, retire=False,
+        )
         before = self.tree(repo)
 
-        result = self.apply(repo, report, approval, incomplete)
+        result = self.apply(
+            repo, transaction.report, transaction.approval, incomplete,
+        )
 
         self.assertIsInstance(result, Invalid, result)
         self.assertIn("plan-remedy-incomplete",
@@ -401,33 +434,35 @@ class HumanLifecycleScenario(DriftScenarioTestCase):
 
     def test_a_skipped_hostile_record_cannot_expand_the_plan(self):
         repo = self.ready_repo()
-        report, record, approval, _ = self.transaction(repo)
-        hostile = next(
-            item for item in report.records
-            if item.extra["path"] == fixture.HOSTILE_HOMOGLYPH_DOC
-        )
+        transaction = self.semantic_approval_transaction(repo)
         expanded = self.edit_plan(
-            repo, record, approval, hostile_record=hostile,
+            repo, transaction.distill, transaction.approval,
+            hostile_record=transaction.skipped,
         )
         before = self.tree(repo)
 
-        result = self.apply(repo, report, approval, expanded)
+        result = self.apply(
+            repo, transaction.report, transaction.approval, expanded,
+        )
 
         self.assertIsInstance(result, Invalid, result)
         self.assertIn("plan-record-not-approved",
                       [problem.code for problem in result.problems])
         self.assert_refused_untouched(repo, before, result)
 
-    def test_a_stale_human_transaction_is_byte_identical_and_unstaged(self):
+    def test_a_stale_semantic_approval_is_byte_identical_and_unstaged(self):
         repo = self.ready_repo()
-        report, _, approval, plan = self.transaction(repo)
+        transaction = self.semantic_approval_transaction(repo)
         fixture._git(
             repo, "commit", "-q", "--allow-empty", "-m",
             "Advance the repository after semantic approval",
         )
         before = self.tree(repo)
 
-        result = self.apply(repo, report, approval, plan)
+        result = self.apply(
+            repo, transaction.report, transaction.approval,
+            transaction.plan,
+        )
 
         self.assertIsInstance(result, ApplyResult, result)
         self.assertEqual(result.status, STATE_STALE)

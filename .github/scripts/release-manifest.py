@@ -84,9 +84,10 @@ GATE_MANIFEST = {
         "tests/engine/acceptance/scenario_human_lifecycle_test.py",
     ],
     # The one highest-level human transaction: a report produced by the audit
-    # engine, strict-subset human approval, a valid edit plan, and the public
-    # deterministic applier over a real temporary repository. Keeping it as a
-    # named criterion means broad acceptance discovery cannot mask its removal.
+    # engine, strict-subset semantic approval, a valid edit plan, and the
+    # public deterministic applier over a real temporary repository. Keeping
+    # it as a named criterion means broad acceptance discovery cannot mask its
+    # removal.
     "primary human lifecycle": [
         "tests/engine/acceptance/scenario_human_lifecycle_test.py",
     ],
