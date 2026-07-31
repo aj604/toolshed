@@ -144,9 +144,15 @@ Rules the seam validator enforces (`--chunk <file> --manifest <manifest>`):
 
 Assembly (`--assemble <dir> --manifest <manifest> --out bloat-verdicts.json`)
 seam-validates every chunk, renumbers ids `B1..Bn`, and writes the envelope.
-Missing chunks fail the assembly by name, unless `--allow-partial`: then each
-is skipped **loudly** — named on stderr with its documents, and written to
-`--unswept-out` as a `[{"chunk", "docs"}]` gap list — and the next plan's
-content-addressed resume sweeps exactly them. An invalid chunk always fails.
-The gap list stays *outside* the envelope: `bloat-audit` refuses an envelope
-carrying any key but `schema_version` and `verdicts`.
+The envelope's `completion` object preserves the full public `bloat-plan`
+artifact, including its declared budgets and content digest. The engine
+independently re-derives that plan from the current index. Each chunk records a
+typed `completion_state`, the verdict ids it contributed, and (when complete)
+a digest of the received verdict contents; the outer digest binds the plan,
+all chunk outcomes, and all verdict contents. Repartitioning, editing, or
+rehashing untrusted evidence therefore cannot manufacture clean coverage.
+Missing or invalid chunks fail the assembly by name unless `--allow-partial`;
+then each stays inside `completion` as a typed gap and the next
+content-addressed plan resumes exactly that work.
+`--unswept-out` may still render the same gaps for a run surface, but it is
+never the report's source of truth and omitting it cannot turn partial clean.

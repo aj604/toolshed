@@ -460,16 +460,18 @@ def _parser():
         description=(
             "Emit a validated bloat report as JSON: every verdict in "
             "--verdicts checked against the whole-repository context index, "
-            "expanded into findings, and validated against the report "
-            "contract every lane shares. There is no planless run — a bloat "
-            "verdict is a value judgment, and --verdicts is required. Exits 1 "
-            "if the registry or the verdicts do not validate."
+            "its mandatory completion evidence checked against the current "
+            "chunk plan, findings expanded, and the result validated against "
+            "the report contract every lane shares. There is no planless run "
+            "— a bloat verdict is a value judgment, and --verdicts is "
+            "required. Exits 1 if the registry, verdicts, or completion "
+            "evidence do not validate."
         ),
     )
     _add_corpus_arguments(bloat_audit)
     bloat_audit.add_argument(
         "--verdicts", required=True,
-        help="path to the verdicts a bloat lane returned for the corpus",
+        help="path to the verdicts + completion envelope the lane assembled",
     )
     bloat_audit.set_defaults(run=_bloat_audit, render=None)
 

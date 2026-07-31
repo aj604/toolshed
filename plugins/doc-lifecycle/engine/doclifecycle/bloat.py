@@ -43,7 +43,7 @@ that never see each other reach the same answer.
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from .cache import cache_key, get as cache_get, put as cache_put
@@ -54,8 +54,8 @@ from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import DOCUMENTATION, authorize_path
 from .registry import compile_glob
 from .report import (
-    EvidenceBoundary, Lineage, current_lineage, state_from_content, validate_report,
-    whole_number,
+    EvidenceBoundary, Lineage, SCOPE_WHOLE_INVENTORY, current_lineage,
+    state_from_content, validate_report, whole_number,
 )
 from .results import STATUS_OK, Invalid, Problem
 
@@ -137,6 +137,13 @@ SCOPE_SELECTORS = ("set", "glob", "kind")
 DEFAULT_MAX_DOCUMENTS = 8
 DEFAULT_MAX_UNITS = 400
 
+COMPLETION_COMPLETE = "complete"
+COMPLETION_MISSING = "missing"
+COMPLETION_INVALID = "invalid"
+COMPLETION_STATES = (
+    COMPLETION_COMPLETE, COMPLETION_MISSING, COMPLETION_INVALID,
+)
+
 
 # --------------------------------------------------------------------------
 # Chunk planning
@@ -164,6 +171,8 @@ class ChunkPlan:
 
     chunks: Tuple[Chunk, ...]
     index_digest: str
+    max_documents: int
+    max_units: int
     digest: str
     status: str = STATUS_OK
 
@@ -172,6 +181,8 @@ class ChunkPlan:
             "status": self.status,
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "index_digest": self.index_digest,
+            "max_documents": self.max_documents,
+            "max_units": self.max_units,
             "digest": self.digest,
             "chunks": [c.to_dict() for c in self.chunks],
         }
@@ -236,9 +247,13 @@ def plan_chunks(index, max_documents=DEFAULT_MAX_DOCUMENTS,
     return ChunkPlan(
         chunks=built,
         index_digest=index.digest,
+        max_documents=max_documents,
+        max_units=max_units,
         digest=sha256_canonical({
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "index_digest": index.digest,
+            "max_documents": max_documents,
+            "max_units": max_units,
             "chunks": [c.to_dict() for c in built],
         }),
     )
@@ -259,6 +274,227 @@ def plan_repository_chunks(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
     if isinstance(index, Invalid):
         return index
     return plan_chunks(index, max_documents=max_documents, max_units=max_units)
+
+
+def chunk_plan_from_dict(raw):
+    """Parse a serialized engine plan without claiming its index is current.
+
+    Scheduler adapters use this to preserve the exact plan artifact they were
+    handed.  `validate_chunk_plan` remains the authority that independently
+    rebuilds it from the repository's current index before an audit can be
+    called complete.
+    """
+    fields = {
+        "status", "schema_version", "index_digest", "max_documents",
+        "max_units", "digest", "chunks",
+    }
+    if not isinstance(raw, dict) or set(raw) != fields:
+        return Invalid((Problem(
+            code="bloat-completion-plan-invalid",
+            message=f"completion.plan must carry exactly {sorted(fields)}",
+            location="completion.plan",
+        ),))
+    if (raw.get("status") != STATUS_OK
+            or not whole_number(raw.get("schema_version"))
+            or raw["schema_version"] != ARTIFACT_SCHEMA_VERSION):
+        return Invalid((Problem(
+            code="bloat-completion-plan-invalid",
+            message="completion.plan must be a successful current-schema plan",
+            location="completion.plan",
+        ),))
+    max_documents, max_units = raw.get("max_documents"), raw.get("max_units")
+    if not (whole_number(max_documents) and max_documents > 0
+            and whole_number(max_units) and max_units > 0):
+        return Invalid((Problem(
+            code="bloat-completion-plan-invalid",
+            message="completion.plan budgets must be positive integers",
+            location="completion.plan",
+        ),))
+    digests = (raw.get("index_digest"), raw.get("digest"))
+    if not all(isinstance(value, str) and len(value) == 64
+               and all(char in "0123456789abcdef" for char in value)
+               for value in digests):
+        return Invalid((Problem(
+            code="bloat-completion-plan-invalid",
+            message="completion.plan index_digest and digest must be sha256 digests",
+            location="completion.plan",
+        ),))
+    chunks = raw.get("chunks")
+    if not isinstance(chunks, list):
+        return Invalid((Problem(
+            code="bloat-completion-plan-invalid",
+            message="completion.plan.chunks must be a list",
+            location="completion.plan.chunks",
+        ),))
+    built = []
+    for position, chunk in enumerate(chunks):
+        if (not isinstance(chunk, dict)
+                or set(chunk) != {"id", "documents", "unit_count"}
+                or not isinstance(chunk.get("id"), str)
+                or not chunk["id"].strip()
+                or not isinstance(chunk.get("documents"), list)
+                or not all(isinstance(path, str) and path.strip()
+                           for path in chunk["documents"])
+                or not whole_number(chunk.get("unit_count"))
+                or chunk["unit_count"] < 0):
+            return Invalid((Problem(
+                code="bloat-completion-plan-invalid",
+                message=f"completion.plan.chunks[{position}] has invalid shape",
+                location=f"completion.plan.chunks[{position}]",
+            ),))
+        built.append(Chunk(
+            chunk_id=chunk["id"], documents=tuple(chunk["documents"]),
+            unit_count=chunk["unit_count"],
+        ))
+    canonical = {
+        "schema_version": raw["schema_version"],
+        "index_digest": raw["index_digest"],
+        "max_documents": max_documents,
+        "max_units": max_units,
+        "chunks": [chunk.to_dict() for chunk in built],
+    }
+    if raw["digest"] != sha256_canonical(canonical):
+        return Invalid((Problem(
+            code="bloat-completion-plan-invalid",
+            message="completion.plan digest does not match its serialized contents",
+            location="completion.plan.digest",
+        ),))
+    return ChunkPlan(
+        chunks=tuple(built), index_digest=raw["index_digest"],
+        max_documents=max_documents, max_units=max_units,
+        digest=raw["digest"],
+    )
+
+
+@dataclass(frozen=True)
+class ChunkOutcome:
+    """What assembly received for one planned chunk."""
+
+    chunk_id: str
+    completion_state: str
+    verdicts: Tuple[dict, ...] = ()
+    reason: str = ""
+
+    @classmethod
+    def complete(cls, chunk_id, verdicts):
+        return cls(chunk_id, COMPLETION_COMPLETE, tuple(verdicts), "")
+
+    @classmethod
+    def missing(cls, chunk_id, reason):
+        return cls(chunk_id, COMPLETION_MISSING, (), reason)
+
+    @classmethod
+    def invalid(cls, chunk_id, reason):
+        return cls(chunk_id, COMPLETION_INVALID, (), reason)
+
+
+@dataclass(frozen=True)
+class BloatAuditInput:
+    """The one public artifact a completed fan-out hands to `audit_bloat`."""
+
+    verdicts: Tuple[dict, ...]
+    plan: ChunkPlan
+    chunks: Tuple[dict, ...]
+    digest: str
+
+    def to_dict(self):
+        return {
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "verdicts": [dict(verdict) for verdict in self.verdicts],
+            "completion": {
+                "plan": self.plan.to_dict(),
+                "chunks": [dict(chunk) for chunk in self.chunks],
+                "digest": self.digest,
+            },
+        }
+
+
+def _completion_digest(plan_digest, chunks, verdicts):
+    """Identity of the authentic plan and every received verdict byte-shape."""
+    return sha256_canonical({
+        "plan_digest": plan_digest,
+        "chunks": chunks,
+        "verdicts": verdicts,
+    })
+
+
+def assemble_bloat_input(plan, outcomes):
+    """Bind one deterministic plan to the chunk results assembly received.
+
+    `outcomes` is one `ChunkOutcome` per planned chunk, in plan order. The
+    function owns global verdict labels, per-result content digests, and the
+    completion digest so interactive and scheduler adapters cannot implement
+    parallel wire contracts.
+    """
+    if not isinstance(plan, ChunkPlan):
+        return Invalid((Problem(
+            code="bloat-completion-plan-invalid",
+            message="assembly requires the ChunkPlan returned by bloat planning",
+            location="completion.plan",
+        ),))
+    if not isinstance(outcomes, (list, tuple)) or not all(
+            isinstance(outcome, ChunkOutcome) for outcome in outcomes):
+        return Invalid((Problem(
+            code="bloat-completion-outcomes-invalid",
+            message="assembly outcomes must be ChunkOutcome values",
+            location="completion.chunks",
+        ),))
+    expected_ids = [chunk.chunk_id for chunk in plan.chunks]
+    received_ids = [outcome.chunk_id for outcome in outcomes]
+    if received_ids != expected_ids:
+        return Invalid((Problem(
+            code="bloat-completion-outcomes-mismatch",
+            message=(f"assembly outcomes must follow the planned chunks exactly; "
+                     f"expected {expected_ids}, received {received_ids}"),
+            location="completion.chunks",
+        ),))
+
+    verdicts, completed = [], []
+    for outcome in outcomes:
+        if outcome.completion_state not in COMPLETION_STATES:
+            return Invalid((Problem(
+                code="bloat-completion-state-invalid",
+                message=(f"chunk {outcome.chunk_id} completion_state must be one "
+                         f"of {list(COMPLETION_STATES)}"),
+                location="completion.chunks",
+            ),))
+        if outcome.completion_state == COMPLETION_COMPLETE:
+            if (outcome.reason or not isinstance(outcome.verdicts, tuple)
+                    or not all(isinstance(verdict, dict)
+                               for verdict in outcome.verdicts)):
+                return Invalid((Problem(
+                    code="bloat-completion-outcome-invalid",
+                    message="a complete chunk carries verdicts and no reason",
+                    location="completion.chunks",
+                ),))
+            start = len(verdicts) + 1
+            for verdict in outcome.verdicts:
+                verdicts.append({**verdict, "id": f"B{len(verdicts) + 1}"})
+            ids = [f"B{number}" for number in range(start, len(verdicts) + 1)]
+            selected = verdicts[start - 1:]
+            result_digest = sha256_canonical({
+                "chunk": outcome.chunk_id, "verdicts": selected,
+            })
+        else:
+            if outcome.verdicts or not _nonempty(outcome.reason):
+                return Invalid((Problem(
+                    code="bloat-completion-outcome-invalid",
+                    message="a missing or invalid chunk carries a reason and no verdicts",
+                    location="completion.chunks",
+                ),))
+            ids, result_digest = [], None
+        completed.append({
+            "id": outcome.chunk_id,
+            "completion_state": outcome.completion_state,
+            "verdict_ids": ids,
+            "result_digest": result_digest,
+            "reason": outcome.reason,
+        })
+
+    digest = _completion_digest(plan.digest, completed, verdicts)
+    return BloatAuditInput(
+        verdicts=tuple(verdicts), plan=plan, chunks=tuple(completed), digest=digest,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -289,8 +525,8 @@ def load_bloat_verdicts(path):
         ),))
 
 
-def _verdict_list(payload):
-    """(the `verdicts` list, ()) or (None, problems), from a bloat envelope.
+def _audit_input(payload):
+    """(`verdicts`, `completion`, problems) from a bloat audit envelope.
 
     The shape check `load_bloat_verdicts` deliberately does not do: an
     object, no extra keys, carrying a `verdicts` list (optionally a
@@ -299,14 +535,15 @@ def _verdict_list(payload):
     so no call path into `audit_bloat` can skip it.
     """
     if (not isinstance(payload, dict)
-            or set(payload) - {"schema_version", "verdicts"}
-            or "verdicts" not in payload
-            or not isinstance(payload["verdicts"], list)):
-        return None, (Problem(
+            or set(payload) - {"schema_version", "verdicts", "completion"}
+            or not {"verdicts", "completion"}.issubset(payload)
+            or not isinstance(payload.get("verdicts"), list)):
+        return None, None, (Problem(
             code="bloat-verdicts-invalid-shape",
             message=(
-                f"verdicts must be an object shaped {{'verdicts': [...]}} "
-                f"(optionally with 'schema_version'), not {payload!r}"
+                "bloat audit input must carry verdicts and completion, with "
+                "only an optional schema_version — completion is report "
+                "evidence, not an optional presentation sidecar"
             ),
             location="verdicts",
         ),)
@@ -316,7 +553,7 @@ def _verdict_list(payload):
     # compare equal to `1`, so an envelope declaring either passed a check whose
     # own message says it reads an *integer* version.
     if not whole_number(version) or version != ARTIFACT_SCHEMA_VERSION:
-        return None, (Problem(
+        return None, None, (Problem(
             code="bloat-verdicts-invalid-shape",
             message=(
                 f"verdicts schema_version {version!r} is not supported; this "
@@ -325,7 +562,133 @@ def _verdict_list(payload):
             location="verdicts.schema_version",
         ),)
 
-    return payload["verdicts"], ()
+    return payload["verdicts"], payload["completion"], ()
+
+
+def validate_chunk_plan(index, raw):
+    """Re-derive an untrusted serialized chunk plan from its declared budgets."""
+    parsed = chunk_plan_from_dict(raw)
+    if isinstance(parsed, Invalid):
+        return parsed
+    expected = plan_chunks(
+        index, max_documents=parsed.max_documents, max_units=parsed.max_units,
+    )
+    if raw != expected.to_dict():
+        return Invalid((Problem(
+            code="bloat-completion-plan-mismatch",
+            message=("completion.plan is not the deterministic plan for the "
+                     "current index and its declared budgets; re-plan and "
+                     "re-run pending chunks"),
+            location="completion.plan",
+        ),))
+    return expected
+
+
+def _validate_completion(index, verdicts, raw):
+    """Validate assembled completion evidence against the current index.
+
+    The assembler is allowed to report missing or invalid worker results; those
+    are coverage gaps.  The completion artifact itself is authority-shaped
+    input, though, so stale, duplicated, mismatched, or edited evidence is an
+    invalid run rather than a partial one.
+    """
+    problems = []
+
+    def bad(code, message, location):
+        problems.append(Problem(code=code, message=message, location=location))
+
+    if not isinstance(raw, dict) or set(raw) != {"plan", "chunks", "digest"}:
+        bad("bloat-completion-invalid-shape",
+            "completion must carry exactly plan, chunks, and digest", "completion")
+        return None, tuple(problems)
+
+    plan = validate_chunk_plan(index, raw["plan"])
+    if isinstance(plan, Invalid):
+        return None, plan.problems
+
+    chunks = raw.get("chunks")
+    if not isinstance(chunks, list):
+        bad("bloat-completion-invalid-shape", "completion.chunks must be a list",
+            "completion.chunks")
+        return None, tuple(problems)
+    chunk_fields = {
+        "id", "completion_state", "verdict_ids", "result_digest", "reason",
+    }
+    malformed = [position for position, chunk in enumerate(chunks)
+                 if not isinstance(chunk, dict) or set(chunk) != chunk_fields]
+    if malformed:
+        for position in malformed:
+            bad("bloat-completion-invalid-shape",
+                f"completion.chunks[{position}] must carry exactly id, "
+                "completion_state, verdict_ids, result_digest, and reason",
+                f"completion.chunks[{position}]")
+        return None, tuple(problems)
+
+    assigned = []
+    verdict_ids = [entry.get("id") if isinstance(entry, dict) else None
+                   for entry in verdicts]
+    if len(chunks) != len(plan.chunks):
+        bad("bloat-completion-chunks-mismatch",
+            "completion must name every planned chunk exactly once, in plan order",
+            "completion.chunks")
+    for position, (chunk, planned) in enumerate(zip(chunks, plan.chunks)):
+        where = f"completion.chunks[{position}]"
+        chunk_id = chunk["id"]
+        completion_state = chunk["completion_state"]
+        ids = chunk["verdict_ids"]
+        result_digest = chunk["result_digest"]
+        reason = chunk["reason"]
+        if chunk_id != planned.chunk_id:
+            bad("bloat-completion-chunks-mismatch",
+                f"completion chunk {chunk_id!r} does not match planned chunk "
+                f"{planned.chunk_id!r}", where + ".id")
+        if completion_state not in COMPLETION_STATES:
+            bad("bloat-completion-state-invalid",
+                f"completion_state must be one of {list(COMPLETION_STATES)}",
+                where + ".completion_state")
+        if not isinstance(ids, list) or not all(_nonempty(value) for value in ids):
+            bad("bloat-completion-invalid-chunk",
+                "chunk verdict_ids must be a list of non-empty ids",
+                where + ".verdict_ids")
+            ids = []
+        if completion_state == COMPLETION_COMPLETE:
+            if reason != "":
+                bad("bloat-completion-outcome-invalid",
+                    "a complete chunk carries no failure reason", where + ".reason")
+            assigned.extend(ids)
+            selected = [entry for entry in verdicts
+                        if isinstance(entry, dict) and entry.get("id") in ids]
+            expected_result_digest = sha256_canonical({
+                "chunk": chunk_id, "verdicts": selected,
+            })
+            if result_digest != expected_result_digest:
+                bad("bloat-completion-result-mismatch",
+                    "result_digest does not bind the verdict contents received "
+                    "for this chunk", where + ".result_digest")
+        else:
+            if ids:
+                bad("bloat-completion-outcome-invalid",
+                    "a missing or invalid chunk cannot contribute verdicts",
+                    where + ".verdict_ids")
+            if not _nonempty(reason):
+                bad("bloat-completion-outcome-invalid",
+                    "a missing or invalid chunk must explain its coverage gap",
+                    where + ".reason")
+            if result_digest is not None:
+                bad("bloat-completion-outcome-invalid",
+                    "a missing or invalid chunk carries no result_digest",
+                    where + ".result_digest")
+    if assigned != verdict_ids or len(set(assigned)) != len(assigned):
+        bad("bloat-completion-verdict-mismatch",
+            "complete chunks must bind every supplied verdict id exactly once, "
+            "in assembled order", "completion.chunks")
+
+    expected_digest = _completion_digest(plan.digest, chunks, verdicts)
+    if raw.get("digest") != expected_digest:
+        bad("bloat-completion-digest-mismatch",
+            "completion evidence changed after assembly", "completion.digest")
+
+    return (plan, chunks) if not problems else None, tuple(problems)
 
 
 # Every bloat verdict is checked against the whole-repository context index,
@@ -364,9 +727,10 @@ def audit_bloat(repo_root, verdicts, registry_path=DEFAULT_REGISTRY_PATH):
     verdicts against the index, and validate what results through the same
     `report.validate_report` every other lane runs through.
 
-    `verdicts` is the envelope a bloat lane returned —
-    `{"verdicts": [...]}`, optionally with a matching `schema_version` — not
-    a bare list; `_verdict_list` checks its shape here, inside the
+    `verdicts` is the envelope a bloat lane assembled — `{"verdicts": [...],
+    "completion": {...}}`, optionally with a matching `schema_version` — not
+    a bare list and never a verdict-only artifact whose missing work lived in
+    an optional sidecar. `_audit_input` checks its shape here, inside the
     composition, the same seam `drift.audit_drift` checks its verdicts
     payload at (`_verdict_entries`). Required — there is no planless bloat
     audit the way a drift run can leave living documents unexamined; a value
@@ -385,13 +749,65 @@ def audit_bloat(repo_root, verdicts, registry_path=DEFAULT_REGISTRY_PATH):
         audit_mode="full", evidence_boundary=EVIDENCE_BOUNDARY, **state
     )
 
-    entries, problems = _verdict_list(verdicts)
+    entries, completion, problems = _audit_input(verdicts)
     if problems:
         return Invalid(tuple(problems))
 
-    result = record_verdicts(index, lineage, entries)
-    if isinstance(result, Invalid):
-        return result
+    validated_completion, problems = _validate_completion(
+        index, entries, completion,
+    )
+    if problems:
+        return Invalid(tuple(problems))
+    plan, completed_chunks = validated_completion
+
+    by_id = {entry["id"]: entry for entry in entries}
+    findings, examined, incomplete = [], [], [
+        {"scope": gap.scope, "reason": gap.reason} for gap in index.unexamined
+    ]
+    for chunk, completed in zip(plan.chunks, completed_chunks):
+        if completed["completion_state"] == COMPLETION_COMPLETE:
+            result = record_verdicts(
+                index, lineage,
+                [by_id[record_id] for record_id in completed["verdict_ids"]],
+                chunk=chunk,
+            )
+            if isinstance(result, Invalid):
+                return result
+            findings.extend(result.findings)
+            examined.extend({
+                "scope": document,
+                "chunk": completed["id"],
+                "plan_digest": plan.digest,
+            } for document in chunk.documents)
+            continue
+        code = ("bloat-chunk-missing"
+                if completed["completion_state"] == COMPLETION_MISSING
+                else "bloat-chunk-invalid")
+        for document in chunk.documents:
+            incomplete.append({
+                "scope": document,
+                "reason": (
+                    f"{code}: planned chunk {completed['id']} did not produce "
+                    f"a valid result: {completed['reason']}"
+                ),
+            })
+
+    result = BloatResult(
+        findings=tuple(findings), incomplete=tuple(incomplete),
+        index_digest=index.digest, examined=tuple(examined),
+        scope={
+            "basis": (
+                "the completion artifact partitions the context index into "
+                "content-addressed chunks"
+            ),
+            "coverage": SCOPE_WHOLE_INVENTORY,
+            "documents": sorted(
+                [document.path for document in index.documents]
+                + [gap.scope for gap in index.unexamined]
+            ),
+            "excluded": [],
+        },
+    )
 
     return validate_report(
         result.report_payload(lineage), registry_path=registry_path
@@ -544,6 +960,8 @@ class BloatResult:
     findings: Tuple[Finding, ...]
     incomplete: Tuple[dict, ...]
     index_digest: str
+    examined: Tuple[dict, ...] = ()
+    scope: Optional[dict] = None
     status: str = STATUS_OK
 
     def records(self):
@@ -565,13 +983,18 @@ class BloatResult:
         """
         records = [f.to_record() for f in self.findings]
         incomplete = [dict(i) for i in self.incomplete]
-        return {
+        payload = {
             "status": state_from_content(records, incomplete),
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "lineage": lineage.to_dict(),
             "records": records,
             "incomplete": incomplete,
         }
+        if self.examined:
+            payload["examined"] = [dict(entry) for entry in self.examined]
+        if self.scope is not None:
+            payload["scope"] = dict(self.scope)
+        return payload
 
     def to_dict(self):
         return {

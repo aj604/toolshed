@@ -58,16 +58,18 @@ artifact.
    "${TMPDIR:-/tmp}/bloat-plan.json"` partitions every indexed document into bounded chunks
    (`--max-documents`, `--max-units`), content-addressed so an unchanged chunk
    keeps its id, and refuses outright (`registry-missing`) when there is none.
-   For a dispatched sweep, `scripts/plan-chunks.py` plans from
-   the repository's `.md` files and `.doc-lifecycle/audit-scope.json` instead,
-   adding the dispatch ergonomics the engine has no opinion about: per-chunk
-   turn budgets, `--emit-prompt` slices, and `--results-dir` resume. It does
-   **not** read the registry, so it plans an unregistered or unauditable
-   corpus without complaint — check the registry exists yourself before
-   dispatching a sweep with it, or every chunk's model invocation is spent
-   before `bloat-audit` refuses at the end. Either
-   way `bloat-audit` re-derives every fact from the registry, so a chunk plan
-   is a work order, never an authority. `plan-chunks.py --emit-prompt`/
+   For a dispatched sweep, `scripts/plan-chunks.py` adds the dispatch
+   ergonomics the engine has no opinion about: per-chunk turn budgets,
+   `--emit-prompt` slices, and `--results-dir` resume. On a registered
+   repository it asks the public `bloat-plan` command for the authentic plan,
+   dispatches those exact chunk ids and members, and preserves that full plan
+   in `engine_plan`; assembly refuses a missing, edited, or differently
+   partitioned plan before any envelope can reach `bloat-audit`. The script's
+   legacy `.md`/`audit-scope.json` planner remains only for unregistered
+   inventory and prompt-planning uses; such a manifest cannot be assembled
+   into completion evidence.
+   Either way `bloat-audit` re-derives every fact from the registry, so a
+   chunk plan is a work order, never an authority. `plan-chunks.py --emit-prompt`/
    `--emit-turns` read a `bloat-plan` manifest too (its chunks carry
    `documents`, bare paths, rather than `plan-chunks.py`'s own per-doc
    `docs: [{"path","lines","hint"}]`) — the dispatch prompt renders whichever
@@ -100,15 +102,12 @@ artifact.
    file-bound `DISTILL` status — expands each `scope` into one finding per
    member, and writes the validated report. It fails closed: any problem
    records nothing and names everything, so one re-prompt fixes all of it.
-   Exit 0 is a report (clean or with findings), 1 refused, 4 partial —
-   `partial` means the *index* could not examine something (an unregistered or
-   symlinked path), and the report names it.
-
-   **An unswept chunk is not in that count.** The engine sees only the verdicts
-   it was handed, so documents a `--allow-partial` assembly skipped read as
-   examined-and-clean at exit 0. After a partial assembly the report's coverage
-   is not what it appears: carry the `--unswept-out` list forward and name
-   those chunks yourself whenever you present or hand off the report.
+   Exit 0 is a report (clean or with findings), 1 refused, 4 partial. Every
+   valid chunk contributes positive `examined` entries bound to its chunk and
+   plan digest. A missing or invalid chunk contributes one `incomplete` entry
+   per affected document, naming the chunk, and forces partial. Stale,
+   duplicated, mismatched, or edited completion evidence is invalid rather
+   than partial: re-plan and run the pending chunks again.
 
 **Headless (chunk executor):** your chunk slice arrived verbatim in the
 dispatch prompt — the doc list and the output path. That slice is your entire
@@ -144,8 +143,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/plan-chunks.py 
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py \
   --chunk <dir>/chunks/<id>.json --manifest <dir>/manifest.json
 
-# assemble every chunk result into the verdicts envelope (refuses partial
-# assembly; --allow-partial skips missing chunks loudly)
+# assemble every chunk result into the verdicts + completion envelope (refuses
+# partial assembly; --allow-partial records missing/invalid chunks as gaps)
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/detecting-doc-bloat/scripts/validate-bloat-output.py \
   --assemble <dir>/chunks --manifest <dir>/manifest.json --out <dir>/bloat-verdicts.json
 
@@ -161,7 +160,9 @@ python3 -m doclifecycle bloat-audit --repo . --verdicts <dir>/bloat-verdicts.jso
 Verdicts carry only `id, verdict, path, units, evidence, destination,
 proposal, status, scope, sample`; the verdicts are `CUT / CONDENSE /
 EXTRACT-AND-MOVE / MERGE-DOC / RETIRE-DOC / DISTILL`; the artifact is the
-envelope `{"schema_version": 1, "verdicts": [...]}`. `files`, `members`,
+envelope `{"schema_version": 1, "verdicts": [...], "completion": {...}}`.
+The assembler authors `completion`; chunk executors author only verdicts.
+`files`, `members`,
 `occurrences`, and `contention` are refused outright — a bulk finding's
 members are enumerated from the index, never asserted by the model.
 `DISTILL` verdicts carry classification + landed-code evidence, plus — where

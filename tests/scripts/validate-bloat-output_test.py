@@ -12,6 +12,7 @@ Run: python3 tests/scripts/validate-bloat-output_test.py
 """
 
 import json
+import hashlib
 import os
 import subprocess
 import sys
@@ -27,6 +28,24 @@ SCRIPT = os.path.join(
 
 UNIT = "a" * 64          # a unit is the sha256 digest `segment` prints
 UNIT2 = "b" * 64
+
+
+def digest(value):
+    return hashlib.sha256(json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("utf-8")).hexdigest()
+
+
+def engine_plan(chunks, index_digest="a" * 64,
+                max_documents=8, max_units=400):
+    content = {
+        "schema_version": 1,
+        "index_digest": index_digest,
+        "max_documents": max_documents,
+        "max_units": max_units,
+        "chunks": chunks,
+    }
+    return {"status": "ok", **content, "digest": digest(content)}
 
 
 def cut(**over):
@@ -68,7 +87,28 @@ def scope_retire(**over):
 
 
 def envelope(verdicts, **over):
-    obj = {"schema_version": 1, "verdicts": verdicts}
+    plan = engine_plan([{
+        "id": "c-aaa", "documents": ["README.md"], "unit_count": 1,
+    }])
+    result = {
+        "id": "c-aaa", "completion_state": "complete",
+        "verdict_ids": [entry.get("id", f"B{position}")
+                        for position, entry in enumerate(verdicts, 1)],
+        "result_digest": digest({"chunk": "c-aaa", "verdicts": verdicts}),
+        "reason": "",
+    }
+    obj = {
+        "schema_version": 1,
+        "verdicts": verdicts,
+        "completion": {
+            "plan": plan,
+            "chunks": [result],
+            "digest": digest({
+                "plan_digest": plan["digest"],
+                "chunks": [result], "verdicts": verdicts,
+            }),
+        },
+    }
     obj.update(over)
     return obj
 
@@ -103,7 +143,9 @@ class Envelope(unittest.TestCase):
         self.assertIn("OK: 1 verdict(s) valid", r.stdout)
 
     def test_envelope_without_schema_version_valid(self):
-        r = run({"verdicts": [cut()]})
+        payload = envelope([cut()])
+        del payload["schema_version"]
+        r = run(payload)
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_bare_array_refused_legibly(self):
@@ -111,6 +153,12 @@ class Envelope(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("verdicts", r.stderr)
         self.assertIn("envelope", r.stderr)
+
+    def test_completion_cannot_be_omitted_from_an_empty_verdict_envelope(self):
+        r = run({"schema_version": 1, "verdicts": []})
+
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("completion", r.stderr)
 
     def test_unsupported_schema_version_refused(self):
         r = run(envelope([cut()], schema_version=2))
@@ -454,6 +502,7 @@ class SeamFixture(unittest.TestCase):
         os.makedirs(self.chunks_dir)
         self.manifest = {
             "schema": 1,
+            "index_digest": "a" * 64,
             "chunks": [
                 {"id": "c-aaa", "turns": 20,
                  "docs": [{"path": "README.md", "lines": 20, "hint": "living"},
@@ -464,6 +513,12 @@ class SeamFixture(unittest.TestCase):
             ],
             "pending": ["c-aaa", "c-bbb"],
         }
+        self.manifest["engine_plan"] = engine_plan([
+            {"id": "c-aaa", "documents": ["README.md", "RUNBOOK.md"],
+             "unit_count": 6},
+            {"id": "c-bbb", "documents": ["docs/plans/old-design.md"],
+             "unit_count": 3},
+        ])
         self.manifest_path = os.path.join(self.tmp.name, "manifest.json")
         with open(self.manifest_path, "w", encoding="utf-8") as f:
             json.dump(self.manifest, f)
@@ -529,15 +584,11 @@ class ChunkSeam(SeamFixture):
         path = os.path.join(self.tmp.name, "bloat-plan.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump({
-                "status": "ok",
-                "schema_version": 1,
-                "index_digest": "c" * 64,
-                "digest": "d" * 64,
-                "chunks": [
+                **engine_plan([
                     {"id": "c-aaa",
                      "documents": ["README.md", "RUNBOOK.md"],
                      "unit_count": 6},
-                ],
+                ], index_digest="c" * 64),
             }, f)
         return path
 
@@ -581,13 +632,38 @@ class Assembly(SeamFixture):
         r, out = self.assemble()
         self.assertEqual(r.returncode, 0, r.stderr)
         payload = self.read(out)
-        self.assertEqual(set(payload), {"schema_version", "verdicts"})
+        self.assertEqual(set(payload), {"schema_version", "verdicts", "completion"})
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual([v["id"] for v in payload["verdicts"]], ["B1", "B2"])
+        self.assertEqual(
+            payload["completion"]["plan"], self.manifest["engine_plan"],
+        )
         final = run_argv(out)
         self.assertEqual(final.returncode, 0, final.stderr)
 
-    def test_allow_partial_survives_a_chunk_doc_missing_its_path(self):
+    def test_tampered_engine_plan_digest_is_refused(self):
+        self.write_both()
+        self.manifest["engine_plan"]["digest"] = "f" * 64
+        with open(self.manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(self.manifest, fh)
+
+        result, _out = self.assemble()
+
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("digest does not match", result.stderr)
+
+    def test_scheduler_membership_must_match_the_engine_plan(self):
+        self.write_both()
+        self.manifest["chunks"][0]["docs"][0]["path"] = "OTHER.md"
+        with open(self.manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(self.manifest, fh)
+
+        result, _out = self.assemble()
+
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("exactly match engine_plan", result.stderr)
+
+    def test_malformed_scheduler_manifest_fails_shut_without_a_traceback(self):
         # `chunk_doc_paths` filtered its `docs` dialect only for `isinstance
         # dict`, never for the `path` being a string, so a chunk carrying
         # `docs: [{}]` yielded `[None]` and the notice's `', '.join(...)`
@@ -596,14 +672,16 @@ class Assembly(SeamFixture):
         # an incomplete fan-out. Found by review on the split stack.
         manifest = os.path.join(self.tmp.name, "malformed-manifest.json")
         with open(manifest, "w", encoding="utf-8") as fh:
-            json.dump({"chunks": [{"id": "c-aaa", "docs": [{}]}]}, fh)
+            json.dump({"index_digest": "a" * 64,
+                       "chunks": [{"id": "c-aaa", "docs": [{}]}]}, fh)
         out = os.path.join(self.tmp.name, "bloat-verdicts.json")
 
         r = run_argv("--assemble", self.chunks_dir, "--manifest", manifest,
                      "--out", out, "--allow-partial")
 
         self.assertNotIn("Traceback", r.stderr)
-        self.assertIn("UNSWEPT", r.stderr)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("engine_plan", r.stderr)
 
     def test_missing_chunk_refused_by_name(self):
         self.write_chunk("c-aaa.json", self.first_result())
@@ -629,7 +707,8 @@ class Assembly(SeamFixture):
             self.assertEqual(json.load(f), [
                 {"chunk": "c-bbb", "docs": ["docs/plans/old-design.md"]}])
         # The envelope stays exactly what bloat-audit accepts.
-        self.assertEqual(set(self.read(out)), {"schema_version", "verdicts"})
+        self.assertEqual(set(self.read(out)),
+                         {"schema_version", "verdicts", "completion"})
 
     def test_complete_assembly_writes_an_empty_unswept_list(self):
         self.write_both()
@@ -639,17 +718,35 @@ class Assembly(SeamFixture):
         with open(unswept, encoding="utf-8") as f:
             self.assertEqual(json.load(f), [])
 
-    def test_invalid_chunk_fails_even_with_allow_partial(self):
+    def test_invalid_chunk_is_a_gap_with_allow_partial(self):
         self.write_chunk("c-aaa.json", self.first_result([cut(verdict="POLICY")]))
         self.write_chunk("c-bbb.json", self.second_result())
-        for extra in ((), ("--allow-partial",)):
-            r, _ = self.assemble(*extra)
-            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-            self.assertIn("c-aaa", r.stderr)
+        refused, _ = self.assemble()
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        partial, out = self.assemble("--allow-partial")
+        self.assertEqual(partial.returncode, 0, partial.stdout + partial.stderr)
+        chunk = self.read(out)["completion"]["chunks"][0]
+        self.assertEqual(chunk["completion_state"], "invalid")
+        self.assertEqual(chunk["id"], "c-aaa")
+
+    def test_unreadable_chunk_is_a_gap_with_allow_partial(self):
+        path = os.path.join(self.chunks_dir, "c-aaa.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        self.write_chunk("c-bbb.json", self.second_result())
+
+        result, out = self.assemble("--allow-partial")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        chunk = self.read(out)["completion"]["chunks"][0]
+        self.assertEqual(chunk["completion_state"], "invalid")
+        self.assertIn("unreadable", chunk["reason"])
 
     def test_empty_manifest_assembles_an_empty_envelope(self):
         with open(self.manifest_path, "w", encoding="utf-8") as f:
-            json.dump({"schema": 1, "chunks": [], "pending": []}, f)
+            json.dump({"schema": 1, "index_digest": "a" * 64,
+                       "chunks": [], "pending": [],
+                       "engine_plan": engine_plan([])}, f)
         r, out = self.assemble()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.read(out)["verdicts"], [])

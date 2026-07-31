@@ -26,9 +26,6 @@ from support import (  # noqa: E402  (also puts the engine on sys.path)
 from doclifecycle import bloat  # noqa: E402
 from doclifecycle.context import build_context_index  # noqa: E402
 
-
-
-
 class ContextIndexCommand(RepoTestCase):
     def corpus(self):
         return self.repo({
@@ -168,10 +165,24 @@ class BloatAuditCommand(RepoTestCase):
         return entry
 
     def verdicts_file(self, root, verdicts):
+        plan = bloat.plan_repository_chunks(root)
         path = os.path.join(root, "verdicts.json")
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump({"verdicts": verdicts}, fh)
+        remaining = list(verdicts)
+        outcomes = []
+        for chunk in plan.chunks:
+            selected = [entry for entry in remaining
+                        if entry.get("scope") is not None
+                        or entry.get("path") in chunk.documents]
+            remaining = [entry for entry in remaining if entry not in selected]
+            outcomes.append(bloat.ChunkOutcome.complete(
+                chunk.chunk_id, selected,
+            ))
+        self.write_input(path, bloat.assemble_bloat_input(plan, outcomes))
         return path
+
+    def write_input(self, path, audit_input):
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(audit_input.to_dict(), fh)
 
     def test_the_command_agrees_with_the_library(self):
         repo = self.corpus()
@@ -179,6 +190,8 @@ class BloatAuditCommand(RepoTestCase):
         path = self.verdicts_file(repo, verdicts)
 
         result = run_command("bloat-audit", "--repo", repo, "--verdicts", path)
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
@@ -186,7 +199,7 @@ class BloatAuditCommand(RepoTestCase):
             # `audit_bloat` takes the envelope the file holds — the same
             # shape `load_bloat_verdicts` hands the CLI unchanged — not the
             # bare `verdicts` list.
-            bloat.audit_bloat(repo, {"verdicts": verdicts}).to_dict(),
+            bloat.audit_bloat(repo, payload).to_dict(),
         )
 
     def test_a_cut_records_digest_is_mintable(self):
@@ -221,6 +234,101 @@ class BloatAuditCommand(RepoTestCase):
         result = run_command("bloat-audit", "--repo", self.corpus())
 
         self.assertEqual(result.returncode, 2)
+
+    def test_missing_planned_chunk_is_partial_inside_the_report(self):
+        repo = self.corpus()
+        plan = bloat.plan_repository_chunks(repo, max_documents=1)
+        self.assertGreaterEqual(len(plan.chunks), 2)
+        completed, missing = plan.chunks[0], plan.chunks[1]
+        outcomes = [
+            bloat.ChunkOutcome.complete(completed.chunk_id, []),
+            bloat.ChunkOutcome.missing(
+                missing.chunk_id, f"missing result for {missing.chunk_id}",
+            ),
+        ]
+        outcomes.extend(
+            bloat.ChunkOutcome.missing(
+                chunk.chunk_id, f"missing result for {chunk.chunk_id}",
+            )
+            for chunk in plan.chunks[2:]
+        )
+        verdicts = os.path.join(repo, "partial-verdicts.json")
+        self.write_input(
+            verdicts, bloat.assemble_bloat_input(plan, outcomes),
+        )
+        audited = run_command(
+            "bloat-audit", "--repo", repo, "--verdicts", verdicts,
+        )
+
+        self.assertEqual(audited.returncode, 4, audited.stderr)
+        report = json.loads(audited.stdout)
+        self.assertEqual(report["status"], "partial")
+        for document in missing.documents:
+            self.assertIn(document, [gap["scope"] for gap in report["incomplete"]])
+        self.assertTrue(all(
+            missing.chunk_id in gap["reason"]
+            for gap in report["incomplete"]
+            if gap["scope"] in missing.documents
+        ))
+
+    def test_complete_multi_chunk_sweep_with_empty_verdicts_is_clean(self):
+        repo = self.corpus()
+        plan = bloat.plan_repository_chunks(repo, max_documents=1)
+        outcomes = [
+            bloat.ChunkOutcome.complete(chunk.chunk_id, [])
+            for chunk in plan.chunks
+        ]
+        verdicts = os.path.join(repo, "complete-verdicts.json")
+        self.write_input(
+            verdicts, bloat.assemble_bloat_input(plan, outcomes),
+        )
+        audited = run_command(
+            "bloat-audit", "--repo", repo, "--verdicts", verdicts,
+        )
+
+        self.assertEqual(audited.returncode, 0, audited.stderr)
+        report = json.loads(audited.stdout)
+        self.assertEqual(report["status"], "clean")
+        self.assertEqual(report["records"], [])
+        self.assertEqual(report["incomplete"], [])
+        self.assertEqual(
+            sorted(entry["scope"] for entry in report["examined"]),
+            sorted(document for chunk in plan.chunks
+                   for document in chunk.documents),
+        )
+        self.assertTrue(all(entry["chunk"].startswith("c-")
+                            for entry in report["examined"]))
+        self.assertTrue(all(len(entry["plan_digest"]) == 64
+                            for entry in report["examined"]))
+
+    def test_invalid_planned_chunk_is_partial_inside_the_report(self):
+        repo = self.corpus()
+        plan = bloat.plan_repository_chunks(repo, max_documents=1)
+        invalid = plan.chunks[0]
+        outcomes = [bloat.ChunkOutcome.invalid(
+            invalid.chunk_id, f"bloat-chunk-invalid: {invalid.chunk_id}",
+        )]
+        outcomes.extend(
+            bloat.ChunkOutcome.complete(chunk.chunk_id, [])
+            for chunk in plan.chunks[1:]
+        )
+        verdicts = os.path.join(repo, "invalid-verdicts.json")
+        self.write_input(
+            verdicts, bloat.assemble_bloat_input(plan, outcomes),
+        )
+        audited = run_command(
+            "bloat-audit", "--repo", repo, "--verdicts", verdicts,
+        )
+
+        self.assertEqual(audited.returncode, 4, audited.stderr)
+        report = json.loads(audited.stdout)
+        self.assertEqual(report["status"], "partial")
+        self.assertTrue(all(
+            "bloat-chunk-invalid" in gap["reason"]
+            and invalid.chunk_id in gap["reason"]
+            for gap in report["incomplete"]
+            if gap["scope"] in invalid.documents
+        ))
 
 
 if __name__ == "__main__":
