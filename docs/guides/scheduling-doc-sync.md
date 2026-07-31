@@ -48,13 +48,19 @@ Mondays:
 - A trusted script renders each engine chunk with its public segmentation evidence and the
   planner's turn budget. The coordinator dispatches those exact prompts to one fresh worker per
   chunk in parallel waves; coordinators and workers have only `Task`, `Read`, `Grep`, and `Glob`.
+  That is the exact built-in inventory, not merely an approval list; MCP tools are denied,
+  project/local settings are excluded, and each attempt's sole user-settings source is a fresh
+  temporary config root with auto-memory disabled.
   Their extra read roots are limited to this audit's temporary directory and the pinned bloat
   skill directory, so the prompts are reachable without granting all runner temporary state.
 - Workers return JSON rather than writing files. Another trusted script extracts the pinned
-  action's schema-bound `structured_output`, validates every chunk, and selects only the
-  missing/invalid ids for one equally read-only fresh retry.
+  action's schema-bound `structured_output`, requires its outer and inner chunk identities to
+  agree, validates every chunk, and selects only the missing/invalid ids for one equally
+  read-only fresh retry. A failed first action does not suppress that retry; cancellation does.
 - Plans, chunk results, completion envelopes, reports, and cost data stay under the runner's
   temporary directory, never in the checkout.
+- First-pass execution telemetry is copied before any retry can overwrite the action's default
+  path; retry telemetry is copied separately and both snapshots are aggregated.
 - After the workers and their retry stop, a defense-in-depth workflow step checks HEAD plus
   staged, unstaged, ignored, and ordinary untracked files. Any repository mutation fails the run
   before completion assembly; the lane never resets the checkout and publishes a laundered

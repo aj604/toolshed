@@ -224,6 +224,13 @@ def parse_structured_output(raw, expected):
             print(f"warning: model returned a non-object for {item['id']}",
                   file=sys.stderr)
             continue
+        if result.get("chunk") != item["id"]:
+            print(
+                f"warning: model returned a chunk identity mismatch for "
+                f"{item['id']}",
+                file=sys.stderr,
+            )
+            continue
         candidates[item["id"]] = result
     return candidates
 

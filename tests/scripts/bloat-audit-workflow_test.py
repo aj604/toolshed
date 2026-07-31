@@ -76,7 +76,7 @@ class ScheduledBloatAuditContract(unittest.TestCase):
             self.assertIn(f'${{BLOAT_DIR}}/{name}', text)
         self.assertNotRegex(text, r">\s*(?:manifest|bloat-(?:verdicts|report)|audit-cost)\.json")
 
-    def test_every_action_is_sha_pinned_and_the_model_has_no_repo_credential(self):
+    def test_actions_are_pinned_and_workflow_passes_no_explicit_repo_credential(self):
         text = self.workflow_text()
         uses = re.findall(r"^\s*uses:\s*([^\s#]+)", text, re.MULTILINE)
         self.assertTrue(uses)
@@ -102,23 +102,57 @@ class ScheduledBloatAuditContract(unittest.TestCase):
         )
         model_grants = re.findall(r'--allowedTools "([^"]+)"', text)
         self.assertEqual(model_grants, ["Task,Read,Grep,Glob"] * 2)
+        model_inventories = re.findall(r'--tools "([^"]+)"', text)
+        self.assertEqual(model_inventories, ["Task,Read,Grep,Glob"] * 2)
+        self.assertEqual(
+            re.findall(r"--setting-sources ([^\s]+)", text),
+            ["user", "user"],
+        )
+        self.assertEqual(text.count('CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"'), 2)
+        self.assertEqual(
+            re.findall(r'--disallowedTools "([^"]+)"', text),
+            ["mcp__*", "mcp__*"],
+        )
+        self.assertEqual(
+            re.findall(
+                r"CLAUDE_CONFIG_DIR: "
+                r"\$\{\{ runner\.temp \}\}/doc-bloat-audit/"
+                r"(claude-config-[a-z]+)",
+                text,
+            ),
+            ["claude-config-first", "claude-config-retry"],
+        )
+        prepare = self.step_script("Render trusted read-only coordinator prompt")
+        self.assertIn("rm -rf", prepare)
+        self.assertIn("mkdir -p", prepare)
+        for config in ("claude-config-first", "claude-config-retry"):
+            self.assertEqual(prepare.count(config), 2)
         self.assertEqual(text.count("--add-dir"), 2)
         self.assertNotIn('--add-dir "${{ runner.temp }}"', text)
         self.assertIn(
             '--add-dir "${{ runner.temp }}/doc-bloat-audit"', text,
         )
         for forbidden in ("Write", "Bash", "Skill"):
-            self.assertNotIn(forbidden, " ".join(model_grants))
+            self.assertNotIn(
+                forbidden, " ".join(model_grants + model_inventories),
+            )
 
     def test_supported_action_outputs_feed_trusted_collection_and_one_retry(self):
         text = self.workflow_text()
         first = text.index("- name: Dispatch bounded bloat workers")
+        preserve_first = text.index(
+            "- name: Preserve first-pass execution telemetry",
+        )
         collect = text.index("- name: Validate worker returns and select retries")
         retry = text.index("- name: Retry invalid bloat chunks once")
+        preserve_retry = text.index("- name: Preserve retry execution telemetry")
         final = text.index("- name: Validate retry returns")
         assembly = text.index("- name: Assemble chunk completion evidence")
-        self.assertLess(first, collect)
+        self.assertLess(first, preserve_first)
+        self.assertLess(preserve_first, collect)
         self.assertLess(collect, retry)
+        self.assertLess(retry, preserve_retry)
+        self.assertLess(preserve_retry, final)
         self.assertLess(retry, final)
         self.assertLess(final, assembly)
 
@@ -128,7 +162,23 @@ class ScheduledBloatAuditContract(unittest.TestCase):
         self.assertIn("steps.retry_model.outputs.structured_output", text)
         self.assertIn("steps.retry_model.outputs.execution_file", text)
         self.assertRegex(text, r'bloat-cadence\.py"\s+collect')
-        self.assertIn("steps.collect.outputs.retry == 'true'", text)
+        self.assertIn(
+            "if: ${{ always() && !cancelled() && "
+            "steps.collect.outputs.retry == 'true' }}",
+            self.step_text("Retry invalid bloat chunks once"),
+        )
+
+        first_copy = self.step_text("Preserve first-pass execution telemetry")
+        retry_copy = self.step_text("Preserve retry execution telemetry")
+        cost = self.step_text("Extract cost and turn observability")
+        self.assertIn("steps.model.outputs.execution_file", first_copy)
+        self.assertIn("execution-first.json", first_copy)
+        self.assertIn("steps.retry_model.outputs.execution_file", retry_copy)
+        self.assertIn("execution-retry.json", retry_copy)
+        self.assertNotIn("steps.model.outputs.execution_file", cost)
+        self.assertNotIn("steps.retry_model.outputs.execution_file", cost)
+        self.assertIn('execution-first.json"', cost)
+        self.assertIn('execution-retry.json"', cost)
 
     def test_integrity_gate_orders_model_before_trusted_assembly(self):
         text = self.workflow_text()

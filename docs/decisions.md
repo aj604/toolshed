@@ -59,18 +59,31 @@
   authentic plan with scheduler-only prompts and budgets; it does not own membership or scope.
   This explicit preflight matters because that helper retains an unregistered-repository
   prompt-planning fallback that must never burn a scheduled fan-out and fail only at assembly.
-- Decided (bounded headless workers): the pinned model action is a coordinator, never an inline
-  auditor. It renders `--emit-prompt` and `--emit-turns` for every pending chunk, dispatches one
-  fresh Task per chunk in parallel waves with the emitted `max_turns`, seam-validates the result,
-  and retries once with a fresh Task. It may use `Task`, the read/skill tools, `Write` for the
-  named out-of-tree result, and only `Bash(git *)` / `Bash(python3 *)`.
+- Decided (bounded headless workers): trusted `bloat-cadence.py prepare`, not the model, asks
+  `plan-chunks.py --emit-readonly-prompt` and `--emit-turns` to render every pending chunk's
+  exact public-engine evidence, work order, and budget. The pinned model action is only a
+  coordinator: it dispatches one fresh Task per chunk in parallel waves and returns each
+  worker's JSON unchanged through the action's schema-bound `structured_output`. Trusted
+  `bloat-cadence.py collect` parses that value, binds each outer id to the inner result's
+  `chunk`, validates the candidate, and renders the exact missing/invalid selection for one
+  fresh retry. The retry guard runs after a failed first action when collection found gaps,
+  but still respects cancellation.
 - Decided (trust boundary): the model job holds `contents: read` plus `id-token: write` only,
-  persists no checkout credential, receives no `GH_TOKEN`, and writes every plan, chunk result,
-  envelope, report, sidecar, and cost artifact under `runner.temp`. The publish job is model-free
-  and read-only. Because local Write and restricted Bash still make worktree mutation possible,
-  a trusted post-model step checks the original HEAD and every staged, unstaged, ignored, or
-  ordinary untracked file before assembly/audit. It fails without resetting or cleaning, so a
-  mutation cannot be laundered into a report. Neither job can commit, push, or open a pull request.
+  persists no checkout credential, and passes no explicit GitHub-token input. Each coordinator
+  and every Task has the exact built-in inventory `Task,Read,Grep,Glob`; the identical
+  `--allowedTools` list is only its no-prompt ceiling, and all MCP tools are denied. The pinned
+  action's supported `--setting-sources user` is redirected to a fresh, empty, per-attempt
+  `CLAUDE_CONFIG_DIR`, project/local settings are not loaded, and auto-memory is disabled.
+  Thus the model has no file-mutation or command tool; trusted workflow code alone writes every
+  plan, chunk result, envelope, report, sidecar, and cost artifact under `runner.temp`. The
+  publish job is model-free and read-only. A post-model integrity check remains defense in
+  depth: it checks the original HEAD and every staged, unstaged, ignored, or ordinary untracked
+  file before assembly/audit, and fails without resetting or cleaning. Neither job can commit,
+  push, or open a pull request.
+- Decided (attempt observability): claude-code-action may reuse its runner-temp execution path.
+  The workflow therefore copies the first-pass execution output to `execution-first.json`
+  before any retry, copies a retry to `execution-retry.json`, and aggregates only those distinct
+  snapshots. A retry cannot overwrite the cost, turn, or duration evidence from the first pass.
 - Decided (completion is report truth): deterministic assembly uses `--allow-partial` so each
   missing or invalid chunk is preserved inside #152's completion envelope; `bloat-audit`
   independently re-derives it and emits one typed incomplete entry per affected document.
@@ -82,9 +95,10 @@
   bloat cadence are descoped, not implied (#57)". The adjacent #143 decision separately
   supersedes the autonomous auto-apply half.
 - Code: `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat-audit.yml`,
-  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/{apply-upgrade,render-audit-summary}.py`,
+  `plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/{apply-upgrade,bloat-cadence,render-audit-summary}.py`,
+  `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py`,
   `.github/workflows/doc-bloat-audit.yml`, `.doc-lifecycle/wiring/render-audit-summary.py`,
-  `tests/scripts/{bloat-audit-workflow,apply-upgrade,render-audit-summary}_test.py`,
+  `tests/scripts/{bloat-audit-workflow,bloat-cadence,apply-upgrade,render-audit-summary}_test.py`,
   `tests/baselines/scheduling-bloat-cadence-red/`
 
 ## 2026-07-30 — whole-document bloat authority binds every current unit (#153)

@@ -20,20 +20,30 @@ completion evidence before the public audit creates a typed report.
 
 ## Standards-review hardening
 
-The trusted post-model workflow step now runs after fan-out/retry and before any completion
-assembly. It verifies `HEAD == GITHUB_SHA`, unstaged tracked state, staged state, and every
-untracked path including ignored files. It never resets, restores, checks out, or cleans. Both
-assembly and `bloat-audit` require that step's successful outcome, so a mutation cannot be hidden
-inside an apparently read-only report. `PYTHONDONTWRITEBYTECODE=1` keeps the workflow's own Python
-invocations from creating ignored cache files in the checkout; plans, worker results, envelopes,
-reports, sidecars, and cost data remain allowed under `runner.temp`.
+Trusted `bloat-cadence.py prepare` now renders the worker work orders before either model action.
+The coordinator and its Tasks have an exact `Task,Read,Grep,Glob` built-in inventory, an identical
+no-prompt ceiling, and no MCP tools. Each invocation loads only the supported `user` settings
+source through its own fresh temporary `CLAUDE_CONFIG_DIR`; project/local settings and auto-memory
+are excluded. Workers return JSON through the pinned action's schema-bound `structured_output`.
+The trusted collector binds every outer id to the inner `chunk`, validates accepted candidates,
+and selects exact gaps for one non-cancelled retry even when the first action failed.
+
+The action's first-pass execution telemetry is copied before retry can reuse its default path,
+retry telemetry is copied separately, and the cost renderer aggregates those distinct snapshots.
+The trusted post-model integrity step remains defense in depth: it verifies `HEAD == GITHUB_SHA`,
+unstaged tracked state, staged state, and every untracked path including ignored files. It never
+resets, restores, checks out, or cleans. Both assembly and `bloat-audit` require that step's
+successful outcome, so a mutation cannot be hidden inside an apparently read-only report.
+`PYTHONDONTWRITEBYTECODE=1` keeps the workflow's own Python invocations from creating ignored
+cache files in the checkout; plans, worker results, envelopes, reports, sidecars, and cost data
+remain allowed under `runner.temp`.
 
 The execution seam passes a clean repository and rejects tracked, staged, ordinary untracked,
-ignored-untracked, and moved-HEAD fixtures. The focused review GREEN is 6/6 workflow tests, 20/20
-renderer tests, and 7/7 install-parity tests. The renderer selector is now the domain-specific
-`--audit-surface drift|bloat`; the ambiguous legacy `--kind` flag is rejected.
+ignored-untracked, and moved-HEAD fixtures. The focused review GREEN is 7/7 workflow tests, 5/5
+cadence tests, 21/21 renderer tests, and 7/7 install-parity tests. The renderer selector is now
+the domain-specific `--audit-surface drift|bloat`; the ambiguous legacy `--kind` flag is rejected.
 
-Full review evidence: all 22 discovered script suites, all 1,265 engine tests, the 54-suite
+Full review evidence: all 23 discovered script suites, all 1,265 engine tests, the 55-suite
 release-manifest guard, plugin validation, YAML/JSON parsing, compilation, source/vendor and
 template/dogfood parity, version guard, and diff checks passed. This directory is retained
 methodology under `tests/baselines/`; the release manifest deliberately keeps baselines outside

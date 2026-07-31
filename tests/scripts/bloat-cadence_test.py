@@ -179,6 +179,25 @@ raise SystemExit(2 if payload.get('invalid') else 0)
         self.assertIn(os.path.join(self.prompts, "c-a.md"), retry)
         self.assertIn(os.path.join(self.prompts, "c-b.md"), retry)
 
+    def test_outer_id_must_match_the_inner_chunk_identity(self):
+        result = self.collect({
+            "schema_version": 1,
+            "chunks": [
+                {"id": "c-a", "result_json": json.dumps({
+                    "chunk": "c-b", "verdicts": [],
+                })},
+            ],
+        })
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.results, "c-a.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.results, "c-b.json")))
+        self.assertIn("chunk identity mismatch", result.stderr)
+        with open(self.retry_prompt, encoding="utf-8") as stream:
+            retry = stream.read()
+        self.assertIn(os.path.join(self.prompts, "c-a.md"), retry)
+        self.assertIn(os.path.join(self.prompts, "c-b.md"), retry)
+
     def test_invalid_retry_preserves_valid_first_pass_and_leaves_partial_truth(self):
         first = self.collect({
             "schema_version": 1,

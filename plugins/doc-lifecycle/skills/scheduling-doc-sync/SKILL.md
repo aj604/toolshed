@@ -131,11 +131,12 @@ slice with public-engine segmentation evidence and asks `--emit-turns` for that 
 
 The pinned action's documented `structured_output` is the only model-result seam.
 `bloat-cadence.py collect` parses that schema-bound value, rejects unknown or duplicate ids,
-writes a candidate under runner.temp only after `validate-bloat-output.py --chunk` accepts it,
-and renders a retry prompt containing exactly the missing/invalid chunks. That prompt runs in a
-second, equally read-only model action: one seam failure earns one fresh retry, never a wider
-budget guessed in YAML and never a model-authored repair. Any retry gap stays absent for trusted
-completion assembly.
+requires each outer id to equal the inner result's `chunk`, writes a candidate under runner.temp
+only after `validate-bloat-output.py --chunk` accepts it, and renders a retry prompt containing
+exactly the missing/invalid chunks. That prompt runs in a second, equally read-only model action:
+one seam failure earns one fresh retry even when the first action failed, unless the workflow
+was cancelled; it never earns a wider budget guessed in YAML or a model-authored repair. Any
+retry gap stays absent for trusted completion assembly.
 
 After the workers stop, `validate-bloat-output.py --assemble --allow-partial` binds the full
 public plan and every complete, missing, or invalid chunk into #152's completion envelope;
@@ -147,9 +148,15 @@ document look examined. `publish` revalidates freshness and calls
 
 Every plan, prompt result, envelope, sidecar, report, and cost artifact lives under
 `${{ runner.temp }}/doc-bloat-audit`, outside the checkout. The model job grants only
-`contents: read` plus `id-token: write`, drops the checkout credential, carries no `GH_TOKEN`,
-and both coordinator actions allow exactly `Task,Read,Grep,Glob`. Their workers inherit that
-boundary: no `Skill`, `Write`, or `Bash`, and therefore no model-side mutation or command path.
+`contents: read` plus `id-token: write`, drops the checkout credential, and passes no explicit
+GitHub-token input to the action. Both coordinator actions allow exactly
+`Task,Read,Grep,Glob`; their workers inherit that boundary: no `Skill`, `Write`, or `Bash`, and
+therefore no model-side mutation or command path.
+`--tools` fixes that built-in inventory, the matching `--allowedTools` value is only the
+no-prompt ceiling, and `--disallowedTools "mcp__*"` removes MCP tools. The pinned action maps an
+empty `--setting-sources` back to all sources, so each attempt instead loads only the supported
+`user` source while `CLAUDE_CONFIG_DIR` points at its own freshly emptied runner.temp directory;
+project/local settings are excluded and auto-memory is disabled.
 Claude Code's `--add-dir` read boundary names only the audit's runner.temp directory and the
 pinned detecting-doc-bloat skill directory (not all of runner.temp), so those read tools can
 reach the trusted prompts/contracts without widening into unrelated runner state.
@@ -158,6 +165,10 @@ assemble completion. A defense-in-depth post-model step still checks that HEAD i
 `GITHUB_SHA` and refuses staged, unstaged, ignored, or ordinary untracked files before
 completion assembly or `bloat-audit`; it never resets or cleans a mutation. The model action
 and every artifact action are pinned to immutable SHAs.
+
+The action can reuse one execution-output path for both invocations. The workflow copies the
+first action's telemetry before the retry can start, copies retry telemetry separately, and
+aggregates those distinct snapshots for cost, turn, and duration observability.
 
 **Installed on the same registry condition as the other engine lanes.** A missing registry
 would make the public planner refuse before the sweep has a corpus, so Upgrade mode regenerates
