@@ -98,6 +98,20 @@ class BloatPlanCommand(RepoTestCase):
             bloat.plan_repository_chunks(repo, max_documents=2).to_dict(),
         )
 
+    def test_positive_boundary_budgets_match_the_library(self):
+        repo = self.corpus()
+        expected = bloat.plan_repository_chunks(
+            repo, max_documents=1, max_units=1,
+        ).to_dict()
+
+        result = run_command(
+            "bloat-plan", "--repo", repo,
+            "--max-documents", "1", "--max-units", "1",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), expected)
+
     def test_every_document_appears_in_exactly_one_chunk(self):
         repo = self.corpus()
 
@@ -126,6 +140,18 @@ class BloatPlanCommand(RepoTestCase):
                              "--max-documents", "0")
 
         self.assertEqual(result.returncode, 2)
+
+    def test_every_invalid_budget_is_a_usage_error_from_the_library_rule(self):
+        for flag in ("--max-documents", "--max-units"):
+            for value in ("0", "-1", "true", "1.5", "many"):
+                with self.subTest(flag=flag, value=value):
+                    result = run_command(
+                        "bloat-plan", "--repo", self.corpus(), flag, value,
+                    )
+
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("usage:", result.stderr)
+                    self.assertIn("must be a positive integer", result.stderr)
 
 
 class BloatAuditCommand(RepoTestCase):
