@@ -26,9 +26,10 @@ Deriving the commands rather than restating them is the point — narrowing a
 glob in `release.yml` moves the guard's own baseline, and is caught rather
 than obeyed.
 
-It also carries the release manifest: the gate criteria issue #77 names, each
-mapped to the suites that discharge it. Discovery running a shrinking set of
-suites is green; discovery no longer running `install-parity_test.py` is not.
+It also carries the release manifest: the gate criteria release issues name,
+each mapped to the suites that discharge it. Discovery running a shrinking set
+of suites is green; discovery no longer running `install-parity_test.py` is
+not.
 
 Detection is structural, not name-based: a repository candidate is a tracked
 file or an untracked file Git does not ignore, and it is a suite when it
@@ -80,6 +81,15 @@ GATE_MANIFEST = {
         "tests/engine/acceptance/scenario_bloat_test.py",
         "tests/engine/acceptance/scenario_cache_test.py",
         "tests/engine/acceptance/scenario_approval_test.py",
+        "tests/engine/acceptance/scenario_human_lifecycle_test.py",
+    ],
+    # The one highest-level human transaction: a report produced by the audit
+    # engine, strict-subset semantic approval, a valid edit plan, and the
+    # public deterministic applier over a real temporary repository. Keeping
+    # it as a named criterion means broad acceptance discovery cannot mask its
+    # removal.
+    "primary human lifecycle": [
+        "tests/engine/acceptance/scenario_human_lifecycle_test.py",
     ],
     # The hostile corpus the acceptance fixture builds, and the refusals it
     # must produce: hostile filenames and malformed input that change nothing

@@ -22,6 +22,9 @@ import unittest
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 GUARD = os.path.join(ROOT, ".github", "scripts", "release-manifest.py")
 RUNNER = os.path.join(ROOT, ".github", "scripts", "run-script-suites.py")
+HUMAN_LIFECYCLE_SCENARIO = (
+    "tests/engine/acceptance/scenario_human_lifecycle_test.py"
+)
 
 
 def _load(path, name):
@@ -371,6 +374,43 @@ class HolesAnIndependentReviewFound(unittest.TestCase):
 
 
 class TheManifestNamesTheGateCriteria(unittest.TestCase):
+
+    def test_the_primary_human_lifecycle_has_its_own_gate_criterion(self):
+        self.assertEqual(
+            guard.GATE_MANIFEST["primary human lifecycle"],
+            [HUMAN_LIFECYCLE_SCENARIO],
+        )
+
+    def test_removing_the_primary_human_lifecycle_fails_its_criterion(self):
+        repo = SyntheticRepo()
+        self.addCleanup(repo.cleanup)
+
+        report = guard.audit(repo.root, manifest={
+            "primary human lifecycle": [HUMAN_LIFECYCLE_SCENARIO],
+        })
+
+        self.assertEqual(
+            [("primary human lifecycle", HUMAN_LIFECYCLE_SCENARIO)],
+            report.manifest_missing,
+        )
+
+    def test_unwiring_the_primary_human_lifecycle_fails_its_criterion(self):
+        narrowed = RELEASE_YML.replace(
+            "-p '*_test.py'", "-p 'wired_test.py'",
+        )
+        repo = SyntheticRepo(release_yml=narrowed)
+        self.addCleanup(repo.cleanup)
+        repo.write("tests/engine/acceptance/__init__.py", "")
+        repo.write(HUMAN_LIFECYCLE_SCENARIO)
+
+        report = guard.audit(repo.root, manifest={
+            "primary human lifecycle": [HUMAN_LIFECYCLE_SCENARIO],
+        })
+
+        self.assertEqual(
+            [("primary human lifecycle", HUMAN_LIFECYCLE_SCENARIO)],
+            report.manifest_missing,
+        )
 
     def test_a_manifest_suite_that_vanished_is_reported(self):
         repo = SyntheticRepo()
