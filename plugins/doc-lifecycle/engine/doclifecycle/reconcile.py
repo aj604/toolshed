@@ -23,7 +23,7 @@ the *selection rule* an approval must obey — structure, not advice:
   part of the group would leave the rest describing text that no longer exists,
   so the group is selected whole or not at all.
 - `exclusive` — some pair in the group contradicts. No member may be selected:
-  the contradiction is resolved by re-running the audit or fixing the detector,
+  the contradiction is resolved by re-running the audit or correcting the audit policy,
   not by an approver silently picking a side.
 
 **A target is (document, unit digests).** A unit digest is content, so the same
@@ -35,7 +35,7 @@ report that spells one leg of a contradictory pair the other way would otherwise
 split the pair into two independent groups and let an approver take one leg.
 
 **A remedy is what the record writes, and where** — the replacement text and
-the destination, never the finding code. Codes are detector vocabulary; the
+the destination, never the finding code. Codes are audit policy vocabulary; the
 question is whether two records would put the same bytes in the same place, so
 a drift `STALE` fix and a bloat `CONDENSE` proposing one replacement for one
 passage reconcile as the duplicate they are. Evidence prose, display ids,
@@ -106,7 +106,7 @@ EXCLUSIVE_RELATIONS = (RELATION_SAME_TARGET, RELATION_MUTUALLY_EXCLUSIVE)
 
 # What a remedy *writes*, in the two field names the lanes use for it: drift's
 # `fix` and bloat's `proposal`. Read as one slot, because a remedy is the bytes
-# it puts in the document, not the vocabulary its detector names the verdict
+# it puts in the document, not the vocabulary its audit policy uses for the verdict
 # with — two lanes proposing the same replacement for one passage are one edit
 # described twice, and reconciling them as a contradiction would be false.
 #
@@ -221,7 +221,7 @@ def _target(record):
 def _remedy(record):
     """The remedy signature: what the record writes, and where.
 
-    Deliberately not the finding code. Codes are detector vocabulary, and the
+    Deliberately not the finding code. Codes are audit policy vocabulary, and the
     question a selection has to answer is whether two records would put the
     same bytes in the same place: two lanes naming one edit differently must
     not read as a contradiction, and two records writing different text to one

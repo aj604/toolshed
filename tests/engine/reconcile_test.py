@@ -111,7 +111,7 @@ class Independence(unittest.TestCase):
 
 class Duplicates(unittest.TestCase):
     def test_two_lanes_writing_one_replacement_are_duplicates(self):
-        # A remedy is what a record writes, not what its detector calls the
+        # A remedy is what a record writes, not what its audit policy calls the
         # verdict: a drift STALE fix and a bloat CONDENSE proposing the same
         # replacement for the same passage are one edit described twice.
         drift = finding_record("R-1", "STALE", "docs/a.md", [UNIT_A],
@@ -142,7 +142,7 @@ class Duplicates(unittest.TestCase):
             [r.kind for r in result.groups[0].relations], [RELATION_DUPLICATE]
         )
 
-    def test_one_detector_cannot_report_one_edit_twice(self):
+    def test_one_audit_lane_cannot_report_one_edit_twice(self):
         # The reachable duplicates above are cross-code. The same code, target,
         # and units *is* the same finding — its digest says so — so a report
         # carrying it twice is refused before reconciliation ever sees it.

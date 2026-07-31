@@ -86,7 +86,7 @@ Landed four of the six 2026-07-12 architecture-review findings; design + rationa
   `docs/doc-scope.md`; a matching item that already carries one **is** the second rediscovery.
 - **F6** — `growing-docs` description claims the direct "write an ADR/tutorial/walkthrough" ask.
 - **F3** — UNVERIFIABLE waiver file (`.github/doc-sync/drift-waivers.json` at the time; relocated
-  to `.doc-lifecycle/drift-waivers.json` by #133): detector stays
+  to `.doc-lifecycle/drift-waivers.json` by #133): audit engine stays
   pure, `render-report.py` suppresses waived claims and surfaces unwaived ones (incl. on
   no-drift nights); installer + `apply-upgrade.py` seed only-if-absent.
 - **F4** — recurrence memory: `sync-gate.py stale-state` → `last-stales.json` on the PR branch;

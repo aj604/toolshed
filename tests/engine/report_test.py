@@ -24,6 +24,7 @@ from support import RepoTestCase  # noqa: E402
 
 from doclifecycle import (  # noqa: E402
     ARTIFACT_SCHEMA_VERSION,
+    PLUGIN_COMPATIBILITY_VERSION,
     PLUGIN_VERSION,
     RULESET_VERSION,
 )
@@ -90,7 +91,7 @@ def lineage_payload(**overrides):
         "audit_config_digest": CONFIG_DIGEST,
         "registry_digest": "2" * 64,
         "ruleset_version": RULESET_VERSION,
-        "plugin_version": PLUGIN_VERSION,
+        "plugin_version": PLUGIN_COMPATIBILITY_VERSION,
         "evidence_boundary": {"sources": ["src/**"],
                               "excluded": ["src/vendor/**"], "commands": []},
     }
@@ -553,6 +554,19 @@ class Staleness(GitRepoTestCase):
         self.assertEqual(result.status, STATE_FINDINGS)
         self.assertEqual(result.stale_reasons, ())
 
+    def test_a_wording_only_release_keeps_prior_plugin_lineage_fresh(self):
+        repo = self.git_repo()
+        lineage = self.fresh_lineage(repo, plugin_version="0.44.3")
+
+        result = validate_report(
+            report_payload(lineage=lineage),
+            repo_root=repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertEqual(result.status, STATE_FINDINGS)
+        self.assertEqual(result.stale_reasons, ())
+
     def test_each_lineage_field_that_can_drift_makes_the_report_stale(self):
         repo = self.git_repo()
         cases = [
@@ -589,7 +603,7 @@ class Staleness(GitRepoTestCase):
 
         reason = result.stale_reasons[0]
         self.assertEqual(reason.reported, "0.0.1")
-        self.assertEqual(reason.current, PLUGIN_VERSION)
+        self.assertEqual(reason.current, PLUGIN_COMPATIBILITY_VERSION)
         self.assertIn("re-run", reason.message)
 
     def test_every_drifted_field_is_reported_not_just_the_first(self):
@@ -680,7 +694,7 @@ class Staleness(GitRepoTestCase):
             status=STATE_STALE,
             stale_reasons=[{
                 "code": "lineage-plugin-mismatch", "message": "drifted once",
-                "reported": "0.0.1", "current": PLUGIN_VERSION,
+                "reported": "0.0.1", "current": PLUGIN_COMPATIBILITY_VERSION,
             }],
         )
 
@@ -771,7 +785,7 @@ class Staleness(GitRepoTestCase):
     def test_stale_reasons_on_a_report_that_is_not_stale_are_inconsistent(self):
         result = validate_report(report_payload(stale_reasons=[{
             "code": "lineage-plugin-mismatch", "message": "drifted",
-            "reported": "0.0.1", "current": PLUGIN_VERSION,
+            "reported": "0.0.1", "current": PLUGIN_COMPATIBILITY_VERSION,
         }]))
 
         self.assertEqual(codes(result), ["report-state-inconsistent"])
@@ -951,7 +965,9 @@ class CurrentLineage(GitRepoTestCase):
             "repository", "base_commit", "inventory_digest", "registry_digest",
             "audit_config_digest", "ruleset_version", "plugin_version",
         })
-        self.assertEqual(state["plugin_version"], PLUGIN_VERSION)
+        self.assertEqual(
+            state["plugin_version"], PLUGIN_COMPATIBILITY_VERSION
+        )
         self.assertEqual(state["ruleset_version"], RULESET_VERSION)
         self.assertEqual(state["audit_config_digest"], CONFIG_DIGEST)
 

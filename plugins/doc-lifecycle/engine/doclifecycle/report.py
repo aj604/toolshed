@@ -23,7 +23,11 @@ import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from . import ARTIFACT_SCHEMA_VERSION, PLUGIN_VERSION, RULESET_VERSION
+from . import (
+    ARTIFACT_SCHEMA_VERSION,
+    PLUGIN_COMPATIBILITY_VERSION,
+    RULESET_VERSION,
+)
 from . import repository as repository_mod
 from .digest import canonical, load_strict_json, sha256_canonical
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
@@ -1350,7 +1354,7 @@ def _current_state(repo_root, registry_path, audit_config_digest):
         return {}, None, tuple(problems)
 
     current["ruleset_version"] = RULESET_VERSION
-    current["plugin_version"] = PLUGIN_VERSION
+    current["plugin_version"] = PLUGIN_COMPATIBILITY_VERSION
     if audit_config_digest is not None:
         current["audit_config_digest"] = audit_config_digest
     return current, inventory, ()

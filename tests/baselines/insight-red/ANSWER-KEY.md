@@ -1,7 +1,7 @@
 # insight-red answer key (grading reference — NOT shown to baseline agents)
 
 Fixture: `tests/baselines/insight-red/fixture/` (self-contained fake repo). Tests
-whether the detector's **insight walk** (detecting-doc-bloat step 3, added in
+whether the bloat lane's **insight walk** (detecting-doc-bloat step 3, added in
 doc-lifecycle 0.6.0) actually changes behavior: RED arm runs the 0.5.5 skill text
 (no insights channel, two-kind doc taxonomy), GREEN arm runs the current text.
 Three planted items.
