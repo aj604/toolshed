@@ -71,9 +71,10 @@ the only doc-lifecycle content left under `.github/`. Also runnable: the ci+rele
 actually runs, computes the suites those steps really execute, and fails when a suite in the tree
 is not among them: a `tests/engine` subdirectory missing `__init__.py`, a name the pattern
 misses, a directory nothing discovers, or a glob narrowed in `release.yml`. It also carries the
-release manifest mapping each of #77's gate criteria to the suites that discharge it, and
-declares `tests/baselines/` and `tests/fixtures/` non-gate roots — the RED/GREEN skill baselines
-are retained methodology, demonstrably outside the release gate), and the shadow-mode parity
+release manifest mapping each release criterion to the suites that discharge it — #77's original
+criteria plus #158's primary human lifecycle transaction — and declares `tests/baselines/` and
+`tests/fixtures/` non-gate roots — the RED/GREEN skill baselines are retained methodology,
+demonstrably outside the release gate), and the shadow-mode parity
 gate's second-cycle worker orchestrator
 (`tests/baselines/shadow-parity-gate-rerun/fanout.py`, #117 — kept because it carries the worker
 prompt the verdict makes claims about). The rest of the tree's Python is one-off tooling wired
