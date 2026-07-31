@@ -556,7 +556,7 @@ class Staleness(GitRepoTestCase):
 
     def test_a_wording_only_release_keeps_prior_plugin_lineage_fresh(self):
         repo = self.git_repo()
-        lineage = self.fresh_lineage(repo, plugin_version="0.44.2")
+        lineage = self.fresh_lineage(repo, plugin_version="0.44.3")
 
         result = validate_report(
             report_payload(lineage=lineage),

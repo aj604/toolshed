@@ -48,11 +48,11 @@ RULESET_VERSION = 10
 # `plugins/doc-lifecycle/.claude-plugin/plugin.json` — the engine is also
 # vendored into consumers without that manifest, so it cannot read it.
 # `tests/engine/report_test.py` fails loudly when the two drift.
-PLUGIN_VERSION = "0.44.3"
+PLUGIN_VERSION = "0.44.4"
 
 # The artifact-facing engine compatibility marker stored in lineage's existing
 # `plugin_version` field. Bump it only when a plugin release makes prior
 # artifacts unsafe to reuse for a reason not already expressed by the schema or
 # ruleset versions. A wording-only release therefore keeps compatible artifacts
 # fresh while a genuinely incompatible marker still fails closed.
-PLUGIN_COMPATIBILITY_VERSION = "0.44.2"
+PLUGIN_COMPATIBILITY_VERSION = "0.44.3"

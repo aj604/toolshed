@@ -798,7 +798,7 @@ class Freshness(ApprovedTestCase):
         self.assertEqual(result.stale_reasons, ())
 
     def test_a_wording_only_release_keeps_prior_plugin_approval_fresh(self):
-        prior = self.lineage_for(self.repo, plugin_version="0.44.2")
+        prior = self.lineage_for(self.repo, plugin_version="0.44.3")
         record = self.finding(
             "R-prior", "STALE", DOC_A, self.units(self.repo, DOC_A)[:1],
             lineage=prior, fix="Fees: 2.5%.",
