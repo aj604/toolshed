@@ -309,38 +309,28 @@ class RecorderTestCase(RepoTestCase):
 
 
 class WholeDocumentVerdictsBindEveryCurrentUnit(RecorderTestCase):
+    CASES = (
+        (bloat.RETIRE_DOC, {}),
+        (bloat.DISTILL, {"status": "pending-implementation"}),
+        (bloat.MERGE_DOC, {}),
+    )
+
     def all_units(self, path="docs/plans/p.md"):
         return list(self.index.document(path).units)
 
-    def test_retire_doc_omitting_a_current_unit_is_refused(self):
-        result = self.record([self.verdict(
-            verdict=bloat.RETIRE_DOC,
-            units=[self.unit("docs/plans/p.md", SHARED)],
-        )])
+    def test_each_whole_document_verdict_omitting_a_current_unit_is_refused(self):
+        for verdict, required in self.CASES:
+            with self.subTest(verdict=verdict):
+                result = self.record([self.verdict(
+                    verdict=verdict,
+                    units=[self.unit("docs/plans/p.md", SHARED)],
+                    **required,
+                )])
 
-        self.assertEqual(
-            problem_codes(result), ["bloat-whole-document-units-incomplete"]
-        )
-
-    def test_distill_omitting_a_current_unit_is_refused(self):
-        result = self.record([self.verdict(
-            verdict=bloat.DISTILL, status="pending-implementation",
-            units=[self.unit("docs/plans/p.md", SHARED)],
-        )])
-
-        self.assertEqual(
-            problem_codes(result), ["bloat-whole-document-units-incomplete"]
-        )
-
-    def test_merge_doc_omitting_a_current_unit_is_refused(self):
-        result = self.record([self.verdict(
-            verdict=bloat.MERGE_DOC,
-            units=[self.unit("docs/plans/p.md", SHARED)],
-        )])
-
-        self.assertEqual(
-            problem_codes(result), ["bloat-whole-document-units-incomplete"]
-        )
+                self.assertEqual(
+                    problem_codes(result),
+                    ["bloat-whole-document-units-incomplete"],
+                )
 
     def test_a_duplicate_unit_identity_is_refused(self):
         units = self.all_units()
@@ -374,27 +364,16 @@ class WholeDocumentVerdictsBindEveryCurrentUnit(RecorderTestCase):
 
         self.assertEqual(problem_codes(result), ["bloat-unknown-unit"])
 
-    def test_complete_retire_doc_records(self):
-        result = self.record([self.verdict(
-            verdict=bloat.RETIRE_DOC, units=self.all_units(),
-        )])
+    def test_each_complete_whole_document_verdict_records(self):
+        for verdict, required in self.CASES:
+            with self.subTest(verdict=verdict):
+                result = self.record([self.verdict(
+                    verdict=verdict, units=self.all_units(), **required,
+                )])
 
-        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
-
-    def test_complete_distill_records(self):
-        result = self.record([self.verdict(
-            verdict=bloat.DISTILL, units=self.all_units(),
-            status="pending-implementation",
-        )])
-
-        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
-
-    def test_complete_merge_doc_records(self):
-        result = self.record([self.verdict(
-            verdict=bloat.MERGE_DOC, units=self.all_units(),
-        )])
-
-        self.assertNotIsInstance(result, Invalid, getattr(result, "problems", None))
+                self.assertNotIsInstance(
+                    result, Invalid, getattr(result, "problems", None)
+                )
 
     def test_passage_remedies_stay_bounded_to_selected_units(self):
         for verdict, proposal in (

@@ -174,6 +174,12 @@ class ApprovalTestCase(RepoTestCase):
         self.assertNotIsInstance(segmentation, Invalid)
         return [u.digest for u in segmentation.units if u.assertion_capable]
 
+    def whole_units(self, repo, path):
+        """Every deterministic unit identity, including document structure."""
+        segmentation = segment_document(repo, path)
+        self.assertNotIsInstance(segmentation, Invalid)
+        return [unit.digest for unit in segmentation.units]
+
     def finding(self, record_id, code, path, units, lineage=None, **extra):
         finding = build_finding(
             lineage=self.lineage if lineage is None else lineage,
@@ -307,6 +313,32 @@ class PartialApproval(ApprovalTestCase):
 
 
 class MintRefusals(ApprovalTestCase):
+    def test_partial_whole_document_record_cannot_be_minted(self):
+        segmentation = segment_document(self.repo, DOC_A)
+        self.assertNotIsInstance(segmentation, Invalid, segmentation)
+        unit = segmentation.units[0].digest
+        record = self.finding(
+            "BLOAT-FORGED", "RETIRE-DOC", DOC_A, [unit],
+        )
+        # Structural report validation deliberately has no repository to
+        # compare. Minting does, and must not amplify that unchecked passage
+        # record into whole-document authority.
+        report = validate_report({
+            "status": STATE_FINDINGS,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "lineage": self.lineage.to_dict(),
+            "records": [record],
+            "incomplete": [],
+        })
+        self.assertIsInstance(report, Report, report)
+
+        result = self.mint(report, [record["digest"]])
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(
+            codes(result), ["approval-whole-document-units-incomplete"]
+        )
+
     def test_selecting_a_digest_the_report_does_not_carry_is_refused(self):
         one, _ = self.two_findings()
 
@@ -519,7 +551,8 @@ class ReconciledSelection(ApprovalTestCase):
         # clean — walking a pending-implementation DISTILL through the gate.
         unit = self.units(self.repo, DOC_A)[0]
         cut = self.finding("R-1", "CUT", DOC_A, [unit])
-        distill = self.finding("R-2", "DISTILL", DOC_A, [unit],
+        distill = self.finding("R-2", "DISTILL", DOC_A,
+                               self.whole_units(self.repo, DOC_A),
                                status="pending-implementation")
         report = self.report([cut, distill])
 
@@ -766,6 +799,27 @@ class Freshness(ApprovedTestCase):
 
     def test_it_keeps_its_digest_through_validation(self):
         self.assertEqual(self.check().digest, self.approval.digest)
+
+    def test_complete_whole_document_approval_becomes_stale_if_a_unit_is_added(self):
+        record = self.finding(
+            "BLOAT-R1", "RETIRE-DOC", DOC_A,
+            self.whole_units(self.repo, DOC_A),
+        )
+        report = self.report([record])
+        approval = self.mint(report, [record["digest"]])
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        self.write(self.repo, DOC_A, DOC_A_TEXT + "\nA newly added claim.\n")
+
+        result = validate_approval_set(
+            approval.to_dict(), report=report, repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual(
+            reasons(result), ["approval-whole-document-units-incomplete"]
+        )
 
     def test_a_new_commit_makes_it_stale_naming_the_base_commit(self):
         self.write(self.repo, "unrelated.txt", "a change somewhere else")

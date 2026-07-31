@@ -54,8 +54,10 @@ from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import DOCUMENTATION, authorize_path
 from .registry import compile_glob
 from .report import (
+    WHOLE_DOCUMENT_RECORD_CODES,
     EvidenceBoundary, Lineage, SCOPE_WHOLE_INVENTORY, current_lineage,
-    state_from_content, validate_report, whole_number,
+    state_from_content,
+    validate_report, whole_number,
 )
 from .results import STATUS_OK, Invalid, Problem
 
@@ -89,7 +91,7 @@ SCOPE_VERDICTS = (RETIRE_DOC,)
 # Verdicts whose remedy retires the source document. Unlike passage remedies,
 # their subject is the complete current deterministic segmentation: approving
 # fewer units must never authorize deletion of the units left behind.
-WHOLE_DOCUMENT_VERDICTS = (RETIRE_DOC, DISTILL, MERGE_DOC)
+WHOLE_DOCUMENT_VERDICTS = WHOLE_DOCUMENT_RECORD_CODES
 
 # Owned by context.py, not repeated here: `_status()` checks a verdict's
 # status *against* the planning document's own file-bound marker, so the set
@@ -1142,22 +1144,22 @@ class _Recorder:
             self.bad("bloat-invalid-shape",
                      f"{where} must name at least one assertion unit", where)
             return ()
-        valid_units = []
+        well_typed_units = []
         for unit in units:
             if not isinstance(unit, str) or unit not in document.units:
                 self.bad("bloat-unknown-unit",
                          f"unit {unit!r} does not occur in {path} — a verdict is "
                          f"about content that is actually there", where)
             if isinstance(unit, str):
-                valid_units.append(unit)
+                well_typed_units.append(unit)
 
         if verdict in WHOLE_DOCUMENT_VERDICTS:
-            if len(valid_units) != len(set(valid_units)):
+            if len(well_typed_units) != len(set(well_typed_units)):
                 self.bad("bloat-whole-document-unit-duplicate",
                          f"{verdict} names a unit identity more than once for "
                          f"{path} — a whole-document judgment binds the current "
                          f"deterministic unit set exactly once", where)
-            missing = sorted(set(document.units) - set(valid_units))
+            missing = sorted(set(document.units) - set(well_typed_units))
             if missing:
                 self.bad("bloat-whole-document-units-incomplete",
                          f"{verdict} retires all of {path}, but its unit set "
@@ -1165,11 +1167,13 @@ class _Recorder:
                          f"a whole-document judgment must name every unit the "
                          f"current segmentation contains", where)
 
-        destination = self._destination(raw, where, verdict, path, valid_units)
+        destination = self._destination(
+            raw, where, verdict, path, well_typed_units
+        )
         extra = {
             "verdict": verdict,
             "evidence": raw.get("evidence"),
-            "duplicate_search": self._duplicate_search(path, valid_units),
+            "duplicate_search": self._duplicate_search(path, well_typed_units),
             "destination": destination,
             "proposal": self._proposal(raw, where, verdict),
             "status": self._status(raw, where, verdict, path, document),

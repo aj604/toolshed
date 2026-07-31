@@ -29,6 +29,7 @@ from doclifecycle import (  # noqa: E402
 )
 from doclifecycle import repository  # noqa: E402
 from doclifecycle.digest import sha256_canonical  # noqa: E402
+from doclifecycle.finding import finding_digest  # noqa: E402
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import (  # noqa: E402
     AUDIT_MODES,
@@ -44,6 +45,7 @@ from doclifecycle.report import (  # noqa: E402
     Report,
     current_lineage,
     load_report,
+    parse_lineage,
     validate_report,
 )
 from doclifecycle.results import (  # noqa: E402
@@ -54,6 +56,7 @@ from doclifecycle.results import (  # noqa: E402
     STATE_STALE,
     Invalid,
 )
+from doclifecycle.segment import segment_document  # noqa: E402
 
 REGISTRY = json.dumps({
     "schema_version": 1,
@@ -846,6 +849,95 @@ class Staleness(GitRepoTestCase):
 
         self.assertIsInstance(result, Invalid)
         self.assertIn("repository-state-unavailable", codes(result))
+
+
+class WholeDocumentRecordAuthority(GitRepoTestCase):
+    def complete_record(self, repo, path, lineage):
+        parsed, problems = parse_lineage(lineage)
+        self.assertEqual(problems, ())
+        segmentation = segment_document(repo, path)
+        self.assertNotIsInstance(segmentation, Invalid, segmentation)
+        units = [unit.digest for unit in segmentation.units]
+        return {
+            "id": "BLOAT-R1",
+            "digest": finding_digest(parsed, "RETIRE-DOC", path, units),
+            "code": "RETIRE-DOC",
+            "path": path,
+            "units": units,
+        }
+
+    def test_current_lineage_report_cannot_carry_a_partial_retirement(self):
+        path = "docs/architecture.md"
+        repo = self.git_repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            path: "# Architecture\n\nFirst claim. Second claim.\n",
+        })
+        lineage_payload = self.fresh_lineage(repo)
+        lineage, problems = parse_lineage(lineage_payload)
+        self.assertEqual(problems, ())
+        segmentation = segment_document(repo, path)
+        self.assertNotIsInstance(segmentation, Invalid, segmentation)
+        self.assertGreater(len(segmentation.units), 1)
+        units = [segmentation.units[0].digest]
+        record = {
+            "id": "BLOAT-FORGED",
+            "digest": finding_digest(lineage, "RETIRE-DOC", path, units),
+            "code": "RETIRE-DOC",
+            "path": path,
+            "units": units,
+        }
+
+        result = validate_report(
+            report_payload(lineage=lineage_payload, records=[record]),
+            repo_root=repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(
+            codes(result), ["report-whole-document-units-incomplete"]
+        )
+
+    def test_duplicate_whole_document_unit_is_invalid_without_a_repository(self):
+        unit = "b" * 64
+        record = {
+            "id": "BLOAT-FORGED",
+            "digest": "a" * 64,
+            "code": "RETIRE-DOC",
+            "path": "docs/architecture.md",
+            "units": [unit, unit],
+        }
+
+        result = validate_report(report_payload(records=[record]))
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(
+            codes(result), ["report-whole-document-unit-duplicate"]
+        )
+
+    def test_complete_old_record_stays_stale_when_the_document_gains_a_unit(self):
+        path = "docs/architecture.md"
+        repo = self.git_repo({
+            ".doc-lifecycle/registry.json": REGISTRY,
+            path: "# Architecture\n\nFirst claim.\n",
+        })
+        lineage = self.fresh_lineage(repo)
+        record = self.complete_record(repo, path, lineage)
+        with open(os.path.join(repo, path), "a", encoding="utf-8") as fh:
+            fh.write("\nSecond claim.\n")
+
+        result = validate_report(
+            report_payload(lineage=lineage, records=[record]),
+            repo_root=repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertIsInstance(result, Report, result)
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertIn(
+            "lineage-inventory-mismatch",
+            [reason.code for reason in result.stale_reasons],
+        )
 
 
 class CurrentLineage(GitRepoTestCase):
