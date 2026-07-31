@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from support import (  # noqa: E402  (also puts the engine on sys.path)
     CORPUS_REGISTRY as REGISTRY,
+    ENGINE,
     SHARED_SENTENCE as SHARED,
     RepoTestCase,
     run_command,
@@ -79,6 +80,14 @@ class ContextIndexCommand(RepoTestCase):
 
 
 class BloatPlanCommand(RepoTestCase):
+    def launcher(self, *argv):
+        env = {key: value for key, value in os.environ.items()
+               if key != "PYTHONPATH"}
+        return subprocess.run(
+            [sys.executable, os.path.join(ENGINE, "doc-lifecycle.py"), *argv],
+            capture_output=True, text=True, env=env,
+        )
+
     def corpus(self):
         return self.repo({
             ".doc-lifecycle/registry.json": REGISTRY,
@@ -97,6 +106,25 @@ class BloatPlanCommand(RepoTestCase):
             json.loads(result.stdout),
             bloat.plan_repository_chunks(repo, max_documents=2).to_dict(),
         )
+
+    def test_positive_boundary_budgets_match_the_library(self):
+        repo = self.corpus()
+        expected = bloat.plan_repository_chunks(
+            repo, max_documents=1, max_units=1,
+        ).to_dict()
+
+        for entrypoint, command in {
+            "module": run_command,
+            "launcher": self.launcher,
+        }.items():
+            with self.subTest(entrypoint=entrypoint):
+                result = command(
+                    "bloat-plan", "--repo", repo,
+                    "--max-documents", "1", "--max-units", "1",
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), expected)
 
     def test_every_document_appears_in_exactly_one_chunk(self):
         repo = self.corpus()
@@ -126,6 +154,24 @@ class BloatPlanCommand(RepoTestCase):
                              "--max-documents", "0")
 
         self.assertEqual(result.returncode, 2)
+
+    def test_every_invalid_budget_is_a_usage_error_from_the_library_rule(self):
+        commands = {"module": run_command, "launcher": self.launcher}
+        for entrypoint, command in commands.items():
+            for flag in ("--max-documents", "--max-units"):
+                for value in ("0", "-1", "true", "1.5", "many"):
+                    with self.subTest(
+                        entrypoint=entrypoint, flag=flag, value=value,
+                    ):
+                        result = command(
+                            "bloat-plan", "--repo", self.corpus(), flag, value,
+                        )
+
+                        self.assertEqual(result.returncode, 2)
+                        self.assertIn("usage:", result.stderr)
+                        self.assertIn(
+                            "must be a positive integer", result.stderr,
+                        )
 
 
 class BloatAuditCommand(RepoTestCase):

@@ -34,6 +34,7 @@ from .bloat import (
     audit_bloat,
     load_bloat_verdicts,
     plan_repository_chunks,
+    positive_chunk_budget,
 )
 from .context import build_context_index
 from .drift import (
@@ -330,10 +331,14 @@ def _add_drift_scope_arguments(command):
 
 
 def _positive(value):
-    number = int(value)
-    if number < 1:
-        raise argparse.ArgumentTypeError(f"must be a positive integer, not {value}")
-    return number
+    try:
+        candidate = int(value)
+    except (TypeError, ValueError):
+        candidate = value
+    try:
+        return positive_chunk_budget(candidate, "chunk budget")
+    except ValueError as problem:
+        raise argparse.ArgumentTypeError(str(problem)) from problem
 
 
 def _bloat_audit(args):

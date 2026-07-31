@@ -212,6 +212,13 @@ def _chunk_id(index, paths):
     return "c-" + sha256_canonical({"members": members})[:16]
 
 
+def positive_chunk_budget(value, name):
+    """Return one valid chunk budget, or reject it by its public name."""
+    if not whole_number(value) or value < 1:
+        raise ValueError(f"{name} must be a positive integer, not {value!r}")
+    return value
+
+
 def plan_chunks(index, max_documents=DEFAULT_MAX_DOCUMENTS,
                 max_units=DEFAULT_MAX_UNITS):
     """Partition the index into bounded chunks. Deterministic and total.
@@ -223,6 +230,8 @@ def plan_chunks(index, max_documents=DEFAULT_MAX_DOCUMENTS,
     coverage gap, so one that exceeds the unit budget alone gets a chunk to
     itself rather than being split or skipped.
     """
+    max_documents = positive_chunk_budget(max_documents, "max_documents")
+    max_units = positive_chunk_budget(max_units, "max_units")
     groups = {}
     for document in index.documents:
         directory = document.path.rsplit("/", 1)[0] if "/" in document.path else ""
@@ -277,6 +286,8 @@ def plan_repository_chunks(repo_root, registry_path=DEFAULT_REGISTRY_PATH,
     disagree with a CI invocation. An invalid registry invalidates the run, as
     it does everywhere else.
     """
+    max_documents = positive_chunk_budget(max_documents, "max_documents")
+    max_units = positive_chunk_budget(max_units, "max_units")
     index = build_context_index(repo_root, registry_path)
     if isinstance(index, Invalid):
         return index
