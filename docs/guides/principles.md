@@ -1,6 +1,6 @@
 # Docs as checkable claims — how doc-lifecycle thinks
 
-> As of 2026-07-30 (doc-lifecycle 0.44.1; skill files under `plugins/doc-lifecycle/skills/`, applier contract in `plugins/doc-lifecycle/engine/README.md`)
+> As of 2026-07-30 (doc-lifecycle 0.45.0; skill files under `plugins/doc-lifecycle/skills/`, applier contract in `plugins/doc-lifecycle/engine/README.md`)
 
 Five minutes here explains every skill in the plugin. Each principle below names the
 skill file that enforces it, so none of this is aspiration — you can go read the rule.
@@ -55,18 +55,22 @@ reviewable; this one stays reviewable by construction.
 
 Installing the plugin schedules **nothing**. The skills run when you ask, in your
 session, with you approving. Unattended operation exists — but only after you explicitly
-install it via `scheduling-doc-sync`, as three GitHub Actions with the write authority
-split out of the schedule: a **nightly drift audit** that holds `contents: read`, no
-credential, and opens no PR, no commit, no issue — it stops at a published report; a
-**manual apply dispatch**, never scheduled, that a person triggers by naming the record
-digests they approve, and which opens one **real pull request** (never a draft) for you
-to merge; and a **weekly self-upgrade check** that compares your installed version to the
-plugin's latest release and, when one is available, files a notice issue naming it — the
-schedule never opens a PR on its own. A PR only appears once a person dispatches the same
-workflow by hand naming the target version; that dispatch clones the target release,
-regenerates the wiring, and opens the review PR (see [scheduling-doc-sync.md](scheduling-doc-sync.md)).
-There is no scheduled bloat sweep — bloat auditing stays interactive
-(`docs/guides/auditing-doc-bloat.md`).
+install it via `scheduling-doc-sync`, as five GitHub Actions:
+
+- `doc-audit.yml`, a **nightly drift audit** that is read-only and stops at a published report;
+- `doc-bloat-audit.yml`, a **weekly bloat audit** that is also read-only and stops at a
+  published report, with incomplete coverage stated explicitly;
+- `doc-apply.yml`, a **manual apply dispatch** that opens one real pull request for the record
+  digests a person approved;
+- `doc-policy-apply.yml`, an optional audit-chained lane that can open a review PR only for the
+  engine's closed eligible drift subset under an explicitly committed policy; and
+- `doc-sync-upgrade.yml`, whose **weekly self-upgrade check** may file one notice issue, while
+  running release code and opening an upgrade PR still require a human dispatch.
+
+Scheduled bloat findings still require a person to approve record IDs through `fixing-docs`;
+the weekly bloat lane never applies, branches, or opens a pull request. See
+[scheduling-doc-sync.md](scheduling-doc-sync.md) for the full trust split and
+[auditing-doc-bloat.md](auditing-doc-bloat.md) for review and application.
 Merging is still the only thing that lands anything; the schedule can only ever propose.
 
 Run the loops by hand first. When the record shapes are familiar and the approvals feel

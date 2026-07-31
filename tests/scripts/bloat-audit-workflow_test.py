@@ -13,7 +13,8 @@ WORKFLOW = os.path.join(
     ROOT, "plugins", "doc-lifecycle", "skills", "scheduling-doc-sync",
     "doc-bloat-audit.yml",
 )
-GUIDE = os.path.join(ROOT, "docs", "guides", "auditing-doc-bloat.md")
+BLOAT_GUIDE = os.path.join(ROOT, "docs", "guides", "auditing-doc-bloat.md")
+PRINCIPLES_GUIDE = os.path.join(ROOT, "docs", "guides", "principles.md")
 
 
 class ScheduledBloatAuditContract(unittest.TestCase):
@@ -41,19 +42,38 @@ class ScheduledBloatAuditContract(unittest.TestCase):
             for line in body[run + 1:]
         ) + "\n"
 
-    def test_bloat_guide_names_the_scheduled_report_and_human_apply_boundary(self):
-        with open(GUIDE, encoding="utf-8") as stream:
-            guide = stream.read()
+    def test_public_guides_name_the_scheduled_report_and_human_apply_boundary(self):
+        with open(BLOAT_GUIDE, encoding="utf-8") as stream:
+            bloat_guide = stream.read()
+        with open(PRINCIPLES_GUIDE, encoding="utf-8") as stream:
+            principles = stream.read()
 
-        self.assertNotIn("There is no scheduled bloat sweep", guide)
-        self.assertNotIn("unattended lane covers **drift** only", guide)
+        for guide in (bloat_guide, principles):
+            self.assertNotIn("There is no scheduled bloat sweep", guide)
+            self.assertNotIn("unattended lane covers **drift** only", guide)
+
         self.assertRegex(
-            guide,
+            bloat_guide,
             r"(?s)weekly, read-only scheduled bloat audit.*typed report",
         )
-        self.assertIn("[scheduling guide](scheduling-doc-sync.md)", guide)
-        self.assertRegex(guide, r"No scheduled lane\s+applies")
-        self.assertIn("`fixing-docs`", guide)
+        self.assertIn(
+            "[scheduling guide](scheduling-doc-sync.md)", bloat_guide,
+        )
+        self.assertRegex(bloat_guide, r"No scheduled lane\s+applies")
+
+        self.assertIn("five GitHub Actions", principles)
+        for workflow in (
+                "doc-audit.yml", "doc-bloat-audit.yml", "doc-apply.yml",
+                "doc-policy-apply.yml", "doc-sync-upgrade.yml"):
+            self.assertIn(workflow, principles)
+        self.assertRegex(
+            principles,
+            r"(?s)weekly bloat audit.*read-only.*published report",
+        )
+        self.assertRegex(
+            principles,
+            r"(?s)bloat findings.*person.*approve.*`fixing-docs`",
+        )
 
     def test_lane_preflights_then_budget_dispatches_and_reports_typed_gaps(self):
         text = self.workflow_text()
