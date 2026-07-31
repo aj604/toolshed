@@ -28,10 +28,10 @@ ACTION_SCHEMA = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["id", "result"],
+                "required": ["id", "result_json"],
                 "properties": {
                     "id": {"type": "string"},
-                    "result": {"type": "object"},
+                    "result_json": {"type": "string"},
                 },
             },
         },
@@ -133,9 +133,10 @@ final response is one JSON chunk-result object.
 
 After all Tasks return, respond only through the required structured-output
 schema: schema_version must be 1 and chunks must contain one
-{{"id": <task id>, "result": <the Task's exact JSON object>}} entry per
-successful Task. Omit a Task that failed to return an object. Never repair or
-reinterpret a response; the trusted post-model collector validates every seam.
+{{"id": <task id>, "result_json": <the Task's exact response encoded as a
+JSON string>}} entry per successful Task. Omit a Task that failed to return an
+object. Never repair or reinterpret a response; the trusted post-model
+collector parses and validates every seam.
 
 {os.linesep.join(work)}
 """
@@ -206,14 +207,24 @@ def parse_structured_output(raw, expected):
 
     candidates = {}
     for item in payload["chunks"]:
-        if (not isinstance(item, dict) or set(item) != {"id", "result"}
+        if (not isinstance(item, dict) or set(item) != {"id", "result_json"}
                 or not isinstance(item.get("id"), str)
-                or not isinstance(item.get("result"), dict)
+                or not isinstance(item.get("result_json"), str)
                 or item["id"] not in expected or item["id"] in candidates):
             print("warning: model structured_output carried an unknown, duplicate, "
                   "or malformed chunk entry", file=sys.stderr)
             return {}
-        candidates[item["id"]] = item["result"]
+        try:
+            result = json.loads(item["result_json"])
+        except json.JSONDecodeError:
+            print(f"warning: model returned malformed JSON for {item['id']}",
+                  file=sys.stderr)
+            continue
+        if not isinstance(result, dict):
+            print(f"warning: model returned a non-object for {item['id']}",
+                  file=sys.stderr)
+            continue
+        candidates[item["id"]] = result
     return candidates
 
 

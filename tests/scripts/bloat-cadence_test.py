@@ -102,6 +102,21 @@ raise SystemExit(2 if payload.get('invalid') else 0)
         self.assertEqual(
             json.loads(value)["required"], ["schema_version", "chunks"],
         )
+        schema = json.loads(value)
+
+        def assert_closed_objects(node):
+            if not isinstance(node, dict):
+                return
+            if node.get("type") == "object":
+                self.assertIs(node.get("additionalProperties"), False)
+            for child in node.values():
+                if isinstance(child, dict):
+                    assert_closed_objects(child)
+                elif isinstance(child, list):
+                    for member in child:
+                        assert_closed_objects(member)
+
+        assert_closed_objects(schema)
         self.assertIn("max_turns: 20", prompt)
         self.assertIn("max_turns: 24", prompt)
         self.assertIn("fresh Task", prompt)
@@ -125,8 +140,12 @@ raise SystemExit(2 if payload.get('invalid') else 0)
         result = self.collect({
             "schema_version": 1,
             "chunks": [
-                {"id": "c-a", "result": {"chunk": "c-a", "verdicts": []}},
-                {"id": "c-b", "result": {"chunk": "c-b", "invalid": True}},
+                {"id": "c-a", "result_json": json.dumps({
+                    "chunk": "c-a", "verdicts": [],
+                })},
+                {"id": "c-b", "result_json": json.dumps({
+                    "chunk": "c-b", "invalid": True,
+                })},
             ],
         })
 
@@ -148,7 +167,9 @@ raise SystemExit(2 if payload.get('invalid') else 0)
             "--retry-prompt", self.retry_prompt, "--planner", self.planner,
             "--root", self.tmp.name, "--prompts-dir", self.prompts,
             structured={"schema_version": 1, "chunks": [
-                {"id": "c-nope", "result": {"chunk": "c-nope", "verdicts": []}},
+                {"id": "c-nope", "result_json": json.dumps({
+                    "chunk": "c-nope", "verdicts": [],
+                })},
             ]},
         )
 
@@ -162,7 +183,9 @@ raise SystemExit(2 if payload.get('invalid') else 0)
         first = self.collect({
             "schema_version": 1,
             "chunks": [
-                {"id": "c-a", "result": {"chunk": "c-a", "verdicts": []}},
+                {"id": "c-a", "result_json": json.dumps({
+                    "chunk": "c-a", "verdicts": [],
+                })},
             ],
         })
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
@@ -170,7 +193,9 @@ raise SystemExit(2 if payload.get('invalid') else 0)
         second = self.collect({
             "schema_version": 1,
             "chunks": [
-                {"id": "c-b", "result": {"chunk": "c-b", "invalid": True}},
+                {"id": "c-b", "result_json": json.dumps({
+                    "chunk": "c-b", "invalid": True,
+                })},
             ],
         }, retry=False)
 
