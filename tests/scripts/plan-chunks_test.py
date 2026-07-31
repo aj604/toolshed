@@ -682,6 +682,48 @@ class EmitPrompt(unittest.TestCase):
             self.assertIn("c-nope", r.stderr)
 
 
+class EmitReadOnlyPrompt(unittest.TestCase):
+    def registered_fixture(self, root):
+        write(root, ".doc-lifecycle/registry.json", json.dumps({
+            "schema_version": 1,
+            "roots": ["docs"],
+            "sets": [],
+            "rules": [{"glob": "docs/*.md", "kind": "living"}],
+        }))
+        write(root, "docs/a.md", "# A\n\nCurrent guidance.\n")
+        git_init(root)
+        out = os.path.join(root, "manifest.json")
+        planned = run(root, out=out)
+        self.assertEqual(planned.returncode, 0, planned.stderr)
+        with open(out, encoding="utf-8") as stream:
+            chunk_id = json.load(stream)["chunks"][0]["id"]
+        return out, chunk_id
+
+    def test_read_only_prompt_embeds_trusted_units_and_returns_json(self):
+        with tempfile.TemporaryDirectory() as root:
+            manifest_path, chunk_id = self.registered_fixture(root)
+            result = run_emit(
+                root, manifest_path, "--emit-readonly-prompt", chunk_id,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("trusted segmentation evidence", result.stdout.lower())
+            self.assertRegex(result.stdout, r'"digest": "[0-9a-f]{64}"')
+            self.assertIn('"chunk": "' + chunk_id + '"', result.stdout)
+            self.assertIn("return", result.stdout.lower())
+            self.assertNotIn("python3", result.stdout)
+            self.assertNotIn("Write the chunk", result.stdout)
+            self.assertNotIn("--results-dir", result.stdout)
+
+    def test_read_only_prompt_needs_no_results_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            manifest_path, chunk_id = self.registered_fixture(root)
+            result = run_emit(
+                root, manifest_path, "--emit-readonly-prompt", chunk_id,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+
 class EngineManifestDialect(unittest.TestCase):
     """The engine's `bloat-plan` manifest: {"documents": [<path>, ...]} per
     chunk, no per-doc "lines"/"hint", no per-chunk "turns" — a different but

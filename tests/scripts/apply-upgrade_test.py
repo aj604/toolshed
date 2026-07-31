@@ -33,6 +33,11 @@ TPL_DOC_AUDIT = (
     "on:\n  schedule:\n    - cron: \"{{AUDIT_CRON}}\"\n"
     "jobs:\n  x: ${{ github.token }}\n"
 )
+TPL_BLOAT_AUDIT = (
+    "name: doc-bloat-audit\n"
+    "on:\n  schedule:\n    - cron: \"{{BLOAT_AUDIT_CRON}}\"\n"
+    "jobs:\n  x: ${{ github.token }}\n"
+)
 TPL_DOC_APPLY = "name: doc-apply\non:\n  workflow_dispatch: {}\n"
 TPL_DOC_POLICY_APPLY = (
     "name: doc-policy-apply\n"
@@ -59,6 +64,7 @@ def make_plugin_root(base, version_tag="NEW"):
     (sds).mkdir(parents=True)
     (sds / "doc-sync-upgrade.yml").write_text(TPL_DOC_UPGRADE)
     (sds / "doc-audit.yml").write_text(TPL_DOC_AUDIT)
+    (sds / "doc-bloat-audit.yml").write_text(TPL_BLOAT_AUDIT)
     (sds / "doc-apply.yml").write_text(TPL_DOC_APPLY)
     (sds / "doc-policy-apply.yml").write_text(TPL_DOC_POLICY_APPLY)
     sources = dict(SCRIPT_SOURCES)
@@ -96,6 +102,8 @@ def _workflows(repo, upgrade_yml, registry):
     if registry:
         (wf / "doc-audit.yml").write_text(
             "name: doc-audit\non:\n  schedule:\n    - cron: \"5 1 * * *\"\n")
+        (wf / "doc-bloat-audit.yml").write_text(
+            "name: doc-bloat-audit\non:\n  schedule:\n    - cron: \"10 4 * * 2\"\n")
 
 
 def make_install(base, upgrade_yml=True, registry=False, name="repo"):
@@ -196,6 +204,15 @@ class ApplyUpgrade(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         da = (repo / ".github/workflows/doc-audit.yml").read_text()
         self.assertIn('cron: "5 1 * * *"', da)
+
+    def test_preserves_the_bloat_audit_knob_on_a_registry_install(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        r = run(pr, repo, "0.45.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        workflow = (repo / ".github/workflows/doc-bloat-audit.yml").read_text()
+        self.assertIn('cron: "10 4 * * 2"', workflow)
+        self.assertIn("jobs:\n  x: ${{ github.token }}", workflow)
 
     def test_no_placeholder_survives_and_github_expr_untouched(self):
         pr = make_plugin_root(self.base)
@@ -337,6 +354,7 @@ class ApplyUpgrade(unittest.TestCase):
         declared = set(text.splitlines())
         expected = {".github/workflows/doc-sync-upgrade.yml",
                     ".github/workflows/doc-audit.yml",
+                    ".github/workflows/doc-bloat-audit.yml",
                     ".github/workflows/doc-apply.yml",
                     ".github/workflows/doc-policy-apply.yml",
                     ".doc-lifecycle/installed-version",
@@ -379,6 +397,7 @@ class ApplyUpgrade(unittest.TestCase):
         declared = set(text.splitlines())
         self.assertEqual(
             declared & {".github/workflows/doc-audit.yml",
+                        ".github/workflows/doc-bloat-audit.yml",
                         ".github/workflows/doc-apply.yml",
                         ".github/workflows/doc-policy-apply.yml",
                         ".doc-lifecycle/wiring/engine",
@@ -510,6 +529,16 @@ class ApplyUpgrade(unittest.TestCase):
         du = (repo / ".github/workflows/doc-sync-upgrade.yml").read_text()
         self.assertIn('cron: "0 2 * * 1"', du)
         self.assertIn("default upgrade cron", r.stderr)
+
+    def test_absent_bloat_audit_yml_uses_weekly_default_and_warns(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        (repo / ".github/workflows/doc-bloat-audit.yml").unlink()
+        r = run(pr, repo, "0.45.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        workflow = (repo / ".github/workflows/doc-bloat-audit.yml").read_text()
+        self.assertIn('cron: "0 4 * * 1"', workflow)
+        self.assertIn("default bloat audit cron", r.stderr)
 
     # --- the relocation (aj604/toolshed#133) --------------------------------
     #
@@ -724,6 +753,16 @@ class ApplyUpgrade(unittest.TestCase):
         r = run(pr, repo, "0.36.0")
         self.assertEqual(r.returncode, 1)
         self.assertIn("audit cron", r.stderr)
+
+    def test_unextractable_bloat_audit_cron_fails(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        (repo / ".github/workflows/doc-bloat-audit.yml").write_text(
+            "name: doc-bloat-audit\non:\n  workflow_dispatch: {}\n"
+        )
+        r = run(pr, repo, "0.45.0")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("bloat audit cron", r.stderr)
 
     def test_unknown_template_placeholder_fails(self):
         pr = make_plugin_root(self.base)

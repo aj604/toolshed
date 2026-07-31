@@ -1,0 +1,364 @@
+# doc-bloat-audit — scheduled, read-only bloat sweep (aj604/toolshed#144).
+#
+# This scheduler adapter owns cadence and orchestration only. The engine's public
+# `bloat-plan` and `bloat-audit` contracts own scope, completion, and result
+# states; detecting-doc-bloat's scripts own prompt slicing, turn budgets, seam
+# validation, and completion assembly. A missing or invalid chunk therefore
+# reaches the report as typed #152 completion evidence, never as an empty-looking
+# clean sweep. Every generated artifact stays under runner.temp, outside the work
+# tree. Models and Task workers have only read tools; trusted deterministic
+# scripts render their work orders, extract the action's supported structured
+# output, validate results, select one retry, and assemble completion evidence.
+name: doc-bloat-audit
+
+on:
+  schedule:
+    - cron: "{{BLOAT_AUDIT_CRON}}"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: doc-bloat-audit
+  cancel-in-progress: false
+
+env:
+  BLOAT_DIR: ${{ runner.temp }}/doc-bloat-audit
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # claude-code-action OAuth exchange only
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Freeze the skill and its helper scripts at the same release as the
+      # vendored engine. The checkout is under runner.temp and carries no
+      # repository credential.
+      - name: Pin plugin marketplace
+        run: |
+          set -euo pipefail
+          VERSION=$(cat .doc-lifecycle/installed-version)
+          rm -rf "${RUNNER_TEMP}/toolshed-marketplace"
+          git clone --depth 1 --branch "v${VERSION}" \
+            https://github.com/aj604/toolshed.git "${RUNNER_TEMP}/toolshed-marketplace"
+
+      # Fail before the first model turn when the closed-world registry is not
+      # present or valid. The explicit public plan is the preflight: without it,
+      # plan-chunks' unregistered-repository fallback could still produce a
+      # legacy prompt manifest and burn the fan-out before completion assembly
+      # refused it. plan-chunks then calls the same `bloat-plan` contract using
+      # the consumer's chunk-size knob and merely decorates its exact chunk
+      # ids/membership with scheduler prompt metadata and turn budgets.
+      - name: Preflight registry and plan the public bloat audit
+        run: |
+          set -euo pipefail
+          test -f .doc-lifecycle/registry.json
+          mkdir -p "${BLOAT_DIR}/chunks"
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py bloat-plan --repo . \
+            > "${BLOAT_DIR}/preflight-plan.json"
+          python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py" \
+            --root . \
+            --config .doc-lifecycle/audit-scope.json \
+            --out "${BLOAT_DIR}/manifest.json" \
+            --results-dir "${BLOAT_DIR}/chunks"
+
+      # Render every public-engine unit identity, exact worker prompt, and
+      # planner-owned turn budget before any model runs. This script also emits
+      # the JSON schema consumed through claude-code-action's documented
+      # structured_output contract.
+      - name: Render trusted read-only coordinator prompt
+        id: prepare
+        run: |
+          set -euo pipefail
+          rm -rf \
+            "${BLOAT_DIR}/claude-config-first" \
+            "${BLOAT_DIR}/claude-config-retry"
+          mkdir -p \
+            "${BLOAT_DIR}/claude-config-first" \
+            "${BLOAT_DIR}/claude-config-retry"
+          python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/bloat-cadence.py" prepare \
+            --manifest "${BLOAT_DIR}/manifest.json" \
+            --planner "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py" \
+            --root . \
+            --prompts-dir "${BLOAT_DIR}/prompts" \
+            --out "${BLOAT_DIR}/coordinator-prompt.md" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      # The coordinator sends the already-rendered prompts to fresh Tasks and
+      # returns their objects unchanged. Its entire capability boundary — and
+      # the boundary inherited by workers — is Task plus read-only file tools.
+      - name: Dispatch bounded bloat workers
+        id: model
+        env:
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/doc-bloat-audit/claude-config-first
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: >-
+            Read ${{ runner.temp }}/doc-bloat-audit/coordinator-prompt.md and
+            follow that complete, deterministically rendered work order exactly.
+          claude_args: >-
+            --max-turns 60
+            --add-dir "${{ runner.temp }}/doc-bloat-audit"
+            "${{ runner.temp }}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat"
+            --setting-sources user
+            --tools "Task,Read,Grep,Glob"
+            --allowedTools "Task,Read,Grep,Glob"
+            --disallowedTools "mcp__*"
+            --json-schema '${{ steps.prepare.outputs.schema }}'
+
+      # claude-code-action uses one runner.temp execution path per invocation.
+      # Preserve the first run before a retry can replace it at that path.
+      - name: Preserve first-pass execution telemetry
+        if: always()
+        env:
+          MODEL_EXECUTION_FILE: ${{ steps.model.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+          source="${MODEL_EXECUTION_FILE:-${RUNNER_TEMP}/claude-execution-output.json}"
+          if [ -f "$source" ]; then
+            cp -- "$source" "${BLOAT_DIR}/execution-first.json"
+          fi
+
+      # Parse only the pinned action's documented structured_output. Candidate
+      # files land under runner.temp only after the existing chunk validator
+      # accepts them. Missing/invalid returns become the exact retry selection.
+      - name: Validate worker returns and select retries
+        id: collect
+        if: always()
+        env:
+          MODEL_STRUCTURED_OUTPUT: ${{ steps.model.outputs.structured_output }}
+        run: |
+          set -euo pipefail
+          python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/bloat-cadence.py" collect \
+            --manifest "${BLOAT_DIR}/manifest.json" \
+            --results-dir "${BLOAT_DIR}/chunks" \
+            --validator "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py" \
+            --retry-prompt "${BLOAT_DIR}/retry-prompt.md" \
+            --planner "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py" \
+            --root . \
+            --prompts-dir "${BLOAT_DIR}/prompts" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Retry invalid bloat chunks once
+        id: retry_model
+        if: ${{ always() && !cancelled() && steps.collect.outputs.retry == 'true' }}
+        env:
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/doc-bloat-audit/claude-config-retry
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: >-
+            Read ${{ runner.temp }}/doc-bloat-audit/retry-prompt.md and follow
+            that complete, deterministically rendered retry work order exactly.
+          claude_args: >-
+            --max-turns 60
+            --add-dir "${{ runner.temp }}/doc-bloat-audit"
+            "${{ runner.temp }}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat"
+            --setting-sources user
+            --tools "Task,Read,Grep,Glob"
+            --allowedTools "Task,Read,Grep,Glob"
+            --disallowedTools "mcp__*"
+            --json-schema '${{ steps.prepare.outputs.schema }}'
+
+      - name: Preserve retry execution telemetry
+        if: ${{ always() && !cancelled() && steps.collect.outputs.retry == 'true' }}
+        env:
+          RETRY_EXECUTION_FILE: ${{ steps.retry_model.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+          source="${RETRY_EXECUTION_FILE:-${RUNNER_TEMP}/claude-execution-output.json}"
+          if [ -f "$source" ]; then
+            cp -- "$source" "${BLOAT_DIR}/execution-retry.json"
+          fi
+
+      # There is deliberately no second retry. Invalid retry returns never
+      # become chunk files, so --allow-partial below binds the remaining ids and
+      # their documents into typed incomplete completion evidence.
+      - name: Validate retry returns
+        if: ${{ always() && !cancelled() && steps.collect.outputs.retry == 'true' }}
+        env:
+          MODEL_STRUCTURED_OUTPUT: ${{ steps.retry_model.outputs.structured_output }}
+        run: |
+          set -euo pipefail
+          python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/bloat-cadence.py" collect \
+            --manifest "${BLOAT_DIR}/manifest.json" \
+            --results-dir "${BLOAT_DIR}/chunks" \
+            --validator "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py"
+
+      - name: Extract cost and turn observability
+        if: always()
+        run: |
+          set -euo pipefail
+          logs=(--execution-log "${BLOAT_DIR}/execution-first.json")
+          if [ -f "${BLOAT_DIR}/execution-retry.json" ]; then
+            logs+=(--execution-log "${BLOAT_DIR}/execution-retry.json")
+          fi
+          python3 .doc-lifecycle/wiring/render-audit-summary.py cost \
+            "${logs[@]}" \
+            --out "${BLOAT_DIR}/audit-cost.json"
+
+      # Defense in depth: models cannot mutate the checkout by capability, and
+      # this gate additionally fails closed if an action implementation or
+      # another process moved HEAD or changed any checkout file. Never reset or
+      # clean here — a mutation must not be laundered into a read-only report.
+      - name: Verify repository integrity before assembly
+        id: integrity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          dirty=0
+          if [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then
+            echo "::error::repository HEAD moved during the model fan-out"
+            dirty=1
+          fi
+          if ! git diff --quiet --; then
+            echo "::error::tracked worktree files changed during the model fan-out"
+            dirty=1
+          fi
+          if ! git diff --cached --quiet HEAD --; then
+            echo "::error::staged repository changes appeared during the model fan-out"
+            dirty=1
+          fi
+          if [ -n "$(git ls-files --others)" ]; then
+            echo "::error::untracked repository files appeared during the model fan-out"
+            dirty=1
+          fi
+          if [ "$dirty" -ne 0 ]; then
+            exit 1
+          fi
+
+      # Assembly is deterministic. `--allow-partial` does not forgive a gap:
+      # #152 binds each missing/invalid chunk and every affected document into
+      # the envelope's completion evidence. The sidecar is presentation/debug
+      # data only; bloat-audit derives partial from the envelope itself.
+      - name: Assemble chunk completion evidence
+        if: ${{ always() && steps.integrity.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          if [ -f "${BLOAT_DIR}/manifest.json" ]; then
+            python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py" \
+              --assemble "${BLOAT_DIR}/chunks" \
+              --manifest "${BLOAT_DIR}/manifest.json" \
+              --out "${BLOAT_DIR}/bloat-verdicts.json" \
+              --allow-partial \
+              --unswept-out "${BLOAT_DIR}/unswept.json"
+          fi
+
+      - name: Run the public bloat audit
+        if: ${{ always() && steps.integrity.outcome == 'success' }}
+        run: |
+          set -uo pipefail
+          if [ ! -f "${BLOAT_DIR}/bloat-verdicts.json" ]; then
+            echo "no assembled verdict envelope; no bloat report can be produced"
+            exit 0
+          fi
+          code=0
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py bloat-audit --repo . \
+            --verdicts "${BLOAT_DIR}/bloat-verdicts.json" \
+            > "${BLOAT_DIR}/bloat-report.json" || code=$?
+          case "$code" in
+            0) echo "bloat-audit exit code: 0 (clean/findings — typed report)" ;;
+            1) echo "bloat-audit exit code: 1 (invalid — typed report)" ;;
+            4) echo "bloat-audit exit code: 4 (partial — typed report)" ;;
+            *)
+              echo "bloat-audit exit code: $code (unexpected)"
+              exit "$code"
+              ;;
+          esac
+
+      - name: Upload bloat report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bloat-audit-report
+          path: ${{ runner.temp }}/doc-bloat-audit/bloat-report.json
+          if-no-files-found: ignore
+
+      - name: Upload completion evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bloat-audit-completion
+          path: |
+            ${{ runner.temp }}/doc-bloat-audit/manifest.json
+            ${{ runner.temp }}/doc-bloat-audit/chunks
+            ${{ runner.temp }}/doc-bloat-audit/bloat-verdicts.json
+            ${{ runner.temp }}/doc-bloat-audit/unswept.json
+          if-no-files-found: ignore
+
+      - name: Upload cost artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bloat-audit-cost
+          path: ${{ runner.temp }}/doc-bloat-audit/audit-cost.json
+          if-no-files-found: ignore
+
+  publish:
+    needs: audit
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download bloat report
+        continue-on-error: true
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: bloat-audit-report
+          path: ${{ runner.temp }}/doc-bloat-audit
+
+      - name: Download cost artifact
+        continue-on-error: true
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: bloat-audit-cost
+          path: ${{ runner.temp }}/doc-bloat-audit
+
+      # A rerun of this job must not present an old report as current. The
+      # generic report validator owns freshness; the adapter only preserves its
+      # typed payload. An invalid report has no lineage to revalidate.
+      - name: Re-validate freshness before publishing
+        run: |
+          set -uo pipefail
+          report="${BLOAT_DIR}/bloat-report.json"
+          if [ -f "$report" ] && ! grep -q '"status"[[:space:]]*:[[:space:]]*"invalid"' "$report"; then
+            code=0
+            python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py validate-report \
+              --repo . --report "$report" \
+              > "${BLOAT_DIR}/revalidated.json" || code=$?
+            case "$code" in
+              0|1|3|4) ;;
+              *) exit "$code" ;;
+            esac
+            if [ -s "${BLOAT_DIR}/revalidated.json" ]; then
+              mv "${BLOAT_DIR}/revalidated.json" "$report"
+            fi
+          fi
+
+      - name: Render typed bloat summary
+        run: |
+          python3 .doc-lifecycle/wiring/render-audit-summary.py summary --audit-surface bloat \
+            --report "${BLOAT_DIR}/bloat-report.json" \
+            --cost "${BLOAT_DIR}/audit-cost.json"

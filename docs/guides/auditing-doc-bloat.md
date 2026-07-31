@@ -1,6 +1,6 @@
 # Auditing and fixing bloat with `detecting-doc-bloat` and `fixing-docs`
 
-> As of 2026-07-29 (doc-lifecycle 0.44.0, engine verdict contract; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/engine/doclifecycle/bloat.py`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`)
+> As of 2026-07-30 (doc-lifecycle 0.45.0, engine verdict and scheduled-audit contracts; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/engine/doclifecycle/bloat.py`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat-audit.yml`)
 
 **You should already have:** the plugin installed and [the principles](principles.md)
 read — especially §3, because this loop *is* the propose → approve → apply contract.
@@ -103,7 +103,9 @@ is reviewable at all.
 
 ## Next
 
-This loop is interactive by design — you ask, you read, you approve by ID. There is no
-scheduled bloat sweep: the unattended lane covers **drift** only, auditing the corpus
-nightly and handing you a report to approve records from. When the drift loop feels
-routine, [put that one on a schedule](scheduling-doc-sync.md).
+The approval loop remains interactive: you read and approve records by ID through
+`fixing-docs`. A separate weekly, read-only scheduled bloat audit can sweep the registered
+corpus and publish a typed report, including explicit incomplete coverage. No scheduled lane
+applies its findings. See the [scheduling guide](scheduling-doc-sync.md) for installation,
+cadence, and trust boundaries; when a report arrives, use Steps 2 and 3 above to review and
+apply only the IDs you approve.

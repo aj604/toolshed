@@ -106,6 +106,33 @@ class CostExtraction(unittest.TestCase):
             "available": True, "turns": 7, "cost_usd": 0.42, "duration_ms": 15000,
         })
 
+    def test_aggregates_first_attempt_and_retry_execution_logs(self):
+        first = self.write_log([
+            {"type": "result", "num_turns": 7,
+             "total_cost_usd": 0.42, "duration_ms": 15000},
+        ])
+        retry = os.path.join(self.tmp.name, "retry.json")
+        with open(retry, "w", encoding="utf-8") as stream:
+            json.dump([
+                {"type": "result", "num_turns": 3,
+                 "total_cost_usd": 0.18, "duration_ms": 6000},
+            ], stream)
+        out = self.out_path()
+
+        proc = run(
+            "cost", "--execution-log", first,
+            "--execution-log", retry, "--out", out,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(out, encoding="utf-8") as stream:
+            self.assertEqual(json.load(stream), {
+                "available": True,
+                "turns": 10,
+                "cost_usd": 0.60,
+                "duration_ms": 21000,
+            })
+
     def test_last_result_event_wins(self):
         log = self.write_log([
             {"type": "result", "subtype": "error_max_turns", "num_turns": 3,
@@ -217,6 +244,29 @@ class RenderOutcomes(unittest.TestCase):
         self.assertIn("PARTIAL", text)
         self.assertIn("docs/runbook.md", text)
         self.assertIn("the chunk worker failed twice", text)
+
+    def test_bloat_summary_names_typed_completion_gaps_from_the_report(self):
+        path = self.write_report(report(
+            "partial",
+            incomplete=[{
+                "scope": "docs/runbook.md",
+                "reason": "chunk c-deadbeef is missing: result file was not produced",
+            }],
+        ))
+        proc = self.summary_run(
+            "--audit-surface", "bloat", "--report", path,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        text = self.summary_text()
+        self.assertIn("Bloat audit: PARTIAL", text)
+        self.assertIn("docs/runbook.md", text)
+        self.assertIn("c-deadbeef", text)
+
+    def test_ambiguous_legacy_kind_flag_is_rejected(self):
+        path = self.write_report(report("clean"))
+        proc = self.summary_run("--kind", "bloat", "--report", path)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("unrecognized arguments", proc.stderr)
 
     def test_clean_report_says_clean(self):
         path = self.write_report(report("clean"))

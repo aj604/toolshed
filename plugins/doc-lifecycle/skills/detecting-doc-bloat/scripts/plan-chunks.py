@@ -40,6 +40,7 @@ the dispatcher's job, not the planner's.
 Usage:
     plan-chunks.py [--config PATH] [--root DIR] [--out FILE] [--results-dir DIR]
     plan-chunks.py --emit-prompt ID --manifest FILE --results-dir DIR  # dispatch prompt
+    plan-chunks.py --emit-readonly-prompt ID --manifest FILE  # return-only prompt
     plan-chunks.py --emit-turns ID --manifest FILE     # print turn budget
 
 --emit-prompt renders the full dispatch prompt for one chunk — the doc list
@@ -53,10 +54,16 @@ detecting-doc-bloat/SKILL.md) rather than the bare `chunks/<id>.json` a
 work-tree-rooted executor would resolve into the tree itself. The executor is
 handed its slice; it never opens the manifest.
 
-Both `--emit-prompt` and `--emit-turns` accept a manifest from either
+`--emit-readonly-prompt` is the scheduled cadence's stricter sibling: it runs
+the public `segment` contract before the model turn, embeds those trusted unit
+identities, names the pinned skill/contract references to read, and requires the
+chunk object as the Task's final response. It names no output path and requires
+no command or mutation tool; the trusted scheduler owns extraction and files.
+
+All three emission modes accept a manifest from either
 planner: this script's own (`{"docs": [{"path","lines","hint"}, ...]}` per
 chunk) or the engine's `bloat-plan` (`{"documents": [<path>, ...]}`, no
-per-doc lines/hint and no per-chunk `turns`). `--emit-prompt` renders
+per-doc lines/hint and no per-chunk `turns`). Both prompt modes render
 whichever fields a chunk's dialect actually carries; `--emit-turns` returns
 the stamped `turns` when present, the floor for a pre-`turns` manifest of
 this script's own dialect (`docs` present), and fails loudly (exit 2) for a
@@ -421,6 +428,35 @@ file, in the chunk-result shape the skill's contract defines; then stop.
 Orchestration, retries, and assembly belong to whoever dispatched you.
 """
 
+READ_ONLY_SWEEP_PROMPT = """\
+You are a read-only chunk executor. Use only Read, Grep, and Glob. Never run a
+command and never write, edit, stage, or delete a file. Read the following
+pinned rule sources before judging the chunk:
+  - {skill_path}
+  - {contract_path}
+  - {lenses_path}
+  - {planning_path}
+
+Audit exactly the documents listed below and no others. This list is your
+entire document scope; do not enumerate or open documents outside it.
+
+Chunk {id}:
+{doc_lines}
+
+The kind hints are the planner's; override one only with stated evidence, per
+the skill. The trusted segmentation evidence below was produced before this
+model turn by the public engine. Use its digest values verbatim for verdict
+`units`; never invent, abbreviate, or paraphrase an identity.
+
+{segmentation}
+
+Return exactly one JSON object as your final Task response, with no Markdown
+fence or surrounding prose: {{"chunk": "{id}", "verdicts": [...]}}. Return
+an empty `verdicts` array when nothing in this chunk is bloated. Do not author
+completion evidence, retry, or inspect orchestration state; the trusted caller
+owns validation, retries, and assembly.
+"""
+
 
 def usable_result(results_dir, cid, manifest_path):
     """True only for a parseable *current-shape* result that names this chunk.
@@ -514,6 +550,54 @@ def emit_prompt(chunk, results_dir):
         out_path=out_path)
 
 
+def segmentation_evidence(root, chunk):
+    """Public-engine segment artifacts rendered before a read-only model turn."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = (ENGINE + os.pathsep + env["PYTHONPATH"]
+                         if env.get("PYTHONPATH") else ENGINE)
+    evidence = []
+    docs = chunk.get("docs")
+    paths = ([doc["path"] for doc in docs] if isinstance(docs, list)
+             else chunk.get("documents"))
+    if not isinstance(paths, list):
+        die(f"error: chunk {chunk.get('id')!r} carries no recognized docs")
+    for path in paths:
+        result = subprocess.run(
+            [sys.executable, "-m", "doclifecycle", "segment", "--repo", root,
+             "--path", path],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            die(f"error: cannot render trusted segmentation for {path}: "
+                f"{detail or 'segment failed'}")
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            die(f"error: segment returned malformed JSON for {path}: {exc}")
+        if not isinstance(payload, dict) or payload.get("status") != "ok":
+            die(f"error: segment returned no usable evidence for {path}")
+        evidence.append(payload)
+    return evidence
+
+
+def emit_readonly_prompt(chunk, root):
+    skill_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    return READ_ONLY_SWEEP_PROMPT.format(
+        id=chunk["id"],
+        doc_lines="\n".join(chunk_doc_lines(chunk)),
+        skill_path=os.path.join(skill_dir, "SKILL.md"),
+        contract_path=os.path.join(skill_dir, "output-contract.md"),
+        lenses_path=os.path.join(skill_dir, "references", "verdict-lenses.md"),
+        planning_path=os.path.join(
+            skill_dir, "references", "planning-artifacts.md",
+        ),
+        segmentation=json.dumps(
+            segmentation_evidence(root, chunk), indent=2, sort_keys=True,
+        ),
+    )
+
+
 def emit_turns(chunk):
     """This chunk's model-invocation turn budget, for either planner's manifest.
 
@@ -549,20 +633,26 @@ def main():
                     "leave 'pending'. With --emit-prompt: required — the "
                     "out-of-work-tree dir the rendered prompt tells the "
                     "executor to write its result into")
-    ap.add_argument("--emit-prompt", metavar="ID",
+    dispatch = ap.add_mutually_exclusive_group()
+    dispatch.add_argument("--emit-prompt", metavar="ID",
                     help="print the dispatch prompt for one manifest chunk "
                     "(requires --results-dir)")
-    ap.add_argument("--emit-turns", metavar="ID",
+    dispatch.add_argument("--emit-readonly-prompt", metavar="ID",
+                    help="print a return-only prompt with trusted segmentation "
+                    "evidence for a Read/Grep/Glob worker")
+    dispatch.add_argument("--emit-turns", metavar="ID",
                     help="print the turn budget for one manifest chunk")
     ap.add_argument("--manifest", help="manifest JSON for --emit-prompt/"
                     "--emit-turns")
     args = ap.parse_args()
 
-    if args.emit_prompt or args.emit_turns:
+    if args.emit_prompt or args.emit_readonly_prompt or args.emit_turns:
         if not args.manifest:
-            die("error: --emit-prompt/--emit-turns require --manifest")
+            die("error: prompt/turn emission requires --manifest")
         man = load_manifest(args.manifest)
-        chunk = find_chunk(man, args.emit_prompt or args.emit_turns)
+        chunk = find_chunk(
+            man, args.emit_prompt or args.emit_readonly_prompt or args.emit_turns,
+        )
         if args.emit_prompt:
             if not args.results_dir:
                 die("error: --emit-prompt requires --results-dir — the "
@@ -577,6 +667,8 @@ def main():
                     f"unaccounted change the applier refuses. Pass a path "
                     f"outside the repository (${{TMPDIR:-/tmp}}/...)")
             print(emit_prompt(chunk, args.results_dir), end="")
+        elif args.emit_readonly_prompt:
+            print(emit_readonly_prompt(chunk, args.root), end="")
         else:
             print(emit_turns(chunk))
         return 0

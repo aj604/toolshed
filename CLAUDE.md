@@ -3,7 +3,7 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture absorbed the helper scripts into; see its `README.md`) plus ten skill
+re-architecture absorbed the helper scripts into; see its `README.md`) plus eleven skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
@@ -17,7 +17,7 @@ must run it from a copy of the install's own tooling taken before the regenerati
 release's copy of it),
 `scripts/render-report.py` (the upgrade lane's run surface — its only consumer;
 `detecting-doc-bloat` now summarizes its report by hand rather than through a subcommand here),
-`scripts/render-audit-summary.py` (the audit lane's run-surface rendering — #71),
+`scripts/render-audit-summary.py` (the audit lanes' run-surface rendering — #71/#144),
 `scripts/render-apply-summary.py` (the apply lane's run surface — its refusals, its
 staged path list, and the PR title, body, and commit message that carry the approval set's digest
 and summary — #72),
@@ -25,13 +25,18 @@ and summary — #72),
 `drift-audit --evidence-command` from `evidence-tools.json` and runs each declared tool only as
 a `--help`/`--version` read, under the model step's existing `Bash(python3 *)` grant rather than
 a wider one, #118), and
+`scripts/bloat-cadence.py` (the scheduled bloat lane's trusted prompt renderer and
+schema-bound action-output collector — it validates chunk returns, selects one retry, and runs
+from the release-pinned marketplace rather than being vendored), and
 `scripts/apply-upgrade.py` (the deterministic upgrade engine — the *target release's* own copy is
 what the upgrade lane runs, in the one job holding no credential, and it stays deliberately
 un-vendored) — all under `scheduling-doc-sync/scripts/`, not the
 skill's base directory, which holds only the templates; all `python3`, no deps)
-plus the four GitHub Actions templates the scheduling skill installs
+plus the five GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml` — the read-only scheduled
-audit, #71; `doc-apply.yml` — the manual apply dispatch, #72;
+drift audit, #71; `doc-bloat-audit.yml` — the weekly read-only, budgeted Task fan-out whose
+typed completion gaps come from the report, #144; `doc-apply.yml` — the manual apply dispatch,
+the human-selected apply lane, #72;
 `doc-policy-apply.yml` — the successful-scheduled-audit-chained policy lane whose three jobs keep
 the model repository-credential-free and open a real review PR for the mechanical subset selected
 by the standing consumer policy, #143; and
@@ -39,7 +44,7 @@ by the standing consumer policy, #143; and
 release and files a notice issue, while a human dispatch naming the target is what regenerates the
 wiring and opens the version-bump PR, #127). #77 removed the legacy
 `doc-sync.yml` / `doc-bloat.yml` write lanes and their gate/path-authority/distill-planner
-scripts, so an install is exactly those four templates; `apply-upgrade.py` installs the three
+scripts, so an install is exactly those five templates; `apply-upgrade.py` installs the four
 engine lanes only into a repo holding `.doc-lifecycle/registry.json`, and the upgrade lane
 everywhere. The sample repos under `tests/fixtures/` are the other runnable
 code that matters, alongside the dogfooded install under `.doc-lifecycle/` (#133 centralized it
@@ -66,9 +71,9 @@ and narrative-anchor refresh records; upgrades preserve it and never seed one),
 `installed-version`
 (the plugin-version lockfile the upgrade workflow reads), and `state/sync-marker`, which survives
 as legacy state no lane reads — carried across the relocation byte-for-byte because whose state it
-is decides that. The four lane workflows stay in `.github/workflows/` (`doc-audit.yml`,
-`doc-apply.yml`, `doc-policy-apply.yml`, `doc-sync-upgrade.yml`) because GitHub reads workflows
-only from there, and are
+is decides that. The five lane workflows stay in `.github/workflows/` (`doc-audit.yml`,
+`doc-bloat-audit.yml`, `doc-apply.yml`, `doc-policy-apply.yml`, `doc-sync-upgrade.yml`) because
+GitHub reads workflows only from there, and are
 the only doc-lifecycle content left under `.github/`. Also runnable: the ci+release workflow
 (`.github/workflows/release.yml`), that workflow's own test-suite runner
 (`.github/scripts/run-script-suites.py`, #99 — discovery-driven, so a new
@@ -134,7 +139,8 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   the 2026-07-09 distill-lane fan-out's at `tests/baselines/distill-fanout-red/` /
   `distill-fanout-green/`, and the fix-skill merge's at
   `tests/baselines/fixing-docs-merge-red/` / `fixing-docs-merge-green/`; the policy lane's retained
-  test-first record is at `tests/baselines/policy-lane-red/`;
+  test-first record is at `tests/baselines/policy-lane-red/`, and the scheduled bloat cadence's
+  at `tests/baselines/scheduling-bloat-cadence-red/`;
   method, status, and resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md`
   (2026-06-09 suite entry; 2026-06-20 `docs/reference/` shape; 2026-07-06 rearchitecture
   entry; 2026-07-07 scale-hardening entry; 2026-07-09 distill-fan-out entry).
@@ -160,7 +166,7 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   grant naming a Bash executable beyond `git`/`python3`, since those patterns are prefix-matched,
   #118),
   `install-parity_test.py`
-  (the dogfooded install (`.doc-lifecycle/` plus the four lane workflows under `.github/workflows/`) is byte-identical to what `apply-upgrade.py` would lay down
+  (the dogfooded install (`.doc-lifecycle/` plus the five lane workflows under `.github/workflows/`) is byte-identical to what `apply-upgrade.py` would lay down
   from the plugin with this install's knobs, plus a whole-tree comparison of the vendored engine),
   and `engine-capability_test.py` (the engine's
   applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the
@@ -175,6 +181,13 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   revalidated payload must not fail the step outright) and static guards on how this lane
   reaches Tier-2 tool evidence (#118: the model grant unchanged, `--evidence-command` rendered
   by `probe-evidence-tool.py` rather than typed into the YAML);
+  `bloat-audit-workflow_test.py` guards the sibling bloat cadence (#144): registry/public-plan
+  preflight before fan-out, the two SHA-pinned model actions' exact `Task,Read,Grep,Glob`
+  boundary, trusted structured-output extraction and one-retry selection, one budgeted fresh
+  Task per chunk, out-of-tree artifacts, a post-model fail-closed clean-worktree gate before
+  #152 completion assembly, and a report-derived typed partial summary (the unswept sidecar is
+  never the authority); `bloat-cadence_test.py` executes the supported action-output seam,
+  invalid-return retry selection, and post-retry partial truth;
   `probe-evidence-tool_test.py` covers that script itself (the declared list and its rendered
   flags, the refusals for an undeclared tool or a non-`--help`/`--version` invocation, and the
   credential scrub). Both suites sit alongside what `workflow-permissions_test.py` already
