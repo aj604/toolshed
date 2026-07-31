@@ -14,8 +14,9 @@
 #     the lane stops, so no branch and no pull request exist to review. Only then does it mint
 #     the approval set (`mint-approval`), whose own refusals — unknown record, exclusive group,
 #     unauthorized target, stale preimage — are the engine's, not this workflow's.
-#   plan — the only job with a model, and it holds no credential at all: `contents: read`, a
-#     checkout with no persisted credential, and no GH_TOKEN. It authors an edit plan and
+#   plan — the only job with a model, and it holds no repository credential: `contents: read`, a
+#     checkout with no persisted repository credential, and no GH_TOKEN. The action still receives
+#     its model OAuth/API inputs and id-token. It authors an edit plan and
 #     nothing else. The plan is a *proposal*: the applier re-derives every operation against the
 #     approval set, the record's own remedy table, and the exact preimages, so a hostile plan
 #     buys nothing a validated approval set does not already allow.
@@ -277,8 +278,9 @@ jobs:
             ${{ runner.temp }}/branch.txt
           if-no-files-found: error
 
-  # The only job that runs a model, and the only one that holds no credential: no GH_TOKEN, and
-  # a checkout that persists none. It authors a proposal; it cannot land one.
+  # The only job that runs a model, and the only one that holds no repository credential: no
+  # GH_TOKEN, and a checkout that persists none. The action still receives its model OAuth/API
+  # inputs and id-token. It authors a proposal; it cannot land one.
   plan:
     needs: revalidate
     runs-on: ubuntu-latest

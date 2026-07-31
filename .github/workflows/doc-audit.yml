@@ -4,8 +4,9 @@
 # parity gate (aj604/toolshed#76) cleared for retirement and #77 removed.
 #
 # Two jobs, split strictly by trust, per the re-architecture's scheduler-adapter contract:
-# `audit` executes the model with `contents: read` and no credential at all (checkout drops
-# persist-credentials, no GH_TOKEN reaches it) and calls the engine's own public CLI —
+# `audit` executes the model with `contents: read` and no repository credential (checkout drops
+# persist-credentials, no GH_TOKEN reaches it); the action still receives its model OAuth/API
+# inputs and id-token. It calls the engine's own public CLI —
 # `drift-plan` (deterministic scope), then `drift-audit` (the validated report) — never owning
 # a lifecycle rule of its own. `publish` runs no model and holds no write scope at all today
 # (`contents: read` only) — it consumes only the validated report artifact `audit` produced and
@@ -23,7 +24,7 @@
 # (evidence.command, #115): probe-evidence-tool.py reads which programs this install declared
 # and will run each one only as a `--help`/`--version` read, under the python3 allowance
 # already granted. Widening the grant instead was rejected — those patterns are prefix-matched,
-# so naming `gh` grants `gh api` too, in a job deliberately given no credential.
+# so naming `gh` grants `gh api` too, in a job deliberately given no repository credential.
 #
 # Design: the distilled-decisions comment on aj604/toolshed#57 (2026-07-26); this workflow's
 # ticket is aj604/toolshed#71.
@@ -94,7 +95,7 @@ jobs:
       # Code install, plugin setup, and auth. Auth prefers the OAuth token (created by
       # /install-github-app); an unset secret renders empty and the action treats empty as
       # absent, so ANTHROPIC_API_KEY alone also works. The allowedTools list is ergonomics, not
-      # the boundary — the job's read-only permissions and credential-free checkout are.
+      # the boundary — the job's read-only permissions and repository-credential-free checkout are.
       #
       # The output contract here is the engine's per-unit verdicts shape
       # (doclifecycle/drift.py's `load_verdicts`), which the detecting-doc-drift skill now

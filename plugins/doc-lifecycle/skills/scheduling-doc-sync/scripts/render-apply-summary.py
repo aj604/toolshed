@@ -20,6 +20,7 @@ that is not its `clean` verdict.
 Usage:
     render-apply-summary.py verify-report --report FILE --expected-digest HEX
     render-apply-summary.py gate --stage NAME --payload FILE --exit-code N
+    render-apply-summary.py policy-eligibility --eligibility FILE --out FILE
     render-apply-summary.py run-id --run-id STR --out FILE
     render-apply-summary.py record-args --records STR --out FILE
     render-apply-summary.py config-digest --report FILE --out FILE
@@ -286,6 +287,109 @@ def config_digest(args):
             "fresh engine run, so configuration drift cannot be compared — "
             "refusing rather than checking less than the lane claims to")
     write_file(args.out, digest)
+    return 0
+
+
+def policy_eligibility(args):
+    """Render the policy's per-record decisions and gate downstream jobs.
+
+    The engine owns every eligibility judgment. It has no public read-back
+    validator for this ephemeral command result, so this is a fail-closed
+    adapter envelope check: it confirms only the fields the scheduler must
+    render and that the eligible summary agrees with the decision envelopes.
+    It does not know any finding code, policy class, or eligibility rule. The
+    one scheduler decision it publishes is whether there is a subset worth
+    handing to `policy-mint`, which derives that subset again itself.
+    """
+    payload, reason = read_json(args.eligibility)
+    if payload is None:
+        return refuse(
+            "policy eligibility", "apply-policy-eligibility-invalid", reason)
+
+    policy = payload.get("policy")
+    decisions = payload.get("decisions")
+    eligible = payload.get("eligible")
+    report_digest = payload.get("report_digest")
+    malformed = (
+        payload.get("status") != "ok"
+        or not isinstance(policy, dict)
+        or not isinstance(policy.get("id"), str)
+        or not policy.get("id").strip()
+        or not isinstance(decisions, list)
+        or not isinstance(eligible, list)
+        or not isinstance(report_digest, str)
+        or not SHA256.fullmatch(report_digest)
+        or len(set(eligible)) != len(eligible)
+        or any(not isinstance(d, str) or not SHA256.fullmatch(d)
+               for d in eligible)
+    )
+
+    admitted = []
+    if not malformed:
+        for decision in decisions:
+            if not isinstance(decision, dict):
+                malformed = True
+                break
+            digest = decision.get("digest")
+            eligible_class = decision.get("eligible_class")
+            refusal_payload = decision.get("refusal")
+            if (
+                not isinstance(digest, str)
+                or not SHA256.fullmatch(digest)
+                or not isinstance(decision.get("id"), str)
+                or not isinstance(decision.get("code"), str)
+                or ((eligible_class is None) == (refusal_payload is None))
+                or (eligible_class is not None
+                    and not isinstance(eligible_class, str))
+                or (refusal_payload is not None
+                    and not isinstance(refusal_payload, dict))
+            ):
+                malformed = True
+                break
+            if eligible_class is not None:
+                admitted.append(digest)
+
+    if malformed or admitted != eligible:
+        return refuse(
+            "policy eligibility", "apply-policy-eligibility-invalid",
+            "the engine's eligibility artifact is malformed or its eligible "
+            "summary disagrees with the per-record decisions — refusing "
+            "rather than guessing which records the policy admitted")
+
+    surface = [
+        "## Doc apply: policy eligibility",
+        "",
+        f"- Policy: {code_span(policy.get('id'))}",
+        f"- Report: {code_span(report_digest)}",
+        f"- Eligible records: {len(eligible)}",
+        "",
+        "### Decisions",
+        "",
+    ]
+    for decision in decisions:
+        if decision.get("eligible_class") is not None:
+            outcome = (
+                f"eligible as {code_span(decision.get('eligible_class'))}")
+        else:
+            refusal_payload = decision.get("refusal") or {}
+            outcome = (
+                f"refused by {code_span(refusal_payload.get('code'))}: "
+                f"{code_span(refusal_payload.get('message'))}")
+        surface.append(
+            f"- {code_span(decision.get('id'))} "
+            f"{code_span(decision.get('code'))}: {outcome}")
+
+    if not eligible:
+        surface += [
+            "",
+            "**No branch and no pull request were created.** The standing "
+            "policy admitted no record from this report; a human may still "
+            "select records through the manual apply lane.",
+        ]
+    surface.append("")
+    write_surface("\n".join(surface))
+    write_file(args.out, f"eligible={'true' if eligible else 'false'}\n",
+               mode="a")
     return 0
 
 
@@ -740,6 +844,11 @@ def _parser():
     config.add_argument("--report", required=True)
     config.add_argument("--out", required=True)
     config.set_defaults(run=config_digest)
+
+    policy = sub.add_parser("policy-eligibility")
+    policy.add_argument("--eligibility", required=True)
+    policy.add_argument("--out", required=True)
+    policy.set_defaults(run=policy_eligibility)
 
     approval = sub.add_parser("approval-digest")
     approval.add_argument("--approval", required=True)

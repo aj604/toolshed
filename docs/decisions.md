@@ -4,6 +4,45 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-07-30 — policy-minted mechanical fixes run only through an audit-chained review PR (#143)
+- Evidence: the engine already owned `policy-eligibility`, `policy-mint`, artifact-side policy
+  restrictions, complete-plan validation, post-write confinement, and policy-aware PR rendering,
+  but no scheduler adapter called those seams. The 2026-07-29 descope below made that omission
+  explicit pending a successor issue.
+- Decided: `doc-policy-apply.yml` chains only a successful *scheduled* `doc-audit` run and has the
+  same three trust domains as manual apply. `revalidate` downloads that exact run's report and
+  checks current lineage before the engine evaluates and independently mints the policy-derived
+  subset; `plan` is the sole model job and holds no repository credential; `apply` is model-free,
+  binds the approval digest, runs the capability-limited applier, stages its explicit verified
+  paths, and opens a real pull request. It never pushes the default branch and never opens a
+  draft. The model-authored artifact and trusted approval bundle use separate extraction
+  directories.
+- Decided (opt-in): `.doc-lifecycle/auto-apply-policy.json` is standing consumer judgment. Absence
+  is a clean opt-out, upgrade never seeds or overwrites it, and an empty eligible set stops before
+  planning or writing. This repository explicitly enables `drift-stale-mechanical` and
+  `narrative-anchor-refresh`; no class reaches bloat, create, retire, move, waived records, missing
+  evidence, or command-only evidence.
+- Change approval: because no person selected the records before the run, PR review is the
+  semantic review and merging the real PR is change approval. The PR body states this explicitly.
+- Kept the manual and policy plan/apply steps visible in both workflows. GitHub grants
+  permissions and secrets at job boundaries; moving the repeated steps into a composite action
+  would hide but not own those boundaries, while a reusable workflow would add a new
+  secrets-forwarding/call boundary and replace the required visible three-job graph. Static parity
+  guards therefore bind both lanes to the same plan/apply permissions, pinned actions,
+  repository-credential boundary, deterministic applier, exact staging, push, and real-PR seams;
+  selection and triggering remain the deliberate differences.
+- Kept eligibility-envelope reading in the scheduler renderer rather than creating a second
+  engine validator solely for an ephemeral command result. The adapter checks only the fields it
+  renders and agreement between decision envelopes and the eligible summary, failing closed on a
+  malformed envelope; it owns no finding codes, policy classes, or eligibility rules, and
+  `policy-mint` independently derives the selection again before minting.
+- Supersedes: only the auto-apply-lane half of “2026-07-29 — the auto-apply lane and a scheduled
+  bloat cadence are descoped, not implied.” The scheduled bloat cadence remains descoped.
+- Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-policy-apply.yml,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/render-apply-summary.py,
+  plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py,
+  .doc-lifecycle/auto-apply-policy.json, tests/scripts/policy-workflow_test.py
+
 ## 2026-07-30 — whole-document bloat authority binds every current unit (#153)
 - Evidence: `RETIRE-DOC`, `DISTILL`, and `MERGE-DOC` records could name one selected passage,
   pass human approval and plan validation, then authorize `retire-document` over the complete
@@ -52,7 +91,7 @@
   all use the same vocabulary. `RULESET_VERSION` advances to 8 because payloads accepted by the
   prior policy can now produce coverage gaps.
 
-## 2026-07-29 — the auto-apply lane and a scheduled bloat cadence are descoped, not implied (#57)
+## 2026-07-29 — the auto-apply lane and a scheduled bloat cadence are descoped, not implied (#57; policy-lane half superseded by #143)
 - Evidence: issue #73 ("Auto-apply policy for mechanical remedies") is `CLOSED` `COMPLETED`, closed by
   PR #114 merging — but PR #114 delivered only the engine half: `policy.py`'s
   `policy-eligibility`/`policy-mint` CLI commands and `approval.py`'s minter machinery (the doors the

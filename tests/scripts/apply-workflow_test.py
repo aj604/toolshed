@@ -3,7 +3,7 @@
 
 `workflow-permissions_test.py` and `marketplace-pin_test.py` glob over every
 `plugins/doc-lifecycle/skills/scheduling-doc-sync/*.yml`, so doc-apply.yml
-already inherits: model jobs read-only, credential-free, and
+already inherits: model jobs read-only, repository-credential-free, and
 `persist-credentials: false`; workflow-level permissions granting no write;
 write jobs running no model and never `git add -A`; and a marketplace pin that
 is a local checkout or a `.git`-suffixed URL. This suite covers what is new to
@@ -12,7 +12,7 @@ the apply lane — the one lane that writes:
 1. Every third-party action is pinned to an immutable 40-hex commit SHA, the
    same bar doc-audit.yml meets.
 2. The job shape the acceptance criteria describe: `revalidate` (deterministic,
-   no write scope), `plan` (the only model, no credential), `apply`
+   no write scope), `plan` (the only model, no repository credential), `apply`
    (credentialed, no model) — and `apply` runs only when both of the others
    succeeded, so a refusal at revalidation creates no branch and no PR.
 3. No dispatch input is ever interpolated into a `run:` block. Inputs travel

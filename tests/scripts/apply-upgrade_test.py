@@ -34,6 +34,10 @@ TPL_DOC_AUDIT = (
     "jobs:\n  x: ${{ github.token }}\n"
 )
 TPL_DOC_APPLY = "name: doc-apply\non:\n  workflow_dispatch: {}\n"
+TPL_DOC_POLICY_APPLY = (
+    "name: doc-policy-apply\n"
+    "on:\n  workflow_run:\n    workflows: [\"doc-audit\"]\n"
+)
 
 SCRIPT_SOURCES = {
     "scheduling-doc-sync/scripts": ["upgrade-gate.py", "render-report.py",
@@ -56,6 +60,7 @@ def make_plugin_root(base, version_tag="NEW"):
     (sds / "doc-sync-upgrade.yml").write_text(TPL_DOC_UPGRADE)
     (sds / "doc-audit.yml").write_text(TPL_DOC_AUDIT)
     (sds / "doc-apply.yml").write_text(TPL_DOC_APPLY)
+    (sds / "doc-policy-apply.yml").write_text(TPL_DOC_POLICY_APPLY)
     sources = dict(SCRIPT_SOURCES)
     for subdir, names in NEW_LANE_SCRIPT_SOURCES.items():
         sources[subdir] = sources.get(subdir, []) + names
@@ -75,6 +80,10 @@ def make_plugin_root(base, version_tag="NEW"):
 MARKER = "deadbeefcafe\n"
 AUDIT_SCOPE = '{"exclude": ["keep/me"], "include": []}\n'
 WAIVERS = '{"waivers": [{"file": "README.md", "claim": "fast"}]}\n'
+AUTO_APPLY_POLICY = (
+    '{"artifact":"auto-apply-policy","schema_version":1,'
+    '"id":"nightly-doc-sync"}\n'
+)
 
 
 def _workflows(repo, upgrade_yml, registry):
@@ -140,6 +149,7 @@ def make_legacy_install(base, registry=False, name="repo", extras=()):
             for n in names:
                 (ds / n).write_text(f"# {n} @ OLD\n")
         (ds / "evidence-tools.json").write_text('{"tools": ["gh"]}\n')
+        (ds / "auto-apply-policy.json").write_text(AUTO_APPLY_POLICY)
         reg = repo / ".doc-lifecycle"
         reg.mkdir(parents=True)
         (reg / "registry.json").write_text('{"roots": [], "rules": []}\n')
@@ -255,6 +265,29 @@ class ApplyUpgrade(unittest.TestCase):
             "# probe-evidence-tool.py @ NEW\n",
         )
 
+    def test_new_lane_install_gets_the_policy_apply_workflow(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        r = run(pr, repo, "0.36.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            (repo / ".github/workflows/doc-policy-apply.yml").read_text(),
+            TPL_DOC_POLICY_APPLY,
+        )
+
+    def test_an_upgrade_never_opts_a_consumer_into_auto_apply(self):
+        pr = make_plugin_root(self.base)
+        repo = make_install(self.base, registry=True)
+        run(pr, repo, "0.36.0")
+        policy = repo / ".doc-lifecycle/auto-apply-policy.json"
+        self.assertFalse(policy.exists())
+
+        repo2 = make_install(self.base, registry=True, name="configured")
+        policy2 = repo2 / ".doc-lifecycle/auto-apply-policy.json"
+        policy2.write_text(AUTO_APPLY_POLICY)
+        run(pr, repo2, "0.36.0")
+        self.assertEqual(policy2.read_text(), AUTO_APPLY_POLICY)
+
     def test_seeds_declared_evidence_tools_empty_only_if_absent(self):
         # Tool-free is the default a consumer opts out of, never one they
         # inherit: the seeded file declares nothing, and an install that has
@@ -305,6 +338,7 @@ class ApplyUpgrade(unittest.TestCase):
         expected = {".github/workflows/doc-sync-upgrade.yml",
                     ".github/workflows/doc-audit.yml",
                     ".github/workflows/doc-apply.yml",
+                    ".github/workflows/doc-policy-apply.yml",
                     ".doc-lifecycle/installed-version",
                     ".doc-lifecycle/wiring/engine"}
         for names in SCRIPT_SOURCES.values():
@@ -346,6 +380,7 @@ class ApplyUpgrade(unittest.TestCase):
         self.assertEqual(
             declared & {".github/workflows/doc-audit.yml",
                         ".github/workflows/doc-apply.yml",
+                        ".github/workflows/doc-policy-apply.yml",
                         ".doc-lifecycle/wiring/engine",
                         ".doc-lifecycle/evidence-tools.json"}, set())
 
@@ -496,6 +531,9 @@ class ApplyUpgrade(unittest.TestCase):
         self.assertEqual(
             (repo / ".doc-lifecycle/evidence-tools.json").read_text(),
             '{"tools": ["gh"]}\n')
+        self.assertEqual(
+            (repo / ".doc-lifecycle/auto-apply-policy.json").read_text(),
+            AUTO_APPLY_POLICY)
         # Carried, so the seeder never fires over it.
         self.assertEqual(
             (repo / ".doc-lifecycle/drift-waivers.json").read_text(), WAIVERS)
@@ -600,7 +638,7 @@ class ApplyUpgrade(unittest.TestCase):
         # ever having been read. Which one holds the consumer's decisions is
         # not knowable from the filesystem.
         for name in ("audit-scope.json", "drift-waivers.json",
-                     "evidence-tools.json"):
+                     "evidence-tools.json", "auto-apply-policy.json"):
             with self.subTest(name=name):
                 base = self.base / f"collide-{name}"
                 pr = make_plugin_root(base)

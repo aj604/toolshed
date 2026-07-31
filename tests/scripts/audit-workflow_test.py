@@ -4,7 +4,7 @@ suites already cover.
 
 `workflow-permissions_test.py` and `marketplace-pin_test.py` glob over every
 `plugins/doc-lifecycle/skills/scheduling-doc-sync/*.yml`, so doc-audit.yml
-already inherits: model-job read-only-and-credential-free, workflow-level
+already inherits: model-job read-only-and-repository-credential-free, workflow-level
 permissions grant no write, write jobs run no model and never `git add -A`,
 and the marketplace pin is a `.git`-suffixed URL or a local checkout path.
 This suite covers what is new to this lane and specific to its acceptance
