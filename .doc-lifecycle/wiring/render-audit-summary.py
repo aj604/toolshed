@@ -13,7 +13,7 @@ README's warning). That is rendered as its own typed problem
 (`audit-report-missing`), never silence and never an empty-looking report.
 
 Usage:
-    render-audit-summary.py cost --execution-log FILE --out FILE
+    render-audit-summary.py cost --execution-log FILE [--execution-log FILE ...] --out FILE
     render-audit-summary.py summary --report FILE [--cost FILE]
                                     [--audit-surface drift|bloat]
 
@@ -67,6 +67,29 @@ def extract_cost(execution_log_path):
         "turns": last.get("num_turns"),
         "cost_usd": last.get("total_cost_usd"),
         "duration_ms": last.get("duration_ms"),
+    }
+
+
+def aggregate_cost(execution_log_paths):
+    """Sum every available action invocation without inventing missing fields."""
+    runs = [extract_cost(path) for path in execution_log_paths]
+    available = [run for run in runs if run["available"]]
+    if not available:
+        return {"available": False, "turns": None, "cost_usd": None,
+                "duration_ms": None}
+
+    def total(field):
+        values = [run.get(field) for run in available]
+        if any(not isinstance(value, (int, float)) or isinstance(value, bool)
+               for value in values):
+            return None
+        return sum(values)
+
+    return {
+        "available": True,
+        "turns": total("turns"),
+        "cost_usd": total("cost_usd"),
+        "duration_ms": total("duration_ms"),
     }
 
 
@@ -229,7 +252,7 @@ def main():
     sub = parser.add_subparsers(dest="mode", required=True)
 
     cost = sub.add_parser("cost")
-    cost.add_argument("--execution-log", required=True)
+    cost.add_argument("--execution-log", required=True, action="append")
     cost.add_argument("--out", required=True)
 
     summary = sub.add_parser("summary")
@@ -243,7 +266,7 @@ def main():
 
     if args.mode == "cost":
         with open(args.out, "w", encoding="utf-8") as f:
-            json.dump(extract_cost(args.execution_log), f)
+            json.dump(aggregate_cost(args.execution_log), f)
         return 0
 
     cost_data = None

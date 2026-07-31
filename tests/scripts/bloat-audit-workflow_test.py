@@ -55,11 +55,11 @@ class ScheduledBloatAuditContract(unittest.TestCase):
         self.assertLess(public_plan, model)
 
         self.assertIn("--results-dir \"${BLOAT_DIR}/chunks\"", text)
-        self.assertIn("--emit-prompt", text)
-        self.assertIn("--emit-turns", text)
+        self.assertRegex(text, r'bloat-cadence\.py"\s+prepare')
+        self.assertIn("coordinator-prompt.md", text)
         self.assertRegex(text, r'--allowedTools "[^"]*\bTask\b')
         self.assertIn("fresh Task", text)
-        self.assertIn("max_turns", text)
+        self.assertIn("--max-turns", text)
 
         self.assertIn("--allow-partial", text)
         self.assertIn("--unswept-out \"${BLOAT_DIR}/unswept.json\"", text)
@@ -97,10 +97,38 @@ class ScheduledBloatAuditContract(unittest.TestCase):
             r"python3 .*doc-lifecycle\.py bloat-plan --repo \.\s*\\",
         )
         self.assertIn(
-            '--allowedTools "Task,Skill,Read,Grep,Glob,Write,'
-            'Bash(git *),Bash(python3 *)"',
+            '--allowedTools "Task,Read,Grep,Glob"',
             text,
         )
+        model_grants = re.findall(r'--allowedTools "([^"]+)"', text)
+        self.assertEqual(model_grants, ["Task,Read,Grep,Glob"] * 2)
+        self.assertEqual(text.count("--add-dir"), 2)
+        self.assertNotIn('--add-dir "${{ runner.temp }}"', text)
+        self.assertIn(
+            '--add-dir "${{ runner.temp }}/doc-bloat-audit"', text,
+        )
+        for forbidden in ("Write", "Bash", "Skill"):
+            self.assertNotIn(forbidden, " ".join(model_grants))
+
+    def test_supported_action_outputs_feed_trusted_collection_and_one_retry(self):
+        text = self.workflow_text()
+        first = text.index("- name: Dispatch bounded bloat workers")
+        collect = text.index("- name: Validate worker returns and select retries")
+        retry = text.index("- name: Retry invalid bloat chunks once")
+        final = text.index("- name: Validate retry returns")
+        assembly = text.index("- name: Assemble chunk completion evidence")
+        self.assertLess(first, collect)
+        self.assertLess(collect, retry)
+        self.assertLess(retry, final)
+        self.assertLess(final, assembly)
+
+        self.assertEqual(text.count("anthropics/claude-code-action@"), 2)
+        self.assertEqual(text.count("--json-schema"), 2)
+        self.assertIn("steps.model.outputs.structured_output", text)
+        self.assertIn("steps.retry_model.outputs.structured_output", text)
+        self.assertIn("steps.retry_model.outputs.execution_file", text)
+        self.assertRegex(text, r'bloat-cadence\.py"\s+collect')
+        self.assertIn("steps.collect.outputs.retry == 'true'", text)
 
     def test_integrity_gate_orders_model_before_trusted_assembly(self):
         text = self.workflow_text()

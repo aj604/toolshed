@@ -73,14 +73,16 @@ The `plugins:` selector stays bare `doc-lifecycle@toolshed` (`claude-code-action
 The five workflow templates are in this skill's base directory (announced when the skill
 loads), and its own scripts one level down in `scripts/` — `upgrade-gate.py`,
 `stage-upgrade.py`, `render-report.py`, `render-audit-summary.py`, `render-apply-summary.py`,
-`probe-evidence-tool.py`. The chunk planner and the two output validators stay in the sibling
+`probe-evidence-tool.py`, and `bloat-cadence.py`. The chunk planner and the two output validators stay in the sibling
 skills that own them (`detecting-doc-bloat`, `detecting-doc-drift`) and are never vendored here
 — both always dispatch their own copy via `${CLAUDE_PLUGIN_ROOT}`, so a copy under
 `.doc-lifecycle/wiring/` would have no reader (aj604/toolshed#77 follow-up).
 `scripts/apply-upgrade.py` is the deterministic upgrade engine — the *target release's* copy of
 it is what the upgrade lane runs, so it is never vendored into the install; `stage-upgrade.py` is
 vendored for the mirror-image reason, because it is the code that bounds what that run may have
-written (see Upgrade mode).
+written (see Upgrade mode). `bloat-cadence.py` likewise runs from the release-pinned marketplace
+checkout: it is the scheduler's trusted pre/post-model adapter, not consumer wiring another lane
+calls, so it is not copied into `.doc-lifecycle/wiring/`.
 
 ## The audit lane (`doc-audit.yml`)
 
@@ -122,10 +124,18 @@ hand-install it ahead of that door.
 Two jobs with the same read-only trust split as `doc-audit.yml`, on a separate weekly cadence
 because bloat's work shape is different: `audit` preflights the registry and public
 `bloat-plan` contract before any model turn, then a repository-credential-free coordinator
-dispatches one
-fresh `Task` worker per pending chunk in parallel waves. `plan-chunks.py --emit-prompt` gives a
-worker only its slice and out-of-tree result path; `--emit-turns` supplies that Task's
-`max_turns`. One seam failure earns one fresh retry, never a wider budget guessed in YAML.
+dispatches one fresh `Task` worker per pending chunk in parallel waves. Before that action,
+`bloat-cadence.py prepare` asks `plan-chunks.py --emit-readonly-prompt` to render each exact
+slice with public-engine segmentation evidence and asks `--emit-turns` for that Task's
+`max_turns`. Workers return chunk JSON to the coordinator; they never write a result file.
+
+The pinned action's documented `structured_output` is the only model-result seam.
+`bloat-cadence.py collect` parses that schema-bound value, rejects unknown or duplicate ids,
+writes a candidate under runner.temp only after `validate-bloat-output.py --chunk` accepts it,
+and renders a retry prompt containing exactly the missing/invalid chunks. That prompt runs in a
+second, equally read-only model action: one seam failure earns one fresh retry, never a wider
+budget guessed in YAML and never a model-authored repair. Any retry gap stays absent for trusted
+completion assembly.
 
 After the workers stop, `validate-bloat-output.py --assemble --allow-partial` binds the full
 public plan and every complete, missing, or invalid chunk into #152's completion envelope;
@@ -138,12 +148,16 @@ document look examined. `publish` revalidates freshness and calls
 Every plan, prompt result, envelope, sidecar, report, and cost artifact lives under
 `${{ runner.temp }}/doc-bloat-audit`, outside the checkout. The model job grants only
 `contents: read` plus `id-token: write`, drops the checkout credential, carries no `GH_TOKEN`,
-and allows `Task`, the read/skill tools, `Write` for the named out-of-tree result files, and
-only `Bash(git *)` / `Bash(python3 *)`. It never commits, pushes, opens a pull request, or edits
-repository content. Because those local tools could still dirty the checkout, an immutable
-post-model workflow step checks that HEAD is still `GITHUB_SHA` and refuses staged, unstaged,
-ignored, or ordinary untracked files before completion assembly or `bloat-audit`. It never resets
-or cleans a mutation. The action and every artifact action are pinned to immutable SHAs.
+and both coordinator actions allow exactly `Task,Read,Grep,Glob`. Their workers inherit that
+boundary: no `Skill`, `Write`, or `Bash`, and therefore no model-side mutation or command path.
+Claude Code's `--add-dir` read boundary names only the audit's runner.temp directory and the
+pinned detecting-doc-bloat skill directory (not all of runner.temp), so those read tools can
+reach the trusted prompts/contracts without widening into unrelated runner state.
+Trusted workflow scripts alone render prompts, extract/validate returns, select retries, and
+assemble completion. A defense-in-depth post-model step still checks that HEAD is
+`GITHUB_SHA` and refuses staged, unstaged, ignored, or ordinary untracked files before
+completion assembly or `bloat-audit`; it never resets or cleans a mutation. The model action
+and every artifact action are pinned to immutable SHAs.
 
 **Installed on the same registry condition as the other engine lanes.** A missing registry
 would make the public planner refuse before the sweep has a corpus, so Upgrade mode regenerates

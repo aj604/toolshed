@@ -106,6 +106,33 @@ class CostExtraction(unittest.TestCase):
             "available": True, "turns": 7, "cost_usd": 0.42, "duration_ms": 15000,
         })
 
+    def test_aggregates_first_attempt_and_retry_execution_logs(self):
+        first = self.write_log([
+            {"type": "result", "num_turns": 7,
+             "total_cost_usd": 0.42, "duration_ms": 15000},
+        ])
+        retry = os.path.join(self.tmp.name, "retry.json")
+        with open(retry, "w", encoding="utf-8") as stream:
+            json.dump([
+                {"type": "result", "num_turns": 3,
+                 "total_cost_usd": 0.18, "duration_ms": 6000},
+            ], stream)
+        out = self.out_path()
+
+        proc = run(
+            "cost", "--execution-log", first,
+            "--execution-log", retry, "--out", out,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(out, encoding="utf-8") as stream:
+            self.assertEqual(json.load(stream), {
+                "available": True,
+                "turns": 10,
+                "cost_usd": 0.60,
+                "duration_ms": 21000,
+            })
+
     def test_last_result_event_wins(self):
         log = self.write_log([
             {"type": "result", "subtype": "error_max_turns", "num_turns": 3,

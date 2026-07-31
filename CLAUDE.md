@@ -3,7 +3,7 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture absorbed the helper scripts into; see its `README.md`) plus ten skill
+re-architecture absorbed the helper scripts into; see its `README.md`) plus eleven skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
@@ -25,6 +25,9 @@ and summary — #72),
 `drift-audit --evidence-command` from `evidence-tools.json` and runs each declared tool only as
 a `--help`/`--version` read, under the model step's existing `Bash(python3 *)` grant rather than
 a wider one, #118), and
+`scripts/bloat-cadence.py` (the scheduled bloat lane's trusted prompt renderer and
+schema-bound action-output collector — it validates chunk returns, selects one retry, and runs
+from the release-pinned marketplace rather than being vendored), and
 `scripts/apply-upgrade.py` (the deterministic upgrade engine — the *target release's* own copy is
 what the upgrade lane runs, in the one job holding no credential, and it stays deliberately
 un-vendored) — all under `scheduling-doc-sync/scripts/`, not the
@@ -179,10 +182,12 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   reaches Tier-2 tool evidence (#118: the model grant unchanged, `--evidence-command` rendered
   by `probe-evidence-tool.py` rather than typed into the YAML);
   `bloat-audit-workflow_test.py` guards the sibling bloat cadence (#144): registry/public-plan
-  preflight before fan-out, the SHA-pinned read-only model action, one budgeted fresh Task per
-  chunk, out-of-tree artifacts, a post-model fail-closed clean-worktree gate before #152
-  completion assembly, and a report-derived typed partial summary (the unswept sidecar is never
-  the authority);
+  preflight before fan-out, the two SHA-pinned model actions' exact `Task,Read,Grep,Glob`
+  boundary, trusted structured-output extraction and one-retry selection, one budgeted fresh
+  Task per chunk, out-of-tree artifacts, a post-model fail-closed clean-worktree gate before
+  #152 completion assembly, and a report-derived typed partial summary (the unswept sidecar is
+  never the authority); `bloat-cadence_test.py` executes the supported action-output seam,
+  invalid-return retry selection, and post-retry partial truth;
   `probe-evidence-tool_test.py` covers that script itself (the declared list and its rendered
   flags, the refusals for an undeclared tool or a non-`--help`/`--version` invocation, and the
   credential scrub). Both suites sit alongside what `workflow-permissions_test.py` already

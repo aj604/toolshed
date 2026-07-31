@@ -45,14 +45,20 @@ Mondays:
 
 - The registry and public bloat plan are checked before a model runs. An invalid or absent
   registry spends no fan-out turns.
-- The scheduler renders the engine's chunks, gives each one the planner's turn budget, and
-  dispatches one fresh worker per chunk in parallel waves. A failed seam check gets one fresh
-  retry.
+- A trusted script renders each engine chunk with its public segmentation evidence and the
+  planner's turn budget. The coordinator dispatches those exact prompts to one fresh worker per
+  chunk in parallel waves; coordinators and workers have only `Task`, `Read`, `Grep`, and `Glob`.
+  Their extra read roots are limited to this audit's temporary directory and the pinned bloat
+  skill directory, so the prompts are reachable without granting all runner temporary state.
+- Workers return JSON rather than writing files. Another trusted script extracts the pinned
+  action's schema-bound `structured_output`, validates every chunk, and selects only the
+  missing/invalid ids for one equally read-only fresh retry.
 - Plans, chunk results, completion envelopes, reports, and cost data stay under the runner's
   temporary directory, never in the checkout.
-- After the workers and their retry stop, a trusted workflow step checks HEAD plus staged,
-  unstaged, ignored, and ordinary untracked files. Any repository mutation fails the run before
-  completion assembly; the lane never resets the checkout and publishes a laundered report.
+- After the workers and their retry stop, a defense-in-depth workflow step checks HEAD plus
+  staged, unstaged, ignored, and ordinary untracked files. Any repository mutation fails the run
+  before completion assembly; the lane never resets the checkout and publishes a laundered
+  report.
 - Missing or invalid workers are not treated as clean. Their chunk ids and every affected
   document are bound into the report's typed `incomplete` entries and rendered as PARTIAL; the
   separate unswept sidecar is diagnostic data, not the source of truth.

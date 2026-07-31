@@ -6,8 +6,9 @@
 # validation, and completion assembly. A missing or invalid chunk therefore
 # reaches the report as typed #152 completion evidence, never as an empty-looking
 # clean sweep. Every generated artifact stays under runner.temp, outside the work
-# tree, and no repository write credential reaches the model or its Task workers.
-# A trusted post-model gate refuses any checkout mutation before assembly.
+# tree. Models and Task workers have only read tools; trusted deterministic
+# scripts render their work orders, extract the action's supported structured
+# output, validate results, select one retry, and assemble completion evidence.
 name: doc-bloat-audit
 
 on:
@@ -70,56 +71,111 @@ jobs:
             --out "${BLOAT_DIR}/manifest.json" \
             --results-dir "${BLOAT_DIR}/chunks"
 
-      # The coordinator does not audit documents itself. It renders each
-      # authentic chunk slice and planner-owned budget, sends one fresh Task per
-      # chunk in parallel waves, and performs one fresh retry after a seam
-      # failure. Missing/invalid results are left for deterministic assembly to
-      # record as incomplete; the model never authors completion evidence.
+      # Render every public-engine unit identity, exact worker prompt, and
+      # planner-owned turn budget before any model runs. This script also emits
+      # the JSON schema consumed through claude-code-action's documented
+      # structured_output contract.
+      - name: Render trusted read-only coordinator prompt
+        id: prepare
+        run: |
+          set -euo pipefail
+          python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/bloat-cadence.py" prepare \
+            --manifest "${BLOAT_DIR}/manifest.json" \
+            --planner "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py" \
+            --root . \
+            --prompts-dir "${BLOAT_DIR}/prompts" \
+            --out "${BLOAT_DIR}/coordinator-prompt.md" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      # The coordinator sends the already-rendered prompts to fresh Tasks and
+      # returns their objects unchanged. Its entire capability boundary — and
+      # the boundary inherited by workers — is Task plus read-only file tools.
       - name: Dispatch bounded bloat workers
         id: model
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: ${{ runner.temp }}/toolshed-marketplace
-          plugins: doc-lifecycle@toolshed
           prompt: >-
-            Orchestrate the read-only scheduled bloat sweep whose deterministic
-            manifest is at $BLOAT_DIR/manifest.json. Do not inspect or judge the
-            documents yourself, do not edit the repository, and do not author or
-            repair a worker's JSON. Read only the manifest's pending chunk ids.
-            For every pending id, render its exact worker prompt by running
-            `python3 $RUNNER_TEMP/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py
-            --emit-prompt <id> --manifest $BLOAT_DIR/manifest.json
-            --results-dir $BLOAT_DIR/chunks`; render its integer turn budget with
-            the same script's `--emit-turns <id> --manifest
-            $BLOAT_DIR/manifest.json`. Dispatch one fresh Task for that chunk,
-            passing the rendered prompt verbatim and setting the Task's max_turns
-            to the emitted budget. Chunks are independent: dispatch them in
-            parallel waves of several, never serially. After each Task finishes,
-            run `python3 $RUNNER_TEMP/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py
-            --chunk $BLOAT_DIR/chunks/<id>.json --manifest
-            $BLOAT_DIR/manifest.json`. If that seam check fails or the file is
-            absent, dispatch exactly one fresh Task with the same rendered prompt
-            and max_turns, then validate once more. After the retry, leave a
-            missing or invalid result untouched and continue: deterministic
-            assembly will preserve it as a typed incomplete chunk. Stop after all
-            pending chunks have either validated or had their one fresh retry.
-          claude_args: --max-turns 60 --allowedTools "Task,Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
+            Read ${{ runner.temp }}/doc-bloat-audit/coordinator-prompt.md and
+            follow that complete, deterministically rendered work order exactly.
+          claude_args: >-
+            --max-turns 60
+            --add-dir "${{ runner.temp }}/doc-bloat-audit"
+            "${{ runner.temp }}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat"
+            --allowedTools "Task,Read,Grep,Glob"
+            --json-schema '${{ steps.prepare.outputs.schema }}'
+
+      # Parse only the pinned action's documented structured_output. Candidate
+      # files land under runner.temp only after the existing chunk validator
+      # accepts them. Missing/invalid returns become the exact retry selection.
+      - name: Validate worker returns and select retries
+        id: collect
+        if: always()
+        env:
+          MODEL_STRUCTURED_OUTPUT: ${{ steps.model.outputs.structured_output }}
+        run: |
+          set -euo pipefail
+          python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/bloat-cadence.py" collect \
+            --manifest "${BLOAT_DIR}/manifest.json" \
+            --results-dir "${BLOAT_DIR}/chunks" \
+            --validator "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py" \
+            --retry-prompt "${BLOAT_DIR}/retry-prompt.md" \
+            --planner "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/plan-chunks.py" \
+            --root . \
+            --prompts-dir "${BLOAT_DIR}/prompts" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Retry invalid bloat chunks once
+        id: retry_model
+        if: steps.collect.outputs.retry == 'true'
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: >-
+            Read ${{ runner.temp }}/doc-bloat-audit/retry-prompt.md and follow
+            that complete, deterministically rendered retry work order exactly.
+          claude_args: >-
+            --max-turns 60
+            --add-dir "${{ runner.temp }}/doc-bloat-audit"
+            "${{ runner.temp }}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat"
+            --allowedTools "Task,Read,Grep,Glob"
+            --json-schema '${{ steps.prepare.outputs.schema }}'
+
+      # There is deliberately no second retry. Invalid retry returns never
+      # become chunk files, so --allow-partial below binds the remaining ids and
+      # their documents into typed incomplete completion evidence.
+      - name: Validate retry returns
+        if: always() && steps.collect.outputs.retry == 'true'
+        env:
+          MODEL_STRUCTURED_OUTPUT: ${{ steps.retry_model.outputs.structured_output }}
+        run: |
+          set -euo pipefail
+          python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/bloat-cadence.py" collect \
+            --manifest "${BLOAT_DIR}/manifest.json" \
+            --results-dir "${BLOAT_DIR}/chunks" \
+            --validator "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py"
 
       - name: Extract cost and turn observability
         if: always()
+        env:
+          MODEL_EXECUTION_FILE: ${{ steps.model.outputs.execution_file }}
+          RETRY_EXECUTION_FILE: ${{ steps.retry_model.outputs.execution_file }}
         run: |
+          set -euo pipefail
+          logs=(--execution-log "${MODEL_EXECUTION_FILE:-/home/runner/work/_temp/claude-execution-output.json}")
+          if [ -n "${RETRY_EXECUTION_FILE}" ]; then
+            logs+=(--execution-log "${RETRY_EXECUTION_FILE}")
+          fi
           python3 .doc-lifecycle/wiring/render-audit-summary.py cost \
-            --execution-log "${{ steps.model.outputs.execution_file || '/home/runner/work/_temp/claude-execution-output.json' }}" \
+            "${logs[@]}" \
             --out "${BLOAT_DIR}/audit-cost.json"
 
-      # The model has local Write and restricted Bash tools even though it has
-      # no repository credential. This step is part of the workflow definition
-      # GitHub loaded before the model ran, so it is the trusted boundary: fail
-      # closed on a moved HEAD or any staged, unstaged, ignored, or ordinary
-      # untracked checkout file. Never reset or clean here — that would launder
-      # a mutation into an apparently read-only report.
+      # Defense in depth: models cannot mutate the checkout by capability, and
+      # this gate additionally fails closed if an action implementation or
+      # another process moved HEAD or changed any checkout file. Never reset or
+      # clean here — a mutation must not be laundered into a read-only report.
       - name: Verify repository integrity before assembly
         id: integrity
         if: always()
