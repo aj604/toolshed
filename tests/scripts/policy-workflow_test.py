@@ -22,6 +22,10 @@ POLICY_WORKFLOW = os.path.join(
     ROOT, "plugins", "doc-lifecycle", "skills", "scheduling-doc-sync",
     "doc-policy-apply.yml",
 )
+MANUAL_WORKFLOW = os.path.join(
+    ROOT, "plugins", "doc-lifecycle", "skills", "scheduling-doc-sync",
+    "doc-apply.yml",
+)
 CONSUMER_POLICY = os.path.join(
     ROOT, ".doc-lifecycle", "auto-apply-policy.json",
 )
@@ -56,6 +60,10 @@ def lines():
 
 def jobs():
     return WPT.jobs_of(POLICY_WORKFLOW)
+
+
+def manual_jobs():
+    return WPT.jobs_of(MANUAL_WORKFLOW)
 
 
 class ACompletedScheduledAuditEntersTheSharedApplyLane(unittest.TestCase):
@@ -212,6 +220,102 @@ class TheThreeJobsStaySplitByTrust(unittest.TestCase):
                 offenders.append(f"{number}: {match.group(1)}")
         self.assertGreater(found, 0)
         self.assertEqual(offenders, [])
+
+
+class ManualAndPolicyApplyCannotDriftAtTheTrustSeams(unittest.TestCase):
+    """The lanes differ in selection, not in model/write authority.
+
+    GitHub grants permissions and secrets to jobs, not to a reusable sequence
+    of steps. Keeping each lane's three jobs visible therefore preserves the
+    reviewable trust graph; these parity checks give the security-critical
+    repeated wiring one owner without hiding it behind secret forwarding.
+    """
+
+    def test_plan_and_apply_permissions_are_identical(self):
+        def without_comments(mapping):
+            return {
+                key: value.split("#", 1)[0].strip()
+                for key, value in (mapping or {}).items()
+            }
+
+        for name in ("plan", "apply"):
+            with self.subTest(job=name):
+                self.assertEqual(
+                    without_comments(WPT.mapping_under(
+                        jobs()[name], "permissions", 4)),
+                    without_comments(WPT.mapping_under(
+                        manual_jobs()[name], "permissions", 4)),
+                )
+
+    def test_model_jobs_share_the_repository_credential_boundary(self):
+        for lane in (jobs(), manual_jobs()):
+            body = "\n".join(lane["plan"])
+            for seam in (
+                WPT.MODEL_ACTION,
+                "persist-credentials: false",
+                "contents: read",
+                "id-token: write",
+            ):
+                with self.subTest(seam=seam):
+                    self.assertIn(seam, body)
+            self.assertNotIn("GH_TOKEN", body)
+
+    def test_writers_share_the_deterministic_confinement_boundary(self):
+        for lane in (jobs(), manual_jobs()):
+            body = "\n".join(lane["apply"])
+            for seam in (
+                "apply-plan",
+                "--expected-digest",
+                "staged-paths",
+                "--pathspec-from-file",
+                "--pathspec-file-nul",
+                "verify-staged",
+                "git push origin",
+                "gh pr create",
+            ):
+                with self.subTest(seam=seam):
+                    self.assertIn(seam, body)
+            self.assertNotIn("git add -A", body)
+            self.assertNotIn("--draft", body)
+
+    def test_plan_and_apply_use_the_same_pinned_action_revisions(self):
+        def action_refs(body):
+            return {
+                match.group(1)
+                for line in body
+                for match in [USES_LINE.search(line)]
+                if match
+            }
+
+        for name in ("plan", "apply"):
+            with self.subTest(job=name):
+                self.assertEqual(
+                    action_refs(jobs()[name]),
+                    action_refs(manual_jobs()[name]),
+                )
+
+
+class CredentialClaimsNameTheCredentialTheyExclude(unittest.TestCase):
+    def test_model_jobs_are_never_described_as_unqualified_credential_free(self):
+        current_surfaces = (
+            os.path.join(ROOT, "CLAUDE.md"),
+            SCHEDULING_SKILL,
+            os.path.join(ROOT, "tests", "scripts", "apply-workflow_test.py"),
+            os.path.join(ROOT, "tests", "scripts", "audit-workflow_test.py"),
+            os.path.join(
+                ROOT, "plugins", "doc-lifecycle", "skills",
+                "scheduling-doc-sync", "doc-audit.yml",
+            ),
+            os.path.join(
+                ROOT, "plugins", "doc-lifecycle", "skills",
+                "scheduling-doc-sync", "doc-apply.yml",
+            ),
+        )
+        for path in current_surfaces:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            with self.subTest(path=path):
+                self.assertNotRegex(text, r"(?<!repository-)credential-free")
 
 
 class TheWriterCanOnlyOpenAReviewableChange(unittest.TestCase):

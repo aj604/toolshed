@@ -102,7 +102,7 @@ model reaches the tool, refusing any undeclared program and any invocation that 
 `--help`/`--version` read. It runs under the model step's existing `Bash(python3 *)` allowance,
 so the tool grant stays `Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)` — widening it
 instead was rejected in aj604/toolshed#118, because those patterns are prefix-matched and
-naming `gh` would grant `gh api` in a job deliberately given no credential
+naming `gh` would grant `gh api` in a job deliberately given no repository credential
 (`tests/scripts/workflow-permissions_test.py` refuses any other executable).
 
 **Installed only into a repo that has been through the migration door.** This template requires
@@ -150,7 +150,7 @@ current default branch before calling the engine's public `policy-eligibility` a
 commands. `policy-mint` derives the selection itself and exposes no `--record` flag.
 
 The trust split is the manual lane's: deterministic `revalidate` holds only read scopes,
-credential-free `plan` is the sole model job, and model-free `apply` alone holds `contents: write`
+repository-credential-free `plan` is the sole model job, and model-free `apply` alone holds `contents: write`
 and `pull-requests: write`. The model artifact downloads separately from the trusted approval
 bundle; `apply-plan` enforces operation authority, exact preimages, every approved record being
 executed, complete remedies, and whole-diff confinement. The writer stages the resulting
@@ -609,7 +609,7 @@ landing a file, never the door.
   `run:` block → the PR is the change approval, and dispatch inputs reach argv only after
   validation (`tests/scripts/apply-workflow_test.py`).
 - Naming another executable in a `--allowedTools` grant → those patterns are prefix-matched, so
-  `gh` grants `gh api` in a job deliberately given no credential. Declare the tool in
+  `gh` grants `gh api` in a job deliberately given no repository credential. Declare the tool in
   `evidence-tools.json` and reach it through `probe-evidence-tool.py` instead.
 - Dropping the `Pin plugin marketplace` clone step, or pointing `plugin_marketplaces` at
   `…/toolshed.git` (bare `main`) → an unpinned install that floats and drifts from the frozen

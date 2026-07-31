@@ -24,6 +24,18 @@
   evidence, or command-only evidence.
 - Change approval: because no person selected the records before the run, PR review is the
   semantic review and merging the real PR is change approval. The PR body states this explicitly.
+- Kept the manual and policy plan/apply steps visible in both workflows. GitHub grants
+  permissions and secrets at job boundaries; moving the repeated steps into a composite action
+  would hide but not own those boundaries, while a reusable workflow would add a new
+  secrets-forwarding/call boundary and replace the required visible three-job graph. Static parity
+  guards therefore bind both lanes to the same plan/apply permissions, pinned actions,
+  repository-credential boundary, deterministic applier, exact staging, push, and real-PR seams;
+  selection and triggering remain the deliberate differences.
+- Kept eligibility-envelope reading in the scheduler renderer rather than creating a second
+  engine validator solely for an ephemeral command result. The adapter checks only the fields it
+  renders and agreement between decision envelopes and the eligible summary, failing closed on a
+  malformed envelope; it owns no finding codes, policy classes, or eligibility rules, and
+  `policy-mint` independently derives the selection again before minting.
 - Supersedes: only the auto-apply-lane half of “2026-07-29 — the auto-apply lane and a scheduled
   bloat cadence are descoped, not implied.” The scheduled bloat cadence remains descoped.
 - Code: plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-policy-apply.yml,

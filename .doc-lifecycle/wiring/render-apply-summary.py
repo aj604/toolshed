@@ -293,10 +293,13 @@ def config_digest(args):
 def policy_eligibility(args):
     """Render the policy's per-record decisions and gate downstream jobs.
 
-    The engine owns every eligibility judgment. This reads only the public
-    artifact it emitted, checks that its summary fields agree structurally,
-    and publishes the one scheduler decision that follows: whether there is
-    an eligible subset for `policy-mint` to derive again itself.
+    The engine owns every eligibility judgment. It has no public read-back
+    validator for this ephemeral command result, so this is a fail-closed
+    adapter envelope check: it confirms only the fields the scheduler must
+    render and that the eligible summary agrees with the decision envelopes.
+    It does not know any finding code, policy class, or eligibility rule. The
+    one scheduler decision it publishes is whether there is a subset worth
+    handing to `policy-mint`, which derives that subset again itself.
     """
     payload, reason = read_json(args.eligibility)
     if payload is None:

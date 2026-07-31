@@ -485,6 +485,21 @@ class PolicyEligibility(ScriptTestCase):
         self.assertIn("apply-policy-eligibility-invalid", self.summary())
         self.assertFalse(os.path.exists(out))
 
+    def test_the_adapter_names_its_envelope_check_and_owns_no_policy_rules(self):
+        with open(SCRIPT, encoding="utf-8") as fh:
+            source = fh.read()
+
+        self.assertIn("fail-closed", source)
+        self.assertIn("adapter envelope check", source)
+        for business_rule in (
+            "drift-stale-mechanical",
+            "narrative-anchor-refresh",
+            "policy-never-eligible",
+            "policy-class-not-enabled",
+        ):
+            with self.subTest(business_rule=business_rule):
+                self.assertNotIn(business_rule, source)
+
 
 class ApprovalDigestOutput(ScriptTestCase):
     def test_the_approval_digest_is_emitted_as_a_step_output(self):

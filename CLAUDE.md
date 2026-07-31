@@ -33,8 +33,8 @@ plus the four GitHub Actions templates the scheduling skill installs
 (`plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml` — the read-only scheduled
 audit, #71; `doc-apply.yml` — the manual apply dispatch, #72;
 `doc-policy-apply.yml` — the successful-scheduled-audit-chained policy lane whose three jobs keep
-the model credential-free and open a real review PR for the mechanical subset selected by the
-standing consumer policy, #143; and
+the model repository-credential-free and open a real review PR for the mechanical subset selected
+by the standing consumer policy, #143; and
 `doc-sync-upgrade.yml` — the model-free upgrade lane, whose weekly schedule only detects a newer
 release and files a notice issue, while a human dispatch naming the target is what regenerates the
 wiring and opens the version-bump PR, #127). #77 removed the legacy
@@ -133,7 +133,8 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   2026-07-07 scale hardening's at `tests/baselines/bloat-scale-red/` / `bloat-scale-green/`,
   the 2026-07-09 distill-lane fan-out's at `tests/baselines/distill-fanout-red/` /
   `distill-fanout-green/`, and the fix-skill merge's at
-  `tests/baselines/fixing-docs-merge-red/` / `fixing-docs-merge-green/`;
+  `tests/baselines/fixing-docs-merge-red/` / `fixing-docs-merge-green/`; the policy lane's retained
+  test-first record is at `tests/baselines/policy-lane-red/`;
   method, status, and resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md`
   (2026-06-09 suite entry; 2026-06-20 `docs/reference/` shape; 2026-07-06 rearchitecture
   entry; 2026-07-07 scale-hardening entry; 2026-07-09 distill-fan-out entry).
