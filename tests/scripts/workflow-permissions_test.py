@@ -257,5 +257,44 @@ class WorkflowDefaultsAreReadOnly(unittest.TestCase):
                 f"grant {sorted(write_scopes(perms))} to every job")
 
 
+class EnvValuesReferenceAvailableContexts(unittest.TestCase):
+    """GitHub validates context availability per workflow key, and a violation
+    makes the whole file unprocessable: the schedule never registers, and every
+    push produces a zero-job failure run named after the file's path rather than
+    its `name:` (aj604/toolshed#174).
+
+    `runner`, `steps`, and `job` resolve only once a step is executing on a
+    runner, so they are available in step-level `env:` and nowhere above it.
+    Workflow-level `env:` additionally cannot see the job-scoped contexts.
+    """
+
+    STEP_ONLY = ("runner", "steps", "job")
+    JOB_ONLY = ("needs", "matrix", "strategy")
+
+    def assert_no_contexts(self, entries, contexts, where):
+        for name, value in (entries or {}).items():
+            for context in contexts:
+                self.assertNotRegex(
+                    value, r"\$\{\{[^}]*\b%s\." % context,
+                    f"{where}: env value `{name}` references the `{context}` "
+                    f"context, which is not available there — GitHub rejects "
+                    f"the whole workflow file")
+
+    def test_env_blocks_above_step_scope_avoid_step_scoped_contexts(self):
+        for path in workflow_files():
+            rel = os.path.relpath(path, ROOT)
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+            self.assert_no_contexts(
+                mapping_under(lines, "env", 0),
+                self.STEP_ONLY + self.JOB_ONLY,
+                f"{rel}: workflow-level env")
+            for job, body in jobs_of(path).items():
+                self.assert_no_contexts(
+                    mapping_under(body, "env", 4),
+                    self.STEP_ONLY,
+                    f"{rel}: job `{job}` env")
+
+
 if __name__ == "__main__":
     unittest.main()

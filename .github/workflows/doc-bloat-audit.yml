@@ -24,7 +24,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BLOAT_DIR: ${{ runner.temp }}/doc-bloat-audit
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
@@ -34,6 +33,16 @@ jobs:
       contents: read
       id-token: write   # claude-code-action OAuth exchange only
     steps:
+      # Every generated artifact lives under this root, outside the work tree.
+      # It is exported from a step rather than declared in a workflow- or
+      # job-level `env:` because `runner` resolves only once a step is running
+      # on a runner; referencing it above step scope makes GitHub reject the
+      # whole file, unregistering the schedule (aj604/toolshed#174).
+      - name: Resolve the out-of-tree artifact root
+        run: |
+          set -euo pipefail
+          echo "BLOAT_DIR=${RUNNER_TEMP}/doc-bloat-audit" >> "${GITHUB_ENV}"
+
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -316,6 +325,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Same step-scope requirement as the audit job: this job's downloads and
+      # summary rendering read `BLOAT_DIR`, so it resolves its own copy.
+      - name: Resolve the out-of-tree artifact root
+        run: |
+          set -euo pipefail
+          echo "BLOAT_DIR=${RUNNER_TEMP}/doc-bloat-audit" >> "${GITHUB_ENV}"
+
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
