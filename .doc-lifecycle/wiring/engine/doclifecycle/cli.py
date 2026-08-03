@@ -44,6 +44,7 @@ from .drift import (
     audit_drift,
     load_verdicts,
     plan_drift_audit,
+    resolve_audit_config_digest,
 )
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .migrate import (
@@ -330,6 +331,31 @@ def _add_drift_scope_arguments(command):
     )
 
 
+def _add_evidence_arguments(command):
+    """The `EvidenceBoundary` a run declares — shared verbatim by
+    `drift-audit` and `audit-config-digest`, so the two can only diverge if a
+    caller passes them different argv, never because the flags themselves
+    drifted apart (aj604/toolshed#175).
+    """
+    command.add_argument(
+        "--evidence", action="append", default=None, metavar="GLOB",
+        help="a source glob the run was permitted to consult (repeatable)",
+    )
+    command.add_argument(
+        "--exclude-evidence", action="append", default=None, metavar="GLOB",
+        help="a source glob the run was not permitted to consult (repeatable)",
+    )
+    command.add_argument(
+        "--evidence-command", action="append", default=None, metavar="NAME",
+        help=(
+            "a local tool a verdict may be settled by running, named as a bare "
+            "executable (repeatable). Empty by default: a run that declares no "
+            "tool cannot cite one. The engine never runs it — the citation is "
+            "for whoever checks the verdict"
+        ),
+    )
+
+
 def _chunk_budget_argument(value):
     try:
         candidate = int(value)
@@ -356,15 +382,38 @@ def _drift_audit(args):
         verdicts = load_verdicts(args.verdicts)
         if isinstance(verdicts, Invalid):
             return verdicts
-    # `append` cannot have a non-empty default without appending to it, so the
-    # engine's default boundary is applied here instead of in argparse.
-    sources = tuple(args.evidence) if args.evidence else DEFAULT_EVIDENCE
+    sources, excluded, commands = _evidence_boundary_argv(args)
     return audit_drift(
         args.repo, mode=args.mode, since=args.since, verdicts=verdicts,
         waivers=args.waivers, evidence_sources=sources,
-        evidence_excluded=tuple(args.exclude_evidence or ()),
-        evidence_commands=tuple(args.evidence_command or ()),
+        evidence_excluded=excluded, evidence_commands=commands,
         registry_path=args.registry,
+    )
+
+
+def _evidence_boundary_argv(args):
+    """(sources, excluded, commands) from the evidence flags every command
+    that declares an `EvidenceBoundary` on the command line shares.
+
+    `append` cannot have a non-empty default without appending to it, so the
+    engine's default boundary is applied here instead of in argparse.
+    """
+    sources = tuple(args.evidence) if args.evidence else DEFAULT_EVIDENCE
+    return (sources, tuple(args.exclude_evidence or ()),
+           tuple(args.evidence_command or ()))
+
+
+def _audit_config_digest(args):
+    """The digest a `drift-audit` declaring this same boundary would carry.
+
+    No `--repo`: the whole point of this command is answering that question
+    without reading a repository, so a lane can learn "the repository's
+    current audit configuration" without re-running a full audit.
+    """
+    sources, excluded, commands = _evidence_boundary_argv(args)
+    return resolve_audit_config_digest(
+        evidence_sources=sources, evidence_excluded=excluded,
+        evidence_commands=commands,
     )
 
 
@@ -530,24 +579,25 @@ def _parser():
             "report, never removed from it"
         ),
     )
-    audit.add_argument(
-        "--evidence", action="append", default=None, metavar="GLOB",
-        help="a source glob the run was permitted to consult (repeatable)",
-    )
-    audit.add_argument(
-        "--exclude-evidence", action="append", default=None, metavar="GLOB",
-        help="a source glob the run was not permitted to consult (repeatable)",
-    )
-    audit.add_argument(
-        "--evidence-command", action="append", default=None, metavar="NAME",
-        help=(
-            "a local tool a verdict may be settled by running, named as a bare "
-            "executable (repeatable). Empty by default: a run that declares no "
-            "tool cannot cite one. The engine never runs it — the citation is "
-            "for whoever checks the verdict"
+    _add_evidence_arguments(audit)
+    audit.set_defaults(run=_drift_audit, render=None)
+
+    config_digest = commands.add_parser(
+        "audit-config-digest",
+        help="the digest a drift-audit declaring this same boundary carries",
+        description=(
+            "Emit the sha256 digest of the audit configuration "
+            "--evidence/--exclude-evidence/--evidence-command declare, with "
+            "no repository access and no full audit run. `drift-audit` "
+            "computes a report's own audit_config_digest with the exact same "
+            "function, so a lane checking whether the repository's current "
+            "configuration still matches a report's gets this from the one "
+            "place the report's own field came from, rather than a second "
+            "formula that could drift from it (aj604/toolshed#175)."
         ),
     )
-    audit.set_defaults(run=_drift_audit, render=None)
+    _add_evidence_arguments(config_digest)
+    config_digest.set_defaults(run=_audit_config_digest, render=None)
 
     validate = commands.add_parser(
         "validate-report",

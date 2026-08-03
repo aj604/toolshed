@@ -220,5 +220,52 @@ class TheAuditCommand(DriftCommandTestCase):
         self.assertIn("drift-verdict-on-narrative-document", result.stderr)
 
 
+class TheAuditConfigDigestCommand(DriftCommandTestCase):
+    """aj604/toolshed#175: the one call a lane uses to learn the digest a
+    full `drift-audit` declaring the same boundary would carry, without
+    running one — and without a repository at all."""
+
+    def test_it_needs_no_repo_flag(self):
+        result = run_command("audit-config-digest")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(json.loads(result.stdout)["audit_config_digest"],
+                         r"^[0-9a-f]{64}$")
+
+    def test_it_matches_a_full_audits_own_digest_for_the_same_boundary(self):
+        root = self.drift_repo()
+        path = self.verdicts_file(
+            root, self.verdicts_for(root, self.verdict(root)))
+
+        audit = run_command("drift-audit", "--repo", root, "--verdicts",
+                            path, "--evidence-command", "gh")
+        standalone = run_command("audit-config-digest", "--evidence-command",
+                                 "gh")
+
+        self.assertEqual(
+            json.loads(standalone.stdout)["audit_config_digest"],
+            json.loads(audit.stdout)["lineage"]["audit_config_digest"],
+        )
+
+    def test_omitting_a_declared_command_moves_the_digest(self):
+        with_gh = run_command("audit-config-digest", "--evidence-command",
+                              "gh")
+        without = run_command("audit-config-digest")
+
+        self.assertNotEqual(
+            json.loads(with_gh.stdout)["audit_config_digest"],
+            json.loads(without.stdout)["audit_config_digest"],
+        )
+
+    def test_the_source_globs_are_part_of_the_boundary_too(self):
+        narrow = run_command("audit-config-digest", "--evidence", "src/**")
+        wide = run_command("audit-config-digest", "--evidence", "**")
+
+        self.assertNotEqual(
+            json.loads(narrow.stdout)["audit_config_digest"],
+            json.loads(wide.stdout)["audit_config_digest"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

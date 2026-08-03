@@ -23,7 +23,7 @@ Usage:
     render-apply-summary.py policy-eligibility --eligibility FILE --out FILE
     render-apply-summary.py run-id --run-id STR --out FILE
     render-apply-summary.py record-args --records STR --out FILE
-    render-apply-summary.py config-digest --report FILE --out FILE
+    render-apply-summary.py config-digest --report FILE --out FILE  # FILE: audit-config-digest output
     render-apply-summary.py approval-digest --approval FILE --out FILE
     render-apply-summary.py branch-name --approval FILE --out FILE
     render-apply-summary.py staged-paths --result FILE --approval FILE --out FILE
@@ -269,7 +269,12 @@ def record_args(args):
 
 
 def config_digest(args):
-    """The current audit-configuration digest, read off a fresh engine run.
+    """The current audit-configuration digest, read off the engine's own
+    `audit-config-digest` command (aj604/toolshed#175 — never a fresh full
+    audit's lineage: a lane that ran that audit under a different declared
+    evidence boundary than the report it is checking against would derive an
+    incomparable digest, structurally, no matter how current the repository
+    is).
 
     Supplied to `validate-report`/`mint-approval`, configuration drift is
     compared; omitted, it is never compared and a config-stale report would be
@@ -279,13 +284,14 @@ def config_digest(args):
     payload, reason = read_json(args.report)
     if payload is None:
         return refuse("revalidation", "apply-config-digest-unavailable", reason)
-    digest = (payload.get("lineage") or {}).get("audit_config_digest")
+    digest = payload.get("audit_config_digest")
     if not isinstance(digest, str) or not SHA256.match(digest):
         return refuse(
             "revalidation", "apply-config-digest-unavailable",
-            "the current audit configuration digest could not be read from a "
-            "fresh engine run, so configuration drift cannot be compared — "
-            "refusing rather than checking less than the lane claims to")
+            "the current audit configuration digest could not be read from "
+            "the engine's audit-config-digest command, so configuration "
+            "drift cannot be compared — refusing rather than checking less "
+            "than the lane claims to")
     write_file(args.out, digest)
     return 0
 

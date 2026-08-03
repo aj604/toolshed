@@ -139,21 +139,28 @@ jobs:
             --report "${RUNNER_TEMP}/dispatch/drift-report.json" \
             --expected-digest "$REPORT_DIGEST"
 
-      # The consumer's current audit configuration, read off a fresh deterministic engine run
-      # under this lane's declared boundary. Supplied to every check below, so configuration
-      # drift is compared rather than silently skipped — a check that omits it cannot honestly
-      # clear a config-stale report.
+      # The consumer's current audit configuration, from the exact function `drift-audit` itself
+      # uses to stamp a report's lineage — never a full audit run, and never a second formula
+      # that could drift from the audit lane's own (aj604/toolshed#175). `--evidence-command`
+      # comes from the same probe doc-audit.yml runs, so the boundary this derives and the
+      # boundary the dispatched report published are the same list. Supplied to every check
+      # below, so configuration drift is compared rather than silently skipped — a check that
+      # omits it cannot honestly clear a config-stale report.
       - name: Derive the current audit configuration digest (no model)
         run: |
           set -uo pipefail
-          # `|| true`, not a bare call: the runner's shell is `bash -e`, and a
-          # verdict-carrying exit (a model-free run is `partial`, exit 4) would
-          # abort the step before the digest is read. The payload is the answer
-          # here, not the exit code — and a payload without one refuses below.
-          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py drift-audit --repo . --mode full \
-            > "${RUNNER_TEMP}/current-lineage.json" || true
+          declared=0
+          EVIDENCE_FLAGS=$(python3 .doc-lifecycle/wiring/probe-evidence-tool.py declared --flags) || declared=$?
+          if [ "$declared" -ne 0 ]; then
+            echo "declared evidence tools unreadable (probe exit code: $declared)"
+            echo "refusing to derive a configuration digest that would silently narrow to"
+            echo "tool-free — fix .doc-lifecycle/evidence-tools.json"
+            exit "$declared"
+          fi
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py audit-config-digest \
+            ${EVIDENCE_FLAGS} > "${RUNNER_TEMP}/current-config.json"
           python3 .doc-lifecycle/wiring/render-apply-summary.py config-digest \
-            --report "${RUNNER_TEMP}/current-lineage.json" \
+            --report "${RUNNER_TEMP}/current-config.json" \
             --out "${RUNNER_TEMP}/config-digest.txt"
 
       - name: Revalidate the report against the requested base

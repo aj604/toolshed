@@ -1571,6 +1571,39 @@ verdicts = load_verdicts("verdicts.json")                           # → payloa
 audit_drift(".", mode="full", verdicts=verdicts)                    # → Report or Invalid
 ```
 
+### Audit configuration digest command
+
+Issue #175. `drift-audit` stamps its report's lineage with a digest of the evidence boundary it
+ran under (`audit_config_digest`, above). A lane that wants to know whether *the repository's
+current* audit configuration still matches a report's — before deciding whether to act on it —
+used to answer that by running a full `drift-audit` and reading the field back off its lineage.
+That works only if the full run declares the exact same boundary the original report did; two
+lanes that derive their evidence-command flags independently (say, one from
+`probe-evidence-tool.py declared --flags` and the other from nothing at all) get two different
+digests for an unchanged repository, and `validate-report --audit-config-digest` reports
+`lineage-audit-config-mismatch` forever.
+
+`audit-config-digest` is the fix: the exact function `drift-audit` uses to compute this field,
+exposed as its own command, with no `--repo` at all — there is nothing about the repository this
+digest depends on.
+
+```bash
+python3 -m doclifecycle audit-config-digest \
+  --evidence 'src/**' --exclude-evidence 'src/vendor/**' --evidence-command gh
+```
+
+Takes the same `--evidence`/`--exclude-evidence`/`--evidence-command` flags as `drift-audit`, with
+the same defaults, and emits `{"status": "ok", "schema_version": ..., "audit_config_digest":
+"<sha256>"}`. It always exits 0. Two lanes only ever get the same digest by declaring the same
+boundary — this command cannot infer that on its own, so a caller that wants to match a report
+must pass it the same flags the run that produced the report did.
+
+```python
+from doclifecycle.drift import resolve_audit_config_digest
+
+resolve_audit_config_digest(evidence_commands=("gh",))  # → AuditConfigDigest
+```
+
 ## Migration door
 
 Issue #74. How a consumer already running the pre-registry doc-sync install adopts the registry

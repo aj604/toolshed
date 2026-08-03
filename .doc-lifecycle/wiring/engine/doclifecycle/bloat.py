@@ -733,7 +733,7 @@ EVIDENCE_BOUNDARY = EvidenceBoundary(sources=("**",), excluded=(), commands=())
 def _audit_config_digest(boundary):
     """The consumer configuration this bloat audit ran under.
 
-    `drift._audit_config_digest`'s reasoning, carried over: what a consumer
+    `drift.audit_config_digest`'s reasoning, carried over: what a consumer
     can set that could change a verdict. Bloat's boundary is fixed
     (`EVIDENCE_BOUNDARY`) rather than consumer-configurable, so this digest
     only has to be stable and distinct from drift's, never re-derived from
