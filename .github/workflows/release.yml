@@ -2,15 +2,18 @@
 # CI (every PR and push): version-bump guard (PRs only, doc-sync/nightly exempt) +
 # manifest validation + unit tests — the checks that have historically been run
 # by hand before tagging.
-# Release (pushes to main): when plugins/doc-lifecycle's version has no tag yet,
-# tag vX.Y.Z and publish a GitHub Release. Cutting a release = bumping the
-# version in your PR; the rest is mechanical.
+# Release (manual dispatch only, aj604/toolshed#169 stop-loss): when
+# plugins/doc-lifecycle's version has no tag yet, tag vX.Y.Z and publish a
+# GitHub Release. Publishing is a deliberate human act — dispatch this workflow
+# from main after CI is green there. A version bump merging to main no longer
+# releases by itself.
 name: ci
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   ci:
@@ -76,7 +79,7 @@ jobs:
 
   release:
     needs: ci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
