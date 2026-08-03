@@ -1,0 +1,326 @@
+{
+  "status": "partial",
+  "schema_version": 1,
+  "lineage": {
+    "repository": "origin:github.com/aj604/toolshed",
+    "base_commit": "5ef1471df810df79726285d94104df3dde678faa",
+    "audit_mode": "full",
+    "inventory_digest": "2b3258b419dc39c36ddef13525e27954a58640a2778f25b9308a3ff2e380dbdf",
+    "audit_config_digest": "9151d8e6235fe469a84925c6c5ad5bed08aeaa68a865c0006c177fce7f7186ab",
+    "registry_digest": "c9a6c7b809679ff2c18a26de544d9f2d0b15c404821098c66286a7cd6ef05bc8",
+    "ruleset_version": 10,
+    "plugin_version": "0.44.3",
+    "evidence_boundary": {
+      "sources": [
+        "**"
+      ],
+      "excluded": [],
+      "commands": [
+        "gh"
+      ]
+    }
+  },
+  "records": [
+    {
+      "id": "DRIFT-001",
+      "digest": "84f5317b72386c48b6f9ed0dcb85405d08e12f1f0a6a5bb7e5ba7dc2e12acb57",
+      "code": "ANCHOR-MALFORMED",
+      "path": "docs/decisions.md",
+      "units": [
+        "dbeb7e6ac3fd34f891aa7647813cd021dc2b22da4ae12185080e2f48fd8df696"
+      ],
+      "assertion": "As of 2026-07-30 — entries are dated and appended, newest first; a superseded decision stays standing and is marked superseded by the entry that replaced it, so an old entry is a record of what was true then, not a claim about now.",
+      "location": "docs/decisions.md:3",
+      "message": "the anchor must read `As of <YYYY-MM-DD> (<anchors current at writing>)` — a date nobody can compare cannot say whether the document is honestly dated"
+    },
+    {
+      "id": "DRIFT-002",
+      "digest": "ac463b49b6cfbeb03537c1f182a2699b9c2fb346addbd431e1beb490a515ea95",
+      "code": "ANCHOR-STALE",
+      "path": "docs/guides/starting-docs-from-scratch.md",
+      "units": [
+        "a392f1fd660c430052ed61667b911b49a610f427f93b57ae78fc782291e34333"
+      ],
+      "assertion": "As of 2026-07-05 (doc-lifecycle 0.6.2 @ e5201b8; `plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md`, `plugins/doc-lifecycle/skills/growing-docs/SKILL.md`)",
+      "location": "docs/guides/starting-docs-from-scratch.md:3",
+      "as_of": "2026-07-05",
+      "references": [
+        "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+        "plugins/doc-lifecycle/skills/growing-docs/SKILL.md"
+      ],
+      "evidence": {
+        "source": "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+        "observed": "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md last changed 2026-07-26 in 843f79ad5a574eabf84f15017c74e77b609c9e33, after the anchor's as-of date 2026-07-05 (and 1 more the anchor names)"
+      }
+    }
+  ],
+  "incomplete": [
+    {
+      "scope": "CLAUDE.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "CONTEXT.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "README.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "docs/agents/domain.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "docs/agents/issue-tracker.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "docs/agents/triage-labels.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "docs/doc-scope.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/agents/doc-distiller.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/agents/llm-doc-writer.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/engine/README.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/planning-artifacts.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/verdict-lenses.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/fixing-docs/SKILL.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/growing-docs/SKILL.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/writing-docs/SKILL.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/writing-docs/agent-context.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/writing-docs/readme.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/writing-docs/runbooks.md",
+      "reason": "no verdict set was returned for this document, so none of its claims were examined"
+    }
+  ],
+  "digest": "ccfb67808a742bb593cf17ea3b676619b37e0ec979fe3efeeb069c8e6266ed2f",
+  "examined": [
+    {
+      "scope": "docs/decisions.md",
+      "obligation": "anchor",
+      "anchor": "malformed"
+    },
+    {
+      "scope": "docs/design-rationale.md",
+      "obligation": "anchor",
+      "anchor": "dated",
+      "as_of": "2026-07-04",
+      "references": []
+    },
+    {
+      "scope": "docs/guides/auditing-doc-bloat.md",
+      "obligation": "anchor",
+      "anchor": "dated",
+      "as_of": "2026-07-30",
+      "references": [
+        "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+        "plugins/doc-lifecycle/engine/doclifecycle/bloat.py",
+        "plugins/doc-lifecycle/skills/fixing-docs/SKILL.md",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat-audit.yml"
+      ]
+    },
+    {
+      "scope": "docs/guides/principles.md",
+      "obligation": "anchor",
+      "anchor": "dated",
+      "as_of": "2026-07-30",
+      "references": [
+        "plugins/doc-lifecycle/skills/",
+        "plugins/doc-lifecycle/engine/README.md"
+      ]
+    },
+    {
+      "scope": "docs/guides/scheduling-doc-sync.md",
+      "obligation": "anchor",
+      "anchor": "dated",
+      "as_of": "2026-07-30",
+      "references": [
+        ".doc-lifecycle/",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-audit.yml",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat-audit.yml",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-apply.yml",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-policy-apply.yml",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/apply-upgrade.py",
+        "plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/stage-upgrade.py"
+      ]
+    },
+    {
+      "scope": "docs/guides/starting-docs-from-scratch.md",
+      "obligation": "anchor",
+      "anchor": "dated",
+      "as_of": "2026-07-05",
+      "references": [
+        "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+        "plugins/doc-lifecycle/skills/growing-docs/SKILL.md"
+      ]
+    }
+  ],
+  "scope": {
+    "basis": "full inventory: every living and narrative document the registry classifies",
+    "coverage": "whole-inventory",
+    "documents": [
+      "CLAUDE.md",
+      "CONTEXT.md",
+      "README.md",
+      "docs/agents/domain.md",
+      "docs/agents/issue-tracker.md",
+      "docs/agents/triage-labels.md",
+      "docs/decisions.md",
+      "docs/design-rationale.md",
+      "docs/doc-scope.md",
+      "docs/guides/auditing-doc-bloat.md",
+      "docs/guides/principles.md",
+      "docs/guides/scheduling-doc-sync.md",
+      "docs/guides/starting-docs-from-scratch.md",
+      "plugins/doc-lifecycle/agents/doc-distiller.md",
+      "plugins/doc-lifecycle/agents/llm-doc-writer.md",
+      "plugins/doc-lifecycle/engine/README.md",
+      "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/planning-artifacts.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/verdict-lenses.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md",
+      "plugins/doc-lifecycle/skills/fixing-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/growing-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+      "plugins/doc-lifecycle/skills/writing-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/writing-docs/agent-context.md",
+      "plugins/doc-lifecycle/skills/writing-docs/readme.md",
+      "plugins/doc-lifecycle/skills/writing-docs/runbooks.md"
+    ],
+    "excluded": [
+      {
+        "path": "docs/plans/2026-07-05-marketing-overhaul-design.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-plan.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-07-bloat-scale-hardening-design.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-11-docs-ab-experiment.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-26-shadow-parity-gate.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-27-shadow-parity-gate-rerun.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/2026-07-28-issue-57-review-remediation.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/plans/HANDOFF.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      },
+      {
+        "path": "docs/superpowers/specs/2026-07-07-doc-sync-self-upgrade-design.md",
+        "reason": "a planning document carries lifecycle state rather than standing claims about the code — its obligation is distillation or retirement, not drift",
+        "code": "planning-kind"
+      }
+    ]
+  }
+}
