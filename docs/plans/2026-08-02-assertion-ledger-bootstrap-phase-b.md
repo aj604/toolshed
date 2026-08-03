@@ -120,10 +120,18 @@ The value is a **tier alias** (`sonnet`), not a pinned model id. An alias does
 not go stale when a new model ships; a pinned id needs a plugin release to stay
 correct, and the constraint being expressed is tier-shaped anyway.
 
-**Configuration:** `.doc-lifecycle/sync-budget.json` — Phase A's existing
-consumer-owned cost-control file — gains `bootstrap_model`, default `"sonnet"`
-(absent file or absent field means the default). Model tier is cost control and
-belongs with the other cost knobs rather than in a second config file.
+**Configuration:** the `sync` section of `.doc-lifecycle/config.json` — Phase
+A's consumer-owned cost-control file, born merged so #169 never ships a second
+consumer knob file (Phase C decision, 2026-08-02; §11 item 7) — gains
+`bootstrap_model`, default `"sonnet"` (absent file, section, or field means the
+default). Model tier is cost control and belongs with the other cost knobs
+rather than in a second config file.
+
+The chunk judgment prompt itself has one owner: the tested renderer script
+Phase C's judge job uses to turn a work order into a prompt. Bootstrap chunks
+and sync nights are the same judgment contract with different invokers, so B's
+implementation plan consumes that renderer rather than authoring a second
+prompt for the same contract.
 
 It is a **default, not a ceiling**. A consumer with a small doc set and high
 accuracy requirements may legitimately spend Opus money on a one-time artifact
@@ -303,6 +311,29 @@ anyone who has bootstrapped.
    "not in the covered set" as *declared-uncovered* rather than *new*. Without
    this the schema cannot express a partial bootstrap at all (§8).
 
+Items 5–8 were recorded during Phase C's ([#172](https://github.com/aj604/toolshed/issues/172))
+grilling session (2026-08-02) and live here because Phase A's design doc is not
+yet on main:
+
+5. **The empty work order flows through phase 2.** `accept_sync_judgments`
+   accepts an empty judgment set against an empty work order and emits the
+   validated clean incremental report through the same door — the scheduler
+   never grows a sideline path for the zero-cost night. Phase A's test
+   scenario 1 pins this.
+6. **Findings arise only from model judgment or the deterministic checks that
+   already produce them today (narrative anchors).** A probe failure escalates
+   its unit to the work order — it never directly becomes a finding. Otherwise
+   the policy lane could auto-apply a change no model ever reviewed, a trust
+   posture nobody chose.
+7. **`sync-budget.json` is born as the `sync` section of
+   `.doc-lifecycle/config.json`.** Same fields, same defaults, same fail-closed
+   semantics. #169 ships exactly two consumer files total across all phases:
+   `assertion-ledger.jsonl` and `config.json`.
+8. **The `sync` section also carries `sync_model`** — tier alias, default
+   `"sonnet"`, default-not-ceiling, sibling of `bootstrap_model` — the
+   scheduled judge job's tier. Phase C binds it to the model step and adds the
+   explicit-model-input invariant to the workflow suites.
+
 ## 12. Testing
 
 **One acceptance seam**, matching Phase A's: a doc-bearing fixture repository
@@ -343,7 +374,10 @@ All user decisions, 2026-08-02.
 - **Separate bootstrap chunk cap; bootstrap exempt from the tripwire.**
 - **Sonnet as the tier ceiling for this repository**, expressed as a default
   rather than an enforced ceiling.
-- **Model set at dispatch**, as a tier alias, from `sync-budget.json`.
+- **Model set at dispatch**, as a tier alias, from `config.json`'s `sync`
+  section.
+- **`config.json` born merged; `sync_model` added** — Phase C grilling
+  decisions, 2026-08-02, recorded in §11 items 5–8.
 - **Evidence pre-resolution replaces probe pre-compilation**, on measurement.
 - **Prune coupling quantified in the estimate**, not enforced.
 - **Partial ledgers valid, document-granular coverage.**
