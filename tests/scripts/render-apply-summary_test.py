@@ -404,19 +404,36 @@ class RunId(ScriptTestCase):
 
 
 class ConfigDigest(ScriptTestCase):
-    """Configuration drift is only compared when the lane supplies the digest."""
+    """Configuration drift is only compared when the lane supplies the digest.
+
+    aj604/toolshed#175: this used to read `lineage.audit_config_digest` off a
+    fresh full `drift-audit` run. That run declared no `--evidence-command`,
+    while the audit lane's own report did, so the two digests could never
+    match on an unchanged repository. The source is now the engine's
+    `audit-config-digest` command instead — a top-level `audit_config_digest`
+    field, no lineage, no repository — and a lane declares the *same* tools
+    the audit lane declared to get a comparable digest.
+    """
 
     def test_the_current_audit_config_digest_is_extracted(self):
-        path = self.write("fresh.json", report())
+        path = self.write("fresh.json", {
+            "status": "ok", "schema_version": 1,
+            "audit_config_digest": "f" * 64,
+        })
         out = self.path("config-digest.txt")
         proc = self.run_script("config-digest", "--report", path, "--out", out)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(self.read("config-digest.txt"), "f" * 64)
 
     def test_a_missing_digest_is_refused_rather_than_omitted(self):
-        lineage = dict(LINEAGE)
-        del lineage["audit_config_digest"]
-        path = self.write("fresh.json", report(lineage=lineage))
+        path = self.write("fresh.json", {"status": "ok", "schema_version": 1})
+        proc = self.run_script("config-digest", "--report", path,
+                               "--out", self.path("config-digest.txt"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-config-digest-unavailable", self.summary())
+
+    def test_an_unparseable_payload_is_refused_rather_than_omitted(self):
+        path = self.write_text("fresh.json", "not json")
         proc = self.run_script("config-digest", "--report", path,
                                "--out", self.path("config-digest.txt"))
         self.assertEqual(proc.returncode, 1)

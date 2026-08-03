@@ -84,17 +84,29 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ${{ runner.temp }}/dispatch
 
-      # Derive the current configuration from the same engine and default-branch checkout the
-      # report is about. A model-free audit is expected to be partial; its lineage is the output
-      # needed here, and a missing digest refuses through the tested renderer.
+      # Derive the current configuration from the exact function `drift-audit` itself uses to
+      # stamp a report's lineage — never a full audit run, and never a second formula that could
+      # drift from the audit lane's own (aj604/toolshed#175: a full audit run here with no
+      # declared evidence commands, compared against a report doc-audit.yml declared `gh` under,
+      # could never match, on any repository state, no matter how many times either re-ran).
+      # `--evidence-command` comes from the same probe doc-audit.yml runs, so the boundary this
+      # derives and the boundary the report published are the same list.
       - name: Derive the current audit configuration digest
         if: steps.config.outputs.configured == 'true'
         run: |
           set -uo pipefail
-          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py drift-audit --repo . --mode full \
-            > "${RUNNER_TEMP}/current-lineage.json" || true
+          declared=0
+          EVIDENCE_FLAGS=$(python3 .doc-lifecycle/wiring/probe-evidence-tool.py declared --flags) || declared=$?
+          if [ "$declared" -ne 0 ]; then
+            echo "declared evidence tools unreadable (probe exit code: $declared)"
+            echo "refusing to derive a configuration digest that would silently narrow to"
+            echo "tool-free — fix .doc-lifecycle/evidence-tools.json"
+            exit "$declared"
+          fi
+          python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py audit-config-digest \
+            ${EVIDENCE_FLAGS} > "${RUNNER_TEMP}/current-config.json"
           python3 .doc-lifecycle/wiring/render-apply-summary.py config-digest \
-            --report "${RUNNER_TEMP}/current-lineage.json" \
+            --report "${RUNNER_TEMP}/current-config.json" \
             --out "${RUNNER_TEMP}/config-digest.txt"
 
       # Revalidation happens before the policy is even read. A default branch that advanced,

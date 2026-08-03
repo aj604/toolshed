@@ -530,7 +530,7 @@ def load_waivers(repo_root, waivers_path):
     return tuple(waivers), digest, None
 
 
-def _audit_config_digest(boundary):
+def audit_config_digest(boundary):
     """The consumer configuration this audit ran under.
 
     What a consumer can set that could change a verdict — today, the limit of
@@ -538,12 +538,58 @@ def _audit_config_digest(boundary):
     here: accepting a claim changes what a reader is asked to look at, never
     what the audit found, so it must not expire reports or re-key the findings
     an approval set selects. Detection stays pure; disposition is annotation.
+
+    Public, and the only place this hash is taken: `audit_drift` calls it to
+    stamp a report's lineage, and `resolve_audit_config_digest` calls it
+    again for a lane that wants just this field. Two formulas for the same
+    number is exactly how aj604/toolshed#175 happened — the policy lane's
+    re-derivation drifted from the audit lane's own, silently, because
+    nothing forced them through one function.
     """
     return sha256_canonical({
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "audit": "drift",
         "evidence_boundary": boundary.to_dict(),
     })
+
+
+@dataclass(frozen=True)
+class AuditConfigDigest:
+    """The wire form `resolve_audit_config_digest` returns.
+
+    Always `ok`: building an `EvidenceBoundary` from argv and hashing it
+    cannot fail on repository state, because it never reads the repository.
+    """
+
+    status: str
+    digest: str
+
+    def to_dict(self):
+        return {
+            "status": self.status,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "audit_config_digest": self.digest,
+        }
+
+
+def resolve_audit_config_digest(evidence_sources=DEFAULT_EVIDENCE,
+                                evidence_excluded=(), evidence_commands=()):
+    """The digest a full audit declaring this same boundary would carry.
+
+    The one engine call a lane uses to learn "the repository's current audit
+    configuration" without running a full audit just to read one field off
+    its lineage — cheaper, and it cannot diverge from what a full audit
+    would compute, because it calls the exact function `audit_drift` does.
+    A caller that wants this to match a report's own digest must declare the
+    same `evidence_commands` (and sources/excluded) that produced it — the
+    two only agree when the boundary they declare is the same boundary,
+    which is the wiring lanes must share, not something this function can
+    infer on its own.
+    """
+    boundary = EvidenceBoundary(tuple(evidence_sources),
+                                tuple(evidence_excluded),
+                                tuple(evidence_commands))
+    return AuditConfigDigest(STATUS_OK, audit_config_digest(boundary))
 
 
 def _waiver_hits(waivers, specs):
@@ -1441,7 +1487,7 @@ def audit_drift(repo_root, mode=MODE_FULL, since=None, verdicts=None,
     boundary = EvidenceBoundary(tuple(evidence_sources), tuple(evidence_excluded),
                                 tuple(evidence_commands))
     state, problems = current_lineage(
-        repo_root, registry_path, _audit_config_digest(boundary)
+        repo_root, registry_path, audit_config_digest(boundary)
     )
     if problems:
         return Invalid(tuple(problems))

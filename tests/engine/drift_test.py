@@ -37,6 +37,7 @@ from doclifecycle.drift import (  # noqa: E402
     DriftPlan,
     audit_drift,
     plan_drift_audit,
+    resolve_audit_config_digest,
 )
 from doclifecycle.finding import (  # noqa: E402
     FACTUAL,
@@ -2031,6 +2032,70 @@ class ToolCitations(DriftRepoTestCase):
                             verdicts=self.verdicts_for(root, self.cited(root)))
 
         self.assertEqual(report.lineage.evidence_boundary.commands, ("gh",))
+
+
+class TheStandaloneDigestCommandIsTheAuditsOwnFunction(DriftRepoTestCase):
+    """aj604/toolshed#175: `doc-policy-apply` recomputed "the repository's
+    current audit configuration" by re-running a full audit with no declared
+    evidence commands, while `doc-audit` had declared `gh` — two structurally
+    different boundaries that could never hash equal, on an unchanged
+    repository, no matter how many times either lane re-ran.
+
+    `resolve_audit_config_digest` is the one function both a full audit
+    (`audit_drift`, via `_audit_config_digest`) and a lane that only wants the
+    digest call to compute it, so two lanes declaring the *same* evidence
+    boundary structurally cannot diverge — the fix is making every lane
+    declare the same boundary, not adding a second formula that has to be
+    kept in sync with the first by hand.
+    """
+
+    def test_reproduces_the_mismatch_the_two_lanes_hit_before_the_fix(self):
+        """`doc-audit.yml` renders `--evidence-command` from
+        `probe-evidence-tool.py declared --flags` (here, declaring `gh`);
+        `doc-policy-apply.yml`'s "Derive the current audit configuration
+        digest" step called `drift-audit --repo . --mode full` with no
+        `--evidence-command` at all. Same repository, same commit — the
+        digests still cannot match, because the two commands never declared
+        the same boundary."""
+        root = self.drift_repo()
+        audit_lane = self.audit(
+            root, evidence_commands=("gh",),
+            verdicts=self.verdicts_for(root, self.verdict(root)),
+        )
+
+        policy_lane_before_fix = resolve_audit_config_digest()
+
+        self.assertNotEqual(
+            policy_lane_before_fix.digest,
+            audit_lane.lineage.audit_config_digest,
+            "these were expected to differ — this pins the exact defect "
+            "aj604/toolshed#175 reports, not a passing behavior",
+        )
+
+    def test_declaring_the_same_commands_produces_the_same_digest(self):
+        """The fix: both lanes call this function with the same declared
+        commands (rendered by the same `probe-evidence-tool.py declared
+        --flags`), so the digests agree without either lane re-running a
+        full audit just to learn this one field."""
+        root = self.drift_repo()
+        audit_lane = self.audit(
+            root, evidence_commands=("gh",),
+            verdicts=self.verdicts_for(root, self.verdict(root)),
+        )
+
+        policy_lane_after_fix = resolve_audit_config_digest(
+            evidence_commands=("gh",))
+
+        self.assertEqual(policy_lane_after_fix.digest,
+                         audit_lane.lineage.audit_config_digest)
+
+    def test_needs_no_repository_at_all(self):
+        """Unlike the full audit it replaces, deriving just the digest
+        cannot fail on a repository problem — there is no repository in the
+        call."""
+        result = resolve_audit_config_digest(evidence_commands=("gh",))
+        self.assertEqual(result.status, "ok")
+        self.assertRegex(result.digest, r"^[0-9a-f]{64}$")
 
 
 class ReadOnly(DriftRepoTestCase):
