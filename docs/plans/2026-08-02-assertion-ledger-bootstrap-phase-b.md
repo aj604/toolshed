@@ -3,7 +3,7 @@
 **Status:** approved design, awaiting implementation plan
 **Parent:** [#169 — Make nightly drift sync incremental with an assertion ledger and deterministic probes](https://github.com/aj604/toolshed/issues/169)
 **Issue:** [#171 — Phase B: model-assisted bootstrap with heuristic evidence pre-resolution](https://github.com/aj604/toolshed/issues/171)
-**Depends on:** [#170 — Phase A](https://github.com/aj604/toolshed/issues/170), which must carry four contract amendments (§11) before it is built.
+**Depends on:** [#170 — Phase A](https://github.com/aj604/toolshed/issues/170), which must carry the Phase A contract amendments recorded in §11 before it is built.
 **Design doc for Phase A:** `docs/plans/2026-08-02-assertion-ledger-incremental-sync-phase-a.md`
 
 ## Why (one paragraph)
@@ -333,6 +333,29 @@ yet on main:
    `"sonnet"`, default-not-ceiling, sibling of `bootstrap_model` — the
    scheduled judge job's tier. Phase C binds it to the model step and adds the
    explicit-model-input invariant to the workflow suites.
+
+Items 9–12 were recorded during Phase D's ([#173](https://github.com/aj604/toolshed/issues/173))
+grilling session (2026-08-03), for the same reason:
+
+9. **`plan_sync`'s mode vocabulary is closed-and-three: `sync | bootstrap |
+   reconcile`.** Reconcile (Phase D) is a human-invoked posture composing
+   existing machinery — refresh `reconcile-only` entries plus tombstone
+   pruning under an explicit budget — never a third judgment depth. Volume
+   work stays with bootstrap: mass-churn backlog and distrusted-ledger
+   recovery are re-bootstrap; coverage gaps are bootstrap resume. The
+   scheduled lane only ever runs `mode=sync`; scope-widening postures are
+   human-invoked flows.
+10. **The ledger-diff-to-prose renderer is born in Phase B** with the full
+    core vocabulary (additions, supersedes, tombstones, re-probes,
+    escalations) — one owner, three consumers (the sync lane's standing PR
+    via `render-audit-summary.py`, bootstrap's delivery PR, reconcile's PR).
+    Phase D adds only prune accounting. Bootstrap's delivery PR consumes it
+    from day one; no private diff voice.
+11. **CONTEXT.md glossary entries** (assertion ledger, deterministic probe,
+    judgment work order) **land in Phase A's PR** — the code that speaks the
+    vocabulary lands with its definitions, not three phases later.
+12. **The decision record superseding the nightly full-corpus assumption
+    lands in Phase C's PR** — when the supersession becomes true in the tree.
 
 ## 12. Testing
 
