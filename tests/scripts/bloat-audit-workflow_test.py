@@ -105,7 +105,15 @@ class ScheduledBloatAuditContract(unittest.TestCase):
 
         # Plans, chunk results, envelopes, reports, and cost data all live in
         # runner.temp. The checkout is evidence only, never artifact storage.
-        self.assertIn("BLOAT_DIR: ${{ runner.temp }}/doc-bloat-audit", text)
+        # `runner` is step-scoped, so both jobs export the root from a step;
+        # naming it above step scope made GitHub reject the file (#174).
+        self.assertNotIn("BLOAT_DIR: ${{ runner.temp }}", text)
+        self.assertEqual(
+            2, text.count(
+                'echo "BLOAT_DIR=${RUNNER_TEMP}/doc-bloat-audit" '
+                '>> "${GITHUB_ENV}"'),
+            "each job must resolve the artifact root before using it",
+        )
         for name in ("manifest.json", "bloat-verdicts.json", "unswept.json",
                      "bloat-report.json", "audit-cost.json"):
             self.assertIn(f'${{BLOAT_DIR}}/{name}', text)
