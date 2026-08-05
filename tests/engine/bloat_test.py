@@ -9,6 +9,7 @@ Seams under test: `bloat.plan_chunks()`, `bloat.merge_contention()`,
 Run: python3 tests/engine/bloat_test.py
 """
 
+import json
 import os
 import shutil
 import sys
@@ -27,6 +28,7 @@ from finding_test import lineage as finding_lineage  # noqa: E402
 from report_test import GitRepoTestCase  # noqa: E402  (a real git repository)
 
 from doclifecycle import ARTIFACT_SCHEMA_VERSION, RULESET_VERSION, bloat  # noqa: E402
+from doclifecycle import cache  # noqa: E402
 from doclifecycle.approval import (  # noqa: E402
     MINTER_HUMAN,
     ApprovalSet,
@@ -1574,6 +1576,33 @@ class TheChunkCache(GitRepoTestCase):
         rerun = self.load(self.current())
 
         self.assertIn("docs/a.md", rerun.misses)
+
+    def test_a_rewritten_cached_verdict_sends_the_document_back_for_judgment(self):
+        # A chunk result carries its findings *inside* the stored record, and
+        # that record's own digest is over them — so a poisoner who edits one
+        # verdict and leaves the digest it was written with alone produces an
+        # entry every pre-#187 check passes. The payload digest is what
+        # refuses it, and the effect is the one that matters: the document is
+        # back in `misses`, so the next audit asks the model about it again.
+        state = self.current()
+        bloat.store_chunk(self.cache_dir, self.index, state, self.chunk,
+                          {"docs/a.md": [{"id": "B-1", "verdict": bloat.CUT}],
+                           "docs/b.md": []})
+        self.assertEqual(self.load(state).misses, ())
+
+        key = bloat.chunk_cache_keys(self.index, state, self.chunk)["docs/a.md"]
+        path = cache.entry_path(self.cache_dir, key)
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        payload["records"][0]["records"][0]["verdict"] = bloat.RETIRE_DOC
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+
+        cached = self.load(state)
+
+        self.assertEqual(cached.misses, ("docs/a.md",))
+        self.assertEqual(cached.reasons["docs/a.md"], cache.MISS_PAYLOAD_DIGEST)
+        self.assertNotIn("docs/a.md", cached.hits)
 
     def test_storing_a_document_outside_the_chunk_is_a_programming_error(self):
         with self.assertRaises(ValueError):

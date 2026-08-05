@@ -580,6 +580,13 @@ def lineage_digest(lineage):
     })
 
 
+# The one problem code a caller reads back rather than merely reporting: a
+# payload that is structurally sound but no longer digests to the value it
+# declares has been altered since it was written, which is a different fact
+# about it than "malformed". `cache.py` distinguishes the two on that basis.
+DIGEST_MISMATCH = "report-digest-mismatch"
+
+
 def _content_digest(lineage, records, incomplete, scope=None, examined=()):
     """The report's identity: what it says, not what a validator concluded.
 
@@ -1496,7 +1503,7 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     declared_digest = payload.get("digest")
     if declared_digest is not None and declared_digest != digest:
         return Invalid((Problem(
-            code="report-digest-mismatch",
+            code=DIGEST_MISMATCH,
             message=(
                 f"the report declares digest {declared_digest} but its content "
                 f"digests to {digest} — the report has been altered since it was "

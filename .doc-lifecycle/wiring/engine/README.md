@@ -708,6 +708,21 @@ declared `document_digest`/`source_digest` are also compared against the key's, 
 validates cleanly but names a different document or source (a mismatched chunk sitting at the
 right path) is `MISS_IDENTITY` rather than a false hit. Every other way to fail — the entry was
 never written (`MISS_NOT_FOUND`), or its JSON does not parse (`MISS_CORRUPT`) — is a miss too.
+
+None of those sees an entry rewritten in place into another *valid* entry, so `put()` also
+declares the report contract's own content digest over the whole payload — the lineage and the
+record, to any depth, including everything a semantic result carries in a record's own fields
+(the nested findings of a cached chunk result among them). `validate_report` recomputes it on
+read, so a verdict edited after it was stored no longer digests to what it declares and is
+`MISS_PAYLOAD_DIGEST`, answered ahead of every freshness question — an altered entry is refused
+whether or not its lineage still stands. An entry declaring no digest at all (one written before
+this binding existed) is `MISS_UNDIGESTED`, answered last, so an entry that is also malformed,
+foreign, incomplete, or about another document keeps that more specific reason. Neither is an
+error a caller has to handle: a poisoned or undigested entry costs one document's re-evaluation,
+and the `put()` that follows replaces it with a digested one. A record the report contract itself
+refuses has no digest to declare, so `put()` writes it undigested rather than raising mid-audit —
+it reads back as the `MISS_INVALID` that record has always earned.
+
 There is no path that returns a stale or unverified payload; a hit is exactly the case where every
 check above passed.
 
