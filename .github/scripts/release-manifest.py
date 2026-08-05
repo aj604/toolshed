@@ -125,6 +125,81 @@ GATE_MANIFEST = {
         "tests/engine/migrate_test.py",
         "tests/engine/migrate_cli_test.py",
     ],
+    # Issue #168's sign-off criterion, in its own words: "regression tests for
+    # every reproduced sign-off failure, so that a green gate proves the
+    # properties the final review found missing." The failures the #57 release
+    # review reproduced all shared one invariant — no report, approval, apply
+    # result, staged index, commit, or cache hit may claim authority over bytes
+    # that were not part of its validated inputs. Discovery runs these suites
+    # already; naming them here is what makes deleting one a reported failure
+    # rather than a silently smaller gate. By finding:
+    #   applier write transaction, write-boundary and post-write races,
+    #     compare-aware rollback (#183) — applier_test
+    #   staged index and commit-tree byte verification, both apply lanes
+    #     (#191) — verify-apply-bytes_test, apply-lane-parity_test
+    #   drift-audit repository-integrity gate (#185) — check-repo-integrity_test
+    #     for the gate script, and audit-workflow_test for its wiring into the
+    #     lane. Both, because they fail to different mutations: the script's
+    #     suite is blind to a lane that runs the gate and ignores it, and the
+    #     lane's static checks are blind to `|| true` on the gate's own
+    #     invocation. Only the execution-based class added in #203 fails on
+    #     that one.
+    #   policy provenance, one policy-branded producer (#186) — policy_test,
+    #     policy_cli_test, approval_test, and approval_cli_test for the
+    #     public generic door's refusal of a policy minter kind
+    #   whole-payload cache digest (#187) — cache_test, and only cache_test.
+    #     scenario_cache_test is NOT coverage here despite the name: its three
+    #     tests are all lineage/key independence and it references neither the
+    #     payload digest nor a miss reason. It stays wired under "acceptance
+    #     seam", where it belongs.
+    #   occurrence-bound approval, no digest hull (#193) — approval_test, and
+    #     finding_test for the other half of that trade: occurrence ordinals
+    #     bound an edit and must never enter a finding's content-addressed
+    #     identity, so a reordered document keeps its finding digests (#203)
+    #   idempotent apply recovery, never a force push (#198) — apply-recovery_test
+    #     for the lane's behaviour, render-apply-summary_test for the
+    #     recovery-state strings it reports (branch created, reused, already
+    #     reviewed, conflicted); a recovery that runs correctly and reports the
+    #     wrong state is the same operator-facing failure
+    #   the audit lane's refusal run surface (#185) — render-audit-summary_test,
+    #     which owns the integrity-refused state that outranks any report on disk
+    #   documentation contracts the implementation can falsify (#194) —
+    #     doc-contract_test
+    #   upgrade-lane commit subject and PR title through the renderer (#189) —
+    #     render-report_test, upgrade-workflow_test
+    # The record #203 produced is the evidence a human weighs when deciding
+    # whether to close #57, and its numeric claims kept drifting from the
+    # artifacts they describe — five times across four review rounds, the last
+    # of them introduced by the very commit that added this guard. So the
+    # guard is pinned for the same reason the seven suites below were: a suite
+    # that nothing names is a suite whose deletion nobody reports, and the one
+    # holding the record honest should not be the one that can vanish quietly.
+    #
+    # Most unpinned suites in this tree are fine unpinned — roughly a third of
+    # them are, and that is not a defect. This one is named because deleting
+    # it would restore precisely the blind spot it exists to close.
+    "sign-off record integrity": [
+        "tests/scripts/sign-off-record_test.py",
+    ],
+    "issue #168 sign-off regressions": [
+        "tests/engine/applier_test.py",
+        "tests/engine/approval_test.py",
+        "tests/engine/cache_test.py",
+        "tests/engine/finding_test.py",
+        "tests/engine/policy_test.py",
+        "tests/engine/policy_cli_test.py",
+        "tests/engine/approval_cli_test.py",
+        "tests/scripts/verify-apply-bytes_test.py",
+        "tests/scripts/apply-lane-parity_test.py",
+        "tests/scripts/apply-recovery_test.py",
+        "tests/scripts/audit-workflow_test.py",
+        "tests/scripts/check-repo-integrity_test.py",
+        "tests/scripts/doc-contract_test.py",
+        "tests/scripts/render-apply-summary_test.py",
+        "tests/scripts/render-audit-summary_test.py",
+        "tests/scripts/render-report_test.py",
+        "tests/scripts/upgrade-workflow_test.py",
+    ],
 }
 
 

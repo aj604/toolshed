@@ -120,6 +120,28 @@ class BasicHitsAndMisses(CacheTestCase):
         self.assertFalse(result.hit)
         self.assertEqual(result.reason, cache.MISS_CORRUPT)
 
+    def test_an_entry_that_is_not_utf_8_is_a_miss_rather_than_a_crash(self):
+        # Every other corrupt-entry test writes its garbage through
+        # `encoding="utf-8"`, so none of them reaches the read itself — they
+        # all fail at the parser. Bytes that are not text fail one step
+        # earlier, and `UnicodeDecodeError` is a `ValueError`, so the read's
+        # `except OSError` never saw it (`digest.py`'s own docstring names
+        # this trap). A cache is an optimization: a lookup must be able to
+        # answer "no" about any file on disk, because the answer it owes the
+        # caller is a re-evaluation, never a traceback out of an audit.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache.entry_path(cache_dir, key), "wb") as fh:
+            fh.write(b"\xff\xfe{\x00\"id\x00")
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertIsNone(result.record)
+        self.assertEqual(result.reason, cache.MISS_CORRUPT)
+
     def test_the_stored_record_carries_the_document_and_source_digests(self):
         # put() sets these from the key when the caller's record does not
         # already carry them, since the report contract's lineage has no

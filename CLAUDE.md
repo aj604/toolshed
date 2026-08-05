@@ -100,7 +100,10 @@ actually runs, computes the suites those steps really execute, and fails when a 
 is not among them: a `tests/engine` subdirectory missing `__init__.py`, a name the pattern
 misses, a directory nothing discovers, or a glob narrowed in `release.yml`. It also carries the
 release manifest mapping each release criterion to the suites that discharge it — #77's original
-criteria plus #158's primary human lifecycle transaction — and declares `tests/baselines/` and
+criteria, #158's primary human lifecycle transaction, and #203's `issue #168 sign-off
+regressions`, which names the suites carrying each reproduced sign-off failure's regression so
+deleting one is a reported failure rather than a quietly smaller gate — and declares
+`tests/baselines/` and
 `tests/fixtures/` non-gate roots — the RED/GREEN skill baselines are retained methodology,
 demonstrably outside the release gate), and the shadow-mode parity
 gate's second-cycle worker orchestrator
@@ -127,7 +130,15 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   plus `shadow-parity-gate/`, the #76 gate's first-cycle run evidence, and
   `shadow-parity-gate-rerun/`, #117's second cycle — the FAIL both cycles reached is recorded in
   `docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, which #77 cites; the gate's harness left
-  with the legacy lane in #77, the run evidence stayed),
+  with the legacy lane in #77, the run evidence stayed; and `issue-203-sign-off-gate/`, the #168
+  remediation's gate rerun, the per-P1 mutation picture, every finding's disposition, the per-test
+  audit of #168's surviving-bytes rule, and the reviewers' raw output in two tiers
+  (`reviewer-output-verbatim.md`, the three dispatched agents' aggregates;
+  `reviewer-leaf-output-verbatim.md`, the seven leaves beneath them — retained because one leaf
+  returned 45s after its parent aggregated and its two real findings were lost, which no other
+  artifact would have revealed). That directory is the evidence a human weighs when
+  deciding whether to close #57, which #203 deliberately did not do; `sign-off-record_test.py` is
+  what holds its numeric claims to the artifacts they describe),
   `scripts/` (helper-script suites), `engine/` (engine suites), `docs-ab/` (the doc-form A/B
   harness — tooling, not a suite). Neither `baselines/` nor
   `fixtures/` gates a release — `release-manifest.py` declares both non-gate roots. Not published.
@@ -175,7 +186,7 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   run-surface strings, and
   `apply-upgrade_test.py` that workflow's
   deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
-  unextractable knobs). Three suites cover the
+  unextractable knobs). Five suites cover the
   wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
   token-free; every write job model-free and staging an explicit path list, with no `git add -A`
   exemption left — #127 replaced the upgrade lane's last broad add with the path set
@@ -185,8 +196,20 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   `install-parity_test.py`
   (the dogfooded install (`.doc-lifecycle/` plus the five lane workflows under `.github/workflows/`) is byte-identical to what `apply-upgrade.py` would lay down
   from the plugin with this install's knobs, plus a whole-tree comparison of the vendored engine),
-  and `engine-capability_test.py` (the engine's
-  applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the
+  `engine-capability_test.py` (the engine's
+  applier module grants no shell, git, exec, or network capability), and `doc-contract_test.py`
+  (#194 — the three documentation claims the implementation can falsify: the applier as sole
+  writer of a repository document against `cache.put()`/`write_approval_set()` as artifact
+  writers, the human-only generic mint door against `mint_policy_approval_set` as the sole
+  `policy`-brand producer, and the read-only audit lanes against the opted-in policy lane that
+  authors a real review PR; it pins phrases and code-derived facts, never whole-file snapshots),
+  and `sign-off-record_test.py` (#203 — the same idea aimed at a record rather than the engine:
+  it derives the `issue #168 sign-off regressions` suite count from `release-manifest.py`'s own
+  `GATE_MANIFEST`, holds every engine-test count in `tests/baselines/issue-203-sign-off-gate/`'s
+  authored prose to agreeing with every other, and holds the race audit's totals to its own
+  table. It exempts the two `*-verbatim.md` files, which are frozen quotations — editing one to
+  satisfy a consistency check would be falsifying evidence).
+  `render-audit-summary_test.py` covers the
   audit lane's run-surface rendering (every report result state, plus the
   report-never-produced case, the integrity-refused case — which outranks any report on
   disk — and cost/turn observability); `audit-workflow_test.py` adds
@@ -200,7 +223,10 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   reaches Tier-2 tool evidence (#118: the model grant unchanged, `--evidence-command` rendered
   by `probe-evidence-tool.py` rather than typed into the YAML) and on the repository-integrity
   gate (#185: it stands between the model and `drift-audit`, exempts exactly `verdicts.json`,
-  and its verdict reaches the run surface);
+  and its verdict reaches the run surface) — plus, since #203, an execution-based class that
+  runs the gate step's own `run:` body under `bash -e` against a real dirtied repository and
+  asserts the step *fails*, because every static check above survives appending `|| true` to the
+  gate's invocation, which is P1 #185 itself;
   `check-repo-integrity_test.py` covers the gate itself against real git repositories — the
   dirtied non-document evidence source both lanes must refuse, every mutation surface named
   exhaustively, the allowlist exempting nothing but its own untracked path, and the
@@ -257,8 +283,10 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   update. They test only the two public seams (the library function, and `python3 -m
   doclifecycle` as a subprocess); confirm new seams before adding a suite at one.
 - Every run-surface string — job summaries, PR bodies, PR titles, commit messages — renders via
-  a tested script (`render-audit-summary.py` for the audit lane, `render-apply-summary.py` for
-  the apply lane, `render-report.py` for the upgrade lane), never inline YAML `jq` — keeping the
+  a tested script (`render-audit-summary.py` for the audit lanes, `render-apply-summary.py` for
+  the apply lanes, `render-report.py` for the upgrade lane, and `verify-apply-bytes.py` for its
+  own byte-verification refusals, which it states on the surface itself rather than handing back
+  to the summary renderer), never inline YAML `jq` — keeping the
   logic unit-tested and the CI YAML allowlist thin.
 - **Docs in this repo follow the contract the plugin enforces:** every line is a claim verifiable
   against the repo (the `writing-docs` skill — one door for both human and agent docs; it carries

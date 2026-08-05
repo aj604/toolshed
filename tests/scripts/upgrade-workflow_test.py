@@ -417,13 +417,47 @@ class EveryRunSurfaceStringIsRendered(unittest.TestCase):
                 f"the landing job renders with a copy the transfer could have "
                 f"overwritten: {line.strip()}")
 
+    # Both spellings of the same option. A substring match on `git commit -m`
+    # let `git commit --message "docs: upgrade…"` through the whole gate —
+    # the same shape as the force-push detector's `\bgit push\b` missing
+    # `git -C … push` (#198) and #194's under-scoped phrase pins. A guard that
+    # names one spelling of a flag is a guard the next author bypasses without
+    # meaning to. `-m` is matched as a whole word so `--message` is not
+    # double-counted and an unrelated `-mtime` never trips it.
+    COMMIT_MESSAGE_FLAG = re.compile(
+        r"\bgit\b(?![^\n|;&]*\b--file\b)[^\n|;&]*?\bcommit\b[^\n|;&]*?"
+        r"(?:\s-m\b|\s--message\b|\s-\w*m\b)")
+
     def test_no_commit_message_is_typed_into_the_yaml(self):
         for job, body in self.jobs.items():
             for line in code_lines(body):
-                self.assertNotIn(
-                    "git commit -m", line,
+                self.assertIsNone(
+                    self.COMMIT_MESSAGE_FLAG.search(line),
                     f"job '{job}' types a commit message into the YAML: "
                     f"{line.strip()} — render it and commit with -F")
+
+    def test_the_commit_message_guard_catches_both_spellings(self):
+        # The guard's own regression test. Every one of these is a real way to
+        # smuggle a run-surface string past a substring match, and each was
+        # confirmed against the live template before this pattern landed.
+        for smuggled in (
+                'git commit -m "docs: upgrade"',
+                'git commit --message "docs: upgrade"',
+                'git -C "${dir}" commit -m "docs: upgrade"',
+                'git -C "${dir}" commit --message "docs: upgrade"',
+                'git commit -am "docs: upgrade"',
+                'git commit --quiet --message "docs: upgrade"'):
+            self.assertIsNotNone(
+                self.COMMIT_MESSAGE_FLAG.search(smuggled),
+                f"the guard does not catch: {smuggled}")
+
+        # And it does not fire on the spelling the lane is required to use.
+        for allowed in (
+                'git commit -F "${RUNNER_TEMP}/commit-message.txt"',
+                'git commit --file "${RUNNER_TEMP}/commit-message.txt"'):
+            self.assertIsNone(
+                self.COMMIT_MESSAGE_FLAG.search(allowed),
+                f"the guard wrongly refuses the rendered path: {allowed}")
 
     def test_no_title_is_typed_into_the_yaml(self):
         # Every `--title` argument reads a rendered value; a literal one is a

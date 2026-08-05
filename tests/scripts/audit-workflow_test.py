@@ -39,6 +39,7 @@ Run: python3 tests/scripts/audit-workflow_test.py
 """
 
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -325,6 +326,140 @@ class RepositoryIntegrityGate(unittest.TestCase):
         self.assertIn("name: audit-integrity", text)
         publish = "\n".join(jobs()["publish"])
         self.assertIn("--integrity ${AUDIT_DIR}/audit-integrity.json", publish)
+
+
+class TheIntegrityGateActuallyStopsTheLane(unittest.TestCase):
+    """Executes the real gate step against a real dirtied repository (#203).
+
+    Everything in `RepositoryIntegrityGate` above is a static read of the
+    YAML: where the step sits, that the assembly step carries
+    `steps.integrity.outcome == 'success'`, that the allowlist is one entry.
+    All of it survives appending `|| true` to the gate's own invocation — the
+    step then succeeds, `outcome` *is* `success`, and a dirty checkout
+    publishes a report. That is P1 #185 itself, and no suite failed on it:
+    `check-repo-integrity.py`'s own tests prove the script detects the dirt,
+    but nothing proved the lane stops when it does.
+
+    So this asserts the one thing the string checks cannot — that running the
+    step's literal `run:` body, under the shell GitHub Actions uses, against a
+    repository with a dirtied tracked evidence source, *fails*. A nonzero exit
+    is what makes `outcome` anything other than `success`, and the gate on the
+    assembly step is what turns that into "no report".
+    """
+
+    GATE = "Verify repository integrity before assembly"
+
+    def setUp(self):
+        self.script = None
+        for job_name, step_name, block in step_run_blocks():
+            if job_name == "audit" and step_name.strip() == self.GATE:
+                self.script = "\n".join(block)
+        self.assertIsNotNone(
+            self.script,
+            f"no '{self.GATE}' step in the audit job — did it move or get "
+            f"renamed? This suite is the only execution-level guard on it.")
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = os.path.join(self.tmp.name, "repo")
+        self.artifacts = os.path.join(self.tmp.name, "artifacts")
+        os.makedirs(self.repo)
+        os.makedirs(self.artifacts)
+
+        # The step reaches its tooling through RUNNER_TEMP/toolshed-marketplace
+        # — the release-pinned clone, never the checkout it is judging. Point
+        # that at this repository so the *real* gate script runs: a stub here
+        # would test the fixture rather than the lane.
+        self.runner_temp = os.path.join(self.tmp.name, "runner")
+        os.makedirs(self.runner_temp)
+        os.symlink(ROOT, os.path.join(self.runner_temp, "toolshed-marketplace"))
+
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "gate@example.com")
+        self.git("config", "user.name", "Gate")
+        self.write("src/server.py", "PORT = 8080\n")
+        self.write("docs/architecture.md", "The service listens on port 8080.\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "initial")
+        self.head = self.git("rev-parse", "HEAD").strip()
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", self.repo, *args],
+                              capture_output=True, text=True,
+                              check=True).stdout
+
+    def write(self, relpath, text):
+        path = os.path.join(self.repo, *relpath.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def run_gate(self):
+        return subprocess.run(
+            ["bash", "--noprofile", "--norc", "-e", "-c", self.script],
+            cwd=self.repo, capture_output=True, text=True,
+            env=dict(os.environ, RUNNER_TEMP=self.runner_temp,
+                     AUDIT_DIR=self.artifacts, GITHUB_SHA=self.head))
+
+    def verdict(self):
+        path = os.path.join(self.artifacts, "audit-integrity.json")
+        self.assertTrue(os.path.exists(path),
+                        "the gate wrote no verdict artifact")
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_a_clean_checkout_passes_the_gate(self):
+        # The honest path, so the refusal below is evidence the gate
+        # discriminates rather than evidence it always fails.
+        result = self.run_gate()
+
+        self.assertEqual(result.returncode, 0,
+                         result.stdout + result.stderr)
+        self.assertEqual(self.verdict()["status"], "verified")
+
+    def test_a_dirtied_tracked_evidence_source_fails_the_step(self):
+        # The exact P1: a verdict cites src/server.py, the model (or anything
+        # else in the job) edits it, and the report would name bytes that are
+        # not at the base commit it declares. The step must fail — that is the
+        # only thing `steps.integrity.outcome == 'success'` can read.
+        self.write("src/server.py", "PORT = 9090\n")
+
+        result = self.run_gate()
+
+        self.assertNotEqual(
+            result.returncode, 0,
+            "the gate step exited 0 on a dirtied tracked evidence source, so "
+            "steps.integrity.outcome would be 'success' and the drift audit "
+            "would assemble and publish a report from it — P1 #185")
+        verdict = self.verdict()
+        self.assertEqual(verdict["status"], "refused")
+        self.assertIn("evidence-integrity-tracked-modified",
+                      [p["code"] for p in verdict["problems"]])
+        # And the gate repaired nothing on its way out.
+        with open(os.path.join(self.repo, "src", "server.py"),
+                  encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "PORT = 9090\n")
+
+    def test_an_untracked_file_the_allowlist_does_not_name_fails_the_step(self):
+        # The allowlist is exactly `verdicts.json`; anything else the job
+        # leaves behind is a mutation. Asserted by execution because the
+        # static check only proves the flag is spelled in the YAML.
+        self.write("smuggled.json", "{}\n")
+
+        result = self.run_gate()
+
+        self.assertNotEqual(result.returncode, 0,
+                            result.stdout + result.stderr)
+        self.assertEqual(self.verdict()["status"], "refused")
+
+    def test_the_allowed_verdict_artifact_alone_still_passes(self):
+        self.write("verdicts.json", '{"documents": []}\n')
+
+        result = self.run_gate()
+
+        self.assertEqual(result.returncode, 0,
+                         result.stdout + result.stderr)
+        self.assertEqual(self.verdict()["status"], "verified")
 
 
 class RenderScriptWired(unittest.TestCase):

@@ -1,8 +1,129 @@
 # Decisions
 
-> As of 2026-08-04 — entries are dated and appended, newest first; a superseded decision stays
+> As of 2026-08-05 — entries are dated and appended, newest first; a superseded decision stays
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
+
+## 2026-08-05 — the #168 sign-off gate is evidence in the repository, not a claim in a PR (#203)
+- Decided: the sign-off gate's output is five retained records under
+  `tests/baselines/issue-203-sign-off-gate/` — `reviewer-output-verbatim.md` (the three dispatched
+  agents' aggregate reports, unedited), `reviewer-leaf-output-verbatim.md` (the seven leaf reports
+  beneath them, and the timeline of the one that was lost), `gate-results.md` (every gate
+  component, its command, and its result, plus the per-P1 mutation picture),
+  `independent-reviews.md` (the disposition of every finding), and `race-test-audit.md` (the
+  per-test audit of #168's surviving-bytes rule). A sign-off whose evidence lives only in a pull
+  request body is a claim; the point of #168 was that authority binds to bytes a later reader can
+  check.
+- Decided: **prose that states a number about an artifact is checked against that artifact.**
+  Across four review rounds the same defect recurred six times — the race count, the suite count
+  three times, the engine-test count, and the script/wired gate totals — each caught by a human,
+  each invisible to a fully green gate, on a ticket whose subject is evidentiary discipline. A
+  further instance drifted a *provenance* rather than a number. The root cause is one thing: a
+  claim in prose and the artifact under it had no mechanical relationship.
+  `tests/scripts/sign-off-record_test.py` now derives all three counts from the tools themselves —
+  the pinned-suite count from `release-manifest.py`'s `GATE_MANIFEST`, the script-suite total from
+  `run-script-suites.py`'s glob, the wired-suite total from `release-manifest.py`'s `audit()` —
+  and holds the engine counts and race totals to internal agreement. Every historical drift was
+  replanted and confirmed to fail it.
+- Standing, and the sharpest illustration of why the guard had to *derive* rather than assert:
+  **the commit that added that guard introduced the next instance of the defect it closes.** The
+  new suite became the 29th script suite and 61st wired suite, invalidating four "28/28" and "60
+  suites" claims; the guard as first written could not match those strings at all. Extracting the
+  prior commit and running the gate there confirms both numbers were correct when written. A fix
+  that only corrected the strings would have recurred on the next suite added.
+- Decided: **the quotation exemption is per block, not per file.** A file-level exemption left
+  ~66 lines of authored analysis inside the two quote-bearing files unguarded — a planted false
+  count in an authored header passed the whole gate. Quotations are now delimited by explicit
+  `<!-- BEGIN VERBATIM -->` markers, placed by matching each against its session transcript and
+  refusing unless it matched verbatim exactly once, so the markers sit outside the quoted text.
+  Inferring the boundary from `---` rules would have been wrong: reviewers' own reports contain
+  them. The principle is unchanged and now precise — a quotation must never be edited to satisfy
+  a consistency check, and authored analysis is guarded like any other prose.
+- Standing: the guard suite is pinned to its own criterion, `sign-off record integrity`, because
+  it was briefly silently deletable. Roughly a third of this tree's suites are pinned to no
+  criterion and are fine that way; this one is named because deleting it restores the blind spot
+  it exists to close. It inherits `doc-contract_test.py`'s ceiling and could not have caught the
+  provenance error; nothing mechanical would have.
+- Standing: **the review apparatus lost a finding, and that is why two defects reached the
+  pull-request review instead of this record.** Each axis fanned out internally — Spec into five
+  leaf reviewers, Standards into two — and the Spec aggregate returned at 14:38:35.302Z, 45
+  seconds before its `rev-policy-cache` leaf finished at 14:39:20.675Z. That leaf found both the
+  `cache.get()` non-UTF-8 crash and the `policy_path` asymmetry. Four of five Spec leaves landed
+  in time; the only one that found a real defect did not. The skill's guarantee is no aggregation
+  *across* axes, which held; the intra-axis path had no guarantee at all. All seven leaf reports
+  are now retained in `tests/baselines/issue-203-sign-off-gate/reviewer-leaf-output-verbatim.md`,
+  none unrecoverable, so a recurrence is detectable by comparing leaves against the aggregate that
+  claims to summarize them.
+- Decided, and it is the load-bearing one: **the raw reviewer output is retained, not
+  paraphrased.** A disposition table written by the party under review is that party's account of
+  a review, and #168's User Story 42 exists so #57 closes "on evidence rather than implementation
+  self-assessment". `tests/baselines/shadow-parity-gate/` set the precedent of keeping the raw
+  artifact. The cost of the paraphrase-only version was demonstrated rather than argued: the #203
+  pull-request review found two defects the record had no place for, including a live crash.
+- Standing: **two of the six P1 findings had real gaps that a green gate did not show.** #187's
+  `cache.get()` crashed rather than missing on a non-UTF-8 entry, contradicting its own issue's
+  acceptance text; #185's gate script was well covered while its *wiring into the lane* was
+  asserted only by static YAML strings that survive `|| true` on the gate's own invocation. Both
+  are fixed here. #183, #191, and #186 are confirmed by mutation. The six P1s themselves are
+  **inferred from #168's child issues** — no document enumerates them, and #57's comment
+  enumerates a different, earlier set of seven.
+- Standing: a per-file suite pin guards deletion and unwiring, not weakening. The mutation testing
+  that covers weakening was done by hand, once, and is not part of the gate.
+- Decided: a gate criterion is what makes a regression test durable, so
+  `.github/scripts/release-manifest.py` gained `issue #168 sign-off regressions`, naming the
+  seventeen suites that carry the reproduced failures' regressions and mapping each to its finding.
+  Discovery ran seven of them (`verify-apply-bytes_test.py`, `apply-recovery_test.py`,
+  `apply-lane-parity_test.py`, `doc-contract_test.py`, `approval_cli_test.py`,
+  `render-apply-summary_test.py`, `render-audit-summary_test.py`) while no criterion did, so
+  deleting one would have shrunk the gate silently — which is the failure mode
+  `release-manifest.py` exists to catch, applied to the suites #168 itself added.
+  `audit-workflow_test.py` is pinned alongside `check-repo-integrity_test.py` for #185, because
+  the two fail to different mutations and neither alone covers that P1.
+  `scenario_cache_test.py` is deliberately *not* pinned for #187 despite its name: its three
+  tests are lineage/key independence and it references neither the payload digest nor a miss
+  reason. Citing a suite for coverage it does not provide is the failure this record exists to
+  prevent, so it stays under "acceptance seam" where it belongs.
+- Standing, and it is the limit a human weighing #57 most needs: **two of criterion 1's own
+  subjects are not enumerated anywhere.** #168 states six P1 findings and "three Standards P2 /
+  three Spec P2" without listing either set; it has no comments; the four P2-carrying child
+  issues and their PRs never use the words "P2", "Standards", or "Spec". So there are four child
+  issues for six stated P2 findings with no mapping between them, and criterion 1's P2 clause
+  cannot be discharged by evidence — only by inference. #57's comment enumerates seven P1s from
+  an earlier review of a different range, which is a trap for anyone reading it as this
+  remediation's list.
+- Standing: two thin spots inside the green. The hull-versus-passages distinction rests on a
+  single test (`applier_test.py::OccurrenceBoundPassages::test_a_span_across_the_gap_is_refused`),
+  since the sibling repeat tests declare `occurrences=(1,)` where hull and passage coincide; and
+  `doc-contract_test.py` catches the claims it names drifting, not new false claims appearing —
+  a brand-new false sentence in the engine README leaves all 22 of its tests green.
+- Decided: a guard that names one spelling of a flag is a guard the next author bypasses without
+  meaning to. `upgrade-workflow_test.py`'s commit-message guard matched the literal
+  `git commit -m`, so `git commit --message` passed the whole gate — the same shape as the
+  force-push detector's `\bgit push\b` missing `git -C … push` (#198). It now matches both
+  spellings and carries its own regression test over six smuggling forms and two allowed ones.
+- Decided: occurrence ordinals bound an edit and must never enter a finding's content-addressed
+  identity (#193's other half, #168's User Story 28). The property already held; nothing tested
+  it. `tests/engine/finding_test.py` now segments a document, re-segments it with its passages
+  reordered, and asserts the finding digest is unmoved while a rewritten passage moves it.
+- Decided: nine race tests that asserted a typed refusal but not the surviving bytes are a gap
+  against #168's rule even though none was path-set-only. Seven were given literal byte
+  read-backs; two are accepted because a sibling test owns that property for the whole gate. Two were
+  spot-checked by breaking what they assert — the idempotent-recovery case passed every
+  pre-existing assertion while force-pushing its own commit, which is exactly #198's hole.
+- Standing, and it is the limit of this evidence: none of the gates #168 added has fired in a real
+  lane, and the release tag the audit lane's tooling fetch names is not cut (#228). The properties
+  are proven by execution-based tests and unproven in production.
+- Closing #57 remains a human decision. This entry records the evidence, not a sign-off.
+- Code: `.github/scripts/release-manifest.py`, `tests/baselines/issue-203-sign-off-gate/`,
+  `tests/engine/finding_test.py`, `tests/scripts/apply-recovery_test.py`,
+  `tests/scripts/verify-apply-bytes_test.py`
+- Deferred with issues, each labelled and listed in a comment on #57: #223 (report `base_commit`
+  unbound to the verified head), #224 (only the refusal half of occurrence selection shipped),
+  #225 (integrity evidence omitted rather than stated when its artifact is missing), #226
+  (`check-repo-integrity.py` lacks its sibling's git env scrub and timeout), #227 (residue
+  unreachable by the fix door after a retirement), #228 (the hardened lanes do not run — now a
+  native `blocked_by` edge on #57), #230 (`apply_edit_plan` does not thread `policy_path`), #231
+  (#185's third acceptance clause, integrity versus policy eligibility, is untested).
 
 ## 2026-08-04 — both audit lanes assemble reports only from a verified checkout (#185)
 - Evidence: the bloat lane has re-checked HEAD, staged, tracked, and untracked surfaces before
@@ -1025,8 +1146,8 @@
   is wired into any workflow — `doc-audit.yml` has cut over drift, not bloat; #77 retired the
   legacy *write* lanes (`doc-sync.yml`, `doc-bloat.yml`) but named `plan-chunks.py` and the bloat
   output validator as surviving with "non-legacy owners" — the two detecting skills' own
-  read-only tooling (`HANDOFF.md`, 2026-07-27 entry) — not as migrated to the engine's verdict
-  set.
+  read-only tooling (`docs/plans/HANDOFF.md` @ b7efcb5, 2026-07-27 entry — retired in c75fd59)
+  — not as migrated to the engine's verdict set.
 - Decided (POLICY is retired in the target architecture, not in what ships today): the engine's
   scope mechanism (`enumerate_scope`, `bloat.SCOPE_VERDICTS` — an enumerable `set`/`glob`/`kind`
   rule on `RETIRE-DOC`, resolved from the corpus-wide context index) is the one correct successor
@@ -1708,8 +1829,8 @@
   red rather than degrading silently — `validate-drift-output.py` exits nonzero on shape errors
   and the workflow's validate step carries no `continue-on-error`. The shipped `doc-sync.yml` has
   since moved past this plan's literal task steps (e.g. onto `anthropics/claude-code-action@v1`,
-  per `docs/plans/HANDOFF.md`'s Row 5 note) — the plan's own code blocks are retired as stale
-  procedure, not current truth.
+  per `docs/plans/HANDOFF.md` @ b7efcb5's Row 5 note, retired in c75fd59) — the plan's own code
+  blocks are retired as stale procedure, not current truth.
 - Code: `.github/workflows/doc-sync.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`
 - Source: docs/plans/2026-07-02-doc-sync-automation-plan.md @ 09f4300 (removed in this commit)
 

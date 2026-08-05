@@ -245,7 +245,8 @@ def put(cache_dir, key, record, evidence_sources=("cached-semantic-result",)):
 def get(cache_dir, key, repo_root, registry_path=DEFAULT_REGISTRY_PATH):
     """Look up `key`, revalidate the payload, and return a `CacheResult`.
 
-    Fails closed at every step: a missing file, unparseable JSON, a
+    Fails closed at every step: a missing file, a file that is not UTF-8,
+    unparseable JSON, a
     structurally invalid record, a lineage the repository has since outgrown
     (including one naming a different repository or commit entirely, or an
     audit configuration/registry/inventory/ruleset/plugin that no longer
@@ -270,6 +271,14 @@ def get(cache_dir, key, repo_root, registry_path=DEFAULT_REGISTRY_PATH):
             text = fh.read()
     except OSError:
         return CacheResult(False, reason=MISS_NOT_FOUND)
+    except UnicodeDecodeError:
+        # Bytes that are not text fail one step before the parser, and
+        # `UnicodeDecodeError` is a `ValueError` — so `OSError` above never
+        # caught it and it left this function as a traceback rather than a
+        # miss (`digest.py` documents the same trap for every other artifact
+        # reader in this engine). Corrupt rather than not-found: the entry is
+        # there, it is simply not something this module can read.
+        return CacheResult(False, reason=MISS_CORRUPT)
 
     try:
         payload = json.loads(text)
