@@ -49,7 +49,24 @@ VERIFICATION_SEAMS = (
     "verify-apply-bytes.py index",
     "verify-apply-bytes.py commit",
     "--out \"${RUNNER_TEMP}/verified-commit.txt\"",
-    "verified-commit.txt\"):refs/heads/",
+    "commit=$(cat \"${RUNNER_TEMP}/verified-commit.txt\")",
+    "git push origin \"${commit}:refs/heads/${branch}\"",
+)
+
+# Recovery is one implementation too (aj604/toolshed#198): reading the remote
+# before pushing, certifying an existing derived branch against this run's own
+# result, and the typed terminal states. A lane that recovered on its own terms
+# would be the second write path this suite exists to prevent.
+RECOVERY_SEAMS = (
+    "render-apply-summary.py remote-branch",
+    "verify-apply-bytes.py reuse",
+    # The fetched ref, bound to the id the previous step read: without it the
+    # reuse checks answer about a commit rather than about the branch.
+    "--ref refs/doc-lifecycle/existing",
+    "render-apply-summary.py existing-pull-request",
+    "--state branch-created",
+    "--state branch-reused",
+    "--state pull-request-already-open",
 )
 
 
@@ -142,12 +159,42 @@ class TheTwoApplyLanesRunTheSameCommands(unittest.TestCase):
 
     def test_the_push_names_the_verified_commit_and_never_head(self):
         # `HEAD` is whatever the last thing to run left behind; the commit id
-        # the tree verification wrote is the tree that passed.
+        # the tree verification wrote is the tree that passed. Since #198 it
+        # reaches the push through a variable, so the refspec and the binding
+        # are asserted together — a refspec naming a variable nothing bound to
+        # the verification's own file is no better than one naming `HEAD`.
         for name, body in (("doc-apply.yml", self.manual),
                            ("doc-policy-apply.yml", self.policy)):
             push = next(line for line in body if "git push origin" in line)
-            self.assertIn("verified-commit.txt", push, f"{name}: {push}")
+            self.assertIn('"${commit}:refs/heads/${branch}"', push,
+                          f"{name}: {push}")
             self.assertNotIn("HEAD:refs/heads/", push, f"{name}: {push}")
+            self.assertIn('commit=$(cat "${RUNNER_TEMP}/verified-commit.txt")',
+                          "\n".join(body), name)
+
+    def test_both_lanes_recover_through_the_same_seams(self):
+        for name, body in (("doc-apply.yml", self.manual),
+                           ("doc-policy-apply.yml", self.policy)):
+            text = "\n".join(body)
+            for seam in RECOVERY_SEAMS:
+                self.assertIn(seam, text,
+                              f"{name}'s apply job is missing {seam!r}")
+
+    def test_the_remote_is_read_before_anything_is_pushed(self):
+        # The whole point of the recovery order: a run that pushed first and
+        # asked afterwards would already have overwritten what it was checking.
+        for name, body in (("doc-apply.yml", self.manual),
+                           ("doc-policy-apply.yml", self.policy)):
+            def first(needle):
+                return next(i for i, line in enumerate(body) if needle in line)
+
+            self.assertLess(first("render-apply-summary.py remote-branch"),
+                            first("verify-apply-bytes.py reuse"),
+                            f"{name}: an existing branch is certified before "
+                            f"the remote is read")
+            self.assertLess(first("verify-apply-bytes.py reuse"),
+                            first("git push origin"),
+                            f"{name}: the push precedes the reuse check")
 
 
 class SelectionAndTriggerAreTheOnlyDifferences(unittest.TestCase):

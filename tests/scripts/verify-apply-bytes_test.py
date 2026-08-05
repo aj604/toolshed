@@ -335,6 +335,149 @@ class TheManifestIsTheOnlyAuthority(ApplyBoundaryTestCase):
         self.assert_refused(completed, "apply-result-unreadable")
 
 
+class ReusingAnExistingBranch(ApplyBoundaryTestCase):
+    """The recovery boundary (aj604/toolshed#198).
+
+    A commit an earlier attempt pushed is reusable only if it is this run's own
+    result: this approval's trailer, and a tree the same certification passes.
+    `apply-recovery_test.py` drives this through the whole lane against a real
+    remote; here it is the script's own seam, including the refusals a lane run
+    cannot easily reach.
+    """
+
+    APPROVAL = "a" * 64
+
+    def setUp(self):
+        super().setUp()
+        self.approval = os.path.join(self.tmp, "approval.json")
+        with open(self.approval, "w", encoding="utf-8") as fh:
+            json.dump({"digest": self.APPROVAL}, fh)
+        self.verified_file = os.path.join(self.tmp, "verified-commit.txt")
+
+    def message(self, digest=None):
+        if digest is None:
+            return "docs: apply\n\nsomebody else's work\n"
+        return f"docs: apply\n\nDoc-Lifecycle-Approval: {digest}\n"
+
+    def two_attempts(self, message, tree=None, base=None):
+        """(the existing commit, the commit this run verified).
+
+        Two applies of one approval: the same postimages, committed twice, as
+        two runs seconds apart would produce.
+        """
+        result = self.result(self.apply())
+        self.stage()
+        self.commit()
+        verified = self.git("rev-parse", "HEAD").strip()
+        with open(self.verified_file, "w", encoding="utf-8") as fh:
+            fh.write(f"{verified}\n")
+        self.git("checkout", "-q", "-b", "earlier", base or "HEAD~1")
+        for rel, text in (tree or {"docs/edited.md": AFTER}).items():
+            self.write(rel, text)
+        if os.path.exists(os.path.join(self.repo, "docs/retired.md")):
+            os.remove(os.path.join(self.repo, "docs/retired.md"))
+        self.git("add", "-A")
+        self.git("commit", "-qm", message)
+        return self.git("rev-parse", "HEAD").strip(), result
+
+    def reuse(self, commit, result, verified=None, ref="refs/heads/earlier"):
+        # `--ref` is what the lane fetched the branch into; `two_attempts`
+        # builds the earlier attempt on a local branch of that name, so this is
+        # the same binding the lane makes.
+        return run("reuse", "--result", result, "--repo", self.repo,
+                   "--commit", commit, "--ref", ref,
+                   "--approval", self.approval,
+                   "--verified", verified or self.verified_file,
+                   summary=self.summary)
+
+    def assert_reuse_refused(self, completed, code):
+        self.assertEqual(completed.returncode, 1,
+                         completed.stdout + completed.stderr)
+        self.assertIn(f"`{code}`", self.surface())
+        self.assertIn("REFUSED at branch reuse", self.surface())
+
+    def test_this_runs_own_earlier_result_is_reusable(self):
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        self.assertEqual(self.reuse(existing, result).returncode, 0,
+                         self.surface())
+        self.assertIn("Existing branch verified", self.surface())
+
+    def test_a_commit_carrying_no_approval_trailer_is_refused(self):
+        existing, result = self.two_attempts(self.message())
+        self.assert_reuse_refused(self.reuse(existing, result),
+                                  "apply-branch-approval-conflict")
+
+    def test_a_commit_carrying_another_approvals_trailer_is_refused(self):
+        existing, result = self.two_attempts(self.message("b" * 64))
+        self.assert_reuse_refused(self.reuse(existing, result),
+                                  "apply-branch-approval-conflict")
+
+    def test_a_matching_trailer_over_different_bytes_is_refused(self):
+        existing, result = self.two_attempts(
+            self.message(self.APPROVAL),
+            tree={"docs/edited.md": "not what was approved\n"})
+        self.assert_reuse_refused(self.reuse(existing, result),
+                                  "apply-bytes-not-certified")
+
+    def test_an_id_that_is_not_a_commit_is_refused(self):
+        _, result = self.two_attempts(self.message(self.APPROVAL))
+        self.assert_reuse_refused(self.reuse("refs/heads/earlier", result),
+                                  "apply-commit-unreadable")
+
+    def test_an_absent_verified_commit_file_is_refused(self):
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        self.assert_reuse_refused(
+            self.reuse(existing, result,
+                       verified=os.path.join(self.tmp, "absent.txt")),
+            "apply-commit-unreadable")
+
+    def test_a_ref_that_holds_a_descendant_of_the_read_commit_is_refused(self):
+        # The fail-open shape: the branch advanced between the lane's
+        # `ls-remote` and its fetch, so the id it read is still readable — as
+        # an ancestor — and every other check would pass on a commit the branch
+        # no longer holds.
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        self.write("docs/injected.md", "smuggled\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "a concurrent writer")
+        advanced = self.git("rev-parse", "HEAD").strip()
+        self.assertNotEqual(advanced, existing)
+        self.assert_reuse_refused(self.reuse(existing, result),
+                                  "apply-branch-moved")
+        self.assertIn(advanced, self.surface())
+
+    def test_a_ref_that_does_not_resolve_is_refused(self):
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        self.assert_reuse_refused(
+            self.reuse(existing, result, ref="refs/heads/never-fetched"),
+            "apply-branch-unreadable")
+
+    def test_a_ref_that_is_not_fully_qualified_is_refused(self):
+        # `earlier` is a branch git would happily resolve; this script resolves
+        # only the fully qualified ref the lane fetched into, so a shorthand —
+        # or anything else that would be parsed as a revision expression — is
+        # refused rather than looked up.
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        self.assert_reuse_refused(self.reuse(existing, result, ref="earlier"),
+                                  "apply-branch-unreadable")
+
+    def test_a_ref_shaped_like_an_option_is_refused(self):
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        completed = run("reuse", "--result", result, "--repo", self.repo,
+                        "--commit", existing, "--ref=--all",
+                        "--approval", self.approval,
+                        "--verified", self.verified_file, summary=self.summary)
+        self.assert_reuse_refused(completed, "apply-branch-unreadable")
+
+    def test_a_result_that_is_not_clean_certifies_no_reuse(self):
+        existing, _ = self.two_attempts(self.message(self.APPROVAL))
+        stale = self.result(
+            {"docs/edited.md": sha256(AFTER), "docs/retired.md": None},
+            status="stale")
+        self.assert_reuse_refused(self.reuse(existing, stale),
+                                  "apply-result-not-clean")
+
+
 class TheRunSurface(ApplyBoundaryTestCase):
     def test_a_refusal_falls_back_to_stdout_when_no_summary_is_set(self):
         result = self.result(self.apply())

@@ -33,11 +33,29 @@ Usage:
                                     [--approval-summary FILE] --out FILE
     render-apply-summary.py commit-message --result FILE --approval FILE
                                     [--trailers FILE] --out FILE
+    render-apply-summary.py remote-branch --listing FILE --exit-code N
+                                    --branch NAME --approval FILE --out FILE
+    render-apply-summary.py existing-pull-request --listing FILE --approval FILE
+                                    --branch NAME --base NAME --out FILE
+    render-apply-summary.py recovery --state NAME --branch NAME --approval FILE
+                                    [--commit OID] [--pull-request N]
+
+The last three are the recovery half (aj604/toolshed#198): a run whose push
+landed while its pull request did not leaves the approval stranded, and the
+branch a re-run derives is the same one, because `branch-name` derives it from
+the approval digest. So the remote is read before anything is pushed, an
+already-open pull request for this approval is idempotent success rather than a
+duplicate-creation failure, and every terminal outcome — branch created, branch
+reused, pull request already open, or a typed conflict — says so on the run
+surface. A deterministic name is never authority to overwrite what stands
+there: nothing here force-pushes, and a conflict refuses.
 
 Exit status: 0 the subcommand produced its artifact; 1 a typed refusal, which
-is rendered to $GITHUB_STEP_SUMMARY (stdout when unset) and always states that
-no branch and no pull request were created — the lane's jobs are ordered so
-that a refusal here stops it before any write; 2 a usage error, caught by
+is rendered to $GITHUB_STEP_SUMMARY (stdout when unset) and always states what
+this run did and did not create — before the push, that no branch and no pull
+request exist, because the lane's jobs are ordered so that a refusal stops it
+before any write; at the recovery steps, that this run published nothing and
+left what it found untouched; 2 a usage error, caught by
 argparse before any subcommand body runs. A refusal never writes its output
 file: a half-written path list is one a later step would stage.
 """
@@ -102,12 +120,29 @@ def write_surface(text):
         sys.stdout.write(text)
 
 
-def refuse(stage, code, message, details=()):
+NOTHING_CREATED = (
+    "**No branch and no pull request were created.** Re-run the audit, "
+    "then dispatch this lane again with a report digest that describes "
+    "the repository as it is now.")
+
+# What a recovery refusal has to say instead (aj604/toolshed#198): by then a
+# branch or a pull request may well exist — an earlier attempt's, or somebody
+# else's — and telling a reader nothing was created would be false. What is
+# true is that *this run* published nothing and left what it found alone.
+NOTHING_TOUCHED = (
+    "**This run pushed nothing and opened no pull request, and it changed "
+    "nothing that was already there.** A branch or pull request it did not "
+    "recognise is left exactly as it stands: inspect it, delete it if it is "
+    "stale, and dispatch this lane again.")
+
+
+def refuse(stage, code, message, details=(), closing=NOTHING_CREATED):
     """Render one typed refusal and return the lane's exit status.
 
     Every refusal names the stage it happened at, the typed code, and what a
-    reader must do about it — and states that nothing was created, because the
-    absence of a PR is otherwise indistinguishable from a run still going.
+    reader must do about it — and states what did or did not get created,
+    because the absence of a PR is otherwise indistinguishable from a run still
+    going.
     """
     lines = [
         f"## Doc apply: REFUSED at {stage}",
@@ -115,13 +150,7 @@ def refuse(stage, code, message, details=()):
         f"- `{code}`: {message}",
     ]
     lines += [f"  - {d}" for d in details]
-    lines += [
-        "",
-        "**No branch and no pull request were created.** Re-run the audit, "
-        "then dispatch this lane again with a report digest that describes "
-        "the repository as it is now.",
-        "",
-    ]
+    lines += ["", closing, ""]
     write_surface("\n".join(lines))
     return 1
 
@@ -399,7 +428,8 @@ def policy_eligibility(args):
     return 0
 
 
-def _validated_digest(stage, app, field="digest"):
+def _validated_digest(stage, app, field="digest",
+                      closing=NOTHING_CREATED):
     """`(digest, None)` when `app[field]` is a sha256 digest, else
     `(None, exit_status)` — the one shape check every surface that lets a digest
     reach a ref, a title, or a commit message needs. A digest is content an
@@ -413,7 +443,8 @@ def _validated_digest(stage, app, field="digest"):
         return digest, None
     return None, refuse(
         stage, "apply-approval-digest-invalid",
-        f"the approval set declares no sha256 {field} ({code_span(digest)})")
+        f"the approval set declares no sha256 {field} ({code_span(digest)})",
+        closing=closing)
 
 
 def approval_digest(args):
@@ -435,19 +466,26 @@ def approval_digest(args):
     return 0
 
 
-def branch_name(args):
-    """The branch the change lands on: derived, never dispatched.
+def _derived_branch(digest):
+    """The one place the branch this approval lands on is spelled.
 
-    Naming it after the approval digest makes the branch itself provenance, and
-    keeps a dispatch input out of a ref a credentialed job writes to.
+    Derived, so the branch itself is provenance and no dispatch input reaches a
+    ref a credentialed job writes to — and re-derivable, which is what lets
+    every recovery step below check that the branch it is about to name is this
+    approval's own and not some other ref that happens to be passed in.
     """
+    return f"doc-lifecycle/apply-{digest[:12]}"
+
+
+def branch_name(args):
+    """The branch the change lands on: derived, never dispatched."""
     payload, reason = read_json(args.approval)
     if payload is None:
         return refuse("apply", "apply-approval-digest-invalid", reason)
     digest, bad = _validated_digest("apply", payload)
     if bad is not None:
         return bad
-    write_file(args.out, f"doc-lifecycle/apply-{digest[:12]}\n")
+    write_file(args.out, f"{_derived_branch(digest)}\n")
     return 0
 
 
@@ -816,6 +854,233 @@ def commit_message(args):
     return 0
 
 
+# -- recovery (aj604/toolshed#198) -------------------------------------------
+
+# A git object id, sha-1 or sha-256, spelled as `verify-apply-bytes.py` spells
+# it — this script hands one to that one, and to `git push`.
+OBJECT_ID = re.compile(r"[0-9a-f]{40}([0-9a-f]{24})?")
+# `<object id><tab><ref>`, which is all `git ls-remote` writes. A line shaped
+# any other way is a remote this lane did not understand, never an empty one.
+REMOTE_REF = re.compile(r"^([0-9a-f]{40}(?:[0-9a-f]{24})?)\t(\S+)$")
+# `git ls-remote --exit-code`'s "no matching refs": the *typed* absence, told
+# apart from a remote that could not be read at all.
+NO_MATCHING_REFS = 2
+PULL_REQUEST_NUMBER = re.compile(r"^[0-9]+$")
+
+RECOVERY_STATES = {
+    "branch-created": (
+        "branch created",
+        "The verified commit was pushed to a branch that did not exist "
+        "before. Nothing was overwritten.",
+    ),
+    "branch-reused": (
+        "branch reused",
+        "The derived branch already carried this approval's own verified "
+        "result — an earlier attempt pushed it and did not get as far as the "
+        "pull request. Its commit was re-checked against this run's certified "
+        "postimages and its approval trailer before anything below was done "
+        "with it; nothing was pushed and nothing was overwritten.",
+    ),
+    "pull-request-already-open": (
+        "pull request already open",
+        "A pull request for this approval is already open on this branch, so "
+        "this run had nothing left to create. Review and merge that pull "
+        "request: merging it is the change approval that lands the diff.",
+    ),
+}
+
+
+def _bound_branch(stage, approval_path, branch):
+    """`(the approval set's digest, None)` when `branch` is the one this
+    approval derives, else `(None, exit status)`.
+
+    Every recovery step puts the branch name on a command line — `ls-remote`, a
+    fetch refspec, `gh pr list --head`, and the push itself. The name has one
+    author (`branch-name`), so re-deriving it here is what keeps a recovery
+    step from acting on some other ref: the only branch a run may read, reuse,
+    or push is the one its own approval digest names.
+    """
+    app, reason = read_json(approval_path)
+    if app is None:
+        return None, refuse(stage, "apply-approval-unreadable", reason,
+                            closing=NOTHING_TOUCHED)
+    digest, bad = _validated_digest(stage, app, closing=NOTHING_TOUCHED)
+    if bad is not None:
+        return None, bad
+    if branch != _derived_branch(digest):
+        return None, refuse(
+            stage, "apply-branch-not-derived",
+            f"this run is working on {code_span(branch)}, which is not the "
+            f"branch this approval set derives "
+            f"({code_span(_derived_branch(digest))})",
+            closing=NOTHING_TOUCHED)
+    return digest, None
+
+
+def remote_branch(args):
+    """What the remote holds at the derived branch, if anything.
+
+    The recovery question, asked before anything is pushed, and it has three
+    answers that must stay three: a listing (the branch stands — an earlier
+    attempt got that far, and what it holds decides whether this run may reuse
+    it), `--exit-code` 2 (no such ref, so this is a first run), and any other
+    status (the remote could not be read, which is *not* the same as empty and
+    must never be read as one — that reading would push onto an unexamined
+    ref). Writes the commit the branch points at, or an empty file.
+    """
+    _, bad = _bound_branch("recovery", args.approval, args.branch)
+    if bad is not None:
+        return bad
+    if args.exit_code not in (0, NO_MATCHING_REFS):
+        return refuse(
+            "recovery", "apply-remote-unreadable",
+            f"the remote could not be listed (exit {args.exit_code}), so "
+            f"whether {code_span(args.branch)} already exists is unanswerable "
+            f"— refusing rather than treating an unreadable remote as an "
+            f"empty one", closing=NOTHING_TOUCHED)
+    try:
+        with open(args.listing, encoding="utf-8") as fh:
+            listing = fh.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        return refuse("recovery", "apply-remote-unreadable",
+                      f"cannot read {args.listing}: {exc}",
+                      closing=NOTHING_TOUCHED)
+
+    entries = [line for line in listing.splitlines() if line.strip()]
+    if args.exit_code == NO_MATCHING_REFS or not entries:
+        write_file(args.out, "")
+        return 0
+    matched = [REMOTE_REF.match(entry) for entry in entries]
+    if len(entries) != 1 or matched[0] is None \
+            or matched[0].group(2) != f"refs/heads/{args.branch}":
+        return refuse(
+            "recovery", "apply-remote-branch-unreadable",
+            f"the remote's listing for {code_span(args.branch)} is not one "
+            f"branch and one commit id, so what stands there is not a "
+            f"question with one answer",
+            [code_span(entry) for entry in entries],
+            closing=NOTHING_TOUCHED)
+    write_file(args.out, f"{matched[0].group(1)}\n")
+    return 0
+
+
+def existing_pull_request(args):
+    """The pull request already open for this approval, if there is one.
+
+    What makes a re-run idempotent rather than a duplicate-creation failure:
+    an open pull request whose head is this approval's branch and whose body
+    carries this approval's digest is this run's own outcome, reached by an
+    earlier attempt. Anything else open on that head is a conflict — another
+    approval's review door, or one aimed at a base this run is not applying
+    onto — and is refused rather than added to, because the alternative is
+    two open pull requests claiming one branch.
+    """
+    digest, bad = _bound_branch("recovery", args.approval, args.branch)
+    if bad is not None:
+        return bad
+    payload, reason = read_json(args.listing)
+    if payload is None:
+        return refuse("recovery", "apply-pull-request-listing-unreadable",
+                      reason, closing=NOTHING_TOUCHED)
+    if not isinstance(payload, list) or any(
+            not isinstance(entry, dict) for entry in payload):
+        return refuse(
+            "recovery", "apply-pull-request-listing-unreadable",
+            "the open pull requests were not listed as a list of pull "
+            "requests, so whether one is already open for this approval is "
+            "unanswerable", closing=NOTHING_TOUCHED)
+    if not payload:
+        write_file(args.out, "")
+        return 0
+
+    off_branch = [entry for entry in payload
+                  if entry.get("headRefName") != args.branch]
+    if off_branch:
+        return refuse(
+            "recovery", "apply-pull-request-listing-unreadable",
+            f"the listing carries pull request(s) whose head is not "
+            f"{code_span(args.branch)}, so it does not answer the question it "
+            f"was asked",
+            [code_span(entry.get("headRefName")) for entry in off_branch],
+            closing=NOTHING_TOUCHED)
+    if len(payload) > 1:
+        return refuse(
+            "recovery", "apply-pull-request-conflict",
+            f"{len(payload)} pull requests are open on "
+            f"{code_span(args.branch)} — this lane opens one review door per "
+            f"approval, and which of these is it is not something this run may "
+            f"decide",
+            [f"#{code_span(entry.get('number'))}" for entry in payload],
+            closing=NOTHING_TOUCHED)
+
+    entry = payload[0]
+    number = entry.get("number")
+    if not PULL_REQUEST_NUMBER.fullmatch(str(number)):
+        return refuse(
+            "recovery", "apply-pull-request-listing-unreadable",
+            f"the open pull request is numbered {code_span(number)}, which is "
+            f"not a pull request number", closing=NOTHING_TOUCHED)
+    body = entry.get("body")
+    if not isinstance(body, str) or digest not in body:
+        return refuse(
+            "recovery", "apply-pull-request-conflict",
+            f"a pull request is already open on {code_span(args.branch)} whose "
+            f"body does not carry this approval's digest, so it is some other "
+            f"change's review door and this run must not add to it",
+            [f"open: #{number}", f"this approval: {code_span(digest)}"],
+            closing=NOTHING_TOUCHED)
+    if entry.get("baseRefName") != args.base:
+        return refuse(
+            "recovery", "apply-pull-request-conflict",
+            f"the pull request already open on {code_span(args.branch)} is "
+            f"aimed at {code_span(entry.get('baseRefName'))}, and this run "
+            f"applied onto {code_span(args.base)} — merging it would land this "
+            f"approval somewhere it was not approved for",
+            [f"open: #{number}"], closing=NOTHING_TOUCHED)
+    write_file(args.out, f"{number}\n")
+    return 0
+
+
+def recovery(args):
+    """One terminal recovery outcome, stated on the run surface.
+
+    Four outcomes exist and a reader must be able to tell them apart: the
+    branch was created, the branch was reused, a pull request was already
+    open, or something conflicted. The conflicts are the typed refusals above
+    and in `verify-apply-bytes.py`; the other three are here, because a run
+    that quietly did nothing looks exactly like a run that quietly overwrote
+    something.
+    """
+    digest, bad = _bound_branch("recovery", args.approval, args.branch)
+    if bad is not None:
+        return bad
+    heading, meaning = RECOVERY_STATES[args.state]
+
+    lines = [f"## Doc apply: {heading}", "",
+             f"- Approval digest: {code_span(digest)}",
+             f"- Branch: {code_span(args.branch)}"]
+    if args.state == "pull-request-already-open":
+        if not PULL_REQUEST_NUMBER.fullmatch(args.pull_request or ""):
+            return refuse(
+                "recovery", "apply-recovery-state-incomplete",
+                f"{code_span(args.state)} names no pull request "
+                f"({code_span(args.pull_request)}), so the outcome it claims "
+                f"points at nothing a reviewer can open",
+                closing=NOTHING_TOUCHED)
+        lines.append(f"- Pull request: #{args.pull_request}")
+    else:
+        if not OBJECT_ID.fullmatch(args.commit or ""):
+            return refuse(
+                "recovery", "apply-recovery-state-incomplete",
+                f"{code_span(args.state)} names no commit "
+                f"({code_span(args.commit)}), so what the branch carries is "
+                f"not stated", closing=NOTHING_TOUCHED)
+        lines.append(f"- Commit: {code_span(args.commit)}")
+    lines += ["", meaning, ""]
+    write_surface("\n".join(lines))
+    return 0
+
+
 # -- argv --------------------------------------------------------------------
 
 def _parser():
@@ -898,6 +1163,30 @@ def _parser():
     commit.add_argument("--trailers", default=None)
     commit.add_argument("--out", required=True)
     commit.set_defaults(run=commit_message)
+
+    remote = sub.add_parser("remote-branch")
+    remote.add_argument("--listing", required=True)
+    remote.add_argument("--exit-code", required=True, type=int)
+    remote.add_argument("--branch", required=True)
+    remote.add_argument("--approval", required=True)
+    remote.add_argument("--out", required=True)
+    remote.set_defaults(run=remote_branch)
+
+    open_pr = sub.add_parser("existing-pull-request")
+    open_pr.add_argument("--listing", required=True)
+    open_pr.add_argument("--approval", required=True)
+    open_pr.add_argument("--branch", required=True)
+    open_pr.add_argument("--base", required=True)
+    open_pr.add_argument("--out", required=True)
+    open_pr.set_defaults(run=existing_pull_request)
+
+    state = sub.add_parser("recovery")
+    state.add_argument("--state", required=True, choices=sorted(RECOVERY_STATES))
+    state.add_argument("--branch", required=True)
+    state.add_argument("--approval", required=True)
+    state.add_argument("--commit", default=None)
+    state.add_argument("--pull-request", default=None)
+    state.set_defaults(run=recovery)
 
     return parser
 

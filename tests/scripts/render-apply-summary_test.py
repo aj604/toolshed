@@ -917,6 +917,179 @@ class CommitMessage(ScriptTestCase):
         self.assertIn("apply-approval-digest-invalid", self.summary())
 
 
+BRANCH = f"doc-lifecycle/apply-{APPROVAL_DIGEST[:12]}"
+COMMIT = "9" * 40
+
+
+class RecoveryTestCase(ScriptTestCase):
+    """The recovery half (aj604/toolshed#198), which reads two listings git
+    and the forge wrote and states one terminal outcome."""
+
+    def setUp(self):
+        super().setUp()
+        self.approval = self.write("approval.json", approval())
+
+    def remote(self, listing, exit_code=0, branch=BRANCH):
+        return self.run_script(
+            "remote-branch", "--listing", self.write_text("ls-remote", listing),
+            "--exit-code", str(exit_code), "--branch", branch,
+            "--approval", self.approval, "--out", self.path("existing.txt"))
+
+    def open_pull_requests(self, payload, base="main", branch=BRANCH):
+        return self.run_script(
+            "existing-pull-request", "--listing",
+            self.write("pull-requests.json", payload),
+            "--approval", self.approval, "--branch", branch, "--base", base,
+            "--out", self.path("open-pr.txt"))
+
+
+class RemoteBranch(RecoveryTestCase):
+    def test_a_branch_the_remote_holds_is_named(self):
+        proc = self.remote(f"{COMMIT}\trefs/heads/{BRANCH}\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.read("existing.txt"), f"{COMMIT}\n")
+
+    def test_no_matching_ref_leaves_the_commit_file_empty(self):
+        # `git ls-remote --exit-code` says "nothing there" with exit 2, and a
+        # first run must read that as a first run.
+        proc = self.remote("", exit_code=2)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.read("existing.txt"), "")
+
+    def test_a_remote_that_could_not_be_read_is_not_an_empty_one(self):
+        proc = self.remote("", exit_code=128)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-remote-unreadable", self.summary())
+        self.assertFalse(os.path.exists(self.path("existing.txt")))
+
+    def test_a_listing_naming_another_ref_is_refused(self):
+        proc = self.remote(f"{COMMIT}\trefs/heads/some-other-branch\n")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-remote-branch-unreadable", self.summary())
+
+    def test_a_listing_carrying_two_refs_is_refused(self):
+        proc = self.remote(f"{COMMIT}\trefs/heads/{BRANCH}\n"
+                           f"{'8' * 40}\trefs/heads/{BRANCH}\n")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-remote-branch-unreadable", self.summary())
+
+    def test_a_branch_this_approval_does_not_derive_is_refused(self):
+        # The only branch a run may read, reuse, or push is the one its own
+        # approval digest names.
+        proc = self.remote(f"{COMMIT}\trefs/heads/main\n", branch="main")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-branch-not-derived", self.summary())
+
+
+class ExistingPullRequest(RecoveryTestCase):
+    def entry(self, **over):
+        payload = {"number": 41, "headRefName": BRANCH, "baseRefName": "main",
+                   "body": f"- Approval digest: `{APPROVAL_DIGEST}`\n"}
+        payload.update(over)
+        return payload
+
+    def test_nothing_open_leaves_the_number_file_empty(self):
+        proc = self.open_pull_requests([])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.read("open-pr.txt"), "")
+
+    def test_one_open_for_this_approval_is_named(self):
+        proc = self.open_pull_requests([self.entry()])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.read("open-pr.txt"), "41\n")
+
+    def test_one_open_for_another_approval_is_a_conflict(self):
+        proc = self.open_pull_requests(
+            [self.entry(body="- Approval digest: `" + "e" * 64 + "`")])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-pull-request-conflict", self.summary())
+        self.assertFalse(os.path.exists(self.path("open-pr.txt")))
+
+    def test_one_open_against_another_base_is_a_conflict(self):
+        proc = self.open_pull_requests([self.entry(baseRefName="release")])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-pull-request-conflict", self.summary())
+
+    def test_two_open_on_one_branch_are_a_conflict(self):
+        proc = self.open_pull_requests([self.entry(),
+                                        self.entry(number=42)])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-pull-request-conflict", self.summary())
+
+    def test_a_recovery_refusal_does_not_claim_nothing_exists(self):
+        # By the recovery steps a branch is on the remote and a pull request
+        # may be open on it; the pre-push wording would be a false statement
+        # about the world the reader is about to inspect.
+        self.open_pull_requests([self.entry(baseRefName="release")])
+        self.assertIn("left exactly as it stands", self.summary())
+        self.assertNotIn("No branch and no pull request were created",
+                         self.summary())
+
+    def test_a_listing_that_is_not_a_list_is_refused(self):
+        proc = self.open_pull_requests({"number": 41})
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-pull-request-listing-unreadable", self.summary())
+
+    def test_a_listing_answering_about_another_branch_is_refused(self):
+        proc = self.open_pull_requests([self.entry(headRefName="main")])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-pull-request-listing-unreadable", self.summary())
+
+    def test_a_pull_request_with_no_number_is_refused(self):
+        proc = self.open_pull_requests([self.entry(number="forty-one")])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-pull-request-listing-unreadable", self.summary())
+
+
+class RecoveryState(RecoveryTestCase):
+    def state(self, *argv):
+        return self.run_script("recovery", "--branch", BRANCH,
+                               "--approval", self.approval, *argv)
+
+    def test_a_created_branch_states_itself(self):
+        proc = self.state("--state", "branch-created", "--commit", COMMIT)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("## Doc apply: branch created", self.summary())
+        self.assertIn(BRANCH, self.summary())
+        self.assertIn(COMMIT, self.summary())
+
+    def test_a_reused_branch_says_nothing_was_overwritten(self):
+        proc = self.state("--state", "branch-reused", "--commit", COMMIT)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("## Doc apply: branch reused", self.summary())
+        self.assertIn("nothing was overwritten", self.summary())
+
+    def test_an_already_open_pull_request_states_which_one(self):
+        proc = self.state("--state", "pull-request-already-open",
+                          "--pull-request", "41")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("## Doc apply: pull request already open",
+                      self.summary())
+        self.assertIn("#41", self.summary())
+
+    def test_a_state_that_names_no_commit_is_refused(self):
+        # A terminal state that points at nothing is not self-explaining.
+        proc = self.state("--state", "branch-created")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-recovery-state-incomplete", self.summary())
+
+    def test_a_state_that_names_no_pull_request_is_refused(self):
+        proc = self.state("--state", "pull-request-already-open")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-recovery-state-incomplete", self.summary())
+
+    def test_an_unknown_state_is_a_usage_error(self):
+        proc = self.state("--state", "everything-is-fine")
+        self.assertEqual(proc.returncode, 2)
+
+    def test_a_branch_this_approval_does_not_derive_is_refused(self):
+        proc = self.run_script("recovery", "--state", "branch-created",
+                               "--branch", "main", "--approval", self.approval,
+                               "--commit", COMMIT)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("apply-branch-not-derived", self.summary())
+
+
 class Usage(ScriptTestCase):
     def test_an_unknown_subcommand_is_a_usage_error(self):
         proc = self.run_script("publish-everything")

@@ -20,7 +20,9 @@ release's copy of it),
 `scripts/render-audit-summary.py` (the audit lanes' run-surface rendering — #71/#144),
 `scripts/render-apply-summary.py` (the apply lane's run surface — its refusals, its
 staged path list, and the PR title, body, and commit message that carry the approval set's digest
-and summary — #72),
+and summary — #72; plus that lane's recovery half, #198 — it reads what the remote holds at the
+derived branch and which pull request is already open on it, and renders each terminal recovery
+state: branch created, branch reused, pull request already open, or a typed conflict),
 `scripts/probe-evidence-tool.py` (the audit lane's declared-tool probe — it renders
 `drift-audit --evidence-command` from `evidence-tools.json` and runs each declared tool only as
 a `--help`/`--version` read, under the model step's existing `Bash(python3 *)` grant rather than
@@ -28,7 +30,11 @@ a wider one, #118),
 `scripts/verify-apply-bytes.py` (both apply lanes' byte verification at the two git boundaries the
 engine cannot see, #191 — it takes the applier's certified postimage manifest and compares the
 staged index and then the commit tree against it, refusing when git holds anything else and
-naming the commit the push carries so the pushed tree is the verified one), and
+naming the commit the push carries so the pushed tree is the verified one; and at a third
+boundary, #198 — the same certification asked of an existing derived branch a re-run found on the
+remote, which is reusable only if it carries this approval's trailer, sits on the same base, and is
+still what the branch holds when the lane fetches it, since a branch that advanced in between would
+keep the read commit alive as an ancestor and pass every other check), and
 `scripts/bloat-cadence.py` (the scheduled bloat lane's trusted prompt renderer and
 schema-bound action-output collector — it validates chunk returns, selects one retry, and runs
 from the release-pinned marketplace rather than being vendored), and
@@ -207,7 +213,18 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   absence at both boundaries, and a refusal leaving no commit id for the push to name), and
   `apply-lane-parity_test.py` is what holds selection and trigger to being the only differences
   between the two lanes — every `run:` block of their credentialed jobs must be byte-identical
-  (#191). `policy-workflow_test.py` covers the audit-chained policy lane:
+  (#191), recovery seams included. `apply-recovery_test.py` covers the recovery of a
+  half-finished attempt (#198) by executing the apply job's own `run:` blocks, from the staged
+  path list onward, under `bash -e` against a real bare remote and a `gh` stub: a first run, a
+  push that lands while the pull request fails, a re-run reusing the matching branch, a re-run
+  finding its pull request already open, an existing branch whose tree or approval conflicts,
+  a pull request bound to another approval, and the branch moving between the lane's own
+  `ls-remote` and its fetch (a fast-forward included — the shape that hides, since the old tip
+  survives as an ancestor of the new one). `workflow-permissions_test.py` carries the static
+  half — no apply lane may force-push, its detector run against the forced pushes it exists to
+  catch, including `git -C … push --force` and one split across a backslash continuation
+  (`doc-sync-upgrade.yml`'s `--force` onto its own fixed branch is deliberately outside
+  that guard's scope). `policy-workflow_test.py` covers the audit-chained policy lane:
   completed-run artifact binding, revalidation before `policy-eligibility`/`policy-mint`,
   absent/no-eligible clean stops, the same trust split and staging confinement, real-PR-only
   delivery, dogfood policy configuration, and both user-facing opt-in docs.

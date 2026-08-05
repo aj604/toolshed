@@ -35,9 +35,31 @@ points: `doc-apply.yml` (a human selected the records) and
 only intended differences between them, and
 `tests/scripts/apply-lane-parity_test.py` is what holds that true.
 
+A third boundary is the same question asked of a commit this run did not make:
+`reuse` (#198). An apply whose push landed while its pull request did not
+leaves the derived branch standing, and a re-run of that dispatch aims at the
+same ref, because the name is derived from the approval digest. Reusing it is
+only safe if it is provably this run's own result, so the existing commit goes
+through the certification a fresh one passes — the same manifest, the same
+confinement, the same tree comparison — plus the approval trailer it carries
+and the parent it sits on. Anything else is a typed conflict, never a force
+push.
+
+That boundary has a fourth check, and it is what makes the other three answer
+about the branch rather than about some commit on it: `--commit` is an id the
+lane read from `ls-remote` in an *earlier* step, and the branch can move
+between the two. A fast-forward is the dangerous case — the fetch necessarily
+brings the old tip along as an ancestor of the new one, so every check above
+would pass on a commit the branch no longer holds, and the lane would open a
+pull request over the tip that nothing verified. So the fetched ref is resolved
+here and required to be exactly `--commit`; a branch that moved is
+`apply-branch-moved`, not a reuse.
+
 Usage:
     verify-apply-bytes.py index  --result FILE [--repo DIR]
     verify-apply-bytes.py commit --result FILE [--repo DIR] --out FILE
+    verify-apply-bytes.py reuse  --result FILE [--repo DIR] --commit OID
+                                 --ref REF --verified FILE --approval FILE
 
 Exit status: 0 the boundary holds; 1 a typed refusal, rendered to
 $GITHUB_STEP_SUMMARY (stdout when unset); 2 a usage error, caught by argparse
@@ -59,6 +81,10 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 # `cat-file --batch` is fed. Nothing else becomes a name this script reads.
 OBJECT_ID = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
 DRIVE_LETTER = re.compile(r"^[A-Za-z]:")
+# A fully qualified ref this script may resolve. The lane fetches the derived
+# branch into one it names itself, so nothing here has to parse a revision
+# expression — and a name shaped like an option never becomes an argument.
+REF_NAME = re.compile(r"refs/[A-Za-z0-9._][A-Za-z0-9._/-]*")
 
 # The modes a document may be stored under. A `120000` entry is a symlink,
 # whose blob content is the path it points at — bytes that would digest as some
@@ -86,6 +112,12 @@ TIMEOUT_SECONDS = 30
 
 STAGE_INDEX = "staging"
 STAGE_COMMIT = "commit"
+STAGE_REUSE = "branch reuse"
+
+# The trailer `render-approval --trailers` puts at the head of its block, and
+# the one fact that binds a commit somebody else's run made to this run's
+# authority. Read as a whole line, so a mention of it in prose is not one.
+APPROVAL_TRAILER = "Doc-Lifecycle-Approval:"
 
 
 # -- the run surface ---------------------------------------------------------
@@ -461,6 +493,78 @@ def verify_index(args):
     return compare(STAGE_INDEX, args.repo, entries, postimages, "index")
 
 
+def _parents(stage, repo, commit, whose):
+    """(the commit's parents, None), or (None, status).
+
+    `commit` reaches this read where an option would, so it is the `OBJECT_ID`
+    gate every caller applies first — not a `--` separator, which only says
+    where pathspecs start — that makes it a revision rather than a flag. The
+    same reasoning `repository.changed_paths` states about a diff baseline.
+    """
+    lineage, detail = git(repo, "rev-list", "--parents", "-n", "1", commit)
+    if detail is not None:
+        return None, refuse(
+            stage, "apply-commit-unreadable",
+            f"{whose} parentage cannot be read, so what it changed cannot be "
+            f"established", [quoted(detail)])
+    return lineage.decode("ascii", "replace").split()[1:], None
+
+
+def certify(stage, repo, commit, postimages, what):
+    """One commit against the certified manifest. Returns (parent, status).
+
+    Parentage, whole-diff confinement, and byte binding, in that order — the
+    three checks that together say this commit is the change the applier
+    verified and nothing else. Shared by the commit this run just made and, at
+    `reuse`, by one an earlier attempt left on the remote: two commits asking
+    the same question deserve one answer, not a second and weaker notion of
+    what a certified tree is.
+    """
+    parents, bad = _parents(stage, repo, commit, f"the {what}'s")
+    if bad is not None:
+        return None, bad
+    if len(parents) != 1:
+        # The diff below is against the one parent this lane's commit has.
+        # A merge (or a root commit) is a different shape of change, and this
+        # lane never makes one.
+        return None, refuse(
+            stage, "apply-commit-not-linear",
+            f"the {what} has {len(parents)} parent(s) — this lane commits one "
+            f"reviewed change onto the base it checked out, and anything else "
+            f"is a change nobody approved the shape of")
+
+    # Path confinement at the commit boundary, the counterpart to
+    # `verify-staged` at the index: the *whole* diff this commit carries must
+    # lie inside what the applier certified. Byte binding below cannot answer
+    # this — a path outside the manifest has no certified bytes at all.
+    diff, detail = git(repo, "diff-tree", "-r", "--no-commit-id",
+                       "--name-only", "-z", "--no-renames", commit, "--")
+    if detail is not None:
+        return None, refuse(
+            stage, "apply-commit-unreadable",
+            f"the {what}'s own diff cannot be read, so whether it is confined "
+            f"to the approved paths is unanswerable", [quoted(detail)])
+    changed = sorted(
+        entry.decode("utf-8", "replace") for entry in _nul_fields(diff))
+    outside = [p for p in changed if p not in postimages]
+    if outside:
+        return None, refuse(
+            stage, "apply-commit-not-confined",
+            f"the {what} changes path(s) the applier never certified — the "
+            f"tree that would be pushed is not the change this run verified",
+            [f"`{p}`" for p in outside])
+
+    entries, bad = _listing(
+        stage, repo, ("ls-tree", "-r", "-z", "--full-tree", commit, "--"),
+        f"{what} tree")
+    if bad is not None:
+        return None, bad
+    status = compare(stage, repo, entries, postimages, f"{what} tree")
+    if status != 0:
+        return None, status
+    return parents[0], 0
+
+
 def verify_commit(args):
     """The commit tree, against the certified manifest — then name that commit.
 
@@ -488,56 +592,7 @@ def verify_commit(args):
             STAGE_COMMIT, "apply-commit-unreadable",
             f"git resolved HEAD to {quoted(commit)}, which is not a commit id")
 
-    # `commit` reaches the reads below where an option would, so it is the
-    # `OBJECT_ID` gate above — not a `--` separator, which only says where
-    # pathspecs start — that makes it a revision rather than a flag. The same
-    # reasoning `repository.changed_paths` states about a diff baseline.
-    lineage, detail = git(args.repo, "rev-list", "--parents", "-n", "1", commit)
-    if detail is not None:
-        return refuse(
-            STAGE_COMMIT, "apply-commit-unreadable",
-            "the commit's parentage cannot be read, so what it changed cannot "
-            "be established", [quoted(detail)])
-    parents = lineage.decode("ascii", "replace").split()[1:]
-    if len(parents) != 1:
-        # The diff below is against the one parent this lane's commit has.
-        # A merge (or a root commit) is a different shape of change, and this
-        # lane never makes one.
-        return refuse(
-            STAGE_COMMIT, "apply-commit-not-linear",
-            f"the commit has {len(parents)} parent(s) — this lane commits one "
-            f"reviewed change onto the base it checked out, and anything else "
-            f"is a change nobody approved the shape of")
-
-    # Path confinement at the commit boundary, the counterpart to
-    # `verify-staged` at the index: the *whole* diff this commit carries must
-    # lie inside what the applier certified. Byte binding below cannot answer
-    # this — a path outside the manifest has no certified bytes at all.
-    diff, detail = git(args.repo, "diff-tree", "-r", "--no-commit-id",
-                       "--name-only", "-z", "--no-renames", commit, "--")
-    if detail is not None:
-        return refuse(
-            STAGE_COMMIT, "apply-commit-unreadable",
-            "the commit's own diff cannot be read, so whether it is confined "
-            "to the approved paths is unanswerable", [quoted(detail)])
-    changed = sorted(
-        entry.decode("utf-8", "replace") for entry in _nul_fields(diff))
-    outside = [p for p in changed if p not in postimages]
-    if outside:
-        return refuse(
-            STAGE_COMMIT, "apply-commit-not-confined",
-            "the commit changes path(s) the applier never certified — the "
-            "tree that would be pushed is not the change this run verified",
-            [f"`{p}`" for p in outside])
-
-    entries, bad = _listing(
-        STAGE_COMMIT, args.repo,
-        ("ls-tree", "-r", "-z", "--full-tree", commit, "--"),
-        "commit tree")
-    if bad is not None:
-        return bad
-    status = compare(
-        STAGE_COMMIT, args.repo, entries, postimages, "commit tree")
+    _, status = certify(STAGE_COMMIT, args.repo, commit, postimages, "commit")
     if status != 0:
         return status
 
@@ -549,6 +604,180 @@ def verify_commit(args):
         f"\n**Commit tree verified:** `{commit}` holds exactly the "
         f"{len(postimages)} certified postimage(s); it is the commit this run "
         f"pushes.\n")
+    return 0
+
+
+def read_text(path):
+    """(the file's text, None) or (None, reason)."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read(), None
+    except OSError as exc:
+        return None, f"cannot read {path}: {exc.strerror}"
+    except UnicodeDecodeError as exc:
+        return None, f"{path} is not readable text: {exc}"
+
+
+def _commit_id(source, value):
+    """(a commit id, None) or (None, status) — for an id this script is handed.
+
+    `reuse` reads two ids it did not resolve itself: the one the remote listing
+    named and the one the tree verification wrote. Both become revisions on a
+    git command line, so both are shape-checked here rather than trusted.
+    """
+    commit = (value or "").strip()
+    if not OBJECT_ID.match(commit):
+        return None, refuse(
+            STAGE_REUSE, "apply-commit-unreadable",
+            f"{source} is {quoted(commit)}, which is not a commit id")
+    return commit, None
+
+
+def _branch_tip(repo, ref, commit):
+    """Whether `ref` still resolves to `commit`. Returns an exit status.
+
+    The check the other three rest on. `commit` came from an `ls-remote` the
+    lane ran in an earlier step; this ref is what the fetch in *this* step
+    actually brought back, so resolving it is the only way to learn that the
+    branch is still where it was. Nothing below would notice on its own: a
+    fast-forward makes the old tip an ancestor of the new one, so it stays
+    readable, its tree stays certified, and its trailer stays right — while
+    the branch a pull request would be opened over carries something else
+    entirely.
+    """
+    if not REF_NAME.fullmatch(ref):
+        return refuse(
+            STAGE_REUSE, "apply-branch-unreadable",
+            f"{quoted(ref)} is not a fully qualified ref name, so what the "
+            f"fetch brought back cannot be resolved")
+    out, detail = git(repo, "rev-parse", "--verify", "--end-of-options",
+                      f"{ref}^{{commit}}")
+    if detail is not None:
+        return refuse(
+            STAGE_REUSE, "apply-branch-unreadable",
+            f"`{ref}` does not resolve to a commit, so this run cannot "
+            f"establish what the derived branch holds now", [quoted(detail)])
+    tip = out.decode("ascii", "replace").strip()
+    if tip != commit:
+        return refuse(
+            STAGE_REUSE, "apply-branch-moved",
+            "the derived branch moved between this run reading it and "
+            "fetching it, so the commit checked below is not the one the "
+            "branch holds — reusing it would open a pull request over a tip "
+            "nothing verified",
+            [f"read: `{commit}`", f"now: `{tip}`",
+             "re-run this lane once the branch has settled"])
+    return 0
+
+
+def _approval_bound(repo, commit, digest):
+    """Whether `commit`'s message carries this run's approval trailer.
+
+    Half of what makes an existing branch reusable, and the half a tree
+    comparison cannot answer: two applies of different approval sets could
+    write the same bytes, and the derived branch name carries only the
+    digest's first twelve characters. The trailer carries all of it, and
+    `render-approval --trailers` is what put it there.
+    """
+    out, detail = git(repo, "show", "-s", "--format=%B", "--end-of-options",
+                      commit)
+    if detail is not None:
+        return refuse(
+            STAGE_REUSE, "apply-commit-unreadable",
+            "the existing branch's commit message cannot be read, so what "
+            "authorized it is unanswerable", [quoted(detail)])
+    trailers = [line.strip()
+                for line in out.decode("utf-8", "replace").splitlines()
+                if line.strip().startswith(APPROVAL_TRAILER)]
+    if not trailers:
+        return refuse(
+            STAGE_REUSE, "apply-branch-approval-conflict",
+            f"the branch this approval derives already exists on the remote, "
+            f"and the commit it points at carries no `{APPROVAL_TRAILER}` "
+            f"trailer — this lane did not write it, and a derived name is no "
+            f"authority to overwrite a ref this run does not own",
+            ["inspect that branch, delete it if it is stale, and re-run"])
+    if f"{APPROVAL_TRAILER} {digest}" not in trailers:
+        return refuse(
+            STAGE_REUSE, "apply-branch-approval-conflict",
+            "the branch this approval derives already exists on the remote "
+            "carrying a different approval set, so reusing it would publish "
+            "one approval's branch as another's",
+            [f"this run: `{digest}`"]
+            + [f"the branch: `{t[len(APPROVAL_TRAILER):].strip()}`"
+               for t in trailers])
+    return 0
+
+
+def verify_reuse(args):
+    """An existing derived branch, against the result this run just verified.
+
+    The recovery boundary (#198). The branch name is derived from the approval
+    digest, so a re-run of a dispatch whose push landed and whose pull request
+    did not aims at a ref that already exists — and a deterministic name is not
+    authority to overwrite it. Reuse is allowed only when the commit standing
+    there is this run's own result, which is two questions: does it carry this
+    approval's trailer, and is its tree the one the applier certified. The
+    second is answered by the same certification the fresh commit passed,
+    against the same manifest, plus the parent — the same postimages on another
+    base are a different diff against the base under review.
+    """
+    postimages, bad = manifest(STAGE_REUSE, args.result)
+    if bad is not None:
+        return bad
+
+    app, reason = read_json(args.approval)
+    if app is None:
+        return refuse(STAGE_REUSE, "apply-approval-unreadable", reason)
+    digest = app.get("digest")
+    if not (isinstance(digest, str) and SHA256.match(digest)):
+        return refuse(
+            STAGE_REUSE, "apply-approval-digest-invalid",
+            f"the approval set declares no sha256 digest ({quoted(digest)}), "
+            f"so there is nothing to bind an existing branch to")
+
+    existing, bad = _commit_id("the remote's branch tip", args.commit)
+    if bad is not None:
+        return bad
+    text, reason = read_text(args.verified)
+    if text is None:
+        return refuse(STAGE_REUSE, "apply-commit-unreadable", reason)
+    verified, bad = _commit_id("the commit this run verified", text)
+    if bad is not None:
+        return bad
+
+    # First, because everything below is about `existing` and this is what
+    # makes `existing` the branch rather than a commit somewhere on it.
+    status = _branch_tip(args.repo, args.ref, existing)
+    if status != 0:
+        return status
+
+    status = _approval_bound(args.repo, existing, digest)
+    if status != 0:
+        return status
+
+    parent, status = certify(
+        STAGE_REUSE, args.repo, existing, postimages, "existing branch")
+    if status != 0:
+        return status
+    ours, bad = _parents(STAGE_REUSE, args.repo, verified,
+                         "this run's own commit's")
+    if bad is not None:
+        return bad
+    if ours != [parent]:
+        return refuse(
+            STAGE_REUSE, "apply-branch-lineage-conflict",
+            "the existing branch holds this approval's postimages on a "
+            "different base than this run applied onto, so what it changes "
+            "against the base under review is not what this run verified",
+            [f"this run applied onto `{ours[0] if ours else 'nothing'}`",
+             f"the branch sits on `{parent}`"])
+
+    write_surface(
+        f"\n**Existing branch verified:** `{existing}` carries this approval's "
+        f"trailer and holds exactly the {len(postimages)} certified "
+        f"postimage(s) on the same base; it is this run's own result, reached "
+        f"by an earlier attempt.\n")
     return 0
 
 
@@ -568,6 +797,15 @@ def _parser():
     commit.add_argument("--repo", default=".")
     commit.add_argument("--out", required=True)
     commit.set_defaults(run=verify_commit)
+
+    reuse = sub.add_parser("reuse")
+    reuse.add_argument("--result", required=True)
+    reuse.add_argument("--repo", default=".")
+    reuse.add_argument("--commit", required=True)
+    reuse.add_argument("--ref", required=True)
+    reuse.add_argument("--verified", required=True)
+    reuse.add_argument("--approval", required=True)
+    reuse.set_defaults(run=verify_reuse)
 
     return parser
 
