@@ -262,6 +262,82 @@ class RenderOutcomes(unittest.TestCase):
         self.assertIn("docs/runbook.md", text)
         self.assertIn("c-deadbeef", text)
 
+    def write_integrity(self, payload):
+        path = os.path.join(self.tmp.name, "audit-integrity.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        return path
+
+    def test_a_refused_integrity_gate_renders_its_own_typed_state(self):
+        integrity = self.write_integrity({
+            "status": "refused",
+            "expected_head": "a" * 40,
+            "head": "a" * 40,
+            "allowed": ["verdicts.json"],
+            "problems": [{
+                "code": "evidence-integrity-tracked-modified",
+                "message": "a tracked file changed during the run",
+                "location": "src/server.py",
+            }],
+        })
+        proc = self.summary_run(
+            "--report", os.path.join(self.tmp.name, "absent.json"),
+            "--integrity", integrity)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        text = self.summary_text()
+        self.assertIn("REFUSED — repository integrity", text)
+        self.assertIn("evidence-integrity-tracked-modified", text)
+        self.assertIn("src/server.py", text)
+        self.assertNotIn("audit-report-missing", text)
+
+    def test_a_refusal_outranks_any_report_left_on_disk(self):
+        path = self.write_report(report("clean"))
+        integrity = self.write_integrity({
+            "status": "refused",
+            "problems": [{
+                "code": "evidence-integrity-untracked-added",
+                "message": "a file appeared in the work tree",
+                "location": "notes.txt",
+            }],
+        })
+        proc = self.summary_run("--report", path, "--integrity", integrity)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        text = self.summary_text()
+        self.assertIn("REFUSED — repository integrity", text)
+        self.assertNotIn("CLEAN", text)
+
+    def test_a_verified_gate_leaves_the_report_to_speak(self):
+        path = self.write_report(report("clean"))
+        integrity = self.write_integrity(
+            {"status": "verified", "problems": []})
+        proc = self.summary_run("--report", path, "--integrity", integrity)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("CLEAN", self.summary_text())
+
+    def test_an_unreadable_gate_verdict_is_not_a_passed_gate(self):
+        path = self.write_report(report("clean"))
+        broken = os.path.join(self.tmp.name, "audit-integrity.json")
+        with open(broken, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        proc = self.summary_run("--report", path, "--integrity", broken)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        text = self.summary_text()
+        self.assertIn("REFUSED — repository integrity", text)
+        self.assertIn("evidence-integrity-unverifiable", text)
+
+    def test_the_bloat_surface_renames_the_refusal_heading_too(self):
+        integrity = self.write_integrity({
+            "status": "refused",
+            "problems": [{"code": "evidence-integrity-head-moved",
+                          "message": "the checkout moved", "location": "b" * 40}],
+        })
+        proc = self.summary_run(
+            "--audit-surface", "bloat",
+            "--report", os.path.join(self.tmp.name, "absent.json"),
+            "--integrity", integrity)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Bloat audit: REFUSED", self.summary_text())
+
     def test_ambiguous_legacy_kind_flag_is_rejected(self):
         path = self.write_report(report("clean"))
         proc = self.summary_run("--kind", "bloat", "--report", path)
