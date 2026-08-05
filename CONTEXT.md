@@ -25,6 +25,14 @@ The interactive skill family (bootstrapping-docs, writing-docs, growing-docs) th
 A deterministically segmented structural unit of a living document (sentence, list item, table row — fixed parser). Its identity is a content digest of the unit; findings may group several units. Segmentation never involves a model.
 _Avoid_: claim (legacy "every line is a claim"), line
 
+**Assertion occurrence**:
+Where an assertion unit sits in one document: its ordinal in that document's deterministic
+segmentation, read off the committed baseline. Identity is content, so one identity can occur in
+several places; an occurrence says which of them, and only an occurrence bounds an edit. An
+approval record carries the occurrences it was approved about, and consecutive ones form the
+passage a remedy may write.
+_Avoid_: position (that is the line a reader follows), match, instance
+
 **Assertion class**:
 The model-assigned classification of an assertion unit — factual (needs evidence), normative (needs a governing source or owner judgment), rationale (needs a coherence judgment), or non-assertive prose (no obligation). Recorded in the report as reviewable data; determines the unit's review obligation, never its identity or whether a living assertion is judged.
 _Avoid_: claim type

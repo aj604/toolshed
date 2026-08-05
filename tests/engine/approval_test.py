@@ -15,6 +15,9 @@ from support import ENGINE, RepoTestCase  # noqa: F401 (engine onto sys.path)
 
 from doclifecycle import ARTIFACT_SCHEMA_VERSION
 from doclifecycle.approval import (
+    PRE_OCCURRENCE_SCHEMA_VERSION,
+    PRE_PROVENANCE_SCHEMA_VERSION,
+    SCHEMA_VERSION,
     ApprovalSet,
     Minter,
     load_approval_set,
@@ -61,6 +64,10 @@ REGISTRY = """{
 DOC_A = "docs/a.md"
 DOC_B = "docs/b.md"
 PLAN_DOC = "docs/plans/2026-07-20-fee-tiers.md"
+# A document that says one thing twice, with unrelated material in between:
+# two occurrences of a single assertion-unit identity, which is what makes
+# "which occurrence was approved" a question with more than one answer.
+REPEAT_DOC = "docs/repeats.md"
 
 DOC_A_TEXT = """# Fees
 
@@ -72,6 +79,19 @@ Refunds reverse the fee at the rate charged.
 DOC_B_TEXT = """# Workers
 
 The worker retries a failed job three times.
+"""
+
+REPEAT_DOC_TEXT = """# Retries
+
+The scheduler retries a failed job three times.
+
+## Queues
+
+Jobs are queued in arrival order, oldest first.
+
+## Workers
+
+The scheduler retries a failed job three times.
 """
 
 # A planning document, so a declared scope has something it may legitimately
@@ -173,6 +193,20 @@ class ApprovalTestCase(RepoTestCase):
         segmentation = segment_document(repo, path)
         self.assertNotIsInstance(segmentation, Invalid)
         return [u.digest for u in segmentation.units if u.assertion_capable]
+
+    def occurrences_for(self, path, units, repo=None):
+        """The baseline ordinals `units` occupy in `path` — what a mint derives.
+
+        Hand-assembled approval sets carry the real occurrence binding, so a
+        test about something else is never answered by the occurrence check.
+        """
+        segmentation = segment_document(self.repo if repo is None else repo, path)
+        self.assertNotIsInstance(segmentation, Invalid)
+        wanted = set(units)
+        return sorted(
+            unit.ordinal for unit in segmentation.units
+            if unit.digest in wanted
+        )
 
     def whole_units(self, repo, path):
         """Every deterministic unit identity, including document structure."""
@@ -597,12 +631,245 @@ class ThePreProvenanceSchema(ApprovalTestCase):
 
         self.assertEqual(len(result.problems), 1)
 
-    def test_this_engine_mints_the_provenance_schema(self):
+    def test_this_engine_mints_a_later_schema(self):
         one, _ = self.two_findings()
 
         approval = self.mint(self.report([one]), [one["digest"]])
 
-        self.assertEqual(approval.to_dict()["schema_version"], 2)
+        self.assertEqual(approval.to_dict()["schema_version"], SCHEMA_VERSION)
+        self.assertNotEqual(SCHEMA_VERSION, PRE_PROVENANCE_SCHEMA_VERSION)
+
+
+class ThePreOccurrenceSchema(ApprovalTestCase):
+    """Version 2 is refused, never read as if it named its occurrences."""
+
+    def payload(self):
+        one, _ = self.two_findings()
+        approval = self.mint(self.report([one]), [one["digest"]])
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        payload = approval.to_dict()
+        payload["schema_version"] = PRE_OCCURRENCE_SCHEMA_VERSION
+        for record in payload["records"]:
+            del record["occurrences"]
+        return resigned(payload)
+
+    def test_a_pre_occurrence_artifact_is_refused(self):
+        result = validate_approval_set(self.payload())
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-schema-pre-occurrence"])
+
+    def test_the_refusal_says_what_to_do_about_it(self):
+        result = validate_approval_set(self.payload())
+
+        self.assertIn("mint again from its report",
+                      result.problems[0].message)
+
+    def test_it_is_refused_rather_than_bound_to_a_constructed_hull(self):
+        # The reinterpretation this version gate exists to stop: nothing in a
+        # version-2 record says which occurrence of its units was read, and the
+        # only way to read one under version 3's rules would be to span every
+        # match — the hull that authorizes unreviewed text.
+        result = validate_approval_set(
+            self.payload(), repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertEqual(len(result.problems), 1)
+        self.assertIn("hull", result.problems[0].message)
+
+    def test_this_engine_mints_the_occurrence_schema(self):
+        one, _ = self.two_findings()
+
+        approval = self.mint(self.report([one]), [one["digest"]])
+
+        self.assertEqual(approval.to_dict()["schema_version"], SCHEMA_VERSION)
+        self.assertNotEqual(SCHEMA_VERSION, PRE_OCCURRENCE_SCHEMA_VERSION)
+
+
+class OccurrenceBoundApproval(ApprovalTestCase):
+    """An approval binds where its units are, not merely what they say.
+
+    A unit digest is its content, so a document that says one thing twice holds
+    one identity in two places. Which of them a reviewer read is a separate
+    question from what they read, and only the answer to it can bound an edit.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.git_repo(dict(FILES, **{REPEAT_DOC: REPEAT_DOC_TEXT}))
+        self.lineage = self.lineage_for(self.repo)
+
+    def stale_record(self, path, units, record_id="R-1"):
+        return self.finding(
+            record_id, "STALE", path, units,
+            fix="The scheduler retries a failed job five times.",
+        )
+
+    def approved(self):
+        """A minted approval over one unit of `DOC_A`, and its report."""
+        record = self.stale_record(DOC_A, self.units(self.repo, DOC_A)[:1])
+        report = self.report([record])
+        approval = self.mint(report, [record["digest"]])
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        return report, approval
+
+    def test_a_minted_record_names_where_its_units_are(self):
+        units = self.units(self.repo, DOC_A)[:1]
+        record = self.stale_record(DOC_A, units)
+
+        approval = self.mint(self.report([record]), [record["digest"]])
+
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        self.assertEqual(
+            approval.records[0].occurrences,
+            tuple(self.occurrences_for(DOC_A, units)),
+        )
+
+    def test_a_repeated_unit_is_refused_rather_than_bound_to_a_hull(self):
+        repeated = self.units(self.repo, REPEAT_DOC)[:1]
+        record = self.stale_record(REPEAT_DOC, repeated)
+
+        result = self.mint(self.report([record]), [record["digest"]])
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-occurrence-ambiguous"])
+        self.assertIn("occurs 2 times", result.problems[0].message)
+
+    def test_ambiguity_is_per_unit_and_not_per_document(self):
+        # The sentence between the two copies occurs once, so approving it is
+        # exact — a document with a repeat is not an unapprovable document.
+        unique = self.units(self.repo, REPEAT_DOC)[1:2]
+        record = self.stale_record(REPEAT_DOC, unique)
+
+        approval = self.mint(self.report([record]), [record["digest"]])
+
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        self.assertEqual(len(approval.records[0].occurrences), 1)
+
+    def test_a_whole_document_record_binds_every_occurrence(self):
+        # A retirement approves the document entire, repeats included, so the
+        # count test that refuses an ambiguous passage admits this without a
+        # second rule.
+        whole = self.whole_units(self.repo, REPEAT_DOC)
+        record = self.finding("R-1", "RETIRE-DOC", REPEAT_DOC, whole)
+
+        approval = self.mint(self.report([record]), [record["digest"]])
+
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        self.assertEqual(
+            approval.records[0].occurrences, tuple(range(len(whole)))
+        )
+
+    def test_a_unit_the_baseline_does_not_carry_is_unbindable(self):
+        # Present in the working tree, absent from the commit the report is
+        # pinned to: the audit read text nobody has committed, so where it was
+        # approved cannot be established at all.
+        self.write(self.repo, DOC_A, DOC_A_TEXT + "\nFees are billed monthly.\n")
+        lineage = self.lineage_for(self.repo)
+        record = self.finding(
+            "R-1", "STALE", DOC_A, self.units(self.repo, DOC_A)[-1:],
+            lineage=lineage, fix="Fees are billed weekly.",
+        )
+        report = self.report([record], lineage=lineage)
+
+        result = self.mint(report, [record["digest"]])
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-occurrence-unbindable"])
+
+    def test_a_relocated_occurrence_is_refused_against_its_own_baseline(self):
+        # Same units, same digest arithmetic, a different ordinal: the passage
+        # this would authorize is not the passage the record describes, and the
+        # baseline it names is the one in front of us — so this is a forgery
+        # rather than the world moving.
+        report, approval = self.approved()
+        payload = approval.to_dict()
+        payload["records"][0]["occurrences"] = [
+            payload["records"][0]["occurrences"][0] + 1
+        ]
+
+        result = validate_approval_set(
+            resigned(payload), report=report, repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-occurrence-not-derived"])
+
+    def test_an_occurrence_past_the_end_of_the_document_is_refused(self):
+        report, approval = self.approved()
+        payload = approval.to_dict()
+        payload["records"][0]["occurrences"] = [999]
+
+        result = validate_approval_set(
+            resigned(payload), report=report, repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-occurrence-not-derived"])
+
+    def test_more_occurrences_than_units_is_refused_without_a_repository(self):
+        # Structural, so the count that decides how far an edit may reach is
+        # checked even by a reader holding nothing but the file.
+        _, approval = self.approved()
+        payload = approval.to_dict()
+        payload["records"][0]["occurrences"] = [0, 1]
+
+        result = validate_approval_set(resigned(payload))
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-occurrence-not-derived"])
+
+    def test_an_unordered_or_repeated_occurrence_list_is_refused(self):
+        _, approval = self.approved()
+        for occurrences in ([1, 0], [0, 0], [], [-1]):
+            with self.subTest(occurrences=occurrences):
+                payload = approval.to_dict()
+                payload["records"][0]["occurrences"] = occurrences
+
+                result = validate_approval_set(resigned(payload))
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertEqual(codes(result), ["approval-invalid-record"])
+
+    def test_the_binding_is_read_off_the_baseline_not_the_working_tree(self):
+        # Every ordinal in the document shifts when a paragraph is inserted
+        # above the approved one, and every line number with it. The approval is
+        # still exactly as valid, because the occurrence it names is a fact
+        # about the commit the report is pinned to.
+        report, approval = self.approved()
+        self.write(
+            self.repo, DOC_A,
+            "# Fees\n\nBilling runs nightly.\n" + DOC_A_TEXT[len("# Fees\n"):],
+        )
+
+        result = validate_approval_set(
+            approval.to_dict(), report=report, repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_CLEAN)
+
+    def test_a_moved_base_commit_stands_the_occurrence_check_down(self):
+        # The baseline is gone, so every occurrence disagreement is a
+        # consequence of the move rather than a claim about it. Naming them
+        # would accuse an honest re-run of forgery; `stale` is the whole answer.
+        report, approval = self.approved()
+        self.write(self.repo, DOC_A, "# Fees\n\nBilling runs nightly.\n")
+        self.commit(self.repo, "rewrite")
+
+        result = validate_approval_set(
+            approval.to_dict(), report=report, repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertIn("approval-base-commit-changed", reasons(result))
+        self.assertNotIn("approval-occurrence-not-derived", reasons(result))
 
 
 class ReconciledSelection(ApprovalTestCase):
@@ -800,6 +1067,9 @@ class ApprovedTestCase(ApprovalTestCase):
             "digest": record["digest"], "id": record["id"],
             "code": record["code"], "path": record["path"],
             "destination": destination, "units": sorted(record["units"]),
+            "occurrences": self.occurrences_for(
+                record["path"], record["units"]
+            ),
         }
 
     def rebuilt(self, record, *, lineage=None, scope=None, skipped=None):
@@ -855,6 +1125,9 @@ class ApprovedTestCase(ApprovalTestCase):
             "digest": record["digest"], "id": record["id"],
             "code": record["code"], "path": record["path"],
             "destination": None, "units": sorted(record["units"]),
+            "occurrences": self.occurrences_for(
+                record["path"], record["units"]
+            ),
         }]
         payload["skipped"] = sorted(
             ({"digest": r.digest, "id": r.id} for r in report.records

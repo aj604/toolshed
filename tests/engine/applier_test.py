@@ -22,6 +22,8 @@ from approval_test import (
     HUMAN,
     PLAN_DOC,
     PLAN_DOC_TEXT,
+    REPEAT_DOC,
+    REPEAT_DOC_TEXT,
     ApprovalTestCase,
 )
 
@@ -863,6 +865,9 @@ class HostilePlans(ApplierTestCase):
                 code=record["code"],
                 path=record["path"],
                 units=tuple(record["units"]),
+                occurrences=tuple(
+                    self.occurrences_for(record["path"], record["units"])
+                ),
             ),),
             skipped=(),
             scope=MutationScope(roots=("docs",), paths=(DOC_A,)),
@@ -1955,6 +1960,245 @@ class LoadEditPlan(ApplierTestCase):
 
         self.assertIsInstance(result, Invalid)
         self.assertEqual(codes(result), ["plan-nesting-too-deep"])
+
+
+GAP_DOC = "docs/gaps.md"
+GAP_DOC_TEXT = """# Rates
+
+The base rate is 2 percent.
+
+Support answers within one business day.
+
+The enterprise rate is negotiated per contract.
+"""
+
+REPEATED = "The scheduler retries a failed job three times."
+REPLACEMENT = "The scheduler retries a failed job five times."
+
+
+class OccurrenceBoundPassages(ApplierTestCase):
+    """One approved occurrence authorizes one passage, never the span to its twin.
+
+    The document says the same sentence twice with a section of unrelated
+    material between the copies, which is one assertion-unit identity in two
+    places. Approving the first copy is approval of the first copy: the second,
+    and everything separating them, is text this reviewer never read.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.git_repo(dict(FILES, **{
+            REPEAT_DOC: REPEAT_DOC_TEXT, GAP_DOC: GAP_DOC_TEXT,
+        }))
+        self.lineage = self.lineage_for(self.repo)
+
+    def declared(self, report, record, occurrences):
+        """An approval set naming the occurrences of `record` explicitly.
+
+        Minting refuses to choose between two copies of one sentence
+        (`approval-occurrence-ambiguous`), so a reviewer who has read one of
+        them says which. It validates because it is exact — and that explicit
+        selection is what these tests then hold the applier to.
+        """
+        reconciliation = reconcile(report)
+        self.assertNotIsInstance(reconciliation, Invalid, reconciliation)
+        return ApprovalSet(
+            status=STATE_CLEAN,
+            minter=HUMAN,
+            report_digest=report.digest,
+            report_state=report.status,
+            lineage=report.lineage,
+            reconciliation_digest=reconciliation.digest,
+            records=(ApprovedRecord(
+                digest=record["digest"],
+                record_id=record["id"],
+                code=record["code"],
+                path=record["path"],
+                units=tuple(record["units"]),
+                occurrences=occurrences,
+            ),),
+            skipped=(),
+            scope=MutationScope(roots=("docs",), paths=(record["path"],)),
+        )
+
+    def first_copy(self):
+        """A report and an approval bound to the FIRST copy, at line 3."""
+        units = self.units(self.repo, REPEAT_DOC)[:1]
+        record = self.finding(
+            "DRIFT-REPEAT", "STALE", REPEAT_DOC, units, fix=REPLACEMENT,
+        )
+        report = self.report([record])
+        approval = self.declared(report, record, (1,))
+        self.assertIsInstance(
+            validate_approval_set(approval.to_dict(), report=report,
+                                  repo_root=self.repo,
+                                  audit_config_digest=CONFIG_DIGEST),
+            ApprovalSet,
+        )
+        return report, record, approval
+
+    def replacing(self, approval, record, path, start, end, text, post):
+        return self.plan(approval, [{
+            "op": "replace",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": path,
+            "start_line": start,
+            "end_line": end,
+            "preimage": text,
+            "text": REPLACEMENT,
+        }], {path: sha256_text(post)})
+
+    def test_the_approved_occurrence_applies(self):
+        report, record, approval = self.first_copy()
+        lines = REPEAT_DOC_TEXT.split("\n")
+        lines[2] = REPLACEMENT
+        post = "\n".join(lines)
+        plan = self.replacing(
+            approval, record, REPEAT_DOC, 3, 3, REPEATED, post,
+        )
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assertIsInstance(result, ApplyResult, result)
+        self.assertEqual(result.status, STATE_CLEAN)
+        # The twin is still there, untouched: one occurrence was approved and
+        # one occurrence changed.
+        self.assertEqual(self.read(self.repo, REPEAT_DOC), post)
+        self.assertEqual(
+            self.read(self.repo, REPEAT_DOC).split("\n")[10], REPEATED,
+        )
+
+    def test_the_other_occurrence_is_outside_the_approved_passage(self):
+        report, record, approval = self.first_copy()
+        lines = REPEAT_DOC_TEXT.split("\n")
+        lines[10] = REPLACEMENT
+        plan = self.replacing(
+            approval, record, REPEAT_DOC, 11, 11, REPEATED, "\n".join(lines),
+        )
+        before = self.tree(self.repo)
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assert_untouched(
+            before, result, ["plan-span-outside-approved-units"]
+        )
+
+    def test_the_span_from_one_occurrence_to_its_twin_is_refused(self):
+        # The hull this contract replaced: first approved line through last,
+        # which here is the whole document including two headings and a
+        # sentence about queueing that no record mentions.
+        report, record, approval = self.first_copy()
+        plan = self.replacing(
+            approval, record, REPEAT_DOC, 3, 11,
+            "\n".join(REPEAT_DOC_TEXT.split("\n")[2:11]),
+            "# Retries\n\n" + REPLACEMENT + "\n",
+        )
+        before = self.tree(self.repo)
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assert_untouched(
+            before, result, ["plan-span-outside-approved-units"]
+        )
+
+    def test_the_material_between_the_occurrences_is_outside_it(self):
+        report, record, approval = self.first_copy()
+        lines = REPEAT_DOC_TEXT.split("\n")
+        del lines[6]
+        plan = self.plan(approval, [{
+            "op": "delete",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": REPEAT_DOC,
+            "start_line": 7,
+            "end_line": 7,
+            "preimage": "Jobs are queued in arrival order, oldest first.",
+        }], {REPEAT_DOC: sha256_text("\n".join(lines))})
+        before = self.tree(self.repo)
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assert_untouched(
+            before, result, ["plan-span-outside-approved-units"]
+        )
+
+    def test_an_insert_between_the_occurrences_is_outside_it(self):
+        report, record, approval = self.first_copy()
+        lines = REPEAT_DOC_TEXT.split("\n")
+        lines[7:7] = ["Queue depth is unbounded."]
+        plan = self.plan(approval, [{
+            "op": "insert",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": REPEAT_DOC,
+            "after_line": 7,
+            "text": "Queue depth is unbounded.",
+        }], {REPEAT_DOC: sha256_text("\n".join(lines))})
+        before = self.tree(self.repo)
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assert_untouched(
+            before, result, ["plan-span-outside-approved-units"]
+        )
+
+    def gapped(self):
+        """A minted approval over two units with an unapproved one between."""
+        units = self.whole_units(self.repo, GAP_DOC)
+        record = self.finding(
+            "DRIFT-GAP", "STALE", GAP_DOC, [units[1], units[3]],
+            fix="The base rate is 2.5 percent.",
+        )
+        report, approval = self.approve([record])
+        self.assertEqual(approval.records[0].occurrences, (1, 3))
+        return report, record, approval
+
+    def test_two_approved_units_with_a_gap_are_two_passages(self):
+        # Each is editable on its own …
+        report, record, approval = self.gapped()
+        lines = GAP_DOC_TEXT.split("\n")
+        lines[2] = "The base rate is 2.5 percent."
+        post = "\n".join(lines)
+        plan = self.plan(approval, [{
+            "op": "replace",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": GAP_DOC,
+            "start_line": 3,
+            "end_line": 3,
+            "preimage": "The base rate is 2 percent.",
+            "text": "The base rate is 2.5 percent.",
+        }], {GAP_DOC: sha256_text(post)})
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assertIsInstance(result, ApplyResult, result)
+        self.assertEqual(result.status, STATE_CLEAN)
+
+    def test_a_span_across_the_gap_is_refused(self):
+        # … and the sentence between them, which nobody approved, is not part
+        # of either passage, so no operation may reach across it.
+        report, record, approval = self.gapped()
+        plan = self.plan(approval, [{
+            "op": "replace",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": GAP_DOC,
+            "start_line": 3,
+            "end_line": 7,
+            "preimage": "\n".join(GAP_DOC_TEXT.split("\n")[2:7]),
+            "text": "The base rate is 2.5 percent.",
+        }], {GAP_DOC: sha256_text(
+            "# Rates\n\nThe base rate is 2.5 percent.\n"
+        )})
+        before = self.tree(self.repo)
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assert_untouched(
+            before, result, ["plan-span-outside-approved-units"]
+        )
 
 
 if __name__ == "__main__":

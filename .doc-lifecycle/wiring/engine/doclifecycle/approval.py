@@ -38,6 +38,21 @@ both of which the artifact pins, so an inexact selection is a forgery rather
 than the world moving — and a minter kind anybody could type into a file is
 not authority.
 
+**It binds occurrences, not just text.** A unit digest *is* its content, so a
+document containing the same sentence twice contains one identity twice. That
+is right for a finding — identity is content-addressed, and stays stable when a
+document is reordered — and wrong for authority: reading a record's units back
+as "wherever this text is" made the approved passage the span from the first
+match to the last, so approving one occurrence quietly authorized every word
+between it and its twin. Each approved record therefore carries the
+`occurrences` it was approved about — the assertion-unit ordinals of the
+*committed baseline* the audit read, which the pinned base commit makes
+reproducible whatever the working tree does. Minting derives them and refuses
+rather than guessing when a unit occurs more times in the baseline than the
+record approves; validation re-derives them; and the applier bounds a
+positioned operation by the passages those occurrences are, never by a hull
+spanning content nobody reviewed.
+
 *Why the inventory digest is deliberately not compared.* Every other lineage
 field is. The inventory digest covers document *content*, so the applier's own
 writes move it — and then a second subset of one report could never be applied,
@@ -82,7 +97,7 @@ from .results import (
     Invalid,
     Problem,
 )
-from .segment import segment_document
+from .segment import segment_document, segment_text
 
 # What the artifact says it is. A report also carries a lineage and a list of
 # records; without a self-declared kind, one could be handed to the applier
@@ -90,14 +105,18 @@ from .segment import segment_document
 ARTIFACT_KIND = "approval-set"
 
 # The approval set's own schema version, which has left the engine-wide
-# `ARTIFACT_SCHEMA_VERSION` behind: policy provenance is a field the applier's
-# trust now rests on, and a report, a registry, or a cache entry did not change
-# at all. Versioning it here is what lets version 1 be *refused* rather than
-# read under version 2's rules — a pre-provenance `policy` brand is a label
-# nothing can be revalidated against, and reinterpreting one silently is how a
-# migration turns into an unnoticed grant.
-SCHEMA_VERSION = 2
+# `ARTIFACT_SCHEMA_VERSION` behind: policy provenance and occurrence binding are
+# fields the applier's trust now rests on, and a report, a registry, or a cache
+# entry did not change at all. Versioning it here is what lets an older artifact
+# be *refused* rather than read under the current rules — a pre-provenance
+# `policy` brand is a label nothing can be revalidated against, and a
+# pre-occurrence record says which text was approved without saying which
+# occurrence of it, so reading either silently is how a migration turns into an
+# unnoticed grant. Each superseded version keeps its own refusal, because what a
+# reader must do about it differs by what the version was missing.
+SCHEMA_VERSION = 3
 PRE_PROVENANCE_SCHEMA_VERSION = 1
+PRE_OCCURRENCE_SCHEMA_VERSION = 2
 
 # Who may mint. `human` is semantic approval — a person selecting record
 # digests. `policy` is a standing consumer-configured auto-apply policy, named
@@ -106,6 +125,26 @@ PRE_PROVENANCE_SCHEMA_VERSION = 1
 MINTER_HUMAN = "human"
 MINTER_POLICY = "policy"
 MINTER_KINDS = (MINTER_HUMAN, MINTER_POLICY)
+
+# Every superseded version this engine refuses by name, with the code that names
+# it and what an artifact of that version could not carry. A table rather than a
+# chain of `if`s, so adding a version is one entry: a version that is neither
+# current nor listed here falls through to `approval-schema-version`, which is
+# the right answer for a number nothing ever minted.
+SUPERSEDED_SCHEMA_VERSIONS = {
+    PRE_PROVENANCE_SCHEMA_VERSION: ("approval-schema-pre-provenance", (
+        f"a {MINTER_POLICY!r} brand was descriptive text there, carrying "
+        f"nothing the standing declaration could be revalidated against"
+    )),
+    PRE_OCCURRENCE_SCHEMA_VERSION: ("approval-schema-pre-occurrence", (
+        "its records name the units they approve without naming which "
+        "occurrence of them was read, and a document may hold one unit "
+        "identity in several places. Nothing in the artifact identifies the "
+        "approved occurrence set, and the passage cannot be reconstructed by "
+        "spanning the matches — that hull is precisely the authority over "
+        "unreviewed text this version exists to end"
+    )),
+}
 
 # The bloat verdict codes a policy minter may never select, whichever door it
 # is reached through. `policy.py`'s restricted `NEVER_ELIGIBLE_CODES` is an
@@ -151,7 +190,9 @@ REQUIRED_FIELDS = tuple(
 )
 
 MINTER_FIELDS = ("kind", "id", "policy_digest")
-RECORD_FIELDS = ("digest", "id", "code", "path", "destination", "units")
+RECORD_FIELDS = (
+    "digest", "id", "code", "path", "destination", "units", "occurrences",
+)
 SKIPPED_FIELDS = ("digest", "id")
 SCOPE_FIELDS = ("roots", "paths")
 
@@ -184,6 +225,9 @@ REPOSITORY_REASON_CODES = (
     "approval-preimage-unreadable",
     "approval-whole-document-units-incomplete",
 )
+# The occurrence codes are deliberately absent: an occurrence disagreement is
+# only ever asked against the baseline the approval names, where it is a forgery
+# rather than staleness, so no run produces one as a stale reason to clear.
 REPORT_REASON_CODES = (
     "approval-report-changed",
     "approval-reconciliation-changed",
@@ -253,6 +297,15 @@ class ApprovedRecord:
     set: with it, the allowed mutation scope is a *derivation* of the record
     list that any reader can recompute, and a scope naming one more document
     than the selection justifies is arithmetic, not a judgment call.
+
+    `occurrences` is *where* those units were approved: ascending assertion-unit
+    ordinals into the committed baseline's segmentation of `path`, one per
+    approved unit. Units say what was approved and occurrences say which copy of
+    it, which are different questions the moment a document says the same thing
+    twice — and only the second one bounds an edit. Ordinals rather than line
+    numbers, because a line number is a fact about a rendering and an ordinal is
+    a fact about the document: both are read off the baseline the pinned base
+    commit names, and the ordinal survives a re-wrap that moves every line.
     """
 
     digest: str
@@ -260,6 +313,7 @@ class ApprovedRecord:
     code: str
     path: str
     units: Tuple[str, ...]
+    occurrences: Tuple[int, ...]
     destination: Optional[str] = None
 
     def targets(self):
@@ -276,6 +330,7 @@ class ApprovedRecord:
             "path": self.path,
             "destination": self.destination,
             "units": list(self.units),
+            "occurrences": list(self.occurrences),
         }
 
 
@@ -651,6 +706,223 @@ def _preimage_problems(records, repo_root, registry_path):
     return problems
 
 
+def baseline_units(repo_root, path):
+    """(the committed baseline's assertion units for `path`, None), or
+    (None, why the baseline cannot answer).
+
+    HEAD, deliberately, and not through the inventory: an occurrence is a fact
+    about the document the audit read, and the working tree is what an attacker
+    — or an ordinary half-finished edit — can move underneath a live approval.
+    The base commit is a compared lineage field, so a baseline that has moved is
+    already `approval-base-commit-changed` before any occurrence is read back;
+    within one approval's life these ordinals do not change.
+    """
+    data, problem = repository_mod.head_bytes(repo_root, path)
+    if problem is not None:
+        return None, problem.message
+    if data is None:
+        return None, f"{path} is not in the committed baseline"
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return None, (
+            f"{path} is not valid UTF-8 at HEAD ({exc.reason} at byte "
+            f"{exc.start})"
+        )
+    return segment_text(text, path=path).units, None
+
+
+def _derive_occurrences(units, code, approved):
+    """(the baseline ordinals `approved` occupies, None), or (None, (code, why)).
+
+    For a passage record the derivation is by count, which is what makes "which
+    occurrence" a question with one answer or none. A record approving a unit
+    once against a baseline holding it twice is refused rather than resolved:
+    both copies are the same identity, nothing in the artifact says which one a
+    reviewer read, and picking either — or spanning both — would be the engine
+    deciding what was approved.
+
+    A whole-document record is the one shape where a repeat is not a question.
+    Its units must equal the document's complete identity set (that check has
+    its own owner, `whole_document_unit_difference`), so *every* occurrence of
+    every one of them is inside what was approved and there is nothing to
+    choose between. Findings list each identity once — `finding.py` normalizes
+    units to a set — so this is exactly the case the count rule would refuse
+    for saying one thing twice.
+    """
+    ordinals = {}
+    for unit in units:
+        ordinals.setdefault(unit.digest, []).append(unit.ordinal)
+    whole_document = code in WHOLE_DOCUMENT_RECORD_CODES
+    chosen = []
+    for digest in sorted(set(approved)):
+        wanted = approved.count(digest)
+        found = ordinals.get(digest, [])
+        if len(found) < wanted:
+            return None, ("approval-occurrence-unbindable", (
+                f"assertion unit {digest} is approved {wanted} time(s) and the "
+                f"committed baseline holds it {len(found)} — the approval "
+                f"would name text the audited document does not contain"
+            ))
+        if len(found) > wanted and not whole_document:
+            return None, ("approval-occurrence-ambiguous", (
+                f"assertion unit {digest} occurs {len(found)} times in the "
+                f"committed baseline and is approved {wanted} time(s), so "
+                f"which occurrence was reviewed is not stated. A unit digest "
+                f"is its content, and identical text in two places is one "
+                f"identity in two passages — approving it here would bind "
+                f"authority to whichever the applier happened to find, or to "
+                f"everything between them"
+            ))
+        chosen.extend(found)
+    return tuple(sorted(chosen)), None
+
+
+def _bind_occurrences(records, repo_root):
+    """(records carrying their approved occurrences, problems).
+
+    Minting's half of the occurrence contract: the ordinals are derived here,
+    once, from the baseline the report was produced against, and everything
+    downstream re-derives them rather than deciding afresh what a unit digest
+    reaches.
+    """
+    bound, problems = [], []
+    for i, record in enumerate(records):
+        units, why = baseline_units(repo_root, record.path)
+        if units is None:
+            problems.append(Problem(
+                code="approval-occurrence-unbindable",
+                message=(
+                    f"where record {record.record_id}'s approved units are in "
+                    f"the committed baseline cannot be established: {why} — an "
+                    f"approval binds to the passage it was read in, so a "
+                    f"baseline that cannot answer is a refusal rather than an "
+                    f"approval of wherever the text turns up"
+                ),
+                location=f"records[{i}]",
+            ))
+            continue
+        occurrences, failure = _derive_occurrences(
+            units, record.code, record.units
+        )
+        if occurrences is None:
+            code, reason = failure
+            problems.append(Problem(
+                code=code,
+                message=(
+                    f"record {record.record_id} cannot be bound to a unique "
+                    f"passage of {record.path}: {reason}. Re-run the audit "
+                    f"against a document that says it once, or approve a "
+                    f"record whose units pin the passage exactly"
+                ),
+                location=f"records[{i}]",
+            ))
+            continue
+        bound.append(replace(record, occurrences=occurrences))
+    return tuple(bound), problems
+
+
+def _occurrence_problems(records, repo_root):
+    """Every selected record whose occurrences the committed baseline denies.
+
+    Re-derivation, not belief, for the same reason the allowed mutation scope is
+    recomputed: an approval set is a file, and `occurrences` is the field that
+    decides how far a positioned edit may reach. A widened one would hand the
+    applier a passage nobody read.
+    """
+    problems = []
+    for record in records:
+        units, why = baseline_units(repo_root, record.path)
+        if units is None:
+            problems.append(Problem(
+                code="approval-occurrence-unbindable",
+                message=(
+                    f"record {record.record_id} names occurrences in "
+                    f"{record.path}, and the committed baseline cannot say what "
+                    f"is there: {why} — an unanswered question about the "
+                    f"approved passage is a refusal"
+                ),
+                location=record.path,
+            ))
+            continue
+        if any(o >= len(units) for o in record.occurrences):
+            problems.append(Problem(
+                code="approval-occurrence-not-derived",
+                message=(
+                    f"record {record.record_id} names assertion unit "
+                    f"{max(record.occurrences)} of {record.path}, and the "
+                    f"committed baseline segments it into {len(units)} unit(s) "
+                    f"— an occurrence past the end of the document is not one a "
+                    f"mint could have derived"
+                ),
+                location=record.path,
+            ))
+            continue
+        found = sorted(units[o].digest for o in record.occurrences)
+        # A whole-document record approves every identity in the document, so
+        # each may legitimately be named at more than one ordinal and the
+        # question is only whether the same identities are there. A passage
+        # record approves each of its units once, so the comparison is exact:
+        # a second ordinal holding an already-approved digest is the twin
+        # nobody reviewed.
+        expected = sorted(record.units)
+        if (sorted(set(found)) != sorted(set(expected))
+                if record.code in WHOLE_DOCUMENT_RECORD_CODES
+                else found != expected):
+            problems.append(Problem(
+                code="approval-occurrence-not-derived",
+                message=(
+                    f"record {record.record_id}'s occurrences are not where its "
+                    f"approved units are in the committed baseline of "
+                    f"{record.path} — the ordinals name other text, so the "
+                    f"passage this authorizes is not the passage the record "
+                    f"describes"
+                ),
+                location=record.path,
+            ))
+    return problems
+
+
+def occurrence_passages(repo_root, record):
+    """(the passages a record's approved occurrences are, None), or (None, why).
+
+    Each passage is a `(first line, last line)` pair over the committed
+    baseline, and there is one per *run* of consecutive occurrences: units
+    approved back to back are one passage, so the blank lines and list markers
+    between them stay editable, and an unapproved unit between two approved ones
+    ends the passage rather than being swallowed by it. That is the whole
+    difference from the hull this replaced — a hull spanned from the first
+    approved unit to the last and so authorized every intervening word,
+    including the material separating a repeated sentence from its twin.
+
+    The applier is the caller: bounding an edit is its job, and deciding what
+    the approved passage *is* belongs here, with the field that records it.
+    """
+    units, why = baseline_units(repo_root, record.path)
+    if units is None:
+        return None, why
+    if not record.occurrences or any(
+        o >= len(units) for o in record.occurrences
+    ):
+        return None, (
+            f"its approved occurrences are not units of {record.path} at HEAD"
+        )
+    approved = set(record.units)
+    if any(units[o].digest not in approved for o in record.occurrences):
+        return None, (
+            f"its approved occurrences no longer hold its approved units in "
+            f"{record.path} at HEAD"
+        )
+    passages, run = [], []
+    for ordinal in record.occurrences:
+        if run and ordinal != run[-1] + 1:
+            passages.append((units[run[0]].line, units[run[-1]].end_line))
+            run = []
+        run.append(ordinal)
+    passages.append((units[run[0]].line, units[run[-1]].end_line))
+    return tuple(passages), None
+
+
 def mint_approval_set(report, selected, *, repo_root, minter,
                       registry_path=DEFAULT_REGISTRY_PATH):
     """Mint an approval set for a person's selection of record digests.
@@ -755,6 +1027,10 @@ def _mint_approval_set(report, selected, *, repo_root, minter,
         code=record.extra["code"],
         path=record.extra["path"],
         units=_approved_units(record.extra["code"], record.extra["units"]),
+        # Bound below, once the targets have authorized: reading the committed
+        # baseline for a path the applier may not write would answer a question
+        # about a document this selection has already been refused for.
+        occurrences=(),
         destination=_destination(record),
     ) for record in chosen)
 
@@ -773,6 +1049,10 @@ def _mint_approval_set(report, selected, *, repo_root, minter,
     problems += _preimage_problems(
         [r for r in records if r.digest not in refused], repo_root, registry_path
     )
+    if problems:
+        return Invalid(tuple(problems))
+
+    records, problems = _bind_occurrences(records, repo_root)
     if problems:
         return Invalid(tuple(problems))
 
@@ -951,6 +1231,37 @@ def _approved_records(raw, bad, lineage):
                 where)
             ok = False
             continue
+        canonical = _approved_units(entry["code"], units)
+        occurrences = entry["occurrences"]
+        if not (isinstance(occurrences, list) and occurrences and all(
+            isinstance(o, int) and not isinstance(o, bool) and o >= 0
+            for o in occurrences
+        ) and list(occurrences) == sorted(set(occurrences))):
+            bad("approval-invalid-record",
+                f"records[{i}].occurrences must be a non-empty ascending list "
+                f"of distinct assertion-unit ordinals — they are which "
+                f"occurrence of each approved unit was read, and a repeated or "
+                f"unordered one gives a passage more than one reading",
+                where)
+            ok = False
+            continue
+        # A passage record approves each of its units in one place, so the two
+        # counts are the same number; a whole-document record approves the
+        # document entire, where an identity it lists once may sit in several
+        # places, so it owes an occurrence for each unit and may name more.
+        # Either way a count *below* the units is a record that cannot say
+        # where part of what it approves was read.
+        whole_document = entry["code"] in WHOLE_DOCUMENT_RECORD_CODES
+        if (len(occurrences) < len(canonical) if whole_document
+                else len(occurrences) != len(canonical)):
+            bad("approval-occurrence-not-derived",
+                f"records[{i}] approves {len(canonical)} assertion unit(s) and "
+                f"names {len(occurrences)} occurrence(s) — every approved unit "
+                f"is approved somewhere exactly, so a count that disagrees "
+                f"cannot identify the approved passage without guessing",
+                where)
+            ok = False
+            continue
         destination = entry["destination"]
         if destination is not None and not _printable(destination):
             bad("approval-invalid-record",
@@ -1010,8 +1321,8 @@ def _approved_records(raw, bad, lineage):
                 continue
         records.append(ApprovedRecord(
             digest=entry["digest"], record_id=entry["id"], code=entry["code"],
-            path=entry["path"], units=_approved_units(entry["code"], units),
-            destination=destination,
+            path=entry["path"], units=canonical,
+            occurrences=tuple(occurrences), destination=destination,
         ))
     if ok and _unsorted([r.digest for r in records], "records", bad):
         ok = False
@@ -1322,23 +1633,20 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
     declared_version = payload.get("schema_version")
     if (isinstance(declared_version, int)
             and not isinstance(declared_version, bool)
-            and declared_version == PRE_PROVENANCE_SCHEMA_VERSION):
-        # Alone, and before every other structural check: this artifact was
-        # written under rules that had no policy provenance in them, so reading
-        # its fields under version 2's rules would be reinterpreting it. A
-        # `policy` brand minted then names no declaration, and there is nothing
-        # to recover it from — the report it selects from is what a fresh mint
-        # starts at.
+            and declared_version in SUPERSEDED_SCHEMA_VERSIONS):
+        # Alone, and before every other structural check: an artifact written
+        # under older rules is refused rather than read under these ones, since
+        # what each older version was missing is authority the current applier
+        # rests on and no field can be recovered after the fact. Mint again from
+        # its report, which costs a re-mint and never a silent reinterpretation.
+        code, missing = SUPERSEDED_SCHEMA_VERSIONS[declared_version]
         return Invalid((Problem(
-            code="approval-schema-pre-provenance",
+            code=code,
             message=(
                 f"this approval set declares schema_version "
-                f"{PRE_PROVENANCE_SCHEMA_VERSION}, which predates policy "
-                f"provenance: a {MINTER_POLICY!r} brand was descriptive text "
-                f"there, carrying nothing the standing declaration could be "
-                f"revalidated against. It is refused rather than read as "
-                f"version {SCHEMA_VERSION} — mint again from its report, which "
-                f"costs a re-mint and never a silent reinterpretation"
+                f"{declared_version}, which this engine reads no longer: "
+                f"{missing}. It is refused rather than read as version "
+                f"{SCHEMA_VERSION} — mint again from its report"
             ),
             location="schema_version",
         ),))
@@ -1510,6 +1818,20 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
         if forged_policy_brand:
             return Invalid(tuple(forged_policy_brand))
         reasons += policy_reasons
+        if lineage.base_commit == current.get("base_commit"):
+            # Occurrences are ordinals into the baseline this set names, so they
+            # are re-derivable exactly when that baseline is the one in front of
+            # us — and then a disagreement cannot be the world moving, because a
+            # commit pins its bytes. It is a forged passage bound, `invalid` for
+            # the same reason a forged scope is. Against a *different* base
+            # commit the check stands down rather than running: the move is
+            # already `approval-base-commit-changed`, every occurrence
+            # disagreement under it is a consequence of that move, and naming
+            # them too would accuse an honest re-run of forgery — the same
+            # standing-down `_report_reasons` does when handed another report.
+            occurrence_problems = _occurrence_problems(records, repo_root)
+            if occurrence_problems:
+                return Invalid(tuple(occurrence_problems))
         preimage_problems = _preimage_problems(
             records, repo_root, registry_path
         )

@@ -17,8 +17,10 @@ The applier's whole job is refusal discipline around one small write:
   have produced is invalid.
 - **Operations are checked, not trusted.** Every operation must come from an
   approved record, be one of the operations *that record's finding code
-  approves* (`RECORD_REMEDIES`), stay inside the passage that record's units
-  are, write only that record's own targets, declare a declarable target class,
+  approves* (`RECORD_REMEDIES`), stay inside one of the passages that record's
+  approved *occurrences* are — never a hull spanning the text between two
+  copies of one sentence — write only that record's own targets, declare a
+  declarable target class,
   spell its paths canonically (`paths.write_target_problem`, the same owner the
   approval set uses), carry an exact preimage, and overlap or repeat nothing.
 - **The write is an explicit validated transaction.** Every target's preimage
@@ -57,7 +59,11 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
-from .approval import UNCHECKED_MEANING, validate_approval_set
+from .approval import (
+    UNCHECKED_MEANING,
+    occurrence_passages,
+    validate_approval_set,
+)
 from .bloat import (
     CONDENSE, CUT, DISTILL, EXTRACT_AND_MOVE, MERGE_DOC, RETIRE_DOC,
     residue_destination_ineligibility,
@@ -68,7 +74,6 @@ from .inventory import DEFAULT_REGISTRY_PATH, load_registry
 from .paths import DECLARABLE_TARGET_CLASSES, write_target_problem
 from .report import DIGEST, StaleReason
 from .repository import head_bytes, worktree_changes
-from .segment import segment_text
 from .results import STATE_CLEAN, STATE_STALE, Invalid, Problem
 
 # What the artifact says it is, for the same reason an approval set says so:
@@ -116,8 +121,8 @@ RECORD_REMEDIES = {
     VERDICT_UNVERIFIABLE: _PASSAGE_REMEDY,
     # A narrative document's `> As of` line, overtaken by a change to what it
     # names. The remedy rewrites that one line, so it is the same span edit and
-    # nothing more: an anchor record's units *are* the anchor, so the hull
-    # check already confines the edit to it. The other anchor codes are absent
+    # nothing more: an anchor record's units *are* the anchor, so the approved
+    # passage already confines the edit to it. The other anchor codes are absent
     # deliberately — a missing or malformed anchor needs one authored, which is
     # not a span edit to a passage anybody approved.
     CODE_ANCHOR_STALE: _PASSAGE_REMEDY,
@@ -464,7 +469,7 @@ def _binding_problems(i, operation, by_digest, bad):
         OP_RETIRE: (record.path,),
         OP_CREATE: (record.destination,) if record.destination else (),
         # `move-with-provenance` returned above; these are the rest of
-        # `POSITIONED_OPS`, the ones a hull can and must bound.
+        # `POSITIONED_OPS`, the ones an approved passage can and must bound.
         **{positioned: (record.path,) for positioned in _PASSAGE_REMEDY},
     }.get(op, record.targets())
     if operation["path"] not in expected:
@@ -536,49 +541,32 @@ def _completeness_problems(usable, by_digest, bad):
                 "operations")
 
 
-def _approved_hull(repo_root, record):
-    """((first line, last line), None) of a record's approved units, or
-    (None, why not) — the passage a remedy for this record may edit.
-
-    Measured against the committed baseline, which is the state the plan's
-    line numbers are stated in: the write path requires the tree to equal it,
-    and on an idempotent re-run the approved passage is necessarily no longer
-    on disk — so reading the working tree would make the bound unavailable in
-    exactly the case an attacker arranges.
-    """
-    data, problem = head_bytes(repo_root, record.path)
-    if problem is not None:
-        return None, problem.message
-    if data is None:
-        return None, f"{record.path} is not in the committed baseline"
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        return None, (
-            f"{record.path} is not valid UTF-8 at HEAD ({exc.reason} at byte "
-            f"{exc.start})"
-        )
-    approved = set(record.units)
-    lines = [
-        (unit.line, unit.end_line)
-        for unit in segment_text(text, path=record.path).units
-        if unit.digest in approved
-    ]
-    if not lines:
-        return None, f"none of its units is in {record.path} at HEAD"
-    return (min(s for s, _ in lines), max(e for _, e in lines)), None
+def _rendered(passages):
+    """The approved passages as a reader would cite them: `12..14, 40..41`."""
+    return ", ".join(f"{first}..{last}" for first, last in passages)
 
 
 def _approved_span_problems(repo_root, operations, by_digest):
-    """Positioned operations, checked against the passage that was approved.
+    """Positioned operations, checked against the passages that were approved.
 
-    A record names its target by assertion-unit digest, and those units are a
-    *passage* of the document — so an edit that reaches outside them is an edit
-    to text no reviewer read under this record. The bound is the hull of the
-    approved units (their first line through their last), not each unit
-    exactly: the blank lines and list markers between two approved units are
-    part of the passage, and a remedy that removes two sentences legitimately
-    removes what separated them.
+    A record names its target by assertion-unit digest *and* by which occurrence
+    of each unit the audit read (`approval.occurrence_passages`), and those
+    occurrences are one or more *passages* of the document — so an edit that
+    reaches outside them is an edit to text no reviewer read under this record.
+    Consecutive approved units are one passage, so the blank lines and list
+    markers between them remain editable and a remedy that removes two adjacent
+    sentences legitimately removes what separated them. Units with something
+    unapproved between them are two passages, and an operation must fit inside
+    one of them: spanning the gap would edit the intervening material, which
+    nobody approved — and where the gap separates a repeated sentence from its
+    twin, spanning it is authority over a whole section obtained by approving
+    one line.
+
+    The passages are measured against the committed baseline, which is the state
+    the plan's line numbers are stated in: the write path requires the tree to
+    equal it, and on an idempotent re-run the approved passage is necessarily no
+    longer on disk — so reading the working tree would make the bound
+    unavailable in exactly the case an attacker arranges.
 
     Only operations on the record's *own* document reach this check, and that
     is not a gap: a record's units segment that document alone, so a
@@ -588,7 +576,7 @@ def _approved_span_problems(repo_root, operations, by_digest):
     and a move's append, each of which the approval covers entire.
     """
     problems = []
-    hulls = {}
+    bounds = {}
 
     def bad(message, where):
         problems.append(Problem(
@@ -602,36 +590,36 @@ def _approved_span_problems(repo_root, operations, by_digest):
         record = by_digest[operation["record"]]
         if operation["path"] != record.path:
             continue
-        if record.digest not in hulls:
-            hulls[record.digest] = _approved_hull(repo_root, record)
-        hull, why = hulls[record.digest]
-        if hull is None:
+        if record.digest not in bounds:
+            bounds[record.digest] = occurrence_passages(repo_root, record)
+        passages, why = bounds[record.digest]
+        if passages is None:
             bad(f"operations[{i}] edits {record.path}, and where record "
-                f"{record.record_id}'s approved units are cannot be "
+                f"{record.record_id}'s approved occurrences are cannot be "
                 f"established: {why} — an unanswered question about the "
                 f"target is a refusal. Re-run the audit and mint afresh",
                 f"operations[{i}]")
             continue
-        first, last = hull
         if operation["op"] == OP_INSERT:
             point = operation["after_line"]
-            if not first - 1 <= point <= last:
+            if not any(first - 1 <= point <= last for first, last in passages):
                 bad(f"operations[{i}] inserts after line {point} of "
                     f"{record.path}, and record {record.record_id} was "
-                    f"approved about lines {first}..{last} — an edit outside "
-                    f"the approved passage is an edit nobody reviewed. Move "
-                    f"the insertion inside it, or mint an approval for a "
+                    f"approved about lines {_rendered(passages)} — an edit "
+                    f"outside the approved passage is an edit nobody reviewed. "
+                    f"Move the insertion inside it, or mint an approval for a "
                     f"record that covers where it goes",
                     f"operations[{i}]")
             continue
         start, end = operation["start_line"], operation["end_line"]
-        if start < first or end > last:
+        if not any(first <= start and end <= last for first, last in passages):
             bad(f"operations[{i}] edits lines {start}..{end} of "
                 f"{record.path}, and record {record.record_id} was approved "
-                f"about lines {first}..{last} — an approval binds to the "
-                f"passage its units are, so a wider span is text nobody "
-                f"approved a remedy for. Narrow the operation to the approved "
-                f"passage, or mint an approval that covers the rest",
+                f"about lines {_rendered(passages)} — an approval binds to the "
+                f"passages its approved occurrences are, so a span that "
+                f"reaches beyond one of them is text nobody approved a remedy "
+                f"for. Narrow the operation to an approved passage, or mint an "
+                f"approval that covers the rest",
                 f"operations[{i}]")
     return tuple(problems)
 
