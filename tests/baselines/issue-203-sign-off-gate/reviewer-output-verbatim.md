@@ -58,6 +58,7 @@ Agent `a37d5c3995ee7c02d`, verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by reading the documented standards, then the diff.
 ## Standards review — `8ded7d7...HEAD`
 
@@ -90,6 +91,7 @@ It names `render-apply-summary.py` as the apply lane's run-surface script. `veri
 
 ### Clean, verified
 Engine ↔ `.doc-lifecycle/wiring/engine/` byte-identical. Stdlib-only throughout (engine + both new scripts). No inline `jq`/heredoc run-surface strings. No `git add -A`; no `inputs.*` in any `run:`. `check-repo-integrity.py`'s non-vendoring is correct and documented (it runs from the release-pinned clone: `doc-audit.yml:243`). CONTEXT.md `_Avoid_` lists respected. `release-manifest.py` exit 0 (60 suites); 1344 engine tests and 28/28 script suites pass.
+<!-- END VERBATIM -->
 
 ---
 
@@ -99,6 +101,7 @@ Agent `a3281ff30ced7ae50`, verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by fetching the authoritative spec and the diff.
 Full gate rerun locally: **1344 engine tests OK, 28/28 script suites PASS.**
 
@@ -123,6 +126,7 @@ None material — every touched file traces to a story. Side note (repo conventi
 6. **Run-surface fail-open.** `doc-audit.yml:455` / `doc-bloat-audit.yml:387` pass `--integrity` only under `[ -f … ]`, and the artifact download is `continue-on-error` (`:390`). A lost integrity artifact renders the summary with no integrity evidence rather than refusing — the one place the rendering defaults open. Low blast radius (the report only exists if the gate passed in-job).
 
 Nothing found contradicts #57's distilled decisions: approval sets stay untracked artifacts, the applier stays sole writer, the registry stays closed-world, and policy minting is still refused for bloat at both doors.
+<!-- END VERBATIM -->
 
 ---
 
@@ -132,6 +136,7 @@ Agent `a869539bbcd452d7a`, verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by examining the diff range to find all race/concurrency tests.
 ## Scope of the sweep
 
@@ -242,6 +247,7 @@ This script never writes to the repository, so "surviving bytes" has no rollback
 7. `check-repo-integrity_test.py:87` / `:107` — the dirtied-evidence pair asserts the typed refusal but never that `src/server.py` still holds `"PORT = 9090\n"` at refusal time. `:230` covers that property once for the whole gate, so this is a redundancy gap rather than a hole; :87 would comply by adding the same read-back it already implies.
 
 Note on grading convention: I counted commit-SHA equality (`remote_tip() == planted/moved/landed`, `verified == rev-parse HEAD`) as a surviving-bytes assertion, since a commit id is a cryptographic commitment to the exact tree. If the rule is read to require literal content read-back, then every `apply-recovery_test.py` row marked BOTH degrades to "id-level bytes", and the fix in each case is one extra `git show <tip>:docs/edited.md` comparison against the expected text.
+<!-- END VERBATIM -->
 
 ---
 

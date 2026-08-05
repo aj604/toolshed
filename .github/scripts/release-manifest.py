@@ -167,6 +167,20 @@ GATE_MANIFEST = {
     #     doc-contract_test
     #   upgrade-lane commit subject and PR title through the renderer (#189) —
     #     render-report_test, upgrade-workflow_test
+    # The record #203 produced is the evidence a human weighs when deciding
+    # whether to close #57, and its numeric claims kept drifting from the
+    # artifacts they describe — five times across four review rounds, the last
+    # of them introduced by the very commit that added this guard. So the
+    # guard is pinned for the same reason the seven suites below were: a suite
+    # that nothing names is a suite whose deletion nobody reports, and the one
+    # holding the record honest should not be the one that can vanish quietly.
+    #
+    # Most unpinned suites in this tree are fine unpinned — roughly a third of
+    # them are, and that is not a defect. This one is named because deleting
+    # it would restore precisely the blind spot it exists to close.
+    "sign-off record integrity": [
+        "tests/scripts/sign-off-record_test.py",
+    ],
     "issue #168 sign-off regressions": [
         "tests/engine/applier_test.py",
         "tests/engine/approval_test.py",

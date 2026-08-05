@@ -57,20 +57,77 @@ def read(path):
         return handle.read()
 
 
-# The verbatim files are frozen quotations of what agents actually returned,
-# and the reviewers ran before #203 changed anything — so they quote 1344
-# engine tests, correctly and permanently. Editing them to satisfy a
-# consistency check would be falsifying evidence, which is the precise
-# opposite of their purpose. They are excluded from every check below, and
-# that exclusion is the point rather than a convenience: a claim this suite
-# can enforce is an authored claim, and a quotation is not one.
-VERBATIM = ("reviewer-output-verbatim.md", "reviewer-leaf-output-verbatim.md")
+# A quotation must never be edited to satisfy a consistency check — the
+# reviewers ran before #203 changed anything, so they say 1344 engine tests and
+# 28/28 suites, correctly and permanently. Editing that would be falsifying
+# evidence, the precise opposite of why it is retained.
+#
+# But the exemption is *the quoted blocks*, not the files holding them. Those
+# files also carry ~66 lines of authored analysis — including the corrected
+# provenance narrative — and an earlier file-level exemption left that prose
+# unguarded: a planted "the criterion now names eighteen suites, and the engine
+# suite ran 9999 tests" inside an authored header passed the whole gate. The
+# hole was created by the exemption itself, not by the "new claims" ceiling
+# this suite already acknowledges.
+#
+# So the boundary is explicit rather than inferred. `mark_quotes` wrapped each
+# quotation in these markers by locating it via its exact text re-extracted
+# from the session transcript, refusing unless it matched verbatim exactly
+# once — the markers sit outside the quote and change not one character of it.
+# Inferring the boundary from the surrounding `---` rules would have been
+# wrong: several reviewers' own reports contain `---` lines.
+BEGIN_VERBATIM = "<!-- BEGIN VERBATIM -->"
+END_VERBATIM = "<!-- END VERBATIM -->"
+
+# The second kind of not-an-assertion, found the hard way: `gate-results.md`
+# carries a drift-history table that *quotes the wrong numbers on purpose* —
+# "28/28 suites passed", "eighteen suites pinned" — as the record of what this
+# ticket got wrong. Every one of those is a false claim by construction, and a
+# guard that reads them as live assertions demands the history be falsified to
+# go green. That is the same error as editing a reviewer's quotation, in a
+# different costume.
+#
+# It is a separate marker rather than the same one because the two exemptions
+# rest on different grounds and a reader should be able to tell them apart: a
+# VERBATIM block is someone else's words, a QUOTED-CLAIMS block is this
+# record's own record of its errors.
+BEGIN_QUOTED_CLAIMS = "<!-- BEGIN QUOTED-CLAIMS -->"
+END_QUOTED_CLAIMS = "<!-- END QUOTED-CLAIMS -->"
+
+MARKERS = ((BEGIN_VERBATIM, END_VERBATIM),
+           (BEGIN_QUOTED_CLAIMS, END_QUOTED_CLAIMS))
+OPENERS = {begin for begin, _ in MARKERS}
+CLOSERS = {end for _, end in MARKERS}
+
+
+def authored(text):
+    """`text` with every quoted block removed, leaving only asserted prose.
+
+    Two block kinds are stripped: reviewer quotations (VERBATIM) and this
+    record's own quotations of its past mistakes (QUOTED-CLAIMS). Neither is a
+    claim the record makes, so neither may be held to the artifacts.
+
+    An unterminated marker drops the rest of the file, which is the safe
+    direction: it can only hide asserted prose from a check, never expose a
+    quotation to one. `TheQuotationBoundaryIsWellFormed` is what stops that
+    from happening silently.
+    """
+    kept, quoting = [], False
+    for line in text.splitlines():
+        marker = line.strip()
+        if marker in OPENERS:
+            quoting = True
+        elif marker in CLOSERS:
+            quoting = False
+        elif not quoting:
+            kept.append(line)
+    return "\n".join(kept)
 
 
 def record_files():
-    """The record's *authored* prose — quotations deliberately excluded."""
+    """Every record file. Quotations are stripped per-file by `authored`."""
     return sorted(os.path.join(RECORD, name) for name in os.listdir(RECORD)
-                  if name.endswith(".md") and name not in VERBATIM)
+                  if name.endswith(".md"))
 
 
 def gate_manifest():
@@ -80,6 +137,10 @@ def gate_manifest():
     return module.GATE_MANIFEST
 
 
+QUOTE_BEARING = ("reviewer-output-verbatim.md",
+                 "reviewer-leaf-output-verbatim.md")
+
+
 class TheRecordExists(unittest.TestCase):
     """If the record is gone or renamed, every check below would vacuously pass."""
 
@@ -87,13 +148,87 @@ class TheRecordExists(unittest.TestCase):
         self.assertTrue(os.path.isdir(RECORD), f"no record at {RECORD}")
         present = set(os.listdir(RECORD))
         for expected in ("gate-results.md", "independent-reviews.md",
-                         "race-test-audit.md") + VERBATIM:
+                         "race-test-audit.md") + QUOTE_BEARING:
             self.assertIn(expected, present)
 
-    def test_the_authored_and_quoted_halves_are_both_non_empty(self):
-        # If VERBATIM ever grew to swallow the authored files, every check
-        # below would vacuously pass.
-        self.assertTrue(record_files(), "no authored prose left to check")
+
+class TheQuotationBoundaryIsWellFormed(unittest.TestCase):
+    """The markers must balance, or `authored` silently drops real prose.
+
+    This is the check that keeps the block-level exemption honest: without it,
+    a stray or deleted `END VERBATIM` would quietly restore the file-level
+    hole this suite exists to close, and every other test here would still
+    pass.
+    """
+
+    @staticmethod
+    def _marker_lines(text, marker):
+        """Lines that *are* the marker, matching how `authored` reads them.
+
+        Counting substrings instead would count this record's own prose
+        discussing the markers — which is what happened, and is the same
+        mention-versus-use confusion the fences exist to resolve.
+        """
+        return sum(1 for line in text.splitlines() if line.strip() == marker)
+
+    def test_markers_balance_in_every_record_file(self):
+        # Every file, not just the quote-bearing ones: gate-results.md carries
+        # the QUOTED-CLAIMS fences, and an unbalanced marker there would hide
+        # the rest of the record's real claims from every check below.
+        for path in record_files():
+            text = read(path)
+            name = os.path.basename(path)
+            for begin, end in MARKERS:
+                opened = self._marker_lines(text, begin)
+                closed = self._marker_lines(text, end)
+                self.assertEqual(
+                    opened, closed,
+                    f"{name} has {opened} '{begin}' and {closed} '{end}' "
+                    f"lines — unbalanced, so asserted prose is being hidden "
+                    f"from every check in this suite")
+
+    def test_the_quote_bearing_files_still_carry_their_markers(self):
+        for name in QUOTE_BEARING:
+            text = read(os.path.join(RECORD, name))
+            self.assertGreater(
+                self._marker_lines(text, BEGIN_VERBATIM), 0,
+                f"{name} carries no quotation markers; either it stopped "
+                f"holding quotations or the boundary was removed")
+
+    def test_the_drift_history_is_fenced_and_the_fences_stay_few(self):
+        # The history quotes false numbers on purpose; unfenced, this suite
+        # would demand it be falsified to go green — which is how the fence
+        # came to exist, the guard having flagged the table minutes after it
+        # was written. The upper bound is the point: a fence marks text as
+        # quoted rather than asserted, so a record that kept growing them
+        # would be routing its live claims around the guard.
+        text = read(os.path.join(RECORD, "gate-results.md"))
+        fences = self._marker_lines(text, BEGIN_QUOTED_CLAIMS)
+        self.assertGreaterEqual(
+            fences, 1, "the drift-history table must stay fenced")
+        self.assertLessEqual(
+            fences, 3,
+            f"gate-results.md carries {fences} quoted-claim fences; each one "
+            f"is prose this suite cannot check, so they stay few and "
+            f"deliberate rather than becoming a way around it")
+
+    def test_authored_prose_survives_the_strip(self):
+        # If the markers ever swallowed a whole file, its authored analysis
+        # would silently stop being guarded.
+        for name in QUOTE_BEARING:
+            kept = authored(read(os.path.join(RECORD, name))).strip()
+            self.assertTrue(
+                kept, f"{name} has no authored prose left after stripping "
+                      f"quotations — the boundary is wrong")
+
+    def test_quotations_are_actually_excluded(self):
+        # The other direction: prove the strip removes something. A no-op
+        # `authored` would expose quotations to checks that must never edit
+        # them.
+        for name in QUOTE_BEARING:
+            text = read(os.path.join(RECORD, name))
+            self.assertLess(len(authored(text)), len(text),
+                            f"{name}: nothing was stripped")
 
 
 class ThePinnedSuiteCountIsDerived(unittest.TestCase):
@@ -120,13 +255,84 @@ class ThePinnedSuiteCountIsDerived(unittest.TestCase):
             r"criterion now names (\w+) suites", re.IGNORECASE)
 
         for path in record_files() + [DECISIONS]:
-            for match in pattern.finditer(read(path).replace("\n", " ")):
+            for match in pattern.finditer(
+                    authored(read(path)).replace("\n", " ")):
                 stated = next(g for g in match.groups() if g)
                 self.assertNotIn(
                     stated.lower(), wrong,
                     f"{os.path.relpath(path, ROOT)} says '{stated} suites'; "
                     f"{CRITERION} pins {len(self.suites)} ({expected})")
                 self.assertEqual(stated.lower(), expected)
+
+
+class TheGateSizeCountsAreDerived(unittest.TestCase):
+    """The script-suite and wired-suite totals, from the tools themselves.
+
+    Round 4's finding, and the sharpest instance of this record's own defect
+    class: the commit that added *this suite* made it the 29th script suite
+    and the 61st wired suite, invalidating four "28/28" and "60 suites" claims
+    in a record whose contract is "every gate component, its command, and its
+    result". Extracting the previous commit and running the gate there showed
+    those numbers were correct when written — the anti-drift commit introduced
+    the fifth instance of the drift.
+
+    The earlier checks could not have caught it: they match a spelled-out
+    suite count, a four-digit engine count, and the race totals, and `28/28`
+    and `60 suites` match none of those. Correcting the strings alone would
+    have recurred on the next suite added, so both numbers are derived here —
+    from `run-script-suites.py`'s own glob and `release-manifest.py`'s own
+    audit, never from a number typed twice.
+    """
+
+    def setUp(self):
+        self.scripts = self._script_suites()
+        self.wired = self._wired_suites()
+
+    def _script_suites(self):
+        spec = importlib.util.spec_from_file_location(
+            "run_script_suites",
+            os.path.join(ROOT, ".github", "scripts", "run-script-suites.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.discover(os.path.join(ROOT, "tests", "scripts"))
+
+    def _wired_suites(self):
+        spec = importlib.util.spec_from_file_location(
+            "release_manifest", MANIFEST)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.audit(ROOT).gate
+
+    def test_every_stated_script_suite_total_matches_the_glob(self):
+        # `28/28`, `29/29` — the runner reports passed/total, so a correct
+        # record states the suite count on both sides.
+        total = len(self.scripts)
+        for path in record_files():
+            for match in re.finditer(r"(\d+)/(\d+) suite", authored(read(path))):
+                self.assertEqual(
+                    (int(match.group(1)), int(match.group(2))),
+                    (total, total),
+                    f"{os.path.relpath(path, ROOT)} states "
+                    f"'{match.group(0)}' but tests/scripts holds {total} "
+                    f"suites — re-running the documented command contradicts "
+                    f"the record")
+
+    def test_every_stated_wired_suite_total_matches_the_manifest_guard(self):
+        total = len(self.wired)
+        for path in record_files():
+            for match in re.finditer(r"(\d+) suites? wired", authored(read(path))):
+                self.assertEqual(
+                    int(match.group(1)), total,
+                    f"{os.path.relpath(path, ROOT)} states "
+                    f"'{match.group(0)}' but release-manifest.py wires "
+                    f"{total}")
+
+    def test_the_guard_suite_is_itself_pinned_to_a_criterion(self):
+        # Round 4's third finding: this suite was silently deletable — the
+        # manifest guard stayed green without it. The suite that keeps the
+        # record honest is exactly the one whose removal must be reported.
+        pinned = {path for paths in gate_manifest().values() for path in paths}
+        self.assertIn("tests/scripts/sign-off-record_test.py", pinned)
 
 
 class TheEngineTestCountIsInternallyConsistent(unittest.TestCase):
@@ -142,7 +348,7 @@ class TheEngineTestCountIsInternallyConsistent(unittest.TestCase):
     def test_all_stated_engine_counts_agree(self):
         seen = {}
         for path in record_files() + [DECISIONS]:
-            for match in self.COUNT.finditer(read(path)):
+            for match in self.COUNT.finditer(authored(read(path))):
                 value = next(g for g in match.groups() if g)
                 seen.setdefault(value, []).append(
                     os.path.relpath(path, ROOT))
@@ -160,7 +366,7 @@ class TheRaceAuditTotalsMatchItsTable(unittest.TestCase):
     PATH = os.path.join(RECORD, "race-test-audit.md")
 
     def setUp(self):
-        self.text = read(self.PATH)
+        self.text = authored(read(self.PATH))
 
     def test_the_prose_totals_match_the_row_dispositions(self):
         rows = [line for line in self.text.splitlines()

@@ -15,18 +15,35 @@
   request body is a claim; the point of #168 was that authority binds to bytes a later reader can
   check.
 - Decided: **prose that states a number about an artifact is checked against that artifact.**
-  Across three review rounds the same defect recurred four times — the race count, the suite count
-  twice, and the engine-test count — each caught by a human, each invisible to a fully green gate,
-  on a ticket whose subject is evidentiary discipline. A fifth instance drifted a *provenance*
-  rather than a number. The root cause is one thing: a claim in prose and the artifact under it
-  had no mechanical relationship. `tests/scripts/sign-off-record_test.py` now derives the
-  pinned-suite count from `release-manifest.py`'s own `GATE_MANIFEST`, holds every engine-test
-  count in the authored prose to agreeing with every other, and holds the race audit's totals to
-  its own table; all three historical drifts were replanted and confirmed to fail it. It exempts
-  the verbatim files, because those are quotations and editing one to satisfy a consistency check
-  would be falsifying evidence — a distinction the suite forced on its first run by failing on the
-  reviewers' correct, permanent "1344". It inherits `doc-contract_test.py`'s ceiling and could not
-  have caught the provenance error; nothing mechanical would have.
+  Across four review rounds the same defect recurred six times — the race count, the suite count
+  three times, the engine-test count, and the script/wired gate totals — each caught by a human,
+  each invisible to a fully green gate, on a ticket whose subject is evidentiary discipline. A
+  further instance drifted a *provenance* rather than a number. The root cause is one thing: a
+  claim in prose and the artifact under it had no mechanical relationship.
+  `tests/scripts/sign-off-record_test.py` now derives all three counts from the tools themselves —
+  the pinned-suite count from `release-manifest.py`'s `GATE_MANIFEST`, the script-suite total from
+  `run-script-suites.py`'s glob, the wired-suite total from `release-manifest.py`'s `audit()` —
+  and holds the engine counts and race totals to internal agreement. Every historical drift was
+  replanted and confirmed to fail it.
+- Standing, and the sharpest illustration of why the guard had to *derive* rather than assert:
+  **the commit that added that guard introduced the next instance of the defect it closes.** The
+  new suite became the 29th script suite and 61st wired suite, invalidating four "28/28" and "60
+  suites" claims; the guard as first written could not match those strings at all. Extracting the
+  prior commit and running the gate there confirms both numbers were correct when written. A fix
+  that only corrected the strings would have recurred on the next suite added.
+- Decided: **the quotation exemption is per block, not per file.** A file-level exemption left
+  ~66 lines of authored analysis inside the two quote-bearing files unguarded — a planted false
+  count in an authored header passed the whole gate. Quotations are now delimited by explicit
+  `<!-- BEGIN VERBATIM -->` markers, placed by matching each against its session transcript and
+  refusing unless it matched verbatim exactly once, so the markers sit outside the quoted text.
+  Inferring the boundary from `---` rules would have been wrong: reviewers' own reports contain
+  them. The principle is unchanged and now precise — a quotation must never be edited to satisfy
+  a consistency check, and authored analysis is guarded like any other prose.
+- Standing: the guard suite is pinned to its own criterion, `sign-off record integrity`, because
+  it was briefly silently deletable. Roughly a third of this tree's suites are pinned to no
+  criterion and are fine that way; this one is named because deleting it restores the blind spot
+  it exists to close. It inherits `doc-contract_test.py`'s ceiling and could not have caught the
+  provenance error; nothing mechanical would have.
 - Standing: **the review apparatus lost a finding, and that is why two defects reached the
   pull-request review instead of this record.** Each axis fanned out internally — Spec into five
   leaf reviewers, Standards into two — and the Spec aggregate returned at 14:38:35.302Z, 45

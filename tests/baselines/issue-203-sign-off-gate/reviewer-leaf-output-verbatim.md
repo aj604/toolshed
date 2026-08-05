@@ -76,6 +76,7 @@ Verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by fetching the spec and examining the diff.
 ## Verdict: US11–US15 met. No MISSING items in scope; two small PARTIALs, no implementation-wrong.
 
@@ -98,6 +99,7 @@ I'll start by fetching the spec and examining the diff.
 **Scope creep: none material.** The bloat-lane rewrite is required by US14, not "unrelated workflow duplication". The out-of-tree artifact move, `PYTHONDONTWRITEBYTECODE`, and `--add-dir` all follow from "keep verdict data outside repository state". The `wrote no report` check is new behavior beyond US11-15 but is a direct consequence of moving the redirect out of tree.
 
 All in-scope suites pass: `check-repo-integrity_test` (12), `audit-workflow_test` (34), `bloat-audit-workflow_test` (9), `render-audit-summary_test` (26), `install-parity_test` (7), `workflow-permissions_test` (16).
+<!-- END VERBATIM -->
 
 ---
 
@@ -112,6 +114,7 @@ Verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by getting the spec and the diff.
 All three suites pass locally (31, 14, 10 tests). Findings below; paths absolute.
 
@@ -131,6 +134,7 @@ All three suites pass locally (31, 14, 10 tests). Findings below; paths absolute
 - `/…/scripts/verify-apply-bytes.py:159-164` — one closing for all stages, including `branch reuse`: "Nothing was pushed and no pull request was created… Inspect the checkout, then re-run the audit and mint afresh." At reuse a foreign/earlier branch *does* exist, and `render-apply-summary.py` deliberately introduced `NOTHING_TOUCHED` for exactly that ("telling a reader nothing was created would be false", `/…/scripts/render-apply-summary.py:128-138`). Wrong remediation advice for `apply-branch-approval-conflict` / `apply-branch-moved`; no test asserts this text.
 
 No scope creep found; no implementation-looks-wrong findings on US7–US10, US29–US32.
+<!-- END VERBATIM -->
 
 ---
 
@@ -145,6 +149,7 @@ Verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by gathering the spec and the diff.
 ## Verified
 
@@ -171,6 +176,7 @@ Both are unpinned citations to a file deleted at HEAD, unlike the convention eve
 **PARTIAL — stale narrative anchors (P3).** Three guides were edited in this diff but kept `> As of 2026-07-30 (doc-lifecycle 0.45.0…)` while now describing 0.46.9 behavior: `docs/guides/scheduling-doc-sync.md:3`, `docs/guides/principles.md:3`, `docs/guides/auditing-doc-bloat.md:3`. The new `docs/guides/building-skills-test-first.md:3` correctly reads `2026-08-05 (doc-lifecycle 0.46.9…)`. Per CLAUDE.md, each guide carries growing-docs' `> As of` anchor — this is exactly the narrative-anchor-refresh class the repo's own policy exists to fix.
 
 **Implementation-wrong: none in scope A.**
+<!-- END VERBATIM -->
 
 ---
 
@@ -185,6 +191,7 @@ Verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by getting the spec and the diff.
 Verified against code; both engine suites (1344 tests) and `doc-contract_test.py` (22) are green.
 
@@ -205,6 +212,7 @@ Verified against code; both engine suites (1344 tests) and `doc-contract_test.py
 **Secondary note (US26, "or explicitly selected"):** minting always refuses ambiguity — there is **no public producer** for an explicitly-selected occurrence set. `cli.py` has no occurrence flag; `applier_test.py:1995 declared()` hand-constructs `ApprovalSet`. Validation accepts such a hand-written artifact, so the "explicitly selected" half of US26 exists only as an artifact-level contract, not a door a reviewer can use. Not wrong, but worth confirming it's intended.
 
 **Doc-contract tests:** 22 tests, all schema/policy/lane claims; none assert the occurrence contract (e.g. no analogue of `test_the_pre_provenance_refusal_is_documented` at `tests/scripts/doc-contract_test.py:169` for `approval-schema-pre-occurrence`), though `plugins/doc-lifecycle/engine/README.md:1953,1958,2013-2026` does document it.
+<!-- END VERBATIM -->
 
 ---
 
@@ -219,6 +227,7 @@ Verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by fetching the spec and examining the diff.
 **Verified by execution** (285 in-scope engine tests + 23 policy acceptance tests pass; source/vendor engine byte-identical), plus independent mutation probes.
 
@@ -237,6 +246,7 @@ I'll start by fetching the spec and examining the diff.
 **7. No scope creep.** No new eligibility classes; `POLICY_NEVER_ELIGIBLE_CODES = BLOAT_VERDICTS` unchanged (`approval.py:159`); sha256 only, no signatures/remote service.
 
 **Minor:** `apply_edit_plan` (`applier.py:1418-1440`) has no `policy_path`, pinning revalidation to `DEFAULT_POLICY_PATH`, while `policy-mint`/`validate-approval` accept `--policy` (`cli.py:158-164`). Harmless for shipped templates (they pass the default path) but a consumer with a relocated declaration mints cleanly and then fails closed at apply.
+<!-- END VERBATIM -->
 
 ---
 
@@ -251,6 +261,7 @@ Verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by reading the authorities and the diff.
 Read all authorities, ran both gates, executed both suite sets.
 
@@ -276,6 +287,7 @@ The suite's own docstring calls it "A wiring suite, like engine-capability_test.
 ## Minor — GATE_MANIFEST coverage is uneven
 
 `.github/scripts/release-manifest.py:113-119` adds only `check-repo-integrity_test.py` to "workflow trust boundary". `apply-lane-parity_test.py` and `apply-recovery_test.py` guard the same boundary (force-push, staging confinement, branch reuse) and are unmapped, so deleting them stays green. Not a guard failure (exit 0; `policy-workflow_test.py` is likewise unmapped pre-existing), but the criterion is now under-declared relative to what protects it.
+<!-- END VERBATIM -->
 
 ---
 
@@ -290,6 +302,7 @@ Verbatim:
 
 ---
 
+<!-- BEGIN VERBATIM -->
 I'll start by reading the authorities and then the new scripts.
 ## Standards review — new/changed helper scripts (8ded7d7…HEAD)
 
@@ -322,6 +335,7 @@ Both live in the same directory and are both vendored into `.doc-lifecycle/wirin
 
 ### Clean axes
 Mysterious Name, Primitive Obsession, Data Clumps, Long Function, Repeated Switches, Message Chains: no findings worth raising. The `(stage, code, message, details)` refusal tuple and the `{code, message, location}` problem dict deliberately mirror the engine's `Problem` shape.
+<!-- END VERBATIM -->
 
 ---
 

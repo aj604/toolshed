@@ -25,8 +25,13 @@ half and the component list a later reader can re-execute.
 
 ## The root cause this record kept demonstrating on itself
 
-Across three review rounds, the same defect recurred four times, and a human caught it every
-time:
+Across four review rounds, the same defect recurred six times, and a human caught it every time:
+
+The table below quotes the wrong numbers deliberately — it is the record of what went wrong, so
+every claim in it is false by construction. It is fenced from `sign-off-record_test.py` for that
+reason; see the note under "Two boundaries" about why fencing it is not the same as excusing it.
+
+<!-- BEGIN QUOTED-CLAIMS -->
 
 | Round | Claim | Artifact | Caught by |
 |---|---|---|---|
@@ -34,10 +39,31 @@ time:
 | 2 | "fourteen suites pinned" | manifest held a different number | reviewer |
 | 3 | "eighteen suites pinned" | manifest held seventeen | reviewer |
 | 3 | "1348 engine tests" (inline) | 1349 in the same file's own table | reviewer |
+| 4 | "28/28 suites passed", ×3 | 29/29 once this guard existed | reviewer |
+| 4 | "60 suites wired" | 61 once this guard existed | reviewer |
 
-And in a fifth instance the drifting claim was not a number but a *provenance*: this record
+<!-- END QUOTED-CLAIMS -->
+
+And in a further instance the drifting claim was not a number but a *provenance*: this record
 asserted that its three reviewers "never reported" two defects, when in fact one reviewer found
 both and its report was lost to a race (see `reviewer-leaf-output-verbatim.md`).
+
+**Round 4's pair is the sharpest, and it is self-inflicted.** Adding this guard's own suite made
+it the 29th script suite and the 61st wired suite, invalidating four claims in the same commit
+whose stated purpose was to close this defect class. Extracting the previous commit and running
+the gate there shows what it then produced:
+
+<!-- BEGIN QUOTED-CLAIMS -->
+
+> `60 suite(s) wired` — `28/28 suite(s) passed`
+
+<!-- END QUOTED-CLAIMS -->
+
+Those numbers were correct when written, and were invalidated by the anti-drift commit itself.
+The guard as first written was *structurally* incapable of catching it: its checks matched a
+spelled-out suite count, a four-digit engine count, and the race totals, and neither of the two
+strings above matches any of them. Correcting the four occurrences alone would have recurred on
+the next suite added.
 
 **The root cause is one thing: a claim in prose and the artifact it describes had no mechanical
 relationship.** Every count was typed by hand from something read a moment earlier, and nothing in
@@ -46,18 +72,51 @@ whose entire subject is evidentiary discipline. The gate proved the code; nothin
 record about the code.
 
 **Fixed here rather than deferred**, because the fix is small and the alternative is asking a
-reader to trust a record whose numbers went wrong four times:
-`tests/scripts/sign-off-record_test.py` derives the pinned-suite count from `release-manifest.py`'s
-own `GATE_MANIFEST`, checks every suite it names exists, holds every engine-test count in the
-authored prose to agreeing with every other, and holds the race audit's totals to its own table.
-Each of the three numeric drifts above was replanted and confirmed to fail it.
+reader to trust a record whose numbers went wrong six times.
+`tests/scripts/sign-off-record_test.py` derives, from the tools themselves rather than from a
+number typed twice: the pinned-suite count (from `release-manifest.py`'s own `GATE_MANIFEST`),
+the script-suite total (from `run-script-suites.py`'s own glob), and the wired-suite total (from
+`release-manifest.py`'s own `audit()`). It also checks every pinned suite exists, holds every
+engine-test count in the authored prose to agreeing with every other, and holds the race audit's
+totals to its own table. **Every numeric drift in the table above was replanted and confirmed to
+fail it** — including round 4's pair, which the extended guard flagged before any prose was
+corrected, naming both the stated and the real number.
+
+The suite is pinned to its own gate criterion, `sign-off record integrity`. It was briefly not,
+and was therefore silently deletable — the manifest guard stayed green without it, which is the
+same US40 defect this ticket fixed for seven other suites in round 1, recurring on the one suite
+that guards the record. That is not a claim about unpinned suites generally: roughly a third of
+this tree's suites are pinned to no criterion and are fine that way. This one is named because
+deleting it would restore exactly the blind spot it exists to close.
 
 Two boundaries that suite deliberately keeps:
 
-- **It exempts the verbatim files.** Those are frozen quotations — the reviewers ran before #203
-  changed anything, so they correctly and permanently say 1344. Editing a quotation to satisfy a
-  consistency check would be falsifying evidence. (The suite caught this itself on its first run,
-  which is how the distinction got drawn.)
+- **It exempts the quoted blocks, not the files holding them.** The reviewers ran before #203
+  changed anything, so their reports state the gate totals of that moment — correctly, and
+  permanently. Editing one to satisfy a consistency check would be falsifying evidence. But the
+  two quote-bearing files also carry ~66 lines of *authored* analysis, including the corrected
+  provenance narrative, and a file-level exemption left that prose unguarded: a deliberately
+  false sentence about the suite and engine counts, planted in an authored header, passed the
+  entire gate. The boundary is now explicit — `<!-- BEGIN VERBATIM -->` / `<!-- END VERBATIM -->`
+  markers, placed by matching each quotation against its session transcript and refusing unless
+  it matched verbatim exactly once, so the markers sit outside the quote and change not one
+  character of it. Inferring the boundary from the surrounding `---` rules would have been wrong:
+  several reviewers' reports contain `---` lines. Tests keep the markers balanced in every record
+  file, since an unterminated one would quietly restore the hole.
+- **A second fence, `<!-- BEGIN QUOTED-CLAIMS -->`, covers this record quoting its own mistakes.**
+  The drift-history table above states false numbers by construction — that is what it is for —
+  and so do the illustrations in this section. Unfenced, the guard reads them as live assertions
+  and demands the history be falsified to go green, which is the same error as editing a
+  reviewer's quotation wearing a different costume. It is a separate marker from VERBATIM because
+  the two rest on different grounds: one is someone else's words, the other is this record's
+  account of its own errors. **This is not a loophole for wrong numbers** — a fence marks text as
+  *quoted rather than asserted*, and misusing it to smuggle a live claim out of the guard's reach
+  would be exactly the dishonesty the guard exists to prevent. The fences are few, contiguous, and
+  visible in the diff for that reason.
+
+  Found the hard way: the guard flagged the drift-history table minutes after it was written, on
+  the same run that confirmed round 4's fixes. That is the guard working — it does not know which
+  false numbers are deliberate — but it is also the boundary the first design lacked.
 - **It inherits `doc-contract_test.py`'s ceiling**: it holds the claims it names, not new false
   claims appearing. It could not have caught the provenance error above, and nothing mechanical
   would have — that needed someone to ask whether the retained set was the whole set.
@@ -136,9 +195,9 @@ Not decomposed anywhere (see the caveat above). What can be said by mutation:
   `install-parity_test.py`.
 - **#200's retirement has no test, and here is what that concretely means:** recreating
   `docs/plans/HANDOFF.md` with its stale `> Status: pending-implementation` prose leaves the full
-  script gate at 28/28. Nothing in the gate would notice the retirement being undone. Arguably
-  not testable — what #200 did was delete two planning documents through the fix door — but the
-  consequence is stated rather than waved at.
+  script gate green — every suite passing, nothing flagged. Nothing in the gate would notice the
+  retirement being undone. Arguably not testable — what #200 did was delete two planning
+  documents through the fix door — but the consequence is stated rather than waved at.
 
 ### One thing the suite pin does not do
 
@@ -156,9 +215,9 @@ test catches that mutation, so the property is covered — but not by the test w
 
 | Component | Command | Result |
 |---|---|---|
-| Script/workflow suites | `python3 .github/scripts/run-script-suites.py` | 28/28 suites passed |
+| Script/workflow suites | `python3 .github/scripts/run-script-suites.py` | 29/29 suites passed |
 | Engine suites | `python3 -m unittest discover -s tests/engine -p '*_test.py'` | 1349 tests, OK |
-| Release-manifest coverage | `python3 .github/scripts/release-manifest.py` | 60 suites wired, every gate criterion covered |
+| Release-manifest coverage | `python3 .github/scripts/release-manifest.py` | 61 suites wired, every gate criterion covered |
 | Release-manifest guard's own suite | `python3 tests/scripts/release-manifest_test.py` | 43 tests, OK |
 | Plugin validation | `claude plugin validate plugins/doc-lifecycle` | Validation passed |
 | Compilation | `python3 -m compileall -q` over engine, wiring, skills, `.github/scripts` | clean |
@@ -241,7 +300,7 @@ Every component, in an order that works. Run from the repository root.
 git fetch origin main
 git checkout ajones/issue-203-sign-off-gate      # or the merge commit
 
-python3 .github/scripts/run-script-suites.py                        # 28/28
+python3 .github/scripts/run-script-suites.py                        # 29/29 suites
 python3 -m unittest discover -s tests/engine -p '*_test.py'         # 1349, OK
 python3 .github/scripts/release-manifest.py                         # manifest coverage
 python3 tests/scripts/release-manifest_test.py                      # the guard's own suite
