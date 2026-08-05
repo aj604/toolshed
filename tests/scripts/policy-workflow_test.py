@@ -341,8 +341,14 @@ class TheWriterCanOnlyOpenAReviewableChange(unittest.TestCase):
 
         # The branch is derived, and what it carries is the commit
         # `verify-apply-bytes.py commit` certified — never `HEAD`, which is
-        # whatever the last thing to run left behind (aj604/toolshed#191).
-        self.assertIn('verified-commit.txt"):refs/heads/', body)
+        # whatever the last thing to run left behind (aj604/toolshed#191). The
+        # id reaches the push through a variable since #198, so the binding and
+        # the refspec are asserted together: a refspec naming a variable
+        # nothing bound to the verification's own file would be no better than
+        # one naming `HEAD`.
+        self.assertIn('commit=$(cat "${RUNNER_TEMP}/verified-commit.txt")',
+                      body)
+        self.assertIn('git push origin "${commit}:refs/heads/${branch}"', body)
         self.assertNotIn('"HEAD:refs/heads/', body)
         self.assertIn("gh pr create", body)
         self.assertIn("--body-file", body)

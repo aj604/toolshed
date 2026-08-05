@@ -437,21 +437,98 @@ jobs:
             --result "${RUNNER_TEMP}/apply-result.json" --repo . \
             --out "${RUNNER_TEMP}/verified-commit.txt"
 
-      - name: Push the verified commit
+      # Recovery starts here (aj604/toolshed#198), and the same implementation
+      # the manual apply lane runs. A scheduled attempt whose push landed while
+      # its pull request did not leaves the approval stranded, and the next
+      # attempt derives the *same* branch name, because `branch-name` derives
+      # it from the approval digest. A deterministic name is not authority to
+      # overwrite what stands there, so the remote is read before anything is
+      # pushed and what it holds decides.
+      - name: Read what the remote holds at the derived branch
         run: |
           set -euo pipefail
-          git push origin "$(cat "${RUNNER_TEMP}/verified-commit.txt"):refs/heads/$(cat "${RUNNER_TEMP}/apply/branch.txt")"
+          branch=$(cat "${RUNNER_TEMP}/apply/branch.txt")
+          code=0
+          git ls-remote --exit-code --heads origin "refs/heads/${branch}" \
+            > "${RUNNER_TEMP}/remote-branch.txt" || code=$?
+          python3 .doc-lifecycle/wiring/render-apply-summary.py remote-branch \
+            --listing "${RUNNER_TEMP}/remote-branch.txt" --exit-code "$code" \
+            --branch "$branch" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --out "${RUNNER_TEMP}/existing-commit.txt"
+
+      # An existing derived branch is this run's own earlier result, or it is a
+      # conflict. Both halves are checked: the approval trailer the existing
+      # commit carries, and its complete tree — through the same certification
+      # the fresh commit passed, against the same postimage manifest and on the
+      # same base.
+      - name: Verify an existing derived branch is this run's own result
+        run: |
+          set -euo pipefail
+          existing=$(cat "${RUNNER_TEMP}/existing-commit.txt")
+          if [ -n "$existing" ]; then
+            branch=$(cat "${RUNNER_TEMP}/apply/branch.txt")
+            git fetch --no-tags origin \
+              "refs/heads/${branch}:refs/doc-lifecycle/existing"
+            python3 .doc-lifecycle/wiring/verify-apply-bytes.py reuse \
+              --result "${RUNNER_TEMP}/apply-result.json" --repo . \
+              --commit "$existing" \
+              --verified "${RUNNER_TEMP}/verified-commit.txt" \
+              --approval "${RUNNER_TEMP}/apply/approval.json"
+          fi
+
+      # Two outcomes, both stated: a branch created where none stood, or the
+      # branch the step above proved is this approval's own verified result,
+      # reused as it is. Nothing here force-pushes.
+      - name: Push the verified commit, or reuse the branch already holding it
+        run: |
+          set -euo pipefail
+          branch=$(cat "${RUNNER_TEMP}/apply/branch.txt")
+          existing=$(cat "${RUNNER_TEMP}/existing-commit.txt")
+          if [ -n "$existing" ]; then
+            python3 .doc-lifecycle/wiring/render-apply-summary.py recovery \
+              --state branch-reused --branch "$branch" \
+              --approval "${RUNNER_TEMP}/apply/approval.json" \
+              --commit "$existing"
+            exit 0
+          fi
+          commit=$(cat "${RUNNER_TEMP}/verified-commit.txt")
+          git push origin "${commit}:refs/heads/${branch}"
+          python3 .doc-lifecycle/wiring/render-apply-summary.py recovery \
+            --state branch-created --branch "$branch" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --commit "$commit"
 
       # A real pull request, never a draft. The policy minted without a human selecting records,
       # so PR review is the semantic review, and merging it is change approval of the actual diff.
-      - name: Open the real pull request
+      # Idempotent: one already open on this branch for this approval is this
+      # lane's own earlier outcome, so it is stated rather than duplicated, and
+      # one open for anything else is a conflict the renderer refuses.
+      - name: Open the real pull request, or state the one already open
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          gh pr create --base "$BASE" \
-            --head "$(cat "${RUNNER_TEMP}/apply/branch.txt")" \
-            --title "$(cat "${RUNNER_TEMP}/pr-title.txt")" \
+          branch=$(cat "${RUNNER_TEMP}/apply/branch.txt")
+          gh pr list --head "$branch" --state open \
+            --json number,headRefName,baseRefName,body \
+            > "${RUNNER_TEMP}/open-pull-requests.json"
+          python3 .doc-lifecycle/wiring/render-apply-summary.py existing-pull-request \
+            --listing "${RUNNER_TEMP}/open-pull-requests.json" \
+            --approval "${RUNNER_TEMP}/apply/approval.json" \
+            --branch "$branch" --base "$BASE" \
+            --out "${RUNNER_TEMP}/existing-pull-request.txt"
+          open=$(cat "${RUNNER_TEMP}/existing-pull-request.txt")
+          if [ -n "$open" ]; then
+            python3 .doc-lifecycle/wiring/render-apply-summary.py recovery \
+              --state pull-request-already-open --branch "$branch" \
+              --approval "${RUNNER_TEMP}/apply/approval.json" \
+              --pull-request "$open"
+            exit 0
+          fi
+          title=$(cat "${RUNNER_TEMP}/pr-title.txt")
+          gh pr create --base "$BASE" --head "$branch" \
+            --title "$title" \
             --body-file "${RUNNER_TEMP}/pr-body.md" \
             >> "$GITHUB_STEP_SUMMARY"

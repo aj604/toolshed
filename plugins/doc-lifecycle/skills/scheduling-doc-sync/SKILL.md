@@ -226,7 +226,11 @@ executed, complete remedies, and whole-diff confinement. The writer stages the r
 explicit path list, verifies the staged index and the commit tree against the applier's certified
 postimages through the same `verify-apply-bytes.py` the manual lane runs, pushes the commit that
 verification named, and opens a real pull request, never a draft and never a direct write to the
-default branch.
+default branch. A re-run whose derived branch already exists reuses it rather than pushing again
+or forcing over it — only after re-certifying the commit standing there against this run's own
+approval trailer and postimages — treats an already-open pull request for that approval as
+success, refuses any other branch or pull request found there, and states which of those
+outcomes it reached.
 
 Autonomous minting is an explicit consumer choice. The standing declaration lives at
 `.doc-lifecycle/auto-apply-policy.json`:

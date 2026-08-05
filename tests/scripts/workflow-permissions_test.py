@@ -49,6 +49,36 @@ MODEL_ACTION = "anthropics/claude-code-action"
 # `git add -A` / `git add --all`, in any surrounding shell.
 BROAD_ADD = re.compile(r"git add\s+(-A|--all)\b")
 
+# Everything after `git push` on one command line.
+PUSH = re.compile(r"\bgit push\b(?P<argv>.*)$")
+# A push that overwrites whatever stands at the ref instead of fast-forwarding
+# it. Three spellings, and the third is the one a reader skims past: a leading
+# `+` on the refspec forces the update exactly as `--force` does.
+FORCE_FLAG = re.compile(
+    r"(?:^|\s)(--force(?:-with-lease|-if-includes)?(?:=\S*)?"
+    r"|-[A-Za-z]*f[A-Za-z]*)(?=\s|$)")
+FORCE_REFSPEC = re.compile(r"(?:^|\s)[\"']?\+")
+
+
+def forced_push(line):
+    """Why `line` is a force push, or None.
+
+    Derived branch names are deterministic in the apply lanes, which makes an
+    unconditional overwrite look harmless — the ref "would have held our commit
+    anyway". It would not: it may hold a commit this run did not make, and the
+    lanes settle that by reading the remote and refusing a conflict
+    (aj604/toolshed#198), never by forcing.
+    """
+    match = PUSH.search(line)
+    if not match:
+        return None
+    argv = match.group("argv")
+    if FORCE_FLAG.search(argv):
+        return f"forces the update: {line.strip()}"
+    if FORCE_REFSPEC.search(argv):
+        return f"forces the refspec: {line.strip()}"
+    return None
+
 
 def workflow_files():
     seen, files = set(), []
@@ -201,6 +231,77 @@ class WriteJobsRunNoModel(unittest.TestCase):
                 offenders, [],
                 f"{path}: job '{name}' holds write scopes and stages broadly "
                 f"({offenders}) — stage the authorized path list instead")
+
+
+class NoApplyLaneForcePushes(unittest.TestCase):
+    """A deterministic branch name is never authority to overwrite a ref.
+
+    The apply lanes derive their branch from the approval digest, so a re-run
+    aims at the same name — which is exactly the situation in which a force
+    push looks like a no-op and is not: the ref may hold a commit this run did
+    not make. aj604/toolshed#198 made both lanes read the remote first and
+    reuse only a branch they can certify as this run's own result, so the
+    absence of a force push here is load-bearing rather than incidental.
+
+    Scoped to the two apply lanes on purpose. `doc-sync-upgrade.yml` pushes its
+    own fixed `doc-sync/upgrade` branch with `--force`, deliberately and with
+    its reasoning stated inline (a closed-unmerged PR leaves the branch behind,
+    and what that lane carries is regenerated deterministically from the target
+    release). That is a different lane's decision, not this one's, and #198
+    does not reopen it.
+    """
+
+    APPLY_LANES = ("doc-apply.yml", "doc-policy-apply.yml")
+
+    def apply_lane_files(self):
+        found = [p for p in workflow_files()
+                 if os.path.basename(p) in self.APPLY_LANES]
+        self.assertTrue(found, "no apply lane found — did the layout move?")
+        return found
+
+    def test_no_apply_lane_force_pushes(self):
+        offenders = []
+        for path in self.apply_lane_files():
+            with open(path, encoding="utf-8") as fh:
+                for number, line in enumerate(fh.read().splitlines(), 1):
+                    if line.lstrip().startswith("#"):
+                        continue
+                    reason = forced_push(line)
+                    if reason:
+                        offenders.append(
+                            f"{os.path.relpath(path, ROOT)}:{number} {reason}")
+        self.assertEqual(
+            offenders, [],
+            "an apply lane overwrites a ref rather than fast-forwarding it — "
+            "read the remote and refuse a conflict instead:\n  "
+            + "\n  ".join(offenders))
+
+    def test_some_push_exists_to_have_been_checked(self):
+        pushes = [line for path in self.apply_lane_files()
+                  for line in open(path, encoding="utf-8").read().splitlines()
+                  if PUSH.search(line)]
+        self.assertTrue(pushes, "no `git push` found — did the lanes move?")
+
+    def test_the_detector_names_every_way_of_forcing_one(self):
+        # A guard that never fires reads as coverage without being it, so the
+        # detector is run against the pushes it exists to catch.
+        for line in (
+            'git push --force origin "${commit}:refs/heads/${branch}"',
+            'git push -f origin "${commit}:refs/heads/${branch}"',
+            'git push --force-with-lease origin "${c}:refs/heads/${b}"',
+            'git push --force-if-includes origin "${c}:refs/heads/${b}"',
+            'git push origin "+${commit}:refs/heads/${branch}"',
+            "git push -qf origin HEAD:refs/heads/x",
+        ):
+            self.assertIsNotNone(forced_push(line), line)
+
+    def test_the_detector_passes_the_pushes_the_lanes_actually_run(self):
+        for line in (
+            'git push origin "${commit}:refs/heads/${branch}"',
+            '            git push origin "${commit}:refs/heads/${branch}"',
+            "git push --follow-tags origin main",
+        ):
+            self.assertIsNone(forced_push(line), line)
 
 
 class ModelToolGrantsStayLocal(unittest.TestCase):
