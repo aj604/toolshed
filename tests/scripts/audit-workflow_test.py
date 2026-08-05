@@ -510,15 +510,48 @@ class DeclaredToolsFailureIsNotSilent(unittest.TestCase):
             cwd=self.repo, capture_output=True, text=True,
             env=dict(os.environ, AUDIT_DIR=self.artifacts))
 
+    def _assert_the_engine_actually_ran(self, result):
+        """A green step is not evidence the engine ran.
+
+        The step's redirect can fail on its own — an unset AUDIT_DIR, an
+        artifact root that is not there — and under `bash -eo pipefail` with
+        `set -u` an unbound variable in the *redirection of an external
+        command* inside a `||` list neither aborts the shell nor surfaces:
+        it is captured as exit 1, and the case statement then announces
+        "1 (invalid — typed report)" for a run that never reached the engine.
+        Asserting only the return code passes under that mutation, so these
+        two happy-path cases assert what the run produced instead.
+        """
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("drift-audit exit code: 0", result.stdout)
+        report = os.path.join(self.artifacts, "drift-report.json")
+        self.assertTrue(
+            os.path.exists(report),
+            f"no report at {report} — the step went green without the engine "
+            f"ever writing one:\n{result.stdout}\n{result.stderr}")
+
     def test_a_declared_run_passes_the_flags_through(self):
         self._stub_probe("--evidence-command gh\n", "", 0)
-        result = self._run_step()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self._assert_the_engine_actually_ran(self._run_step())
 
     def test_a_tool_free_install_runs_clean_with_no_flags(self):
         self._stub_probe("\n", "", 0)
+        self._assert_the_engine_actually_ran(self._run_step())
+
+    def test_a_report_that_was_never_written_is_its_own_terminal_state(self):
+        # The engine exited with a code the case statement calls a typed
+        # report, but nothing reached the report path. Two ways that happens:
+        # an uncaught engine crash, and a redirect that failed on its own
+        # (which bash hands to `|| code=$?` indistinguishably from a typed
+        # exit). Neither produced anything to publish, so the step must say
+        # that rather than announce a finding it does not have.
+        self._stub_probe("\n", "", 0)
+        self._stub("engine/doc-lifecycle.py", "import sys\nsys.exit(1)\n")
         result = self._run_step()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(
+            result.returncode, 0,
+            "a run that wrote no report went green:\n" + result.stdout)
+        self.assertIn("wrote no report", result.stdout)
 
     def test_an_unreadable_declaration_fails_the_step_and_says_so(self):
         self._stub_probe("", "error: could not read evidence-tools.json\n", 1)

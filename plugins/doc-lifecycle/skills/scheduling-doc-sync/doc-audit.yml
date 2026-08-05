@@ -300,6 +300,24 @@ jobs:
               exit "$code"
               ;;
           esac
+          # An exit code alone does not prove a report exists. The redirect
+          # above can fail on its own — an unset AUDIT_DIR, an artifact root
+          # that is not there — and bash hands that failure to `|| code=$?`
+          # exactly like a typed engine exit, so the case above would then
+          # announce "1 (invalid — typed report)" for a run that produced no
+          # report at all. (Verified, not reasoned: under `bash -eo pipefail`
+          # with `set -u`, an unbound variable in the *redirection of an
+          # external command* inside a `||` list does not abort the shell —
+          # it is captured as exit 1 and the script continues.) The report
+          # this lane publishes is the only thing that says what was
+          # examined; a failed write is its own terminal state, and it says
+          # so here rather than reading as a finding.
+          if [ ! -s "${AUDIT_DIR}/drift-report.json" ]; then
+            echo "drift-audit reported exit code $code but wrote no report to"
+            echo "${AUDIT_DIR}/drift-report.json — the run produced nothing to"
+            echo "publish, and a failed write must not read as a typed report"
+            exit 1
+          fi
 
       - name: Upload report artifact
         if: always()
