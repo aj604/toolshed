@@ -184,6 +184,46 @@ class UpgradeRender(unittest.TestCase):
         self.assertIn("`.github/workflows/doc-sync-upgrade.yml`", r.stdout)
         self.assertIn("`.github/doc-sync/upgrade-gate.py`", r.stdout)
 
+    # -- upgrade-pr-title / upgrade-commit-subject -------------------------
+
+    def test_the_pr_title_names_the_target_release(self):
+        r = self.run_script("upgrade-pr-title", "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(),
+                         "docs: upgrade doc-sync wiring to plugin v0.8.0")
+
+    def test_the_commit_subject_names_the_target_release(self):
+        r = self.run_script("upgrade-commit-subject", "--latest", "0.8.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(),
+                         "docs: upgrade doc-sync wiring to plugin v0.8.0")
+
+    def test_the_commit_subject_is_one_line_so_git_commit_F_lands_a_subject(self):
+        # The lane commits with `-F`, so anything past the first line would
+        # become a commit body nobody wrote.
+        r = self.run_script("upgrade-commit-subject", "--latest", "0.8.0")
+        self.assertEqual(len(r.stdout.splitlines()), 1, r.stdout)
+
+    def test_the_title_and_the_subject_agree(self):
+        # The upgrade branch carries exactly one commit; a title disagreeing
+        # with its subject would be two claims about one change.
+        title = self.run_script("upgrade-pr-title", "--latest", "0.8.0")
+        subject = self.run_script("upgrade-commit-subject", "--latest", "0.8.0")
+        self.assertEqual(title.stdout, subject.stdout)
+
+    def test_the_blocked_apply_instructions_use_the_rendered_subject(self):
+        # A blocked upgrade is applied by hand, and the summary dictates the
+        # commit. One owner for that line, so the hand-applied history and the
+        # lane's own commit read the same.
+        subject = self.run_script(
+            "upgrade-commit-subject", "--latest", "0.40.0").stdout.strip()
+        for status in ("blocked-workflows", "blocked-relocation"):
+            with self.subTest(status=status):
+                r = self.run_script("upgrade-summary", "--status", status,
+                                    "--current", "0.39.0", "--latest", "0.40.0")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(f"git commit -m '{subject}'", self.summary())
+
     # -- detection-only statuses (aj604/toolshed#127) ----------------------
 
     def test_available_says_nothing_ran_and_names_the_dispatch(self):

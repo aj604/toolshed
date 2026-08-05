@@ -400,16 +400,24 @@ jobs:
               --latest "$TARGET" --files "${CHANGED}"
             exit 1
           fi
+          # Body, title, and commit subject all come from the same tested
+          # renderer: the subject a blocked upgrade's summary tells a human to
+          # type is the subject this lane commits, and neither is a string
+          # typed into YAML.
           python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-pr-body \
             --current "$CURRENT" --latest "$TARGET" \
             --files "${CHANGED}" > "$RUNNER_TEMP/upgrade-pr-body.md"
+          python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-commit-subject \
+            --latest "$TARGET" > "$RUNNER_TEMP/upgrade-commit-subject.txt"
+          python3 "${RUNNER_TEMP}/trusted/render-report.py" upgrade-pr-title \
+            --latest "$TARGET" > "$RUNNER_TEMP/upgrade-pr-title.txt"
           git config user.name "doc-sync"
           git config user.email "doc-sync@users.noreply.github.com"
-          git commit -m "docs: upgrade doc-sync wiring to plugin v${TARGET}"
+          git commit -F "$RUNNER_TEMP/upgrade-commit-subject.txt"
           # --force: a closed-unmerged PR can leave a stale branch behind.
           git push --force origin HEAD:refs/heads/doc-sync/upgrade
           PR_URL=$(gh pr create \
-            --title "docs: upgrade doc-sync wiring to plugin v${TARGET}" \
+            --title "$(cat "$RUNNER_TEMP/upgrade-pr-title.txt")" \
             --body-file "$RUNNER_TEMP/upgrade-pr-body.md" \
             --head doc-sync/upgrade \
             --base "${{ github.ref_name }}")

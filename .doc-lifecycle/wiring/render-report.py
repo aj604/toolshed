@@ -4,7 +4,8 @@
 This script owns user-facing strings — step summaries and PR/issue bodies — so
 a caller's self-explaining exits are unit-testable instead of living as
 jq/heredoc templates in YAML. Its only caller is doc-sync-upgrade.yml
-(`upgrade-summary`, `upgrade-pr-body`, `upgrade-notice`).
+(`upgrade-summary`, `upgrade-pr-body`, `upgrade-pr-title`,
+`upgrade-commit-subject`, `upgrade-notice`).
 
 The legacy doc-sync.yml/doc-bloat.yml write lanes had their own subcommands
 here (pre-summary, issue-body, pr-body, the bloat-* variants, and more); both
@@ -16,6 +17,8 @@ hand rather than through a render-report.py subcommand.
 Usage:
     render-report.py upgrade-summary --status S --current C --latest L [--pr-url URL] [--files F]
     render-report.py upgrade-pr-body --current C --latest L [--files F]
+    render-report.py upgrade-pr-title --latest L
+    render-report.py upgrade-commit-subject --latest L
     render-report.py upgrade-notice --current C --latest L --repo OWNER/NAME [--workflow NAME] --title-out FILE --body-out FILE
 
 Exit status: 0 on success; 2 on bad input.
@@ -36,13 +39,33 @@ def write_summary(text):
         print(text)
 
 
+# The one line an upgrade lands under, whether the lane committed it or a human
+# applied the blocked patch by hand. One owner, so the two histories match.
+UPGRADE_COMMIT_SUBJECT = "docs: upgrade doc-sync wiring to plugin v{latest}"
+
+
+def render_upgrade_commit_subject(latest):
+    return UPGRADE_COMMIT_SUBJECT.format(latest=latest)
+
+
+def render_upgrade_pr_title(latest):
+    """The upgrade pull request's title.
+
+    The same line as the commit subject — the branch carries exactly one
+    commit, and a title that disagreed with it would be two claims about one
+    change — but its own seam, so a reworded title is a deliberate edit here
+    rather than a side effect of touching the commit subject.
+    """
+    return render_upgrade_commit_subject(latest)
+
+
 def _upgrade_apply_instructions(latest):
     # `git apply --index` so a patch that creates and deletes files lands whole;
     # `commit -am` would miss both.
     return ("```\n"
             "git switch -c doc-sync/upgrade\n"
             "git apply --index doc-sync-upgrade.patch\n"
-            f"git commit -m 'docs: upgrade doc-sync wiring to plugin v{latest}'\n"
+            f"git commit -m '{render_upgrade_commit_subject(latest)}'\n"
             "git push -u origin doc-sync/upgrade   # then open a PR\n"
             "```\n\n")
 
@@ -227,6 +250,12 @@ def main():
     upr.add_argument("--latest", required=True)
     upr.add_argument("--files", default="")
 
+    utitle = sub.add_parser("upgrade-pr-title")
+    utitle.add_argument("--latest", required=True)
+
+    usubject = sub.add_parser("upgrade-commit-subject")
+    usubject.add_argument("--latest", required=True)
+
     unot = sub.add_parser("upgrade-notice")
     unot.add_argument("--current", required=True)
     unot.add_argument("--latest", required=True)
@@ -243,6 +272,10 @@ def main():
                 args.status, args.current, args.latest, args.pr_url, args.files))
         elif args.mode == "upgrade-pr-body":
             print(render_upgrade_pr_body(args.current, args.latest, args.files))
+        elif args.mode == "upgrade-pr-title":
+            print(render_upgrade_pr_title(args.latest))
+        elif args.mode == "upgrade-commit-subject":
+            print(render_upgrade_commit_subject(args.latest))
         elif args.mode == "upgrade-notice":
             print(render_upgrade_notice(
                 args.current, args.latest, args.repo, args.workflow,
