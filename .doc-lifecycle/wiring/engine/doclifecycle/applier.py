@@ -1,4 +1,4 @@
-"""The applier: the deterministic component that writes, and nothing else does.
+"""The applier: the deterministic component that writes repository documents.
 
 An **edit plan** is a separate versioned artifact: a small closed vocabulary of
 operations (replace, delete, insert, create-document, retire-document,

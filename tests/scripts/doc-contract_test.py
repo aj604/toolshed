@@ -55,6 +55,13 @@ WRITE_MARKERS = (
     "os.makedirs(", "os.replace(", "os.remove(", "os.rmdir(",
 )
 
+# `open(...)` in a write mode, whatever the target is spelled. Bound to the
+# mode argument rather than to a variable name, so `open(dest, "w")` in a new
+# module is caught the same as `cache.py`'s `open(tmp_path, "w")` — the claim
+# below is that the *package* has three writers, and a name-bound pattern
+# could only support the weaker claim that three known writers still write.
+WRITE_OPEN = re.compile(r"""open\([^)]*,\s*["'][wxa]""")
+
 # Which module owns which half of the boundary the docs must state.
 DOCUMENT_WRITER = "applier.py"
 ARTIFACT_WRITERS = ("cache.py", "approval.py")
@@ -87,7 +94,8 @@ class TheWriterBoundaryMatchesWhoActuallyWrites(unittest.TestCase):
             if not name.endswith(".py"):
                 continue
             source = read(os.path.join(PACKAGE, name))
-            if any(marker in source for marker in WRITE_MARKERS):
+            if (WRITE_OPEN.search(source)
+                    or any(marker in source for marker in WRITE_MARKERS)):
                 writing.add(name)
         self.assertEqual(
             writing, {DOCUMENT_WRITER} | set(ARTIFACT_WRITERS),
@@ -147,6 +155,7 @@ class TheMintingDoorsAreDocumentedAsTheEngineSplitsThem(unittest.TestCase):
     def setUp(self):
         self.approval = read(os.path.join(PACKAGE, "approval.py"))
         self.policy = read(os.path.join(PACKAGE, "policy.py"))
+        self.report = read(os.path.join(PACKAGE, "report.py"))
         self.readme = flat(ENGINE_README)
 
     def test_the_documented_approval_schema_version_is_the_engine_s(self):
@@ -200,12 +209,45 @@ class TheMintingDoorsAreDocumentedAsTheEngineSplitsThem(unittest.TestCase):
         self.assertIn("`validate_approval_set`'s unconditional structural "
                       "layer", self.readme)
 
-    def test_the_minter_is_documented_as_a_field_beside_the_lineage(self):
-        # It is a top-level key of the approval set's digested content, not a
-        # lineage field; the glossary said "in the approval set's lineage".
+    def test_the_lineage_carries_neither_the_minter_nor_the_policy_id(self):
+        # The premise: report.Lineage's own field list. `minter` is a
+        # top-level key of the approval set's digested content beside it
+        # (approval.py), and a policy's `id` becomes `minter.id` (policy.py).
+        lineage = re.search(r"class Lineage:(.*?)\n\n", self.report,
+                            re.DOTALL)
+        self.assertIsNotNone(lineage, "report.Lineage not found")
+        fields = re.findall(r"^\s{4}(\w+):", lineage.group(1), re.MULTILINE)
+        self.assertNotIn("minter", fields)
+        self.assertNotIn("id", fields)
         self.assertIn('"minter": self.minter.to_dict(),', self.approval)
-        self.assertNotIn("minter in the approval set's lineage", flat(CONTEXT))
-        self.assertIn("alongside the lineage, not inside it", flat(CONTEXT))
+        self.assertIn("id=policy.id,", self.policy)
+
+    def test_no_document_places_the_minter_or_the_id_inside_the_lineage(self):
+        # Widened deliberately. This assertion first guarded CONTEXT.md alone
+        # — the *derived* document — so two occurrences of the same falsehood
+        # in the engine README, which owns the contract, survived a green run
+        # (PR #219 review). A guard that skips the owning document is not a
+        # guard; every form the claim took in this repository is listed here.
+        forbidden = (
+            r"minter in (?:the approval set's )?lineage",
+            r"`?id`? is what lineage records",
+            r"lineage records the (?:policy's )?`?id`?",
+            r"minter (?:is |lives )?(?:recorded )?in the lineage",
+        )
+        for path in (ENGINE_README, VENDORED_README, CONTEXT, DISTILLER):
+            text = flat(path)
+            for pattern in forbidden:
+                self.assertIsNone(
+                    re.search(pattern, text),
+                    f"{os.path.relpath(path, ROOT)} places the minter or the "
+                    f"policy id inside the report lineage, which carries "
+                    f"neither")
+
+    def test_the_owning_and_derived_docs_both_place_it_beside_the_lineage(self):
+        placed = re.compile(r"(?:beside|alongside) the lineage, not inside it")
+        for path in (ENGINE_README, VENDORED_README, CONTEXT):
+            self.assertIsNotNone(
+                placed.search(flat(path)), os.path.relpath(path, ROOT))
 
     def test_the_drift_skill_does_not_route_the_auto_lane_through_mint(self):
         text = flat(DRIFT_SKILL)

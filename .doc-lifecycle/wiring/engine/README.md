@@ -9,8 +9,8 @@ component that writes a repository document, and it writes the working tree dire
 index. Two other functions write, and neither writes a document: `cache.put()` serializes one
 cache entry per key into the cache directory its caller names, and
 `approval.write_approval_set()` serializes an approval set to a path it refuses unless git would
-leave that path untracked. Both are named below; nothing else in the package opens a file for
-writing.
+never keep it — ignored, or outside the repository. Both are named below; nothing else in the
+package opens a file for writing.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
 contract, the lineage-keyed cache, the segmenter, finding identity, the context index, the
@@ -2226,7 +2226,8 @@ validate_approval_set(approval.to_dict(), report=report, repo_root=".")
 Issue #73, `doclifecycle/policy.py`. The other minter: a standing,
 consumer-configured declaration that a narrow class of *mechanical* remedies may have approval
 sets minted without waiting for a person, so a scheduled lane keeps producing autonomous fix
-PRs. The policy is named as the minter in lineage, and PR review is the designated semantic
+PRs. The policy is named as the approval set's `minter` — a field beside the lineage, not
+inside it — and PR review is the designated semantic
 review for what it mints — change approval, a person merging the real pull request, still lands
 everything.
 
@@ -2240,8 +2241,8 @@ everything.
 ```
 
 It lives at `.doc-lifecycle/auto-apply-policy.json` beside the registry, because both are
-standing declarations a reviewer reads as repository state. `id` is what lineage records, so an
-unnamed policy is `policy-missing-field`. `classes` is optional and defaults to every class
+standing declarations a reviewer reads as repository state. `id` is what `minter.id` records, so
+an unnamed policy is `policy-missing-field`. `classes` is optional and defaults to every class
 there is; an empty list is `policy-invalid-classes` rather than "the defaults", since a policy
 that would mint nothing said the confusing way is one nobody can read.
 

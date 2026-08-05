@@ -1,4 +1,5 @@
-"""The applier: the only component that writes, and every way it refuses to.
+"""The applier: the only component that writes a repository document, and
+every way it refuses to.
 
 Every fixture is a real git repository, because the applier's whole contract
 is about a real working tree: exact preimages on disk, a whole-diff
