@@ -44,6 +44,14 @@ specific temptation it declined, rather than silently complying or silently igno
 prompt. A GREEN that can't produce that signature under direct pressure isn't done, no
 matter what the unpressured run showed.
 
+**What a GREEN does not prove: that the skill triggers.** Every GREEN run in this suite
+handed agents the SKILL.md file directly, so description-based routing — the model
+picking the skill on its own from the description alone — has never been exercised.
+A GREEN shows the text teaches the rule once the agent is reading it; it says nothing
+about whether the agent would have found it. Treat triggering as a separate check
+against the installed plugin, not something a GREEN covers
+(`tests/baselines/growing-green/GREEN-results.md` records the same caveat).
+
 ## A RED that doesn't fail is itself a finding
 
 Two skills in this suite were reshaped by what a RED run *didn't* find — read that as a
