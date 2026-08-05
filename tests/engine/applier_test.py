@@ -1039,6 +1039,162 @@ class Confinement(ApplierTestCase):
         )
 
 
+class WriteTransaction(ApplierTestCase):
+    """The write is a transaction: rechecked, certified, and never a lost update.
+
+    A concurrent writer is what these are about, and no honest single-process
+    fixture produces one — so each patches the last engine call before the
+    moment under test and writes from there, exactly as the confinement race
+    tests above do. The seam under test is `apply_edit_plan` throughout, over
+    the whole public transaction: a report, an approval set minted from it, a
+    plan bound to that approval, applied to a real git repository.
+    """
+
+    def _distill_fixture(self):
+        """A DISTILL plan writing two paths: a residue created, its planning
+        artifact retired. Two targets is what makes a rollback's two answers —
+        restore mine, leave theirs — visible in one run."""
+        new_doc = "docs/adr-fees.md"
+        content = "# ADR: flat fees\n\nWe charge a flat rate.\n"
+        units = self.whole_units(self.repo, PLAN_DOC)
+        record = self.finding(
+            "BLOAT-002", "DISTILL", PLAN_DOC, units,
+            destination={"path": new_doc},
+        )
+        report, approval = self.approve([record])
+        plan = self.plan(approval, [
+            {
+                "op": "create-document",
+                "record": record["digest"],
+                "target_class": "documentation",
+                "path": new_doc,
+                "text": content,
+            },
+            {
+                "op": "retire-document",
+                "record": record["digest"],
+                "target_class": "documentation",
+                "path": PLAN_DOC,
+                "preimage": PLAN_DOC_TEXT,
+            },
+        ], {new_doc: sha256_text(content), PLAN_DOC: None})
+        return report, approval, plan, new_doc, content
+
+    def test_a_target_that_moved_before_the_write_is_a_typed_race_refusal(self):
+        # The preimage is read, and the post-content computed from it, before
+        # any byte lands — so another writer can take the target over in
+        # between, and the plan's result is then a remedy for text that is no
+        # longer there. Digesting the computed post-content is the last engine
+        # call before the write boundary, so it is the timing hook.
+        from unittest import mock
+        from doclifecycle.digest import sha256_bytes as real
+
+        report, approval, plan, post = self.replace_fixture()
+        theirs = DOC_A_TEXT.replace(OLD_SENTENCE, "Somebody else rewrote this.")
+        before = self.tree(self.repo)
+
+        def racing(data):
+            if data == post.encode("utf-8"):
+                self.write(self.repo, DOC_A, theirs)
+            return real(data)
+
+        with mock.patch(
+            "doclifecycle.applier.sha256_bytes", side_effect=racing
+        ):
+            result = self.apply(plan, approval, report=report)
+
+        self.assertIsInstance(result, Invalid, result)
+        # Typed, and its own reason: a race at the write boundary, not the
+        # plan's operations disagreeing with its declared postimages.
+        self.assertEqual(codes(result), ["apply-write-boundary-race"])
+        self.assertEqual(result.problems[0].location, DOC_A)
+        # The other writer's bytes are exactly what they wrote, and the rest
+        # of the tree is untouched: this run overwrote nothing.
+        self.assertEqual(self.read(self.repo, DOC_A), theirs)
+        self.assertEqual(
+            self.tree(self.repo), dict(before, **{DOC_A: theirs.encode("utf-8")})
+        )
+        self.assertEqual(self.staged_paths(self.repo), [])
+
+    def test_a_target_replaced_before_certification_never_resolves_clean(self):
+        # The post-write race: the plan's bytes land, and something replaces
+        # them before the run certifies what is on disk. Every path set the
+        # run checks still names exactly this plan's own written paths, so
+        # only re-reading the bytes catches it. The post-write status read is
+        # the timing hook.
+        from unittest import mock
+        from doclifecycle.repository import worktree_changes as real
+
+        report, approval, plan, new_doc, content = self._distill_fixture()
+        theirs = "# ADR: flat fees\n\nSomebody else authored this instead.\n"
+        before = self.tree(self.repo)
+        calls = []
+
+        def racing(repo_root):
+            changed, problem = real(repo_root)
+            calls.append(changed)
+            if len(calls) == 2 and problem is None:
+                self.write(self.repo, new_doc, theirs)
+            return changed, problem
+
+        with mock.patch(
+            "doclifecycle.applier.worktree_changes", side_effect=racing
+        ):
+            result = self.apply(plan, approval, report=report)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["apply-postimage-not-on-disk"])
+        self.assertEqual(result.problems[0].location, new_doc)
+        # Compare-aware rollback, both answers in one run: the residue no
+        # longer holds this run's bytes, so it is left exactly as the other
+        # writer left it — restoring it would be a second lost update — while
+        # the planning artifact this run retired, still absent and so still
+        # this run's own, comes back.
+        self.assertEqual(self.read(self.repo, new_doc), theirs)
+        self.assertEqual(self.read(self.repo, PLAN_DOC), PLAN_DOC_TEXT)
+        self.assertEqual(
+            self.tree(self.repo),
+            dict(before, **{new_doc: theirs.encode("utf-8")}),
+        )
+        self.assertEqual(self.staged_paths(self.repo), [])
+        # And the run says so, rather than reporting a rollback it did not do.
+        self.assertIn(new_doc, result.problems[0].message)
+        self.assertIn("left exactly as found", result.problems[0].message)
+        self.assertNotIn(content, self.read(self.repo, new_doc))
+
+    def test_a_clean_apply_certifies_the_bytes_it_read_back(self):
+        report, approval, plan, post = self.replace_fixture()
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertEqual(result.postimages, ((DOC_A, sha256_text(post)),))
+        self.assertEqual(
+            result.to_dict()["postimages"], {DOC_A: sha256_text(post)}
+        )
+        # The idempotent re-run wrote nothing and certifies the same bytes:
+        # a narrower claim about the run, not a weaker one about the content.
+        again = self.apply(plan, approval, report=report)
+        self.assertTrue(again.already_applied)
+        self.assertEqual(again.postimages, result.postimages)
+
+    def test_a_retired_document_is_certified_as_absent(self):
+        report, approval, plan, new_doc, content = self._distill_fixture()
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_CLEAN, result)
+        self.assertEqual(result.postimages, (
+            (new_doc, sha256_text(content)), (PLAN_DOC, None),
+        ))
+        self.assertEqual(result.to_dict()["postimages"][PLAN_DOC], None)
+
+    def test_a_refused_run_certifies_nothing(self):
+        report, approval, plan, _ = self.replace_fixture()
+        self.write(self.repo, "src/app.py", "RATE = 0.025\n")
+        self.commit(self.repo, "move the base")
+        result = self.apply(plan, approval, report=report)
+        self.assertEqual(result.status, STATE_STALE, result)
+        self.assertEqual(result.postimages, ())
+        self.assertEqual(result.to_dict()["postimages"], {})
+
+
 class RemedyBinding(ApplierTestCase):
     """An approved record authorizes its own remedy, not the whole vocabulary."""
 
