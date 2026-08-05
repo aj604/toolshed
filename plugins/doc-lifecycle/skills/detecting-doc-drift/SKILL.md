@@ -22,8 +22,9 @@ Two non-negotiables make the output usable by automation:
 its bar (real output, no aspirational claims, marked+anchored rationale). This skill finds
 and classifies drift; writing-docs governs how the correction reads. **`fixing-docs`**
 consumes the engine report this skill's audit writes — record digests are the handoff, and
-`mint-approval` takes them (an optional auto-trigger layer, designed and shipped as the
-`scheduling-doc-sync` skill, wires detect→fix to cron/PR).
+`mint-approval` takes them from the person who selected them. The `scheduling-doc-sync` skill
+wires detect→fix to cron/PR; where a standing policy is committed there, the selection is
+derived by `policy-mint` instead, which is the only door that mints a `policy` brand.
 
 ## The audit (run these steps, in order)
 

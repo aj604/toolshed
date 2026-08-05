@@ -106,6 +106,8 @@ is reviewable at all.
 The approval loop remains interactive: you read and approve records by ID through
 `fixing-docs`. A separate weekly, read-only scheduled bloat audit can sweep the registered
 corpus and publish a typed report, including explicit incomplete coverage. No scheduled lane
-applies its findings. See the [scheduling guide](scheduling-doc-sync.md) for installation,
+applies a bloat finding, whatever else the schedule is configured to do: every bloat verdict
+code is in `approval.POLICY_NEVER_ELIGIBLE_CODES`, so a standing auto-apply policy can never
+select one. See the [scheduling guide](scheduling-doc-sync.md) for installation,
 cadence, and trust boundaries; when a report arrives, use Steps 2 and 3 above to review and
 apply only the IDs you approve.

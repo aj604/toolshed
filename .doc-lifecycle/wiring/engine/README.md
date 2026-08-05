@@ -4,12 +4,18 @@ Stdlib-only Python package (`doclifecycle`) behind the plugin's skills and workf
 third-party dependencies. Library functions are the implementation; the commands wrap them and
 add nothing, so an import and a command cannot disagree. The one external program it runs is
 `git`, and only to read: a repository's identity and HEAD, which paths a commit range changed,
-and when a path last changed. Git is read-only here; the applier — below — is the one component that writes, and it writes the working tree directly, never the index.
+and when a path last changed. Git is read-only here; the applier — below — is the only
+component that writes a repository document, and it writes the working tree directly, never the
+index. Two other functions write, and neither writes a document: `cache.put()` serializes one
+cache entry per key into the cache directory its caller names, and
+`approval.write_approval_set()` serializes an approval set to a path it refuses unless git would
+never keep it — ignored, or outside the repository. Both are named below; nothing else in the
+package opens a file for writing.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
 contract, the lineage-keyed cache, the segmenter, finding identity, the context index, the
 bloat lane, the drift audit, the migration door, reconciliation, approval sets, and the
-applier — the only component that writes.
+applier — the only component that writes a repository document.
 
 ## Modules
 
@@ -696,6 +702,15 @@ key = cache_key(document_digest, source_digest, state)
 put(cache_dir, key, {"id": "DRIFT-001", "digest": "..."})   # store one result
 result = get(cache_dir, key, repo_root=".")                 # result.hit, result.record
 ```
+
+`put()` is one of the engine's two artifact writers — the other is `write_approval_set()`, below
+— and it is not the applier: what it writes is one JSON file per key at
+`entry_path(cache_dir, key)`, that is `<cache_dir>/<key digest>.json`, created through a
+sibling temporary file and `os.replace` so a reader never observes a half-written entry.
+`cache_dir` is the caller's to name and is created if absent; a cache entry is a derived
+artifact rather than a repository document, so `paths.authorize_path` is not consulted for it:
+placement is the caller's to get right, and `bloat.store_chunk` — the one caller in the package
+— takes the directory as a parameter rather than deriving one.
 
 A key match alone is not a hit. On read, the stored entry is wrapped in the same shape a report
 is and run through `report.validate_report` — the landed validator, not a parallel one — so a
@@ -2153,9 +2168,10 @@ which is how an approval set is minted, never a substitute for one"), a string (
 or run id), or an object that does not declare `artifact: approval-set`. A cache entry is a
 report payload, so it is refused as one.
 
-**Never repository state.** `write_approval_set(approval, path)` refuses any path git would
-keep: `approval-set-tracked-path` for a tracked file, and `approval-set-would-be-tracked` for
-one inside the work tree that is not ignored — a `git add -A` in the run it authorizes would
+**Never repository state.** `write_approval_set(approval, path)` is the engine's other artifact
+writer — `cache.put()` above is the first, and the applier writes documents rather than
+artifacts — and it refuses any path git would keep: `approval-set-tracked-path` for a tracked
+file, and `approval-set-would-be-tracked` for one inside the work tree that is not ignored — a `git add -A` in the run it authorizes would
 otherwise commit it. Outside the repository, or in a git-ignored path, is where it goes. What
 travels in the change is the digest and the rendered summary: `render_approval_set()` for a PR
 body (same code-span escaping as `render_report()`, since a record's code and path are content
@@ -2210,7 +2226,8 @@ validate_approval_set(approval.to_dict(), report=report, repo_root=".")
 Issue #73, `doclifecycle/policy.py`. The other minter: a standing,
 consumer-configured declaration that a narrow class of *mechanical* remedies may have approval
 sets minted without waiting for a person, so a scheduled lane keeps producing autonomous fix
-PRs. The policy is named as the minter in lineage, and PR review is the designated semantic
+PRs. The policy is named as the approval set's `minter` — a field beside the lineage, not
+inside it — and PR review is the designated semantic
 review for what it mints — change approval, a person merging the real pull request, still lands
 everything.
 
@@ -2224,8 +2241,8 @@ everything.
 ```
 
 It lives at `.doc-lifecycle/auto-apply-policy.json` beside the registry, because both are
-standing declarations a reviewer reads as repository state. `id` is what lineage records, so an
-unnamed policy is `policy-missing-field`. `classes` is optional and defaults to every class
+standing declarations a reviewer reads as repository state. `id` is what `minter.id` records, so
+an unnamed policy is `policy-missing-field`. `classes` is optional and defaults to every class
 there is; an empty list is `policy-invalid-classes` rather than "the defaults", since a policy
 that would mint nothing said the confusing way is one nobody can read.
 
@@ -2320,7 +2337,9 @@ living only in the one producer that stays honest is not a defense against a cal
 it. So `approval.POLICY_NEVER_ELIGIBLE_CODES` — the same six bloat verdict codes
 (`policy.NEVER_ELIGIBLE_CODES` is its alias) — is checked directly against the artifact's own
 `minter.kind` and each selected record's `code`, structurally, needing no report and no
-repository: once at mint time inside `mint_approval_set` itself, and again inside
+repository: once at mint time inside `_mint_approval_set`, the private construction both doors
+reach — never inside the public `mint_approval_set`, which a policy mint does not enter at all,
+so locating it there would leave the one kind it restricts unchecked — and again inside
 `validate_approval_set`'s unconditional structural layer — so a hand-edited `minter` field cannot
 brand a bloat selection `policy` after the fact, and an artifact minted by whatever route skipped
 the check is still caught on read-back. Either violation is `approval-policy-ineligible-record`. A
@@ -2354,7 +2373,8 @@ mint_policy_approval_set(report, policy, repo_root=".")   # → ApprovalSet or I
 
 ## The applier
 
-The one component that writes, `doclifecycle/applier.py`. An **edit plan** is a separate
+The only component that writes a repository document, `doclifecycle/applier.py`. An **edit
+plan** is a separate
 versioned artifact (`artifact: edit-plan`, digest required, like an approval set's) binding to
 exactly one approval set by digest, with operations from a closed vocabulary — `replace`,
 `delete`, `insert`, `create-document`, `retire-document`, `move-with-provenance` — each
