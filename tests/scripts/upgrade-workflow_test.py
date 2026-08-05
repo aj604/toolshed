@@ -17,6 +17,9 @@ a document (aj604/toolshed#127):
    target, and the dispatch input reaches no shell as a substitution.
 4. The lane still runs no model, and the workflow YAML carries no version — the
    lockfile remains the pin.
+5. Every run-surface string it emits — summaries, the PR body, the PR title,
+   the commit subject — comes from `render-report.py`, never from a literal in
+   the YAML (aj604/toolshed#189).
 
 Read against the published template only; `install-parity_test.py` is what ties
 the dogfooded install to it.
@@ -382,6 +385,56 @@ class RefusalsReachTheRunSurface(unittest.TestCase):
         body = "\n".join(self.jobs["land"])
         self.assertIn("doc-sync-upgrade-patch", body)
         self.assertIn("if-no-files-found: ignore", body)
+
+
+class EveryRunSurfaceStringIsRendered(unittest.TestCase):
+    """Summaries, PR bodies, PR titles, commit messages — all through the script.
+
+    The repository standard, and the reason for it: a string typed into YAML is
+    a string no suite ever reads, and the lane's whole run surface is what a
+    human sees of an upgrade nobody watched happen (aj604/toolshed#189).
+    """
+
+    def setUp(self):
+        self.jobs = jobs()
+
+    def test_the_landing_job_renders_its_subject_title_and_body(self):
+        body = "\n".join(code_lines(self.jobs["land"]))
+        for subcommand in ("upgrade-commit-subject", "upgrade-pr-title",
+                           "upgrade-pr-body"):
+            self.assertIn(f'render-report.py" {subcommand}', body,
+                          f"the landing job does not render {subcommand}")
+
+    def test_the_rendered_strings_come_from_the_pre_transfer_copy(self):
+        # Same reason every other program in this job does: the bundle carries
+        # the target release's own render-report.py, and a title rendered by
+        # the release being installed is the release describing itself.
+        for line in code_lines(self.jobs["land"]):
+            if "render-report.py" not in line:
+                continue
+            self.assertIn(
+                "${RUNNER_TEMP}/trusted/render-report.py", line,
+                f"the landing job renders with a copy the transfer could have "
+                f"overwritten: {line.strip()}")
+
+    def test_no_commit_message_is_typed_into_the_yaml(self):
+        for job, body in self.jobs.items():
+            for line in code_lines(body):
+                self.assertNotIn(
+                    "git commit -m", line,
+                    f"job '{job}' types a commit message into the YAML: "
+                    f"{line.strip()} — render it and commit with -F")
+
+    def test_no_title_is_typed_into_the_yaml(self):
+        # Every `--title` argument reads a rendered value; a literal one is a
+        # run-surface string no test can hold to account.
+        for job, body in self.jobs.items():
+            for line in code_lines(body):
+                for value in re.findall(r'--title\s+"([^"]*)', line):
+                    self.assertTrue(
+                        value.startswith("$"),
+                        f"job '{job}' types a title into the YAML: "
+                        f"{line.strip()} — render it through render-report.py")
 
 
 if __name__ == "__main__":
