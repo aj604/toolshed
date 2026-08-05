@@ -1362,8 +1362,8 @@ class _Recorder:
         A residue destination is create-only, and that is a *bound on authority*,
         not a limitation. `RECORD_REMEDIES[DISTILL]` includes the span edits — an
         approved distillation legitimately rewrites the artifact it retires — and
-        the applier bounds a positioned edit to the hull of the record's approved
-        units only on the record's *own* document. A record's units segment that
+        the applier bounds a positioned edit to the passages the record's
+        approved occurrences are, only on the record's *own* document. A record's units segment that
         document alone, so a destination that already existed would take
         `replace`/`insert`/`delete` at any line of it, with no passage anyone
         reviewed: naming a decision log as the destination would authorize

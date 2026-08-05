@@ -26,7 +26,7 @@ applier — the only component that writes.
 | `doclifecycle/migrate.py` | `draft_registry()`, `dry_run_migration()`, the legacy-install inference and the migration contract |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
-| `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, the allowed mutation scope, the minter kinds, and `POLICY_NEVER_ELIGIBLE_CODES` — the bloat verdict codes a policy minter may never select, checked here as well as by `policy.py` |
+| `doclifecycle/approval.py` | `mint_approval_set()`, `validate_approval_set()`, `load_approval_set()`, `write_approval_set()`, `derived_scope_paths()`, `baseline_units()`, `occurrence_passages()` — the passages a record's approved occurrences are, which the applier bounds a positioned edit by — the allowed mutation scope, the minter kinds, and `POLICY_NEVER_ELIGIBLE_CODES` — the bloat verdict codes a policy minter may never select, checked here as well as by `policy.py` |
 | `doclifecycle/policy.py` | `load_auto_apply_policy()`, `policy_eligibility()`, `mint_policy_approval_set()`, the eligibility classes; `NEVER_ELIGIBLE_CODES` is an alias of `approval.POLICY_NEVER_ELIGIBLE_CODES`, not a second declaration of it |
 | `doclifecycle/applier.py` | `apply_edit_plan()`, `load_edit_plan()`, `load_approval_payload()`, the edit-plan vocabulary, the record-code remedy table, and the whole-diff confinement check |
 | `doclifecycle/render.py` | `render_report()`, `render_approval_set()`, `approval_trailers()` — Markdown and git trailers from validated artifacts, and nothing else |
@@ -1007,8 +1007,8 @@ other destination.
 
 Create-only is a bound on authority, not a limitation. `DISTILL`'s remedy set includes the span
 edits (an approved distillation legitimately rewrites the artifact it retires), and a positioned
-edit is bounded by the passage the record's approved units are — units that segment the record's
-*own* document. A destination that already existed would therefore take `replace`/`insert`/
+edit is bounded by the passages the record's approved occurrences are — units that segment the
+record's *own* document. A destination that already existed would therefore take `replace`/`insert`/
 `delete` at any line of it: naming a decision log as the residue destination would authorize
 deleting an unrelated sentence from it. An unwritten path cannot, because its whole content is
 the `create-document` text the approval covers. Residue belonging in a document that does exist
@@ -1069,7 +1069,7 @@ before building a finding. An omitted unit is `bloat-whole-document-units-incomp
 identity is `bloat-whole-document-unit-duplicate`; and an extra, stale, or malformed identity is
 `bloat-unknown-unit`. The set includes structural units such as headings, not only
 assertion-capable prose. Passage remedies (`CUT`, `CONDENSE`, `EXTRACT-AND-MOVE`) keep their
-selected-unit hulls, and bulk `RETIRE-DOC` remains complete because scope enumeration supplies each
+selected-unit passages, and bulk `RETIRE-DOC` remains complete because scope enumeration supplies each
 member's units directly from the index. The same exact-set invariant is re-derived by
 repository-backed report validation, approval minting/read-back, and therefore the applier; a
 forged or legacy partial record cannot bypass the audit producer and amplify passage authority
@@ -1899,7 +1899,7 @@ mutation scope, minted by a named minter. The applier accepts nothing else.
 ```json
 {
   "artifact": "approval-set",
-  "schema_version": 2,
+  "schema_version": 3,
   "status": "clean",
   "minter": {"kind": "human", "id": "avery@example.com", "policy_digest": null},
   "report_digest": "<sha256 of the report this selects from>",
@@ -1909,7 +1909,7 @@ mutation scope, minted by a named minter. The applier accepts nothing else.
   "records": [
     {"digest": "<record digest>", "id": "DRIFT-001", "code": "STALE",
      "path": "docs/architecture.md", "destination": null,
-     "units": ["<unit digest>"]}
+     "units": ["<unit digest>"], "occurrences": [7]}
   ],
   "skipped": [{"digest": "<record digest>", "id": "DRIFT-002"}],
   "scope": {"roots": ["docs"], "paths": ["docs/architecture.md"]},
@@ -1928,13 +1928,27 @@ the declaration that selected, `null` for a person, and inside the approval dige
 other field. `status` is `clean` or `stale`; a stale one carries `stale_reasons` in the shape a
 report's do.
 
-`schema_version` is the approval set's own, at **2**, and no longer the engine-wide
-`ARTIFACT_SCHEMA_VERSION` a report and a registry carry — nothing about those changed, and a
-version 1 approval set has to be refused rather than read under version 2's rules. It is
-`approval-schema-pre-provenance`, alone and before every other structural check: a `policy`
-brand minted then names no declaration, nothing can recover which one it was, and reading its
-fields under the new rules would report a missing provenance field instead of an artifact from
-another schema. Mint again from its report. Any other value is `approval-schema-version`.
+`schema_version` is the approval set's own, at **3**, and no longer the engine-wide
+`ARTIFACT_SCHEMA_VERSION` a report and a registry carry — nothing about those changed, and an
+older approval set has to be refused rather than read under the current rules.
+`SUPERSEDED_SCHEMA_VERSIONS` names each one and why, alone and before every other structural
+check. Version 1 is `approval-schema-pre-provenance`: a `policy` brand minted then names no
+declaration, nothing can recover which one it was, and reading its fields under the new rules
+would report a missing provenance field instead of an artifact from another schema. Version 2 is
+`approval-schema-pre-occurrence`: its records name the units they approve without naming which
+occurrence of them was read, and the only way to read one under version 3's rules would be to
+span every match — the hull that authorizes unreviewed text. Either way, mint again from its
+report. Any other value is `approval-schema-version`.
+
+`occurrences` is *where* a record's units were approved: ascending assertion-unit ordinals into
+the committed baseline's segmentation of `path`, one per approved unit. A unit digest is its
+content, so a document that says one thing twice holds one identity in two places — and reading
+a record's units back as "wherever this text is" made the approved passage the span from the
+first match to the last, so approving one occurrence authorized every word between it and its
+twin. Ordinals rather than line numbers, because the ordinal survives a re-wrap; the committed
+baseline rather than the working tree, because the base commit is a compared lineage field, so
+the ordinals cannot move under a live approval however the tree is edited. See "Occurrence
+binding" below.
 
 `digest` is **required** on the way in, unlike a report's — an approval set is authority, and
 its digest is the only part of it that reaches the repository, so a file that declines to say
@@ -1980,7 +1994,33 @@ mints, in this order, because each phase rests on the one before:
 - every target's text must still be what the record was written about
   (`approval-preimage-mismatch`, `approval-preimage-unreadable`); for `RETIRE-DOC`, `DISTILL`,
   and `MERGE-DOC`, the approved units must additionally equal the target's complete current
-  deterministic unit set (`approval-whole-document-units-incomplete`).
+  deterministic unit set (`approval-whole-document-units-incomplete`);
+- and every record must bind to a unique occurrence set in the committed baseline — a unit the
+  baseline does not carry is `approval-occurrence-unbindable`, and a unit the baseline holds
+  more times than the record approves is `approval-occurrence-ambiguous`, refused rather than
+  resolved because nothing in the artifact says which copy a reviewer read.
+
+**Occurrence binding.** `occurrences` is derived once, at the mint, from the baseline the report
+was produced against, and everything downstream re-derives rather than re-decides. A whole-
+document record is the one shape where a repeat is not a question: its units are the document's
+complete identity set, so every occurrence of each is inside what was approved, and the count
+rule that refuses an ambiguous passage admits it without a second rule.
+
+Validation re-derives against the same baseline and returns `invalid` — never `stale` — when the
+declared ordinals are out of range or do not hold the approved units
+(`approval-occurrence-not-derived`, `approval-occurrence-unbindable`): a commit pins its bytes,
+so against the baseline the set names, a disagreement is a forged passage bound and not the world
+moving. Against a *different* base commit the check stands down entirely, exactly as the report
+checks stand down behind `approval-report-changed`: the move is already
+`approval-base-commit-changed`, and every occurrence disagreement under it is a consequence of
+that move rather than a claim about it. Structurally — with no repository at all — the list must
+be non-empty, ascending, distinct, and one ordinal per approved unit (a whole-document record may
+name more, never fewer), or it is `approval-invalid-record` /
+`approval-occurrence-not-derived`.
+
+Minting refuses an ambiguous repeat; an approval set may still name one occurrence of a repeated
+unit *explicitly*, and validation accepts it because it is exact. That is the difference between
+guessing and being told, and it is what the applier's passage bound then rests on.
 
 **Nothing rides along.** The allowed mutation scope is a *derivation* of the selection —
 `derived_scope_paths()`: each selected record's document, plus the `destination` a move writes
@@ -2378,13 +2418,18 @@ The order of refusals is the contract:
    `DISTILL`'s three span edits a given residue needs — that is a per-record choice, not a fixed
    shape every distillation must exercise whole. A positioned
    operation on the record's own document must also lie
-   within the hull of that record's approved units — their first line through their last, so
-   the blank lines between two approved units stay editable —
-   or it is `plan-span-outside-approved-units`. The hull is measured against HEAD, and checked
-   *before* the idempotency step below: measured against the working tree it would be
+   within **one of the passages that record's approved occurrences are**
+   (`approval.occurrence_passages`) — consecutive approved units are one passage, so the blank
+   lines and list markers between them stay editable, and units with something unapproved
+   between them are two passages an operation may not reach across — or it is
+   `plan-span-outside-approved-units`. Never a hull from the first approved line to the last:
+   that spanned whatever separated two approved units, which for a document holding one sentence
+   twice is a whole section authorized by approving one line. The passages are measured against
+   HEAD, and checked
+   *before* the idempotency step below: measured against the working tree they would be
    unavailable on exactly the re-run an attacker arranges, by pre-placing the result of an
    out-of-passage edit on disk. A record's units locate nothing in the document it names as a
-   destination, so there is no hull to measure there — which is why a positioned operation may
+   destination, so there is no passage to measure there — which is why a positioned operation may
    name only the record's own document (`plan-target-not-record-target`). A destination is
    written by the whole-document operations and by a move's append, both of which the approval
    covers entire.

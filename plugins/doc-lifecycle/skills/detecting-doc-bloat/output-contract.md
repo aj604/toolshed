@@ -54,7 +54,7 @@ refused, not preferred:
   the path is a document at all.
 - **Whether a whole-document verdict binds the complete current unit set.**
   `RETIRE-DOC`, `DISTILL`, and `MERGE-DOC` cannot omit, repeat, or add a unit;
-  passage remedies keep their selected-unit hulls.
+  passage remedies keep their selected-unit passages.
 - **A `DISTILL` status**, against the file's own marker.
 - **Whether a chunk verdict stayed in its slice** — for single-document
   verdicts only; a `scope` judgment is corpus-wide by construction.
@@ -121,7 +121,7 @@ proof, full stop. The claims, insights, and decision entry are the
 never decided by the grep. Its `units` name **every** unit the document has —
 two here because the invented doc is that short — because `DISTILL`'s subject
 is the whole document and the applier bounds any span edit the distiller's
-remedy uses to the hull of exactly these digests.
+remedy uses to the passages of exactly these digests.
 
 `B4` is bulk retirement — the replacement for the retired `POLICY` verdict. It
 names an **inclusion rule**, not files: the engine expands `{"set":

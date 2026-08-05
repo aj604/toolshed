@@ -4,6 +4,46 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-08-04 — an approval binds occurrences, not merely the text of its units (#193)
+- Evidence: a unit digest is its content, so a document that says one thing twice holds one
+  identity in two places. The applier bounded a positioned operation by the *hull* of a record's
+  approved units — their first line at HEAD through their last — so approving one occurrence of a
+  repeated sentence authorized every word between it and its twin, including headings and
+  paragraphs no record mentioned. The same hull swallowed unapproved units sitting between two
+  approved ones.
+- Decided: an approved record carries `occurrences`, the assertion-unit ordinals its units occupy
+  in the *committed baseline* — ordinals rather than line numbers, because an ordinal survives a
+  re-wrap; the baseline rather than the working tree, because the base commit is a compared
+  lineage field, so the binding cannot move under a live approval however the tree is edited.
+  Derived once in `_mint_approval_set`, so a human mint and a policy mint keep one construction.
+- Decided: minting refuses rather than resolves an ambiguous repeat
+  (`approval-occurrence-ambiguous`) — nothing in the artifact says which copy a reviewer read, so
+  picking either, or spanning both, would be the engine deciding what was approved. An approval
+  set may still name one occurrence explicitly, and validation accepts it because it is exact. A
+  whole-document record is the one shape where a repeat is not a question: its units are the
+  document's complete identity set, so every occurrence of each is inside what it approves.
+- Decided: validation re-derives against the baseline the set names and answers `invalid`, never
+  `stale` (`approval-occurrence-not-derived`, `approval-occurrence-unbindable`) — a commit pins
+  its bytes, so a disagreement there is a forged passage bound. Against a different base commit
+  the check stands down entirely, exactly as the report checks stand down behind
+  `approval-report-changed`.
+- Decided: the applier bounds a positioned operation by the passages the approved occurrences are
+  (`approval.occurrence_passages`) — consecutive units are one passage, so what separates them
+  stays editable; a gap ends the passage rather than being swallowed. Nothing infers that content
+  between equal unit digests was reviewed.
+- Decided: the approval set's `SCHEMA_VERSION` goes to 3 and version 2 is refused alone
+  (`approval-schema-pre-occurrence`), through the same `SUPERSEDED_SCHEMA_VERSIONS` table version
+  1 already used. A version-2 record identifies no occurrence set, and the only way to read one
+  under the new rules would be to reconstruct the hull this decision exists to end.
+- Still binds: finding identity is untouched — `finding_digest` covers lineage, code, path, and
+  units, so it stays content-addressed and stable across document reordering, and the segmenter
+  did not change.
+- Verified: `tests/engine/applier_test.py`'s `OccurrenceBoundPassages` drives a repeated-unit
+  fixture through `apply_edit_plan`, proving the twin, the material between the copies, and the
+  old first-to-last span are all refused while the approved occurrence applies;
+  `tests/engine/approval_test.py`'s `OccurrenceBoundApproval` and `ThePreOccurrenceSchema` cover
+  the derivation, the forgeries, and the schema refusal.
+
 ## 2026-08-04 — a policy brand is provenance the artifact proves, not a label it claims (#186)
 - Evidence: the 2026-07-29 entry below closed the *record classes* a policy brand could carry, but
   the brand itself stayed a field. `mint-approval --minter-kind policy` still minted a caller-named
