@@ -203,6 +203,12 @@ class MutationBetweenTheApplyAndTheStaging(ApplyBoundaryTestCase):
         # the committed tree would not be the postimage — refused rather than
         # laundered as the approved content.
         self.assert_refused(self.index(result), "apply-bytes-not-certified")
+        # And what it stored is nameable: the filter's normalization, not the
+        # approved document. Asserting only the code would pass just as well
+        # against a check that failed for some unrelated reason.
+        self.assertEqual(self.git("show", ":docs/edited.md"), AFTER.upper())
+        self.assertNotEqual(self.git("show", ":docs/edited.md"), AFTER)
+        self.assertIn(sha256(AFTER), self.surface())
 
     def test_a_symlink_where_a_document_belongs_is_refused(self):
         result = self.result(self.apply())
@@ -259,6 +265,11 @@ class MutationAfterTheIndexWasVerified(ApplyBoundaryTestCase):
         self.git("commit", "--amend", "-qm", "docs: apply")
         self.assert_refused(self.verify_commit(result),
                             "apply-bytes-not-certified")
+        # The commit that would have been pushed carries the hook's text, and
+        # the refusal names the digest the applier certified instead — the two
+        # halves of "these bytes are not the approved ones".
+        self.assertEqual(self.git("show", "HEAD:docs/edited.md"), "hooked\n")
+        self.assertIn(sha256(AFTER), self.surface())
 
     def test_a_commit_carrying_an_uncertified_path_is_refused(self):
         result = self.result(self.apply())
@@ -418,6 +429,12 @@ class ReusingAnExistingBranch(ApplyBoundaryTestCase):
             tree={"docs/edited.md": "not what was approved\n"})
         self.assert_reuse_refused(self.reuse(existing, result),
                                   "apply-bytes-not-certified")
+        # The different bytes are the scenario, so they are asserted: the
+        # branch a re-run would have adopted still holds content this approval
+        # never authorized, and the refusal names the digest that was approved.
+        self.assertEqual(self.git("show", f"{existing}:docs/edited.md"),
+                         "not what was approved\n")
+        self.assertIn(sha256(AFTER), self.surface())
 
     def test_an_id_that_is_not_a_commit_is_refused(self):
         _, result = self.two_attempts(self.message(self.APPROVAL))

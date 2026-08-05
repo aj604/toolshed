@@ -153,6 +153,74 @@ class WhatMovesAFindingDigest(unittest.TestCase):
         self.assertRegex(finding().digest, r"^[0-9a-f]{64}$")
 
 
+class IdentityAcrossAHarmlesslyReorderedDocument(unittest.TestCase):
+    """US28 (#168), stated over a real document rather than hand-made digests.
+
+    Occurrence binding (#193) pins an approval to *where* in the committed
+    baseline its units sit, and that ordinal must never travel back into what a
+    finding *is*. If it did, moving a paragraph up the page — a reorganization
+    that changes no claim — would mint fresh finding digests, and every
+    approval selecting the old ones would be orphaned by an edit nobody
+    considered substantive. So the same passages, walked in a different
+    document order, must reach one finding digest.
+    """
+
+    PASSAGES = (
+        "The service charges a flat 2% fee.",
+        "New endpoints must include an integration test.",
+        "A flat rate was chosen because the processor bills per transaction.",
+    )
+
+    def segmentation(self, passages):
+        return segment_text(
+            "# Architecture\n\n" + "\n\n".join(passages) + "\n",
+            path="docs/architecture.md",
+            kind="living",
+        )
+
+    def units(self, passages):
+        """The assertion-capable units of one document, in document order.
+
+        Taken in the order the segmenter walks them, because that is the order
+        an audit would hand `build_finding` — a helper that sorted here would
+        pre-normalize the very thing the finding digest is supposed to
+        normalize, and the test below would prove nothing.
+        """
+        return tuple(
+            unit.digest
+            for unit in self.segmentation(passages).units
+            if unit.assertion_capable
+        )
+
+    def test_a_reordered_document_really_is_reordered(self):
+        """Guards the guard: without this the equality below could be trivial."""
+        original, reordered = self.PASSAGES, tuple(reversed(self.PASSAGES))
+
+        self.assertNotEqual(
+            self.segmentation(original).digest,
+            self.segmentation(reordered).digest,
+        )
+        self.assertNotEqual(self.units(original), self.units(reordered))
+        self.assertEqual(set(self.units(original)), set(self.units(reordered)))
+
+    def test_reordering_a_document_does_not_move_a_finding_digest(self):
+        """The user story itself: identity is content, never position."""
+        self.assertEqual(
+            finding(units=self.units(self.PASSAGES)).digest,
+            finding(units=self.units(tuple(reversed(self.PASSAGES)))).digest,
+        )
+
+    def test_rewriting_a_passage_does_move_a_finding_digest(self):
+        """The other direction, so the stability above is stability and not a
+        digest that has stopped listening to its document."""
+        rewritten = ("The service charges a flat 2.5% fee.",) + self.PASSAGES[1:]
+
+        self.assertNotEqual(
+            finding(units=self.units(self.PASSAGES)).digest,
+            finding(units=self.units(rewritten)).digest,
+        )
+
+
 class FindingShape(unittest.TestCase):
     def test_units_are_normalized_on_the_finding_itself(self):
         self.assertEqual(finding(units=(UNIT_B, UNIT_A, UNIT_B)).units,

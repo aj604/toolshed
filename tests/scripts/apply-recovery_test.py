@@ -459,6 +459,16 @@ class APushThatLandsWhileThePullRequestFails(ApplyRecoveryTestCase):
         # The push landed: this is precisely the stranded approval #198 exists
         # for, and the state the re-run below starts from.
         self.assertIsNotNone(self.remote_tip(), "the push did not land")
+        # And what stands there is the verified commit, not merely some commit:
+        # a failed `gh pr create` must strand the certified bytes, because the
+        # re-run's whole claim to reuse the branch rests on them being these.
+        with open(os.path.join(run.temp, "verified-commit.txt"),
+                  encoding="utf-8") as fh:
+            verified = fh.read().strip()
+        self.assertEqual(self.remote_tip(), verified)
+        self.assertEqual(
+            self.git(run.repo, "show", f"{verified}:docs/edited.md"), AFTER,
+            "the stranded branch does not hold the approved document")
         self.assertIn("## Doc apply: branch created", run.surface())
 
 
@@ -491,6 +501,7 @@ class ARerunWithThePullRequestAlreadyOpen(ApplyRecoveryTestCase):
     def test_an_open_pull_request_for_this_approval_is_idempotent_success(self):
         stranded = self.run_lane("stranded", pr_create_fails=True)
         self.assertIsNotNone(stranded.failure())
+        landed = self.remote_tip()
 
         rerun = self.run_lane("rerun", pull_requests=self.open_pull_request())
         self.assert_clean(rerun)
@@ -500,6 +511,16 @@ class ARerunWithThePullRequestAlreadyOpen(ApplyRecoveryTestCase):
         self.assertIn("#41", rerun.surface())
         self.assertNotIn("pr create", " ".join(rerun.gh_calls()),
                          "a second pull request was opened for one approval")
+        # Idempotent means the world did not move: a re-run that pushed its own
+        # commit over the branch and only then found the open pull request
+        # would report exactly the same success, while the reviewer's diff
+        # silently became a commit nobody had approved reviewing.
+        self.assertEqual(self.remote_tip(), landed,
+                         "an idempotent re-run moved the branch under the "
+                         "open pull request")
+        self.assertEqual(
+            self.git(stranded.repo, "show", f"{landed}:docs/edited.md"), AFTER,
+            "the branch under review no longer holds the approved document")
 
 
 class AnExistingBranchThatConflicts(ApplyRecoveryTestCase):
@@ -610,6 +631,7 @@ class AnExistingPullRequestThatConflicts(ApplyRecoveryTestCase):
     def test_an_open_pull_request_aimed_at_another_base_is_refused(self):
         stranded = self.run_lane("stranded", pr_create_fails=True)
         self.assertIsNotNone(stranded.failure())
+        landed = self.remote_tip()
         rerun = self.run_lane(
             "rerun",
             pull_requests=[{"number": 9, "headRefName": BRANCH,
@@ -617,10 +639,17 @@ class AnExistingPullRequestThatConflicts(ApplyRecoveryTestCase):
                             "body": f"- Approval digest: "
                                     f"`{APPROVAL_DIGEST}`\n"}])
         self.assert_refused(rerun, "apply-pull-request-conflict")
+        # A refusal leaves the stranded branch exactly as it found it, bytes
+        # and all — a run that refused after moving the ref would have changed
+        # what the other pull request shows while claiming to have done nothing.
+        self.assertEqual(self.remote_tip(), landed)
+        self.assertEqual(
+            self.git(stranded.repo, "show", f"{landed}:docs/edited.md"), AFTER)
 
     def test_two_open_pull_requests_on_one_branch_are_refused(self):
         stranded = self.run_lane("stranded", pr_create_fails=True)
         self.assertIsNotNone(stranded.failure())
+        landed = self.remote_tip()
         body = f"- Approval digest: `{APPROVAL_DIGEST}`\n"
         rerun = self.run_lane(
             "rerun",
@@ -629,6 +658,12 @@ class AnExistingPullRequestThatConflicts(ApplyRecoveryTestCase):
                            {"number": 10, "headRefName": BRANCH,
                             "baseRefName": "release", "body": body}])
         self.assert_refused(rerun, "apply-pull-request-conflict")
+        # Two reviews over one branch is ambiguous, not permission: the ref and
+        # the bytes both reviews are reading stay exactly as the stranded run
+        # left them.
+        self.assertEqual(self.remote_tip(), landed)
+        self.assertEqual(
+            self.git(stranded.repo, "show", f"{landed}:docs/edited.md"), AFTER)
 
 
 if __name__ == "__main__":

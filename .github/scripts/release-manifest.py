@@ -125,6 +125,47 @@ GATE_MANIFEST = {
         "tests/engine/migrate_test.py",
         "tests/engine/migrate_cli_test.py",
     ],
+    # Issue #168's sign-off criterion, in its own words: "regression tests for
+    # every reproduced sign-off failure, so that a green gate proves the
+    # properties the final review found missing." The failures the #57 release
+    # review reproduced all shared one invariant — no report, approval, apply
+    # result, staged index, commit, or cache hit may claim authority over bytes
+    # that were not part of its validated inputs. Discovery runs these suites
+    # already; naming them here is what makes deleting one a reported failure
+    # rather than a silently smaller gate. By finding:
+    #   applier write transaction, write-boundary and post-write races,
+    #     compare-aware rollback (#183) — applier_test
+    #   staged index and commit-tree byte verification, both apply lanes
+    #     (#191) — verify-apply-bytes_test, apply-lane-parity_test
+    #   drift-audit repository-integrity gate (#185) — check-repo-integrity_test
+    #   policy provenance, one policy-branded producer (#186) — policy_test,
+    #     policy_cli_test, approval_test
+    #   whole-payload cache digest (#187) — cache_test, scenario_cache_test
+    #   occurrence-bound approval, no digest hull (#193) — approval_test, and
+    #     finding_test for the other half of that trade: occurrence ordinals
+    #     bound an edit and must never enter a finding's content-addressed
+    #     identity, so a reordered document keeps its finding digests (#203)
+    #   idempotent apply recovery, never a force push (#198) — apply-recovery_test
+    #   documentation contracts the implementation can falsify (#194) —
+    #     doc-contract_test
+    #   upgrade-lane commit subject and PR title through the renderer (#189) —
+    #     render-report_test, upgrade-workflow_test
+    "issue #168 sign-off regressions": [
+        "tests/engine/applier_test.py",
+        "tests/engine/approval_test.py",
+        "tests/engine/cache_test.py",
+        "tests/engine/finding_test.py",
+        "tests/engine/policy_test.py",
+        "tests/engine/policy_cli_test.py",
+        "tests/engine/acceptance/scenario_cache_test.py",
+        "tests/scripts/verify-apply-bytes_test.py",
+        "tests/scripts/apply-lane-parity_test.py",
+        "tests/scripts/apply-recovery_test.py",
+        "tests/scripts/check-repo-integrity_test.py",
+        "tests/scripts/doc-contract_test.py",
+        "tests/scripts/render-report_test.py",
+        "tests/scripts/upgrade-workflow_test.py",
+    ],
 }
 
 

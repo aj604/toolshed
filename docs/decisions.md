@@ -1,8 +1,45 @@
 # Decisions
 
-> As of 2026-08-04 — entries are dated and appended, newest first; a superseded decision stays
+> As of 2026-08-05 — entries are dated and appended, newest first; a superseded decision stays
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
+
+## 2026-08-05 — the #168 sign-off gate is evidence in the repository, not a claim in a PR (#203)
+- Decided: the sign-off gate's output is three retained records under
+  `tests/baselines/issue-203-sign-off-gate/` — `gate-results.md` (every gate component, its
+  command, and its result at the remediation head), `independent-reviews.md` (how the two fresh
+  reviews were dispatched, what each concluded, and the disposition of every finding), and
+  `race-test-audit.md` (the per-test audit of #168's rule that a race test assert surviving bytes
+  and transaction state). A sign-off whose evidence lives only in a pull request body is a claim;
+  the point of #168 was that authority binds to bytes a later reader can check.
+- Decided: a gate criterion is what makes a regression test durable, so
+  `.github/scripts/release-manifest.py` gained `issue #168 sign-off regressions`, naming the
+  fourteen suites that carry the reproduced failures' regressions and mapping each to its finding.
+  Discovery ran four of them (`verify-apply-bytes_test.py`, `apply-recovery_test.py`,
+  `apply-lane-parity_test.py`, `doc-contract_test.py`) while no criterion did, so deleting one
+  would have shrunk the gate silently — which is the failure mode `release-manifest.py` exists to
+  catch, applied to the suites #168 itself added.
+- Decided: occurrence ordinals bound an edit and must never enter a finding's content-addressed
+  identity (#193's other half, #168's User Story 28). The property already held; nothing tested
+  it. `tests/engine/finding_test.py` now segments a document, re-segments it with its passages
+  reordered, and asserts the finding digest is unmoved while a rewritten passage moves it.
+- Decided: seven race tests that asserted a typed refusal but not the surviving bytes are a gap
+  against #168's rule even though none was path-set-only. Six were given literal byte read-backs;
+  the seventh is accepted because a sibling test owns that property for the whole gate. Two were
+  spot-checked by breaking what they assert — the idempotent-recovery case passed every
+  pre-existing assertion while force-pushing its own commit, which is exactly #198's hole.
+- Standing, and it is the limit of this evidence: none of the gates #168 added has fired in a real
+  lane, and the release tag the audit lane's tooling fetch names is not cut (#228). The properties
+  are proven by execution-based tests and unproven in production.
+- Closing #57 remains a human decision. This entry records the evidence, not a sign-off.
+- Code: `.github/scripts/release-manifest.py`, `tests/baselines/issue-203-sign-off-gate/`,
+  `tests/engine/finding_test.py`, `tests/scripts/apply-recovery_test.py`,
+  `tests/scripts/verify-apply-bytes_test.py`
+- Deferred with issues: #223 (report `base_commit` unbound to the verified head), #224 (only the
+  refusal half of occurrence selection shipped), #225 (integrity evidence omitted rather than
+  stated when its artifact is missing), #226 (`check-repo-integrity.py` lacks its sibling's git
+  env scrub and timeout), #227 (residue unreachable by the fix door after a retirement), #228 (the
+  hardened lanes do not run).
 
 ## 2026-08-04 — both audit lanes assemble reports only from a verified checkout (#185)
 - Evidence: the bloat lane has re-checked HEAD, staged, tracked, and untracked surfaces before
@@ -1025,8 +1062,8 @@
   is wired into any workflow — `doc-audit.yml` has cut over drift, not bloat; #77 retired the
   legacy *write* lanes (`doc-sync.yml`, `doc-bloat.yml`) but named `plan-chunks.py` and the bloat
   output validator as surviving with "non-legacy owners" — the two detecting skills' own
-  read-only tooling (`HANDOFF.md`, 2026-07-27 entry) — not as migrated to the engine's verdict
-  set.
+  read-only tooling (`docs/plans/HANDOFF.md` @ b7efcb5, 2026-07-27 entry — retired in c75fd59)
+  — not as migrated to the engine's verdict set.
 - Decided (POLICY is retired in the target architecture, not in what ships today): the engine's
   scope mechanism (`enumerate_scope`, `bloat.SCOPE_VERDICTS` — an enumerable `set`/`glob`/`kind`
   rule on `RETIRE-DOC`, resolved from the corpus-wide context index) is the one correct successor
@@ -1708,8 +1745,8 @@
   red rather than degrading silently — `validate-drift-output.py` exits nonzero on shape errors
   and the workflow's validate step carries no `continue-on-error`. The shipped `doc-sync.yml` has
   since moved past this plan's literal task steps (e.g. onto `anthropics/claude-code-action@v1`,
-  per `docs/plans/HANDOFF.md`'s Row 5 note) — the plan's own code blocks are retired as stale
-  procedure, not current truth.
+  per `docs/plans/HANDOFF.md` @ b7efcb5's Row 5 note, retired in c75fd59) — the plan's own code
+  blocks are retired as stale procedure, not current truth.
 - Code: `.github/workflows/doc-sync.yml`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md`
 - Source: docs/plans/2026-07-02-doc-sync-automation-plan.md @ 09f4300 (removed in this commit)
 
