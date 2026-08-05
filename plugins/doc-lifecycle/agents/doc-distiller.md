@@ -132,9 +132,10 @@ paths.
   exactly that, and reaching for it anyway only turns a reportable gap into a
   failed run.
 - A `replace`, `delete`, or `insert` may name **only the artifact**, and must
-  lie inside the hull of the record's approved assertion units. The destination
-  has no hull — the record's units locate nothing there — so the applier
-  refuses a positioned operation on it (`plan-target-not-record-target`); the
-  destination is written by your one `create-document` and nothing else.
+  lie inside the passages the record's approved occurrences are. The
+  destination has no passage to measure there — the record's units locate
+  nothing in it — so the applier refuses a positioned operation on it
+  (`plan-target-not-record-target`); the destination is written by your one
+  `create-document` and nothing else.
 - The artifact's verbose body is not "wasted" — it survives in git history via
   the Source line. Do not copy extra prose into the residue to save it.
