@@ -7,15 +7,23 @@ the self-explaining outcome, pinned lineage, and cost/budget observability —
 so it is unit-testable instead of living as jq/heredoc templates in YAML.
 
 Every one of the report contract's five result states renders here, plus the
-one state the contract itself cannot describe: the audit job produced no
-report file at all (a crashed job, a stray chunk-worker entry per the engine
-README's warning). That is rendered as its own typed problem
-(`audit-report-missing`), never silence and never an empty-looking report.
+two states the contract itself cannot describe, because neither produces a
+report to carry them:
+
+  * the audit job produced no report file at all (a crashed job, a stray
+    chunk-worker entry per the engine README's warning) — rendered as its own
+    typed problem (`audit-report-missing`), never silence and never an
+    empty-looking report;
+  * the lane's repository-integrity gate refused (check-repo-integrity.py,
+    #185) — rendered from that gate's own verdict file, naming every
+    `evidence-integrity-*` problem it found, so a refusal states itself here
+    instead of surfacing only as a red step in a collapsed job log.
 
 Usage:
     render-audit-summary.py cost --execution-log FILE [--execution-log FILE ...] --out FILE
     render-audit-summary.py summary --report FILE [--cost FILE]
                                     [--audit-surface drift|bloat]
+                                    [--integrity FILE]
 
 `cost` is best-effort and never fails the run: an absent or unreadable
 execution log, or one with no `result` event, writes
@@ -133,6 +141,39 @@ def render_missing_report(report_path):
     return lines
 
 
+def render_integrity_refusal(payload, integrity_path):
+    """The gate's own verdict, rendered as this run's terminal state.
+
+    No lineage line: the refusal is precisely the finding that the checkout
+    the lineage would describe is not the one the run read.
+    """
+    problems = payload.get("problems") if isinstance(payload, dict) else None
+    if not problems:
+        # The flag was passed, so a gate ran, but its verdict cannot be read.
+        # Fail closed: an unreadable gate verdict is not a passed gate.
+        problems = [{
+            "code": "evidence-integrity-unverifiable",
+            "message": "the repository-integrity gate's verdict could not be "
+                       "read, so this run cannot show that its evidence came "
+                       "from the declared base commit",
+            "location": integrity_path,
+        }]
+    lines = [
+        "## Doc audit: REFUSED — repository integrity",
+        "",
+        "The checkout this run would have assembled its report from had "
+        "changed, so no report was published. Evidence read from a mutated "
+        "work tree is not evidence from the declared base commit, and the "
+        "gate never repairs the tree to continue.",
+        "",
+        "**Problems:**",
+    ]
+    for problem in problems:
+        where = f" ({problem.get('location')})" if problem.get("location") else ""
+        lines.append(f"- `{problem.get('code')}`: {problem.get('message')}{where}")
+    return lines
+
+
 def render_invalid(payload):
     lines = ["## Doc audit: INVALID", "", "The run cannot be trusted — no findings are reported.", "",
              "**Problems:**"]
@@ -219,8 +260,31 @@ RENDERERS = {
 }
 
 
-def render(report_path, cost, audit_surface="drift"):
+def _integrity_refusal(integrity_path):
+    """The gate's verdict when it refused, else None. Unreadable counts."""
+    if not integrity_path:
+        return None
+    try:
+        with open(integrity_path, encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+    if isinstance(payload, dict) and payload.get("status") == "verified":
+        return None
+    return payload
+
+
+def render(report_path, cost, audit_surface="drift", integrity_path=None):
     """The full Markdown body for one audit run, as a list of lines."""
+    refusal = _integrity_refusal(integrity_path)
+    if refusal is not None:
+        # The gate wins over any report on disk: a report assembled from a
+        # checkout that failed the gate is exactly what must not be published
+        # as this run's result.
+        lines = render_integrity_refusal(refusal, integrity_path)
+        if audit_surface == "bloat":
+            lines[0] = lines[0].replace("## Doc audit:", "## Bloat audit:", 1)
+        return "\n".join(lines + _cost_lines(cost)) + "\n"
     try:
         with open(report_path, encoding="utf-8") as f:
             payload = json.load(f)
@@ -261,6 +325,10 @@ def main():
     summary.add_argument(
         "--audit-surface", choices=("drift", "bloat"), default="drift",
     )
+    summary.add_argument(
+        "--integrity", default=None,
+        help="check-repo-integrity.py's verdict file for this run",
+    )
 
     args = parser.parse_args()
 
@@ -278,7 +346,8 @@ def main():
             cost_data = {"available": False, "turns": None, "cost_usd": None,
                          "duration_ms": None}
 
-    text = render(args.report, cost_data, audit_surface=args.audit_surface)
+    text = render(args.report, cost_data, audit_surface=args.audit_surface,
+                  integrity_path=args.integrity)
     _write_summary(text)
     return 0
 

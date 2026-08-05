@@ -243,6 +243,90 @@ class StaleFixPrompt(unittest.TestCase):
         self.assertIn("A \"non-assertive\" unit takes none", prompt)
 
 
+class RepositoryIntegrityGate(unittest.TestCase):
+    """The drift lane assembles a report only from a verified checkout (#185).
+
+    The bloat lane has enforced this since #144; this lane needs the identical
+    contract, so the check is one shared script rather than a second copy of a
+    security gate to keep true. What is asserted here is the wiring: where the
+    gate sits, that nothing downstream of it runs without it, and that exactly
+    the one declared work-tree artifact is exempt.
+    """
+
+    GATE = "Verify repository integrity before assembly"
+    GATED = "if: ${{ always() && steps.integrity.outcome == 'success' }}"
+
+    def text(self):
+        return "\n".join(lines())
+
+    def step(self, name):
+        for job_name, step_name, block in step_run_blocks():
+            if job_name == "audit" and step_name.strip() == name:
+                return "\n".join(block)
+        return None
+
+    def test_the_gate_stands_between_the_model_and_any_assembly(self):
+        text = self.text()
+        model = text.index("anthropics/claude-code-action@")
+        gate = text.index(f"- name: {self.GATE}")
+        audit = text.index("- name: Run the drift audit")
+        self.assertLess(model, gate)
+        self.assertLess(gate, audit)
+
+        audit_job = "\n".join(jobs()["audit"])
+        self.assertIn("id: integrity", audit_job)
+        # The engine call that would assemble and publish a report is the one
+        # thing that must not run on a refused checkout.
+        self.assertIn(
+            self.GATED, audit_job,
+            "the drift-audit step must be gated on the integrity outcome")
+
+    def test_both_lanes_run_one_shared_gate_never_a_second_copy(self):
+        script = self.step(self.GATE)
+        self.assertIsNotNone(script, f"no '{self.GATE}' step in the audit job")
+        self.assertIn("check-repo-integrity.py", script)
+        # Run from the release-pinned marketplace, not from the checkout the
+        # gate is judging.
+        self.assertIn(
+            '"${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/'
+            'skills/scheduling-doc-sync/scripts/check-repo-integrity.py"',
+            script)
+        self.assertNotRegex(script, r"\bgit\s+(?:reset|restore|checkout|clean)\b")
+
+        bloat = os.path.join(
+            ROOT, "plugins", "doc-lifecycle", "skills", "scheduling-doc-sync",
+            "doc-bloat-audit.yml")
+        with open(bloat, encoding="utf-8") as stream:
+            self.assertIn("check-repo-integrity.py", stream.read())
+
+    def test_exactly_the_declared_verdict_artifact_is_exempt(self):
+        script = self.step(self.GATE)
+        allows = re.findall(r"--allow\s+(\S+)", script)
+        self.assertEqual(
+            allows, ["verdicts.json"],
+            "the model writes exactly one file into the work tree; anything "
+            "else it leaves behind is a mutation, not this lane's output")
+        # Everything else the lane generates lives outside the checkout, which
+        # is what lets the allowlist stay at exactly one entry.
+        text = self.text()
+        self.assertNotRegex(
+            text, r">\s*(?:drift-(?:plan|report)|audit-cost)\.json")
+        for name in ("drift-plan.json", "drift-report.json", "audit-cost.json",
+                     "audit-integrity.json"):
+            self.assertIn(f"/doc-audit/{name}", text)
+
+    def test_pycache_never_counts_as_a_repository_mutation(self):
+        # Every step in this lane runs python3 inside the checkout; without
+        # this the interpreter's byte-cache would refuse every run.
+        self.assertIn('PYTHONDONTWRITEBYTECODE: "1"', self.text())
+
+    def test_a_refusal_reaches_the_run_surface_as_its_own_state(self):
+        text = self.text()
+        self.assertIn("name: audit-integrity", text)
+        publish = "\n".join(jobs()["publish"])
+        self.assertIn("--integrity ${AUDIT_DIR}/audit-integrity.json", publish)
+
+
 class RenderScriptWired(unittest.TestCase):
     def test_publish_job_renders_through_the_tested_script(self):
         body = jobs()["publish"]
@@ -395,6 +479,12 @@ class DeclaredToolsFailureIsNotSilent(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.repo = self.tmp.name
+        # The lane's artifact root is outside the checkout (#185); the step
+        # reads it from the environment, so the fixture has to supply one or
+        # `set -u` would abort the redirect and the branch under test would
+        # never run.
+        self.artifacts = os.path.join(self.tmp.name, "artifacts")
+        os.makedirs(self.artifacts)
         os.makedirs(os.path.join(self.repo, ".doc-lifecycle", "wiring", "engine"))
         self._stub("engine/doc-lifecycle.py",
                    'import sys\nsys.stdout.write("{}")\nsys.exit(0)\n')
@@ -417,17 +507,51 @@ class DeclaredToolsFailureIsNotSilent(unittest.TestCase):
         return subprocess.run(
             ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c",
              self.script],
-            cwd=self.repo, capture_output=True, text=True)
+            cwd=self.repo, capture_output=True, text=True,
+            env=dict(os.environ, AUDIT_DIR=self.artifacts))
+
+    def _assert_the_engine_actually_ran(self, result):
+        """A green step is not evidence the engine ran.
+
+        The step's redirect can fail on its own — an unset AUDIT_DIR, an
+        artifact root that is not there — and under `bash -eo pipefail` with
+        `set -u` an unbound variable in the *redirection of an external
+        command* inside a `||` list neither aborts the shell nor surfaces:
+        it is captured as exit 1, and the case statement then announces
+        "1 (invalid — typed report)" for a run that never reached the engine.
+        Asserting only the return code passes under that mutation, so these
+        two happy-path cases assert what the run produced instead.
+        """
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("drift-audit exit code: 0", result.stdout)
+        report = os.path.join(self.artifacts, "drift-report.json")
+        self.assertTrue(
+            os.path.exists(report),
+            f"no report at {report} — the step went green without the engine "
+            f"ever writing one:\n{result.stdout}\n{result.stderr}")
 
     def test_a_declared_run_passes_the_flags_through(self):
         self._stub_probe("--evidence-command gh\n", "", 0)
-        result = self._run_step()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self._assert_the_engine_actually_ran(self._run_step())
 
     def test_a_tool_free_install_runs_clean_with_no_flags(self):
         self._stub_probe("\n", "", 0)
+        self._assert_the_engine_actually_ran(self._run_step())
+
+    def test_a_report_that_was_never_written_is_its_own_terminal_state(self):
+        # The engine exited with a code the case statement calls a typed
+        # report, but nothing reached the report path. Two ways that happens:
+        # an uncaught engine crash, and a redirect that failed on its own
+        # (which bash hands to `|| code=$?` indistinguishably from a typed
+        # exit). Neither produced anything to publish, so the step must say
+        # that rather than announce a finding it does not have.
+        self._stub_probe("\n", "", 0)
+        self._stub("engine/doc-lifecycle.py", "import sys\nsys.exit(1)\n")
         result = self._run_step()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(
+            result.returncode, 0,
+            "a run that wrote no report went green:\n" + result.stdout)
+        self.assertIn("wrote no report", result.stdout)
 
     def test_an_unreadable_declaration_fails_the_step_and_says_so(self):
         self._stub_probe("", "error: could not read evidence-tools.json\n", 1)
@@ -471,6 +595,8 @@ class FreshnessRevalidationBehavior(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.repo = self.tmp.name
+        self.artifacts = os.path.join(self.tmp.name, "artifacts")
+        os.makedirs(self.artifacts)
         os.makedirs(os.path.join(self.repo, ".doc-lifecycle", "wiring", "engine"))
 
     def _stub_validate_report(self, stdout, exit_code):
@@ -486,12 +612,12 @@ class FreshnessRevalidationBehavior(unittest.TestCase):
         os.chmod(stub_path, 0o755)
 
     def _write_report(self, content):
-        with open(os.path.join(self.repo, "drift-report.json"), "w",
+        with open(os.path.join(self.artifacts, "drift-report.json"), "w",
                    encoding="utf-8") as fh:
             fh.write(content)
 
     def _report_content(self):
-        with open(os.path.join(self.repo, "drift-report.json"),
+        with open(os.path.join(self.artifacts, "drift-report.json"),
                    encoding="utf-8") as fh:
             return fh.read()
 
@@ -499,7 +625,8 @@ class FreshnessRevalidationBehavior(unittest.TestCase):
         return subprocess.run(
             ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c",
              self.script],
-            cwd=self.repo, capture_output=True, text=True)
+            cwd=self.repo, capture_output=True, text=True,
+            env=dict(os.environ, AUDIT_DIR=self.artifacts))
 
     def test_a_stale_verdict_reaches_the_published_report_not_laundered_as_fresh(self):
         self._write_report('{"status": "clean"}')
@@ -543,6 +670,15 @@ class FreshnessRevalidationBehavior(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             self._report_content(), '{"status": "invalid", "problems": []}')
+
+    def test_an_absent_report_leaves_the_step_green_and_says_why(self):
+        # The integrity gate refusing means no report was ever assembled, so
+        # this step has nothing to re-validate. A `hashFiles()` condition can
+        # no longer answer that (the artifact root is outside the workspace),
+        # so the presence test lives in the script and must not fail the step.
+        result = self._run_step()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no report artifact to re-validate", result.stdout)
 
 
 if __name__ == "__main__":

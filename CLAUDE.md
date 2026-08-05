@@ -3,7 +3,7 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture absorbed the helper scripts into; see its `README.md`) plus twelve skill
+re-architecture absorbed the helper scripts into; see its `README.md`) plus thirteen skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
@@ -38,6 +38,10 @@ keep the read commit alive as an ancestor and pass every other check), and
 `scripts/bloat-cadence.py` (the scheduled bloat lane's trusted prompt renderer and
 schema-bound action-output collector — it validates chunk returns, selects one retry, and runs
 from the release-pinned marketplace rather than being vendored), and
+`scripts/check-repo-integrity.py` (the repository-integrity gate both read-only audit lanes run
+between the model step and any assembly — HEAD, staged, tracked, and untracked surfaces, with an
+`--allow` list holding exactly the artifacts a lane declared it would write into the work tree;
+un-vendored because it judges the checkout and so must not live in it, #185), and
 `scripts/apply-upgrade.py` (the deterministic upgrade engine — the *target release's* own copy is
 what the upgrade lane runs, in the one job holding no credential, and it stays deliberately
 un-vendored) — all under `scheduling-doc-sync/scripts/`, not the
@@ -67,7 +71,9 @@ plugin-regenerated wiring under `wiring/`, machine-written state under `state/`)
 `wiring/verify-apply-bytes.py` — the chunk planner and the
 two output validators are NOT vendored here; both detecting skills always dispatch their own
 copy via `${CLAUDE_PLUGIN_ROOT}`, so a copy under `wiring/` would have no reader
-(aj604/toolshed#77 follow-up),
+(aj604/toolshed#77 follow-up), and `check-repo-integrity.py` is not vendored either — both audit
+lanes run it from the release-pinned marketplace clone, because a gate that judges the checkout
+must not be a file inside the checkout it judges (#185),
 `wiring/engine/` (the `doclifecycle` package vendored wholesale from
 `plugins/doc-lifecycle/engine/`, byte-identical to it — the only copy the lanes run, never
 edited in place),
@@ -182,7 +188,8 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   and `engine-capability_test.py` (the engine's
   applier module grants no shell, git, exec, or network capability). `render-audit-summary_test.py` covers the
   audit lane's run-surface rendering (every report result state, plus the
-  report-never-produced case, and cost/turn observability); `audit-workflow_test.py` adds
+  report-never-produced case, the integrity-refused case — which outranks any report on
+  disk — and cost/turn observability); `audit-workflow_test.py` adds
   `doc-audit.yml`-specific static checks (SHA-pinned third-party actions, no direct branch
   commits; no step reading `$?` or calling the engine CLI with later logic depending on it,
   anywhere `bash -e`'s inherited abort would already have skipped that read or logic — #107)
@@ -191,11 +198,18 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   published report, never laundered as the original's status, and an empty/absent
   revalidated payload must not fail the step outright) and static guards on how this lane
   reaches Tier-2 tool evidence (#118: the model grant unchanged, `--evidence-command` rendered
-  by `probe-evidence-tool.py` rather than typed into the YAML);
+  by `probe-evidence-tool.py` rather than typed into the YAML) and on the repository-integrity
+  gate (#185: it stands between the model and `drift-audit`, exempts exactly `verdicts.json`,
+  and its verdict reaches the run surface);
+  `check-repo-integrity_test.py` covers the gate itself against real git repositories — the
+  dirtied non-document evidence source both lanes must refuse, every mutation surface named
+  exhaustively, the allowlist exempting nothing but its own untracked path, and the
+  fresh-checkout scenario that shows why the refusal has to be terminal (a later checkout of
+  the same commit is clean, so nothing downstream can re-derive the failure);
   `bloat-audit-workflow_test.py` guards the sibling bloat cadence (#144): registry/public-plan
   preflight before fan-out, the two SHA-pinned model actions' exact `Task,Read,Grep,Glob`
   boundary, trusted structured-output extraction and one-retry selection, one budgeted fresh
-  Task per chunk, out-of-tree artifacts, a post-model fail-closed clean-worktree gate before
+  Task per chunk, out-of-tree artifacts, the same shared integrity gate before
   #152 completion assembly, and a report-derived typed partial summary (the unswept sidecar is
   never the authority); `bloat-cadence_test.py` executes the supported action-output seam,
   invalid-return retry selection, and post-retry partial truth;

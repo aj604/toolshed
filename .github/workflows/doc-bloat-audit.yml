@@ -224,32 +224,22 @@ jobs:
       # this gate additionally fails closed if an action implementation or
       # another process moved HEAD or changed any checkout file. Never reset or
       # clean here — a mutation must not be laundered into a read-only report.
+      # The check itself is shared with doc-audit.yml, which needs the identical
+      # contract (aj604/toolshed#185); one script owns it for both lanes, run
+      # from the release-pinned marketplace rather than from the checkout it is
+      # judging. This lane declares no work-tree artifact at all — every one of
+      # its files lives under BLOAT_DIR — so it passes no --allow and any added
+      # file refuses the run.
       - name: Verify repository integrity before assembly
         id: integrity
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          dirty=0
-          if [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then
-            echo "::error::repository HEAD moved during the model fan-out"
-            dirty=1
-          fi
-          if ! git diff --quiet --; then
-            echo "::error::tracked worktree files changed during the model fan-out"
-            dirty=1
-          fi
-          if ! git diff --cached --quiet HEAD --; then
-            echo "::error::staged repository changes appeared during the model fan-out"
-            dirty=1
-          fi
-          if [ -n "$(git ls-files --others)" ]; then
-            echo "::error::untracked repository files appeared during the model fan-out"
-            dirty=1
-          fi
-          if [ "$dirty" -ne 0 ]; then
-            exit 1
-          fi
+          python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/check-repo-integrity.py" \
+            --repo . \
+            --expected-head "${GITHUB_SHA}" \
+            --out "${BLOAT_DIR}/audit-integrity.json"
 
       # Assembly is deterministic. `--allow-partial` does not forgive a gap:
       # #152 binds each missing/invalid chunk and every affected document into
@@ -318,6 +308,16 @@ jobs:
           path: ${{ runner.temp }}/doc-bloat-audit/audit-cost.json
           if-no-files-found: ignore
 
+      # The gate's verdict travels to `publish` so a refusal states itself on
+      # the run surface rather than only as a red step.
+      - name: Upload integrity verdict
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bloat-audit-integrity
+          path: ${{ runner.temp }}/doc-bloat-audit/audit-integrity.json
+          if-no-files-found: ignore
+
   publish:
     needs: audit
     if: ${{ !cancelled() }}
@@ -352,6 +352,13 @@ jobs:
           name: bloat-audit-cost
           path: ${{ runner.temp }}/doc-bloat-audit
 
+      - name: Download integrity verdict
+        continue-on-error: true
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: bloat-audit-integrity
+          path: ${{ runner.temp }}/doc-bloat-audit
+
       # A rerun of this job must not present an old report as current. The
       # generic report validator owns freshness; the adapter only preserves its
       # typed payload. An invalid report has no lineage to revalidate.
@@ -377,4 +384,5 @@ jobs:
         run: |
           python3 .doc-lifecycle/wiring/render-audit-summary.py summary --audit-surface bloat \
             --report "${BLOAT_DIR}/bloat-report.json" \
-            --cost "${BLOAT_DIR}/audit-cost.json"
+            --cost "${BLOAT_DIR}/audit-cost.json" \
+            $( [ -f "${BLOAT_DIR}/audit-integrity.json" ] && echo "--integrity ${BLOAT_DIR}/audit-integrity.json" )

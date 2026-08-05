@@ -113,6 +113,10 @@ GATE_MANIFEST = {
         "tests/scripts/workflow-permissions_test.py",
         "tests/scripts/audit-workflow_test.py",
         "tests/scripts/apply-workflow_test.py",
+        # The read-only lanes' repository-integrity gate: a model job's
+        # read-only permissions say what it may do, this says what the
+        # checkout still was when the report was assembled (#185).
+        "tests/scripts/check-repo-integrity_test.py",
     ],
     "template/dogfood equivalence": [
         "tests/scripts/install-parity_test.py",

@@ -39,7 +39,11 @@ elegant"; you can check "reset state = `make reset`".
 ## 3. Nothing edits your docs without your approval
 
 Both audit lanes are **read-only**. They emit structured records — a verdict from a fixed
-enum, cited evidence — and stop. One skill applies them, `fixing-docs`, and only what you
+enum, cited evidence — and stop. Read-only is enforced, not asserted: before either lane
+assembles a report, a shared gate re-checks that the checkout is still the commit the run
+planned against — same HEAD, nothing staged, nothing modified, nothing added beyond the one
+file the drift lane declares its model writes. If any of that moved, the run publishes no
+report at all and the job summary says which surface moved. One skill applies them, `fixing-docs`, and only what you
 authorized: every record carries an ID, you approve a subset of IDs, and that selection is
 minted into an **approval set** — the artifact the applier treats as its sole authority, a
 report on its own being worth nothing. Drift and bloat land through the same door and the
