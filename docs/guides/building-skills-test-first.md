@@ -44,13 +44,20 @@ specific temptation it declined, rather than silently complying or silently igno
 prompt. A GREEN that can't produce that signature under direct pressure isn't done, no
 matter what the unpressured run showed.
 
-**What a GREEN does not prove: that the skill triggers.** Every GREEN run in this suite
-handed agents the SKILL.md file directly, so description-based routing — the model
-picking the skill on its own from the description alone — has never been exercised.
-A GREEN shows the text teaches the rule once the agent is reading it; it says nothing
-about whether the agent would have found it. Treat triggering as a separate check
-against the installed plugin, not something a GREEN covers
-(`tests/baselines/growing-green/GREEN-results.md` records the same caveat).
+**What a GREEN proves, and what it doesn't.** A GREEN shows the text teaches its rule
+once the agent is reading it — not that the agent would have found it. Most runs here
+handed the skill over: `tests/baselines/growing-green/GREEN-results.md` pointed agents at
+the `SKILL.md` files (the plugin cache was serving pre-edit versions) and asked them to
+scan the descriptions; `tests/baselines/bloat-red/GREEN-results.md` put the content in the
+prompt and calls it a "deployed-skill simulation". Two ran against deployed components,
+and they differ: in `tests/baselines/llm-doc-red/GREEN-results.md` (§E2E) the orchestrator
+invoked the skill by name, so selection was never at stake; in
+`tests/baselines/doc-sync-setup-red/GREEN-results.md` the skill was installed and the
+prompt never names it — it names the plugin and two sibling skills — so the agent did have
+to select `scheduling-doc-sync` from its description. That is one run, with a
+plugin-level hint, installed at `~/.claude/skills/` rather than through the marketplace
+install `README.md` documents. Treat triggering as its own check against the installed
+plugin.
 
 ## A RED that doesn't fail is itself a finding
 
