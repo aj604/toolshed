@@ -22,10 +22,22 @@
 - Decided: **the drifting line is reworded count-free, not renumbered.** Renumbering recurs on the
   next suite added, which is what the entry below already found; the record now states its own
   history without stating a total, the way its HANDOFF sentence was reworded in the same round.
+- Decided: **a guard written against a class carries its own planted cases, in both directions.**
+  Asserting the check against the live record says only that the record is clean today — it cannot
+  tell a working detector from one widened until nothing trips it, and this check shipped a draft
+  whose unit exit read an adjective as the noun counted, so `28 test suites` passed. So
+  `ThisCheckFiresOnThePhrasingsItClaimsToCatch` plants each phrasing into synthetic prose and
+  asserts the verdict for what the check catches *and* for every limit it claims. A stated limit
+  that has stopped being one fails too: a limits list that overstates what escapes is the same
+  defect as prose that overstates a count.
 - Standing limits, stated rather than implied: the check is digits-only (a spelled-out total
-  escapes), reads one- and four-digit runs as out of range, cannot distinguish a historically true
+  escapes), reads one- and four-digit runs as out of range, does not reach a paragraph naming a
+  suite only by bare filename, cannot distinguish a historically true
   count from a live one, and covers the record only — `docs/decisions.md` quotes the same wrong
-  numbers with no fence mechanism to separate quotation from assertion.
+  numbers with no fence mechanism to separate quotation from assertion. The bare-filename gap was
+  measured before it was accepted: anchoring on `_test.py` reaches three more per-suite tallies
+  nothing here can derive, which would push the exemption registry past the cap that keeps it from
+  becoming the way around the check.
 
 ## 2026-08-05 — the #168 sign-off gate is evidence in the repository, not a claim in a PR (#203)
 - Decided: the sign-off gate's output is five retained records under

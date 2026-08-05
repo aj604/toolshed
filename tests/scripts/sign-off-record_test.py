@@ -367,15 +367,26 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
 
     * a value derived here — the script-suite total, the wired-suite total, or
       the pinned-suite count. This is the property that makes renumbering
-      pointless: correcting `28` to `29` does not satisfy this check, deriving
-      it does, and the next suite added invalidates a stale `29` in any
-      phrasing at all, including one nobody has written yet.
+      pointless: the check compares against what the tools report, so a
+      hand-typed `29` passes only for as long as it happens to be right, and
+      the next suite added invalidates it in any phrasing at all, including
+      one nobody has written yet.
     * a shape that cannot be a suite count: a number followed by its own unit
       (`43 tests`, `66 lines`), a reference rather than a tally
       (`User Story 40`), or a run that is part of an identifier, issue number,
       version, date, or line reference (`#168`, `0.46.10`, `python3`,
       `applier_test.py:1089`).
     * a literal in `UNCHECKED_TALLIES` — the closed, capped list below.
+
+    Every clause above is a boundary, and this check shipped with one of them
+    drawn wrong — the unit exit read an *adjective* as the noun being counted,
+    so `28 test suites`, the ordinary English phrasing of the very total that
+    drifted, passed green. A human found that; nothing here would have. So the
+    boundary is pinned by `ThisCheckFiresOnThePhrasingsItClaimsToCatch` below,
+    which plants each phrasing into synthetic prose and asserts the verdict —
+    the caught ones *and* the documented escapes. Loosening an exit to quiet a
+    false positive is now a reported failure rather than a silent widening,
+    which is the same reason `release-manifest.py` is covered by mutation.
 
     Its limits, stated rather than implied — starting with its reach, because
     that is the number a reader would otherwise have to assume:
@@ -417,6 +428,16 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
       none.
     * **A wrong number that happens to equal another derived total passes.**
       Writing `61` where `29` was meant is not caught.
+    * **A suite named by bare filename does not anchor its paragraph.** The
+      shipped defect's own row was reached only because it writes the full
+      `tests/scripts/…` path; the same row saying `install-parity_test.py`
+      escapes. Adding `_test.py` to `ANCHOR` was measured and rejected: it
+      reaches four more numbers, and three of them are per-suite tallies
+      nothing here can derive (`leaves all 22 green`, `moved 34 → 38`), which
+      would take `UNCHECKED_TALLIES` past the cap that keeps it from becoming
+      the way around this check. The narrower anchor is the honest trade, and
+      `ThisCheckFiresOnThePhrasingsItClaimsToCatch` pins the escape so it
+      stays a stated one.
     * **It cannot tell a live count from a historical one.** "made it the 29th
       script suite" stays true forever and still fails here the moment a suite
       is added, so the record states its own history count-free instead. That
@@ -473,7 +494,14 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
     # `28 lines of suites`. So the unit must be plural and unhyphenated, and
     # `_carries_its_own_unit` refuses the exemption outright when the suites
     # are named again just after the unit word.
-    OWN_UNIT = re.compile(r"\A\s*(tests|lines)\b(?![-/])", re.I)
+    #
+    # Listed separately from the pattern so `test_every_unit_exemption_is_one
+    # _the_record_uses` can hold each entry to still being needed, the way
+    # `UNCHECKED_TALLIES` is held: both are lists of ways past the check, and
+    # an entry nobody needs is a hole for nothing.
+    OWN_UNITS = ("tests", "lines")
+    OWN_UNIT = re.compile(
+        r"\A\s*(%s)\b(?![-/])" % "|".join(OWN_UNITS), re.I)
 
     # How far past the unit word to look for the suites being named again.
     # Wide enough for `tests in tests/scripts`, narrow enough that the next
@@ -530,36 +558,44 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
             block = block.replace(tally, " " * len(tally))
         return self.LINK_TARGET.sub(lambda m: " " * len(m.group(0)), block)
 
-    def test_every_gate_shaped_number_in_suite_prose_is_derived(self):
+    def _refused(self, text):
+        """Every gate-shaped number in `text` this check will not accept.
+
+        The detector itself, separated from the record it runs over so the
+        planted-phrasing cases can drive it against synthetic prose. Yields
+        `(number, line)` — the number as written, and the line carrying it.
+        """
         allowed = set(self.derived.values())
-        for path in record_files():
-            for block in self._paragraphs(authored(read(path))):
-                if not self.ANCHOR.search(block):
+        for block in self._paragraphs(text):
+            if not self.ANCHOR.search(block):
+                continue
+            scanned = self._mask_registered(block)
+            for match in self.NUMBER.finditer(scanned):
+                if int(match.group(1)) in allowed:
                     continue
-                scanned = self._mask_registered(block)
-                for match in self.NUMBER.finditer(scanned):
-                    if int(match.group(1)) in allowed:
-                        continue
-                    after = scanned[match.end():match.end() + 48]
-                    before = scanned[max(0, match.start() - 20):match.start()]
-                    if (self._carries_its_own_unit(after)
-                            or self.NAMES_A_THING.search(before)
-                            or (self.IDENTIFIER_TAIL.match(after)
-                                and not self.ORDINAL.match(after))):
-                        continue
-                    line = block.splitlines()[
-                        scanned[:match.start()].count("\n")]
-                    self.fail(
-                        f"{os.path.relpath(path, ROOT)} states '"
-                        f"{match.group(1)}' in prose about the suites:\n"
-                        f"    {line.strip()}\n"
-                        f"Derived totals are "
-                        + ", ".join(f"{v} {k}" for k, v in
-                                    sorted(self.derived.items()))
-                        + ".\nA count here must either match a derived total "
-                        f"or not be a count at all. Renumbering it recurs on "
-                        f"the next suite added — reword the claim count-free, "
-                        f"the way the record does elsewhere.")
+                after = scanned[match.end():match.end() + 48]
+                before = scanned[max(0, match.start() - 20):match.start()]
+                if (self._carries_its_own_unit(after)
+                        or self.NAMES_A_THING.search(before)
+                        or (self.IDENTIFIER_TAIL.match(after)
+                            and not self.ORDINAL.match(after))):
+                    continue
+                line = block.splitlines()[scanned[:match.start()].count("\n")]
+                yield match.group(1), line.strip()
+
+    def test_every_gate_shaped_number_in_suite_prose_is_derived(self):
+        for path in record_files():
+            for number, line in self._refused(authored(read(path))):
+                self.fail(
+                    f"{os.path.relpath(path, ROOT)} states '{number}' in "
+                    f"prose about the suites:\n    {line}\n"
+                    f"Derived totals are "
+                    + ", ".join(f"{v} {k}" for k, v in
+                                sorted(self.derived.items()))
+                    + ".\nA count here must either match a derived total "
+                    f"or not be a count at all. Renumbering it recurs on "
+                    f"the next suite added — reword the claim count-free, "
+                    f"the way the record does elsewhere.")
 
     def _reach(self):
         """(numbers examined, paragraphs anchored, paragraphs) over the record."""
@@ -583,10 +619,11 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
             self.__class__.__doc__)
         self.assertIsNotNone(
             stated, "the class must state its measured reach")
+        measured = self._reach()
         self.assertEqual(
-            tuple(int(g) for g in stated.groups()), self._reach(),
+            tuple(int(g) for g in stated.groups()), measured,
             "the stated reach is not the measured reach; measured now: "
-            "%d numbers examined in %d of %d paragraphs" % self._reach())
+            "%d numbers examined in %d of %d paragraphs" % measured)
 
     def test_the_unchecked_tally_registry_has_no_stale_entries(self):
         # A registered literal that no longer appears would be an exemption
@@ -604,6 +641,131 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
             len(self.UNCHECKED_TALLIES), 3,
             "the registry is a list of numbers nothing checks; growing it is "
             "how this check would stop being one")
+
+    def test_every_unit_exemption_is_one_the_record_uses(self):
+        # The same discipline `UNCHECKED_TALLIES` gets, for the other list of
+        # ways past this check. `OWN_UNITS` claims to hold only the units the
+        # record actually writes; a unit added speculatively, or left behind
+        # after the prose using it was reworded, is an exemption nothing needs.
+        prose = "\n".join(authored(read(path)) for path in record_files())
+        for unit in self.OWN_UNITS:
+            self.assertRegex(
+                prose, r"\d{2,3}\s+%s\b" % unit,
+                f"OWN_UNITS exempts a number followed by {unit!r}, and no "
+                f"gate-shaped number in the record is followed by it — the "
+                f"entry exempts nothing and should go")
+
+
+class ThisCheckFiresOnThePhrasingsItClaimsToCatch(unittest.TestCase):
+    """`NoUncheckedGateCountReachesTheProse`, run against planted prose.
+
+    That check is asserted against the live record, which says only that the
+    record is clean *today* — it cannot distinguish a detector that works from
+    one that has been quietly widened until nothing trips it. That is not a
+    hypothetical: the check's unit exit shipped reading an adjective as the
+    noun being counted, so `28 test suites` passed, and a human found it. The
+    next such hole would arrive the same way, as a one-word edit relaxing an
+    exit to quiet a false positive.
+
+    So the boundary itself is the subject here. Each phrasing below is planted
+    into synthetic prose and the verdict asserted — the caught ones and the
+    documented escapes alike. An escape turning into a catch fails too, on
+    purpose: it means the limits list on that class has gone stale, and a
+    limits list that overstates what escapes is the same defect as prose that
+    overstates a count.
+
+    Synthetic prose, never the record, so nothing here can be satisfied by
+    editing the evidence.
+    """
+
+    # Each case is (what it demonstrates, the prose). `{n}` is a number no
+    # derived total equals, so a catch is a catch for the reason claimed
+    # rather than by collision; `{live}` is a real derived total.
+    CAUGHT = (
+        ("the shipped defect, verbatim",
+         "| Install parity | `tests/scripts/install-parity_test.py` "
+         "(inside the {n}) | PASS |"),
+        ("the adjective family the first draft let through",
+         "Install parity is one of the {n} test suites."),
+        ("a unit word with the suites renamed just after it",
+         "The gate ran {n} tests in tests/scripts."),
+        ("a bare ratio carrying no count noun at all",
+         "| Script suites | `run-script-suites.py` | {n}/{n} clean |"),
+        ("an ordinal, which the identifier exit must not swallow",
+         "Adding it made this the {n}th script suite."),
+        ("sentence-final, the shape an earlier draft let through",
+         "The suites are all wired; there are {n}."),
+        ("a paragraph naming the gate but never the suites",
+         "The gate ran {n} components clean."),
+        ("a count whose subject sits on the line above it",
+         "Every script suite in this tree\nis one of {n}."),
+    )
+
+    # The limits the class docstring claims. Asserted so the claim stays true.
+    ESCAPES = (
+        ("a unit word with the suites not renamed after it",
+         "The script suites are {n} tests worth."),
+        ("the `#` exit that keeps `#168` from reading as a tally",
+         "Install parity is suite #{n}."),
+        ("the `-` exit that keeps `2026-08-05` from reading as a tally",
+         "Script suites 1-{n} all passed."),
+        ("the `user stories` reference exit",
+         "The script suites discharge user stories {n}."),
+        ("a decimal, which reads as a version",
+         "The script suites number {n}.0 in total."),
+        ("a spelled-out total",
+         "There are twenty-eight script suites."),
+        ("a derived total stated as itself, which is the whole point",
+         "The gate ran {live}/{live} script suites."),
+        ("an issue number, a commit and a version in suite prose",
+         "Suite added in #168 at `713de63`, for release 0.46.10."),
+        ("a registered per-suite tally, masked before the scan",
+         "The recovery suite ran `apply-recovery_test.py` 14/14."),
+        ("the shipped defect's own row with the suite named by bare filename",
+         "| Install parity | `install-parity_test.py` (inside the {n}) "
+         "| PASS |"),
+    )
+
+    def setUp(self):
+        # `runTest` is the one method name `TestCase.__init__` accepts without
+        # requiring it to exist — the instance is here for its detector, and
+        # is never run as a test.
+        self.check = NoUncheckedGateCountReachesTheProse("runTest")
+        self.check.setUp()
+        self.live = len(script_suites())
+        derived = set(self.check.derived.values())
+        # The shipped defect's own shape — one below the live total — unless
+        # some other derived total happens to equal it.
+        self.stale = next(n for n in [self.live - 1] + list(range(10, 100))
+                          if n not in derived)
+
+    def _refusals(self, template):
+        return [number for number, _ in self.check._refused(
+            template.format(n=self.stale, live=self.live))]
+
+    def test_it_refuses_every_phrasing_it_is_written_to_catch(self):
+        for demonstrates, template in self.CAUGHT:
+            with self.subTest(demonstrates):
+                self.assertIn(
+                    str(self.stale), self._refusals(template),
+                    f"{demonstrates}: this phrasing states the suite total "
+                    f"and the check accepts it. That is how the seventh "
+                    f"instance shipped — an exit was wider than it read.")
+
+    def test_the_documented_escapes_are_the_actual_escapes(self):
+        for demonstrates, template in self.ESCAPES:
+            with self.subTest(demonstrates):
+                self.assertEqual(
+                    [], self._refusals(template),
+                    f"{demonstrates}: the class docstring lists this as "
+                    f"something the check does not reach, and it now refuses "
+                    f"it. Either the exit narrowed and the limits list is "
+                    f"stale, or this is a false positive.")
+
+    def test_the_two_case_lists_are_not_empty(self):
+        # A vacuous pass here would be worse than no check: it would read as
+        # the detector being covered.
+        self.assertTrue(self.CAUGHT and self.ESCAPES)
 
 
 class TheEngineTestCountIsInternallyConsistent(unittest.TestCase):

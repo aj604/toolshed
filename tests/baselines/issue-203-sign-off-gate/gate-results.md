@@ -122,11 +122,16 @@ paragraph of authored record prose that mentions the suites, a two- or three-dig
 failure unless it equals one of the three derived totals, carries its own unit (`tests`, `lines`),
 names something rather than counting it (`User Story`, `#`-prefixed, a version, a date, a line
 reference), or is one of a short capped list of per-suite tallies this suite cannot derive. Its
-value is that renumbering does not satisfy it and deriving does — a corrected number goes stale
-again on the next suite added, in any phrasing, including one nobody has written yet. What it
-still cannot see is spelled-out totals, one- and four-digit counts, a wrong number that happens to
-equal a different derived total, and every kind of non-numeric drift, the provenance error above
-included. Those limits are listed on the class rather than left to be discovered.
+value is that it compares against what the tools report, so a corrected number satisfies it only
+for as long as that number stays right — a hand-typed total goes stale again on the next suite
+added, in any phrasing, including one nobody has written yet. What it still cannot see is
+spelled-out totals, one- and four-digit counts, a wrong number that happens to equal a different
+derived total, a suite named by bare filename rather than by its `tests/scripts/` path, and every
+kind of non-numeric drift, the provenance error above included. Those limits are listed on the
+class rather than left to be discovered — and each is planted into synthetic prose by
+`ThisCheckFiresOnThePhrasingsItClaimsToCatch`, which asserts the verdict for the phrasings the
+check catches and for the ones it does not. An exit widened to quiet a false positive, or a
+stated limit that has stopped being one, is a reported failure rather than a quieter guard.
 
 The suite is pinned to its own gate criterion, `sign-off record integrity`. It was briefly not,
 and was therefore silently deletable — the manifest guard stayed green without it, which is the
@@ -386,5 +391,6 @@ Every property above is proven by tests, including execution-based ones that run
 has fired in a real lane.** `doc-apply` has never executed, `doc-policy-apply` has failed both its
 runs, `doc-bloat-audit` has failed all fourteen, and `doc-audit` is disabled. The audit lane also
 fetches its tooling from a release tag matching `.doc-lifecycle/installed-version` (0.46.10, this
-ticket's own bump), and that tag is not cut — the newest tag in the repository is `v0.45.0`. Tracked in #228; recorded here so a reader of the green gate does not
-mistake it for production evidence.
+ticket's own bump), and that tag is not cut — the newest tag in the repository is `v0.45.0`.
+Tracked in #228; recorded here so a reader of the green gate does not mistake it for production
+evidence.
