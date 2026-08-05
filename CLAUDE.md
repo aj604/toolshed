@@ -32,7 +32,9 @@ engine cannot see, #191 — it takes the applier's certified postimage manifest 
 staged index and then the commit tree against it, refusing when git holds anything else and
 naming the commit the push carries so the pushed tree is the verified one; and at a third
 boundary, #198 — the same certification asked of an existing derived branch a re-run found on the
-remote, which is reusable only if it carries this approval's trailer and sits on the same base), and
+remote, which is reusable only if it carries this approval's trailer, sits on the same base, and is
+still what the branch holds when the lane fetches it, since a branch that advanced in between would
+keep the read commit alive as an ancestor and pass every other check), and
 `scripts/bloat-cadence.py` (the scheduled bloat lane's trusted prompt renderer and
 schema-bound action-output collector — it validates chunk returns, selects one retry, and runs
 from the release-pinned marketplace rather than being vendored), and
@@ -215,10 +217,13 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   half-finished attempt (#198) by executing the apply job's own `run:` blocks, from the staged
   path list onward, under `bash -e` against a real bare remote and a `gh` stub: a first run, a
   push that lands while the pull request fails, a re-run reusing the matching branch, a re-run
-  finding its pull request already open, an existing branch whose tree or approval conflicts, and
-  a pull request bound to another approval. `workflow-permissions_test.py` carries the static
+  finding its pull request already open, an existing branch whose tree or approval conflicts,
+  a pull request bound to another approval, and the branch moving between the lane's own
+  `ls-remote` and its fetch (a fast-forward included — the shape that hides, since the old tip
+  survives as an ancestor of the new one). `workflow-permissions_test.py` carries the static
   half — no apply lane may force-push, its detector run against the forced pushes it exists to
-  catch (`doc-sync-upgrade.yml`'s `--force` onto its own fixed branch is deliberately outside
+  catch, including `git -C … push --force` and one split across a backslash continuation
+  (`doc-sync-upgrade.yml`'s `--force` onto its own fixed branch is deliberately outside
   that guard's scope). `policy-workflow_test.py` covers the audit-chained policy lane:
   completed-run artifact binding, revalidation before `policy-eligibility`/`policy-mint`,
   absent/no-eligible clean stops, the same trust split and staging confinement, real-PR-only

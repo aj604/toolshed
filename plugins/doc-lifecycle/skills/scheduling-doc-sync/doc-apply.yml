@@ -588,6 +588,14 @@ jobs:
       # the same certification the fresh commit passed, against the same
       # postimage manifest and on the same base, so there is one notion of a
       # certified tree in this lane rather than a second, weaker one.
+      #
+      # The fetch lands in a ref this lane names, and `--ref` is what makes
+      # those checks answer about the *branch*: the id they check came from an
+      # `ls-remote` in the step above, and a branch that advanced in between
+      # would still pass every one of them, because a fast-forward leaves the
+      # old tip readable as an ancestor of the new one. So the ref is resolved
+      # and required to be that id; a branch that moved refuses as
+      # `apply-branch-moved` rather than certifying a commit it no longer holds.
       - name: Verify an existing derived branch is this run's own result
         run: |
           set -euo pipefail
@@ -598,7 +606,7 @@ jobs:
               "refs/heads/${branch}:refs/doc-lifecycle/existing"
             python3 .doc-lifecycle/wiring/verify-apply-bytes.py reuse \
               --result "${RUNNER_TEMP}/apply-result.json" --repo . \
-              --commit "$existing" \
+              --commit "$existing" --ref refs/doc-lifecycle/existing \
               --verified "${RUNNER_TEMP}/verified-commit.txt" \
               --approval "${RUNNER_TEMP}/apply/approval.json"
           fi

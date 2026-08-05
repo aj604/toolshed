@@ -461,7 +461,11 @@ jobs:
       # conflict. Both halves are checked: the approval trailer the existing
       # commit carries, and its complete tree — through the same certification
       # the fresh commit passed, against the same postimage manifest and on the
-      # same base.
+      # same base. `--ref` binds those checks to the branch itself: the id they
+      # check came from the `ls-remote` above, and a branch that advanced in
+      # between would pass them all, since a fast-forward leaves the old tip
+      # readable as an ancestor. A branch that moved refuses as
+      # `apply-branch-moved`.
       - name: Verify an existing derived branch is this run's own result
         run: |
           set -euo pipefail
@@ -472,7 +476,7 @@ jobs:
               "refs/heads/${branch}:refs/doc-lifecycle/existing"
             python3 .doc-lifecycle/wiring/verify-apply-bytes.py reuse \
               --result "${RUNNER_TEMP}/apply-result.json" --repo . \
-              --commit "$existing" \
+              --commit "$existing" --ref refs/doc-lifecycle/existing \
               --verified "${RUNNER_TEMP}/verified-commit.txt" \
               --approval "${RUNNER_TEMP}/apply/approval.json"
           fi

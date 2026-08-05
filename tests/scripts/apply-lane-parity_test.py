@@ -60,6 +60,9 @@ VERIFICATION_SEAMS = (
 RECOVERY_SEAMS = (
     "render-apply-summary.py remote-branch",
     "verify-apply-bytes.py reuse",
+    # The fetched ref, bound to the id the previous step read: without it the
+    # reuse checks answer about a commit rather than about the branch.
+    "--ref refs/doc-lifecycle/existing",
     "render-apply-summary.py existing-pull-request",
     "--state branch-created",
     "--state branch-reused",

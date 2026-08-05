@@ -245,10 +245,15 @@ class ApplyRun:
             env["GH_PR_CREATE_FAILS"] = "1"
         return env
 
-    def execute(self):
+    def execute(self, after=None):
         """Every step from the staged path list on, stopping at the first
         failure — which is what the runner does, and what leaves the world in
-        the state the next scenario starts from."""
+        the state the next scenario starts from.
+
+        `after` maps a step-name fragment to something that happens once that
+        step has run: the seam a concurrent writer moves through, and the only
+        way to play out a race between two steps of one job.
+        """
         for name, script in STEPS[FIRST:]:
             path = os.path.join(self.temp, "step.sh")
             with open(path, "w", encoding="utf-8") as fh:
@@ -259,6 +264,9 @@ class ApplyRun:
             self.results.append((name, completed))
             if completed.returncode != 0:
                 break
+            for fragment, happen in (after or {}).items():
+                if fragment in name:
+                    happen()
         return self
 
     # -- what happened -------------------------------------------------------
@@ -348,8 +356,27 @@ class ApplyRecoveryTestCase(unittest.TestCase):
             fh.write(text)
 
     def run_lane(self, label, pull_requests=NO_PULL_REQUESTS,
-                 pr_create_fails=False):
-        return ApplyRun(self, label, pull_requests, pr_create_fails).execute()
+                 pr_create_fails=False, after=None):
+        return ApplyRun(self, label, pull_requests,
+                        pr_create_fails).execute(after)
+
+    def advance(self, path="docs/injected.md", text="smuggled\n"):
+        """One more commit on the derived branch, as a concurrent writer would.
+
+        A fast-forward on purpose: it is the shape that hides, because the
+        fetch brings the old tip along as an ancestor of the new one, so every
+        check that reads the old id keeps passing while the branch a pull
+        request would be opened over carries something else.
+        """
+        work = os.path.join(self.tmp, "advance")
+        subprocess.run(["git", "clone", "-q", "--branch", BRANCH, self.origin,
+                        work], check=True, capture_output=True,
+                       env=self.git_env())
+        self.write(work, path, text)
+        self.git(work, "add", "-A")
+        self.git(work, "commit", "-qm", "a concurrent writer")
+        self.git(work, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+        return self.git(work, "rev-parse", "HEAD").strip()
 
     def remote_tip(self, ref=None):
         """What `origin` holds at the derived branch, or None."""
@@ -509,6 +536,60 @@ class AnExistingBranchThatConflicts(ApplyRecoveryTestCase):
         run = self.run_lane("other-base")
         self.assert_refused(run, "apply-branch-lineage-conflict")
         self.assertEqual(self.remote_tip(), planted)
+
+
+class TheBranchMovingUnderTheRun(ApplyRecoveryTestCase):
+    """The seventh scenario, which the six the issue named do not reach.
+
+    The lane reads the remote in one step and fetches it in the next, and a
+    concurrent writer between them is the one way a certified commit can stop
+    being what the branch holds. A fast-forward is the dangerous shape: the
+    fetch necessarily transfers the old tip as an ancestor, so it stays
+    readable, its tree stays certified and its trailer stays right — and
+    without binding the fetched ref to the id that was read, the lane would
+    skip the push, report "branch reused", and open a pull request over a tip
+    nothing verified.
+    """
+
+    def test_a_fast_forward_between_the_read_and_the_fetch_is_refused(self):
+        self.plant(self.approved_message())
+        moved = []
+        run = self.run_lane(
+            "raced",
+            after={"Read what the remote holds": lambda: moved.append(
+                self.advance())})
+        self.assertTrue(moved, "the branch never moved — the race never ran")
+        self.assert_refused(run, "apply-branch-moved")
+        self.assertIn("REFUSED at branch reuse", run.surface())
+        self.assertNotIn("branch reused", run.surface())
+        # The unverified tip is still the branch, untouched, and this run
+        # published nothing over it.
+        self.assertEqual(self.remote_tip(), moved[0])
+
+    def test_a_branch_replaced_between_the_read_and_the_fetch_is_refused(self):
+        # The non-fast-forward half of the same race: the old tip is not even
+        # reachable afterwards, which must refuse for the same reason and not
+        # by accident of an unreadable object.
+        self.plant(self.approved_message())
+        def replace():
+            work = os.path.join(self.tmp, "replace")
+            subprocess.run(["git", "clone", "-q", self.origin, work],
+                           check=True, capture_output=True, env=self.git_env())
+            self.git(work, "switch", "-q", "-c", BRANCH, self.base)
+            self.write(work, "docs/edited.md", "unrelated\n")
+            self.git(work, "add", "-A")
+            self.git(work, "commit", "-qm", "unrelated")
+            self.git(work, "push", "-q", "--force", "origin",
+                     f"HEAD:refs/heads/{BRANCH}")
+            return self.git(work, "rev-parse", "HEAD").strip()
+
+        replaced = []
+        run = self.run_lane(
+            "replaced",
+            after={"Read what the remote holds": lambda: replaced.append(
+                replace())})
+        self.assert_refused(run, "apply-branch-moved")
+        self.assertEqual(self.remote_tip(), replaced[0])
 
 
 class AnExistingPullRequestThatConflicts(ApplyRecoveryTestCase):

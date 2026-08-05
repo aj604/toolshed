@@ -380,9 +380,13 @@ class ReusingAnExistingBranch(ApplyBoundaryTestCase):
         self.git("commit", "-qm", message)
         return self.git("rev-parse", "HEAD").strip(), result
 
-    def reuse(self, commit, result, verified=None):
+    def reuse(self, commit, result, verified=None, ref="refs/heads/earlier"):
+        # `--ref` is what the lane fetched the branch into; `two_attempts`
+        # builds the earlier attempt on a local branch of that name, so this is
+        # the same binding the lane makes.
         return run("reuse", "--result", result, "--repo", self.repo,
-                   "--commit", commit, "--approval", self.approval,
+                   "--commit", commit, "--ref", ref,
+                   "--approval", self.approval,
                    "--verified", verified or self.verified_file,
                    summary=self.summary)
 
@@ -426,6 +430,44 @@ class ReusingAnExistingBranch(ApplyBoundaryTestCase):
             self.reuse(existing, result,
                        verified=os.path.join(self.tmp, "absent.txt")),
             "apply-commit-unreadable")
+
+    def test_a_ref_that_holds_a_descendant_of_the_read_commit_is_refused(self):
+        # The fail-open shape: the branch advanced between the lane's
+        # `ls-remote` and its fetch, so the id it read is still readable — as
+        # an ancestor — and every other check would pass on a commit the branch
+        # no longer holds.
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        self.write("docs/injected.md", "smuggled\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "a concurrent writer")
+        advanced = self.git("rev-parse", "HEAD").strip()
+        self.assertNotEqual(advanced, existing)
+        self.assert_reuse_refused(self.reuse(existing, result),
+                                  "apply-branch-moved")
+        self.assertIn(advanced, self.surface())
+
+    def test_a_ref_that_does_not_resolve_is_refused(self):
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        self.assert_reuse_refused(
+            self.reuse(existing, result, ref="refs/heads/never-fetched"),
+            "apply-branch-unreadable")
+
+    def test_a_ref_that_is_not_fully_qualified_is_refused(self):
+        # `earlier` is a branch git would happily resolve; this script resolves
+        # only the fully qualified ref the lane fetched into, so a shorthand —
+        # or anything else that would be parsed as a revision expression — is
+        # refused rather than looked up.
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        self.assert_reuse_refused(self.reuse(existing, result, ref="earlier"),
+                                  "apply-branch-unreadable")
+
+    def test_a_ref_shaped_like_an_option_is_refused(self):
+        existing, result = self.two_attempts(self.message(self.APPROVAL))
+        completed = run("reuse", "--result", result, "--repo", self.repo,
+                        "--commit", existing, "--ref=--all",
+                        "--approval", self.approval,
+                        "--verified", self.verified_file, summary=self.summary)
+        self.assert_reuse_refused(completed, "apply-branch-unreadable")
 
     def test_a_result_that_is_not_clean_certifies_no_reuse(self):
         existing, _ = self.two_attempts(self.message(self.APPROVAL))
