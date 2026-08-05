@@ -30,9 +30,9 @@ content digest over the whole payload — its lineage and its records, to any
 depth, including everything a semantic result carries in a record's own
 fields. `validate_report` recomputes that digest on read, so a verdict edited
 after it was written no longer digests to what it declares and is a miss with
-its own reason (issue #187), and an entry that declares no digest at all — one
-written before this binding existed — is a miss too, since nothing about it
-can be proven unaltered.
+its own reason (issue #187), and an entry declaring no digest this module can
+recompute — absent, or the `null` the report contract skips rather than fails
+— is a miss too, since nothing about it can be proven unaltered.
 
 Fails closed throughout: any lookup this module cannot positively confirm is
 still valid comes back as a miss, never a warning and never the stale payload.
@@ -251,13 +251,14 @@ def get(cache_dir, key, repo_root, registry_path=DEFAULT_REGISTRY_PATH):
     audit configuration/registry/inventory/ruleset/plugin that no longer
     matches), a result admitting it did not finish, a payload describing a
     different document/source pair than `key` names, a payload that no longer
-    digests to the value it declares, and one declaring no digest at all are
-    each a miss — never a warning, and never the stale payload.
+    digests to the value it declares, and one declaring no digest this module
+    can recompute are each a miss — never a warning, and never the stale
+    payload.
 
     A declared digest that no longer matches is caught where the validator
     recomputes it, ahead of every freshness question — an altered entry is
-    refused whether or not its lineage still stands. The missing-digest
-    refusal is answered last instead, so an entry that is also malformed,
+    refused whether or not its lineage still stands. The undigested refusal
+    is answered last instead, so an entry that is also malformed,
     foreign, incomplete, or about another document keeps that more specific
     reason. Nothing is weakened by that ordering: every branch it follows is
     a miss too, and the only path that reaches a hit is the one where a
@@ -317,12 +318,19 @@ def get(cache_dir, key, repo_root, registry_path=DEFAULT_REGISTRY_PATH):
         # right path is not a hit for this key.
         return CacheResult(False, reason=MISS_IDENTITY)
 
-    if "digest" not in payload:
-        # Every check above passed, but the entry declares nothing to
-        # recompute — it was written before the payload binding existed. A
-        # hit here would be a verdict this module cannot show is the one that
-        # was stored, so the caller re-evaluates the document instead, and the
-        # entry is replaced by a digested one on the next `put()`.
+    if not isinstance(payload.get("digest"), str):
+        # Every check above passed, but the entry declares nothing this
+        # module can recompute — an entry written before the payload binding
+        # existed, or one whose digest was blanked out. The test is on the
+        # value, never on the key: the report contract *skips* a declared
+        # digest of `None` rather than failing it, so `"digest": null` is a
+        # one-token edit that a presence check would wave through, and the
+        # gap between the two checks is exactly where a poisoned entry would
+        # sit. A hit here would be a verdict this module cannot show is the
+        # one that was stored, so the caller re-evaluates the document
+        # instead, and the entry is replaced by a digested one on the next
+        # `put()`. Any other type never reaches this line: it is not `None`,
+        # so the validator already refused it as a mismatch above.
         return CacheResult(False, reason=MISS_UNDIGESTED)
 
     return CacheResult(True, record=record.to_dict())

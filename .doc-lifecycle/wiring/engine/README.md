@@ -715,16 +715,18 @@ record, to any depth, including everything a semantic result carries in a record
 (the nested findings of a cached chunk result among them). `validate_report` recomputes it on
 read, so a verdict edited after it was stored no longer digests to what it declares and is
 `MISS_PAYLOAD_DIGEST`, answered ahead of every freshness question — an altered entry is refused
-whether or not its lineage still stands. An entry declaring no digest at all (one written before
-this binding existed) is `MISS_UNDIGESTED`, answered last, so an entry that is also malformed,
-foreign, incomplete, or about another document keeps that more specific reason. Neither is an
-error a caller has to handle: a poisoned or undigested entry costs one document's re-evaluation,
-and the `put()` that follows replaces it with a digested one. A record the report contract itself
-refuses has no digest to declare, so `put()` writes it undigested rather than raising mid-audit —
-it reads back as the `MISS_INVALID` that record has always earned.
+whether or not its lineage still stands. An entry declaring no digest this module can recompute —
+one written before this binding existed, or one whose digest was blanked to `null`, which the
+report contract skips rather than fails — is `MISS_UNDIGESTED`. That one is decided on the
+declared *value*, never on the presence of the field, and is answered last, so an entry that is
+also malformed, foreign, incomplete, or about another document keeps that more specific reason.
+Neither is an error a caller has to handle: a poisoned or undigested entry costs one document's
+re-evaluation, and the `put()` that follows replaces it with a digested one. A record the report
+contract itself refuses has no digest to declare, so `put()` writes it undigested rather than
+raising mid-audit — it reads back as the `MISS_INVALID` that record has always earned.
 
-There is no path that returns a stale or unverified payload; a hit is exactly the case where every
-check above passed.
+There is no path that returns a stale or unverified payload: a hit is exactly the case where every
+check above passed *and* the entry declared a digest that was recomputed and matched.
 
 ## Finding identity
 

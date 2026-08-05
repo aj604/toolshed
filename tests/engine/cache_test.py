@@ -450,6 +450,53 @@ class ThePayloadDigest(CacheTestCase):
         self.assertIsNone(result.record)
         self.assertEqual(result.reason, cache.MISS_UNDIGESTED)
 
+    def test_a_null_declared_digest_is_a_miss(self):
+        # The one-token defeat of the whole binding, and the reason the guard
+        # is on the value rather than the key: `"digest": null` leaves the
+        # field present, so a presence check passes it, while the report
+        # contract skips a declared digest of `None` rather than failing it.
+        # An entry landing between those two would be a clean hit carrying
+        # whatever the poisoner wrote. `poison()` cannot reach this — it
+        # restores the digest the entry was written with — so the edit is
+        # made here.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        cache.put(cache_dir, key, self.chunk_record(verdict="CUT"))
+        path = cache.entry_path(cache_dir, key)
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        payload["records"][0]["records"][0]["verdict"] = "RETIRE-DOC"
+        payload["digest"] = None
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertIsNone(result.record)
+        self.assertEqual(result.reason, cache.MISS_UNDIGESTED)
+
+    def test_a_declared_digest_that_is_not_a_digest_is_a_miss(self):
+        # Any other type is refused where the validator recomputes it: a
+        # declared value that is not `None` never equals the digest of the
+        # payload, whatever it is.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        cache.put(cache_dir, key, self.chunk_record())
+        path = cache.entry_path(cache_dir, key)
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        payload["digest"] = 123
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.reason, cache.MISS_PAYLOAD_DIGEST)
+
     def test_re_storing_an_undigested_entry_repairs_it(self):
         repo = self.git_repo()
         cache_dir = self.cache_dir()
