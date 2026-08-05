@@ -19,6 +19,16 @@
 # state table). Cost/turn/duration figures ride along as observability only: they never narrow
 # the declared scope `drift-plan` already committed to before the model ran a single turn.
 #
+# Every artifact this lane generates lives under runner.temp, outside the work tree, with one
+# declared exception: verdicts.json, which the model is told by name to write in the repository
+# root (detecting-doc-drift/SKILL.md documents that carve-out). The checkout is evidence, never
+# artifact storage — which is what makes the repository-integrity gate below meaningful, since
+# the gate can then treat *any* other work-tree change as a mutation rather than as this lane's
+# own output. The gate is shared with doc-bloat-audit.yml
+# (scheduling-doc-sync/scripts/check-repo-integrity.py, aj604/toolshed#185): both lanes assemble
+# reports only from a checkout still verified to be the declared base commit, and a refusal is
+# terminal — no report is published, and the run surface says which surface moved.
+#
 # The model's tool grant is `Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)` and
 # aj604/toolshed#118 kept it that way. A verdict may still cite a *declared* local tool
 # (evidence.command, #115): probe-evidence-tool.py reads which programs this install declared
@@ -43,6 +53,11 @@ concurrency:
   group: doc-audit
   cancel-in-progress: false
 
+# Interpreter byte-caching would litter the checkout with __pycache__ directories that the
+# repository-integrity gate below would (correctly) read as files this lane never declared.
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
 jobs:
   # Read-only model job: it emits a validated drift report as an artifact and nothing else. No
   # write-capable credential reaches this job at all — not a token, not a persisted checkout
@@ -53,6 +68,18 @@ jobs:
       contents: read
       id-token: write   # claude-code-action OAuth exchange only — not repo write
     steps:
+      # Every generated artifact lives under this root, outside the work tree — the same
+      # discipline doc-bloat-audit.yml keeps, and what lets the integrity gate treat any
+      # work-tree change as a mutation. It is exported from a step rather than declared in a
+      # workflow- or job-level `env:` because `runner` resolves only once a step is running on
+      # a runner; referencing it above step scope makes GitHub reject the whole file,
+      # unregistering the schedule (aj604/toolshed#174).
+      - name: Resolve the out-of-tree artifact root
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/doc-audit"
+          echo "AUDIT_DIR=${RUNNER_TEMP}/doc-audit" >> "${GITHUB_ENV}"
+
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -89,7 +116,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py drift-plan --repo . --mode full \
-            > drift-plan.json
+            > "${AUDIT_DIR}/drift-plan.json"
 
       # Model step run via the official runner (anthropics/claude-code-action) — it owns Claude
       # Code install, plugin setup, and auth. Auth prefers the OAuth token (created by
@@ -109,7 +136,10 @@ jobs:
       # the work tree" rule (detecting-doc-drift/SKILL.md's "The audit" section documents the
       # carve-out and why: this checkout is throwaway and no apply ever runs against it, unlike
       # the interactive sessions that rule protects). The step below that runs `drift-audit`
-      # reads verdicts.json from the same root path, so the two must keep agreeing.
+      # reads verdicts.json from the same root path, so the two must keep agreeing — and it is
+      # the *only* path the integrity gate exempts, so any other work-tree change this step
+      # leaves behind refuses the run rather than travelling on as evidence. The plan the model
+      # reads lives under the out-of-tree artifact root, which `--add-dir` makes readable.
       - name: Audit documentation drift (headless, full corpus)
         if: steps.plan.outcome == 'success'
         id: model
@@ -128,7 +158,7 @@ jobs:
             states its own output contract rather than depending on a plugin version resolved
             at run time — this run validates through `python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py
             drift-audit`, whose --verdicts contract is:
-            {"documents": [{"path": <doc path from drift-plan.json>, "status": "ok",
+            {"documents": [{"path": <doc path from the plan file named below>, "status": "ok",
             "verdicts": [{"unit": <unit ordinal, an integer>, "assertion_class":
             "factual"|"normative"|"rationale"|"non-assertive", "obligation":
             "evidence"|"governing-source"|"owner-judgment"|"coherence", "verdict":
@@ -166,7 +196,8 @@ jobs:
             Nothing else is reachable: the probe refuses an undeclared tool and
             any invocation that is not a --help/--version read. A claim no declared tool can
             settle is genuinely UNVERIFIABLE here, and the report's evidence boundary says why.
-            For every document drift-plan.json lists under "documents" with obligation
+            For every document ${{ runner.temp }}/doc-audit/drift-plan.json lists under
+            "documents" with obligation
             "assertions": run `python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py segment --repo .
             --path <path>` to get its assertion units, and answer for each by its "ordinal" field
             (the small integer printed alongside it) — never its 64-character "digest": the
@@ -176,16 +207,44 @@ jobs:
             (classification-not-assertion-capable). For every factual, normative, and rationale
             unit reach a verdict with current evidence per the obligation shapes above. Documents with obligation "anchor" need
             no verdicts from you — the engine checks those deterministically. Write the result to
-            verdicts.json in the repository root. A document you could not examine still needs an
-            entry with "status": "failed" and a "reason" — never silently omitted.
-          claude_args: --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
+            verdicts.json in the repository root, and write nothing else anywhere in the
+            repository: verdicts.json is the one work-tree file this run declared, and a
+            repository-integrity gate refuses the whole run over any other change it finds —
+            scratch files belong under ${{ runner.temp }}/doc-audit. A document you could not
+            examine still needs an entry with "status": "failed" and a "reason" — never silently
+            omitted.
+          claude_args: >-
+            --add-dir "${{ runner.temp }}/doc-audit"
+            --allowedTools "Skill,Read,Grep,Glob,Write,Bash(git *),Bash(python3 *)"
 
       - name: Extract cost/turn observability (best-effort — never gates the run)
         if: always()
         run: |
           python3 .doc-lifecycle/wiring/render-audit-summary.py cost \
             --execution-log "${{ steps.model.outputs.execution_file || '/home/runner/work/_temp/claude-execution-output.json' }}" \
-            --out audit-cost.json
+            --out "${AUDIT_DIR}/audit-cost.json"
+
+      # Defense in depth, shared verbatim with doc-bloat-audit.yml (aj604/toolshed#185): the
+      # model job holds no repository credential and no write permission, but that is a claim
+      # about what an action implementation can do, not an observation of what this checkout
+      # now is. The gate observes it — HEAD, staged changes, tracked modifications, and
+      # untracked additions — and exempts exactly the one artifact this lane declared the model
+      # would write. It never resets, restores, or cleans: repairing the tree here would erase
+      # the evidence the refusal rests on and let a mutated run continue as if it had been
+      # clean. It also cannot be answered after the fact — a fresh checkout of the same commit
+      # is byte-identical whether or not this run dirtied its own, and the report contract
+      # digests documents and lineage, never the non-document sources a verdict cites. So the
+      # only moment this is checkable is here, before anything is assembled.
+      - name: Verify repository integrity before assembly
+        id: integrity
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 "${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/skills/scheduling-doc-sync/scripts/check-repo-integrity.py" \
+            --repo . \
+            --expected-head "${GITHUB_SHA}" \
+            --allow verdicts.json \
+            --out "${AUDIT_DIR}/audit-integrity.json"
 
       # The engine's own audit command — the same contract interactive use calls. It
       # re-derives the plan itself, so a missing verdicts.json (skipped model step, or one that
@@ -200,7 +259,7 @@ jobs:
       # declaration cannot be read stops the step instead, because a run that cannot state its
       # boundary must not publish one (aj604/toolshed#118).
       - name: Run the drift audit (engine's public CLI)
-        if: always()
+        if: ${{ always() && steps.integrity.outcome == 'success' }}
         run: |
           set -uo pipefail
           # No -e: the runner's shell is `bash -e`, and `set -uo pipefail`
@@ -231,7 +290,7 @@ jobs:
           python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py drift-audit --repo . --mode full \
             $( [ -f verdicts.json ] && echo "--verdicts verdicts.json" ) \
             ${EVIDENCE_FLAGS} \
-            > drift-report.json || code=$?
+            > "${AUDIT_DIR}/drift-report.json" || code=$?
           case "$code" in
             0) echo "drift-audit exit code: 0 (ok/clean/findings — typed report)" ;;
             1) echo "drift-audit exit code: 1 (invalid — typed report)" ;;
@@ -247,7 +306,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: audit-report
-          path: drift-report.json
+          path: ${{ runner.temp }}/doc-audit/drift-report.json
           if-no-files-found: ignore
 
       - name: Upload cost artifact
@@ -255,7 +314,18 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: audit-cost
-          path: audit-cost.json
+          path: ${{ runner.temp }}/doc-audit/audit-cost.json
+          if-no-files-found: ignore
+
+      # The gate's verdict travels to `publish` so a refusal states itself on the run surface
+      # rather than only as a red step: render-audit-summary.py renders it, and it outranks any
+      # report that happens to be on disk.
+      - name: Upload integrity verdict
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: audit-integrity
+          path: ${{ runner.temp }}/doc-audit/audit-integrity.json
           if-no-files-found: ignore
 
   # No model runs in this job, and it holds no write scope at all today. It consumes only the
@@ -270,6 +340,15 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Same step-scope requirement as the audit job: `runner` resolves only once a step runs
+      # (aj604/toolshed#174). Downloads land here rather than in the checkout, so the tree this
+      # job re-validates against is the repository and nothing else.
+      - name: Resolve the out-of-tree artifact root
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/doc-audit"
+          echo "AUDIT_DIR=${RUNNER_TEMP}/doc-audit" >> "${GITHUB_ENV}"
+
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -281,12 +360,21 @@ jobs:
         uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: audit-report
+          path: ${{ runner.temp }}/doc-audit
 
       - name: Download cost artifact
         continue-on-error: true
         uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: audit-cost
+          path: ${{ runner.temp }}/doc-audit
+
+      - name: Download integrity verdict
+        continue-on-error: true
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: audit-integrity
+          path: ${{ runner.temp }}/doc-audit
 
       # Re-check freshness against the live repository: a report is only as good as the state
       # it still describes, and a rerun of this job alone (long after `audit` ran) must not
@@ -296,9 +384,9 @@ jobs:
       # validate-report rejects "status": "invalid" as a report shape it was never meant to
       # persist (report-invalid-status) rather than re-confirming the original problem.
       - name: Re-validate freshness before publishing
-        if: hashFiles('drift-report.json') != ''
         run: |
           set -uo pipefail
+          report="${AUDIT_DIR}/drift-report.json"
           # Two independent traps here, both #107: (1) the runner's shell is
           # `bash -e`, and `set -uo pipefail` does not clear it, so a bare
           # validate-report call would abort before its typed non-zero exits
@@ -312,12 +400,17 @@ jobs:
           # empty or absent (validate-report wrote nothing), even though
           # that is itself a legitimate outcome. A full `if`/`fi` (not a
           # `&&` short-circuit list) exits 0 when its condition is false.
-          if grep -q '"status":[[:space:]]*"invalid"' drift-report.json; then
+          # The presence test lives here rather than in a `hashFiles()` step
+          # condition: hashFiles only sees the workspace, and this lane's
+          # artifacts are deliberately outside it.
+          if [ ! -f "$report" ]; then
+            echo "no report artifact to re-validate — the summary below states that outcome"
+          elif grep -q '"status":[[:space:]]*"invalid"' "$report"; then
             echo "report is already invalid — nothing to re-validate freshness against"
           else
             code=0
             python3 .doc-lifecycle/wiring/engine/doc-lifecycle.py validate-report \
-              --report drift-report.json --repo . > revalidated.json || code=$?
+              --report "$report" --repo . > "${AUDIT_DIR}/revalidated.json" || code=$?
             case "$code" in
               0|1|3|4)
                 echo "validate-report exit code: $code (typed report)"
@@ -327,14 +420,18 @@ jobs:
                 exit "$code"
                 ;;
             esac
-            if [ -s revalidated.json ]; then
-              mv revalidated.json drift-report.json
+            if [ -s "${AUDIT_DIR}/revalidated.json" ]; then
+              mv "${AUDIT_DIR}/revalidated.json" "$report"
             fi
           fi
 
+      # `--integrity` is rendered only when the gate actually produced a verdict; when it did,
+      # a refusal in it outranks whatever report is on disk, so a run whose evidence failed the
+      # gate can never be summarized as a result.
       - name: Render job summary
         if: always()
         run: |
           python3 .doc-lifecycle/wiring/render-audit-summary.py summary \
-            --report drift-report.json \
-            $( [ -f audit-cost.json ] && echo "--cost audit-cost.json" )
+            --report "${AUDIT_DIR}/drift-report.json" \
+            $( [ -f "${AUDIT_DIR}/audit-cost.json" ] && echo "--cost ${AUDIT_DIR}/audit-cost.json" ) \
+            $( [ -f "${AUDIT_DIR}/audit-integrity.json" ] && echo "--integrity ${AUDIT_DIR}/audit-integrity.json" )

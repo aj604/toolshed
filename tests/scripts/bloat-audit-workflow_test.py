@@ -3,8 +3,6 @@
 
 import os
 import re
-import subprocess
-import tempfile
 import unittest
 
 
@@ -241,80 +239,32 @@ class ScheduledBloatAuditContract(unittest.TestCase):
         self.assertIn(expected, self.step_text("Run the public bloat audit"))
 
     def test_integrity_gate_checks_without_resetting_or_laundering(self):
+        # #185 moved the check itself into one shared script both audit lanes
+        # run — the behavioral cases live in check-repo-integrity_test.py, and
+        # what this lane owns is running it, from the release-pinned
+        # marketplace rather than from the checkout it is judging.
         script = self.step_script("Verify repository integrity before assembly")
         self.assertIn('PYTHONDONTWRITEBYTECODE: "1"', self.workflow_text())
-        self.assertIn("git rev-parse HEAD", script)
-        self.assertIn("git diff --quiet", script)
-        self.assertIn("git diff --cached --quiet", script)
-        self.assertIn("git ls-files --others", script)
+        self.assertIn(
+            '"${RUNNER_TEMP}/toolshed-marketplace/plugins/doc-lifecycle/'
+            'skills/scheduling-doc-sync/scripts/check-repo-integrity.py"',
+            script)
+        self.assertIn('--expected-head "${GITHUB_SHA}"', script)
         self.assertNotRegex(script, r"\bgit\s+(?:reset|restore|checkout|clean)\b")
 
-    def test_integrity_gate_rejects_every_repository_mutation_surface(self):
+    def test_this_lane_declares_no_work_tree_artifact_at_all(self):
+        # Every file this lane generates lives under BLOAT_DIR, so it exempts
+        # nothing: an added file in the checkout is always a mutation here.
         script = self.step_script("Verify repository integrity before assembly")
+        invocation = script.split("--out", 1)[0]
+        self.assertNotIn("--allow", invocation)
 
-        def repository():
-            tmp = tempfile.TemporaryDirectory()
-            self.addCleanup(tmp.cleanup)
-            subprocess.run(["git", "init", "-q"], cwd=tmp.name, check=True)
-            subprocess.run(
-                ["git", "config", "user.email", "audit@example.test"],
-                cwd=tmp.name, check=True,
-            )
-            subprocess.run(
-                ["git", "config", "user.name", "Audit Test"],
-                cwd=tmp.name, check=True,
-            )
-            with open(os.path.join(tmp.name, ".gitignore"), "w", encoding="utf-8") as f:
-                f.write("*.ignored\n")
-            with open(os.path.join(tmp.name, "tracked.md"), "w", encoding="utf-8") as f:
-                f.write("original\n")
-            subprocess.run(["git", "add", "."], cwd=tmp.name, check=True)
-            subprocess.run(
-                ["git", "commit", "-q", "-m", "fixture"], cwd=tmp.name, check=True,
-            )
-            head = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], cwd=tmp.name, text=True,
-            ).strip()
-            return tmp.name, head
-
-        def run_gate(root, expected_head):
-            env = dict(os.environ, GITHUB_SHA=expected_head)
-            return subprocess.run(
-                ["bash", "-e"], cwd=root, input=script, text=True,
-                capture_output=True, env=env,
-            )
-
-        def write_file(name, contents):
-            def mutate(root):
-                with open(os.path.join(root, name), "w", encoding="utf-8") as f:
-                    f.write(contents)
-            return mutate
-
-        def stage_tracked(root):
-            write_file("tracked.md", "staged\n")(root)
-            subprocess.run(["git", "add", "tracked.md"], cwd=root, check=True)
-
-        clean, head = repository()
-        self.assertEqual(run_gate(clean, head).returncode, 0)
-
-        cases = {
-            "tracked": write_file("tracked.md", "changed\n"),
-            "staged": stage_tracked,
-            "untracked": write_file("new.md", "new\n"),
-            "ignored-untracked": write_file(
-                "cache.ignored", "ignored but still inside the repository\n",
-            ),
-            "head-moved": lambda root: subprocess.run(
-                ["git", "commit", "-q", "--allow-empty", "-m", "moved"],
-                cwd=root, check=True,
-            ),
-        }
-        for label, mutate in cases.items():
-            with self.subTest(label=label):
-                root, expected_head = repository()
-                mutate(root)
-                proc = run_gate(root, expected_head)
-                self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+    def test_a_refusal_reaches_the_run_surface_as_its_own_state(self):
+        text = self.workflow_text()
+        self.assertIn("name: bloat-audit-integrity", text)
+        self.assertIn(
+            "--integrity ${BLOAT_DIR}/audit-integrity.json",
+            self.step_script("Render typed bloat summary"))
 
 
 if __name__ == "__main__":

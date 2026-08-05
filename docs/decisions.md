@@ -4,6 +4,30 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-08-04 — both audit lanes assemble reports only from a verified checkout (#185)
+- Evidence: the bloat lane has re-checked HEAD, staged, tracked, and untracked surfaces before
+  assembly since #144; the drift lane had no equivalent, and it is the lane whose verdicts cite
+  non-document source files as evidence. Nothing downstream closes that gap: a drift report's
+  lineage digests documents, registry, and commit — never the content of an `evidence.source`
+  path — and `base_commit` is a plain `rev-parse HEAD`, so a report built from a dirtied
+  worktree re-validates as current against a fresh checkout of the same commit and its records
+  reach `policy-eligibility` intact.
+- Decided: one script, `scheduling-doc-sync/scripts/check-repo-integrity.py`, owns the check for
+  both lanes. It runs from the release-pinned marketplace clone rather than the checkout it is
+  judging, names every violated surface exhaustively with a typed `evidence-integrity-*` code,
+  and never resets, restores, or cleans — repairing the tree would erase the evidence the
+  refusal rests on. A refusal is terminal: `drift-audit`/`bloat-audit` and every publication
+  path are gated on the step outcome, so no report exists to launder.
+- Decided (exemptions are declared, not inferred): `--allow` names paths a lane declared it
+  would write into the work tree, and it exempts them only as untracked additions. The drift
+  lane declares exactly `verdicts.json`; the bloat lane declares nothing. Everything else the
+  drift lane generates moved under `${RUNNER_TEMP}/doc-audit/`, which is what keeps the
+  allowlist at one entry.
+- Decided (self-explaining): the gate writes its verdict as an artifact and
+  `render-audit-summary.py --integrity` renders it as this run's terminal state, outranking any
+  report on disk. An unreadable verdict renders as a refusal, not as a passed gate. A failed
+  write of the report itself is a distinct typed outcome, never an exit-1 report.
+
 ## 2026-08-04 — an approval binds occurrences, not merely the text of its units (#193)
 - Evidence: a unit digest is its content, so a document that says one thing twice holds one
   identity in two places. The applier bounded a positioned operation by the *hull* of a record's

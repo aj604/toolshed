@@ -42,14 +42,17 @@ that same destination; only the filename changes per artifact.
 throwaway (`persist-credentials: false`, no write-capable credential reaches it at all) and
 `fixing-docs`' applier never runs against it — the job ends and the checkout is discarded
 before any apply could see it, so a stray artifact there can never trip
-`apply-working-tree-not-confined`. That workflow's own deterministic steps already write
-`drift-plan.json` and `drift-report.json` to the repository root outside the model's turn, and
-its model step's prompt is this lane's own restated copy of the output contract (a headless run
-states its own contract rather than depending on a plugin version resolved at run time — see
-that prompt's comment) — it names `verdicts.json` in the repository root to match. When this
-skill is invoked from `doc-audit.yml`, follow *that prompt's* file destination, not the
-`${TMPDIR:-/tmp}/` rule above: the workflow's own instructions are authoritative for that lane,
-and its deterministic steps read `verdicts.json` from the root. Every other invocation —
+`apply-working-tree-not-confined`. Its model step's prompt is this lane's own restated copy of
+the output contract (a headless run states its own contract rather than depending on a plugin
+version resolved at run time — see that prompt's comment), and it names `verdicts.json` in the
+repository root. When this skill is invoked from `doc-audit.yml`, follow *that prompt's* file
+destination, not the `${TMPDIR:-/tmp}/` rule above: the workflow's own instructions are
+authoritative for that lane, and its deterministic steps read `verdicts.json` from the root.
+`verdicts.json` is the *only* file that lane permits in the work tree — every other artifact it
+generates (the plan, the report, cost data) lives under `${RUNNER_TEMP}/doc-audit/`, and a
+repository-integrity gate refuses the whole run over any other work-tree change before a report
+is assembled (`scheduling-doc-sync/scripts/check-repo-integrity.py`). So scratch files in that
+lane go under `${RUNNER_TEMP}/doc-audit/`, never the checkout. Every other invocation —
 interactive, local, or a future lane whose checkout an apply might run against — keeps the
 out-of-tree rule above; it exists to protect exactly the checkout an apply could later touch,
 which this one structurally is not.

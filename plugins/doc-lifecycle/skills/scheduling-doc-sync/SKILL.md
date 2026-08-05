@@ -73,7 +73,8 @@ The `plugins:` selector stays bare `doc-lifecycle@toolshed` (`claude-code-action
 The five workflow templates are in this skill's base directory (announced when the skill
 loads), and its own scripts one level down in `scripts/` — `upgrade-gate.py`,
 `stage-upgrade.py`, `render-report.py`, `render-audit-summary.py`, `render-apply-summary.py`,
-`probe-evidence-tool.py`, `verify-apply-bytes.py`, and `bloat-cadence.py`. The chunk planner and the two output validators stay in the sibling
+`probe-evidence-tool.py`, `verify-apply-bytes.py`, `bloat-cadence.py`, and
+`check-repo-integrity.py`. The chunk planner and the two output validators stay in the sibling
 skills that own them (`detecting-doc-bloat`, `detecting-doc-drift`) and are never vendored here
 — both always dispatch their own copy via `${CLAUDE_PLUGIN_ROOT}`, so a copy under
 `.doc-lifecycle/wiring/` would have no reader (aj604/toolshed#77 follow-up).
@@ -82,7 +83,9 @@ it is what the upgrade lane runs, so it is never vendored into the install; `sta
 vendored for the mirror-image reason, because it is the code that bounds what that run may have
 written (see Upgrade mode). `bloat-cadence.py` likewise runs from the release-pinned marketplace
 checkout: it is the scheduler's trusted pre/post-model adapter, not consumer wiring another lane
-calls, so it is not copied into `.doc-lifecycle/wiring/`.
+calls, so it is not copied into `.doc-lifecycle/wiring/`. `check-repo-integrity.py` — the
+repository-integrity gate both audit lanes run before assembling anything — is un-vendored for a
+sharper reason: it judges the checkout, so it must not live in the checkout it judges.
 
 ## The audit lane (`doc-audit.yml`)
 
@@ -96,6 +99,17 @@ write lands there, never beside the model. Every third-party action it invokes i
 immutable commit SHA (`tests/scripts/audit-workflow_test.py`).
 `scripts/render-audit-summary.py` owns every string this lane puts on the run surface,
 including the run that produced no report at all.
+
+**A report is assembled only from a verified checkout.** Between the model step and the
+`drift-audit` call, `scripts/check-repo-integrity.py` re-checks HEAD, staged changes, tracked
+modifications, and untracked additions against the commit the lane planned against, and refuses
+the run — no report, no artifact, a typed `evidence-integrity-*` reason on the run surface — if
+any of them moved. `verdicts.json` is the one path it exempts, because it is the one work-tree
+file the lane declared the model would write; everything else this lane generates lives under
+`${RUNNER_TEMP}/doc-audit/`. The bloat lane runs the identical gate and declares no exemption at
+all. The gate never resets, restores, or cleans: repairing the tree would erase the evidence the
+refusal rests on, and a fresh checkout of the same commit is byte-identical whether or not the
+run dirtied its own — so this is the only moment the question is answerable.
 
 **Tier-2 tool evidence is declared, not granted.** A drift verdict may cite `evidence.command`
 — a local tool it ran — instead of a repository path, but only for a tool the run declared
