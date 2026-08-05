@@ -90,11 +90,29 @@ class PolicyScenarioTestCase(ApprovalScenarioTestCase):
         self.assertIsInstance(loaded, AutoApplyPolicy, loaded)
         return loaded
 
+    def narrowed(self, repo, *classes):
+        """Narrow the consumer's standing declaration, on disk and committed.
+
+        A policy brand is provenance (#186): the approval set records the
+        digest of the declaration it derived from, and validation reloads that
+        declaration out of the repository. A narrowing that lived only in this
+        process would describe a policy this consumer never declared — the
+        applier would find the repository's declaration and refuse. Narrow
+        before the audit runs: the commit moves HEAD, and a report names the
+        commit it examined.
+        """
+        fixture._write(repo, fixture.AUTO_APPLY_POLICY_PATH, json.dumps({
+            "artifact": "auto-apply-policy",
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "id": fixture.AUTO_APPLY_POLICY_ID,
+            "classes": list(classes),
+        }, indent=2) + "\n")
+        fixture._commit(repo, "Narrow the standing auto-apply policy")
+        return self.policy(repo)
+
     def drift_only(self, repo):
         """The fixture's policy, narrowed to the drift class by its consumer."""
-        return AutoApplyPolicy(
-            id=self.policy(repo).id, classes=(CLASS_DRIFT_STALE,)
-        )
+        return self.narrowed(repo, CLASS_DRIFT_STALE)
 
     def mint_by_policy(self, report, repo, policy=None):
         return mint_policy_approval_set(
@@ -214,15 +232,31 @@ class ThePolicyMintsForAnEligibleDriftFinding(PolicyScenarioTestCase):
         approval = self.mint_by_policy(report, repo)
 
         self.assertIsInstance(approval, ApprovalSet, approval)
-        self.assertEqual(approval.minter,
-                         Minter(kind=MINTER_POLICY,
-                                id=fixture.AUTO_APPLY_POLICY_ID))
+        self.assertEqual(
+            approval.minter,
+            Minter(kind=MINTER_POLICY, id=fixture.AUTO_APPLY_POLICY_ID,
+                   policy_digest=self.policy(repo).digest),
+        )
+
+    def test_the_brand_is_revalidatable_against_the_declaration_on_disk(self):
+        # Provenance (#186), over the fixture's real install: reload the
+        # declaration, derive the selection again, and the artifact stands.
+        repo = self.build_fixture()
+        report, _ = self.approvable(repo)
+
+        approval = self.mint_by_policy(report, repo)
+        checked = self.check(approval, repo, report=report)
+
+        self.assertIsInstance(checked, ApprovalSet, checked)
+        self.assertEqual(checked.status, STATE_CLEAN)
+        self.assertEqual(checked.stale_reasons, ())
 
     def test_a_consumer_narrowing_the_classes_narrows_the_selection(self):
         repo = self.build_fixture()
+        drift_only = self.drift_only(repo)
         report, by_path = self.approvable(repo)
 
-        approval = self.mint_by_policy(report, repo, self.drift_only(repo))
+        approval = self.mint_by_policy(report, repo, drift_only)
 
         self.assertEqual([r.path for r in approval.records],
                          [fixture.LIVING_DOC])
@@ -248,9 +282,10 @@ class ThePolicyMintsForAnEligibleDriftFinding(PolicyScenarioTestCase):
         # summary and the commit's trailers, rendered by the engine's own
         # renderers — the same ones a human-minted set goes through.
         repo = self.build_fixture()
+        drift_only = self.drift_only(repo)
         report, _ = self.approvable(repo)
 
-        approval = self.mint_by_policy(report, repo, self.drift_only(repo))
+        approval = self.mint_by_policy(report, repo, drift_only)
 
         self.assertIn(f"`policy` `{fixture.AUTO_APPLY_POLICY_ID}`",
                       render_approval_set(approval))
@@ -262,8 +297,9 @@ class ThePolicyMintedSetGoesThroughTheSameApplier(PolicyScenarioTestCase):
     """Fourth acceptance criterion: the identical applier, no bypass."""
 
     def applied(self, repo):
+        drift_only = self.drift_only(repo)
         report, by_path = self.approvable(repo)
-        approval = self.mint_by_policy(report, repo, self.drift_only(repo))
+        approval = self.mint_by_policy(report, repo, drift_only)
         self.assertIsInstance(approval, ApprovalSet, approval)
         plan, post = self.plan_for(
             approval, by_path[fixture.LIVING_DOC].digest, repo
@@ -285,6 +321,7 @@ class ThePolicyMintedSetGoesThroughTheSameApplier(PolicyScenarioTestCase):
 
     def test_drift_021s_wrapped_fix_reaches_the_applier_byte_verbatim(self):
         repo = self.build_fixture()
+        drift_only = self.drift_only(repo)
         fixture._write(
             repo, fixture.LIVING_DOC,
             f"# Architecture\n\n{DRIFT_021_PREIMAGE}\n",
@@ -300,7 +337,7 @@ class ThePolicyMintedSetGoesThroughTheSameApplier(PolicyScenarioTestCase):
             r for r in report.records
             if r.extra.get("assertion") == DRIFT_021_ASSERTION
         )
-        approval = self.mint_by_policy(report, repo, self.drift_only(repo))
+        approval = self.mint_by_policy(report, repo, drift_only)
         self.assertIsInstance(approval, ApprovalSet, approval)
 
         before = self.read(repo, fixture.LIVING_DOC)
@@ -369,8 +406,9 @@ class ThePolicyMintedSetGoesThroughTheSameApplier(PolicyScenarioTestCase):
         # Same confinement path as a human's: an operation on a document the
         # approval does not cover is refused, and the tree is untouched.
         repo = self.build_fixture()
+        drift_only = self.drift_only(repo)
         report, by_path = self.approvable(repo)
-        approval = self.mint_by_policy(report, repo, self.drift_only(repo))
+        approval = self.mint_by_policy(report, repo, drift_only)
         plan, _ = self.plan_for(
             approval, by_path[fixture.LIVING_DOC].digest, repo
         )
@@ -393,10 +431,8 @@ class ThePolicyMintedSetGoesThroughTheSameApplier(PolicyScenarioTestCase):
         # remedy table could not plan would be authority the lane then refuses
         # itself, so this drives the class rather than stopping at eligibility.
         repo = self.build_fixture()
+        anchor_only = self.narrowed(repo, CLASS_ANCHOR_REFRESH)
         report, by_path = self.approvable(repo)
-        anchor_only = AutoApplyPolicy(
-            id=self.policy(repo).id, classes=(CLASS_ANCHOR_REFRESH,)
-        )
 
         approval = self.mint_by_policy(report, repo, anchor_only)
         self.assertEqual([r.path for r in approval.records],
@@ -417,9 +453,10 @@ class ThePolicyMintedSetGoesThroughTheSameApplier(PolicyScenarioTestCase):
         # The no-bypass property stated as an equality: mint by policy and mint
         # by hand over the same selection differ in the minter and nothing else.
         repo = self.build_fixture()
+        drift_only = self.drift_only(repo)
         report, by_path = self.approvable(repo)
 
-        by_policy = self.mint_by_policy(report, repo, self.drift_only(repo))
+        by_policy = self.mint_by_policy(report, repo, drift_only)
         by_hand = mint_approval_set(
             report, [by_path[fixture.LIVING_DOC].digest], repo_root=repo,
             minter=Minter(kind="human", id="avery@example.com"),
@@ -517,9 +554,10 @@ class WhatThePolicyProvablyCannotMint(PolicyScenarioTestCase):
         # living document's stale claim. A policy that applied it anyway would
         # overrule the only person who looked.
         repo = self.build_fixture()
+        drift_only = self.drift_only(repo)
         report = self.full_report(repo, waivers=fixture.WAIVERS_PATH)
 
-        decisions = self.decisions(report, repo, self.drift_only(repo))
+        decisions = self.decisions(report, repo, drift_only)
         stale = [d for d in decisions.values()
                  if d.code == "STALE"]
 
@@ -528,9 +566,10 @@ class WhatThePolicyProvablyCannotMint(PolicyScenarioTestCase):
 
     def test_a_waived_report_mints_nothing_under_the_drift_class(self):
         repo = self.build_fixture()
+        drift_only = self.drift_only(repo)
         report = self.full_report(repo, waivers=fixture.WAIVERS_PATH)
 
-        result = self.mint_by_policy(report, repo, self.drift_only(repo))
+        result = self.mint_by_policy(report, repo, drift_only)
 
         self.assertIsInstance(result, Invalid, result)
         self.assertIn("policy-record-waived",

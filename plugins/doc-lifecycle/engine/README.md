@@ -1899,9 +1899,9 @@ mutation scope, minted by a named minter. The applier accepts nothing else.
 ```json
 {
   "artifact": "approval-set",
-  "schema_version": 1,
+  "schema_version": 2,
   "status": "clean",
-  "minter": {"kind": "human", "id": "avery@example.com"},
+  "minter": {"kind": "human", "id": "avery@example.com", "policy_digest": null},
   "report_digest": "<sha256 of the report this selects from>",
   "report_state": "findings",
   "lineage": {"...": "the report's lineage, verbatim"},
@@ -1918,12 +1918,23 @@ mutation scope, minted by a named minter. The applier accepts nothing else.
 ```
 
 `minter.kind` is `human` (semantic approval — a person selecting digests) or `policy` (a
-standing auto-apply policy, named so PR review knows what it is reviewing). `mint-approval
---minter-kind policy` is the raw flag and mints for any record class a human names: it credits
-a policy without consulting one. The gated door is `policy-mint` below, whose selection is
-derived from a policy's own decisions and cannot be widened by a caller — that is the one to
-wire into a lane. `status` is `clean` or `stale`; a stale one carries `stale_reasons` in the
-shape a report's do.
+standing auto-apply policy, named so PR review knows what it is reviewing). `policy-mint`
+below is the only producer of a `policy` brand: it derives its selection from a policy's own
+decisions, and `mint-approval` — the generic door, where the caller names the records — refuses
+that kind outright (`approval-policy-minter-not-generic`), because a caller-chosen selection
+credited to a standing declaration is that declaration's authority spent on records it never
+decided about. `minter.policy_digest` is the provenance a policy mint records: the digest of
+the declaration that selected, `null` for a person, and inside the approval digest like every
+other field. `status` is `clean` or `stale`; a stale one carries `stale_reasons` in the shape a
+report's do.
+
+`schema_version` is the approval set's own, at **2**, and no longer the engine-wide
+`ARTIFACT_SCHEMA_VERSION` a report and a registry carry — nothing about those changed, and a
+version 1 approval set has to be refused rather than read under version 2's rules. It is
+`approval-schema-pre-provenance`, alone and before every other structural check: a `policy`
+brand minted then names no declaration, nothing can recover which one it was, and reading its
+fields under the new rules would report a missing provenance field instead of an artifact from
+another schema. Mint again from its report. Any other value is `approval-schema-version`.
 
 `digest` is **required** on the way in, unlike a report's — an approval set is authority, and
 its digest is the only part of it that reaches the repository, so a file that declines to say
@@ -1953,6 +1964,10 @@ digest, so an order that may vary would give one selection two identities.
 **Minting.** `mint_approval_set(report, digests, repo_root=…, minter=…)` refuses before it
 mints, in this order, because each phase rests on the one before:
 
+- the minter must be a person (`approval-policy-minter-not-generic`) — this door mints a
+  caller's selection, and `policy.mint_policy_approval_set` reaches the same private
+  construction with a selection it derived itself, so human and policy mints keep identical
+  reconciliation, scope, preimage, report-lineage, and digest mechanics through one code path;
 - the report must be `findings` or `partial` — `clean` has nothing to approve and `stale`
   describes a state that no longer exists (`approval-report-not-approvable`);
 - the selection must be non-empty, repeat nothing, and name only records the report carries
@@ -2048,6 +2063,28 @@ when that matches, that the report still reconciles the same way — selection m
 | `approval-whole-document-units-incomplete` | a whole-document record's units are not the source's complete current deterministic unit set |
 | `approval-report-changed` | the report supplied is not the one this binds to |
 | `approval-reconciliation-changed` | the report's records no longer group the same way |
+| `approval-policy-changed` | a `policy` brand's standing declaration has moved, or cannot be read |
+
+**A policy brand is revalidated against the declaration it names.** With `repo_root`,
+`validate_approval_set` reloads the standing auto-apply policy (`policy_path=`, CLI
+`--policy`, default `.doc-lifecycle/auto-apply-policy.json`) and compares its digest with
+`minter.policy_digest`. A declaration that has moved — or one that no longer reads — is
+`stale` `approval-policy-changed`: a consumer narrowing their own policy is the world moving,
+and re-running the lane against the policy in force is the answer. With the report as well,
+and only when the declaration still matches, the eligibility decision is *recomputed* and the
+selection must be exactly the set it derives; anything else is `invalid`
+`approval-policy-selection-not-derived`. Invalid rather than stale, because eligibility is a
+pure function of the declaration and the report and this artifact pins the digest of both — no
+repository state could make an honest policy mint have chosen some other set. A changed
+declaration stands that recomputation down for the same reason a changed report stands the
+selection checks down: under some other policy the derived set differs as a consequence, so
+running it anyway would accuse every honest re-run of forgery. A `human` minter reads no
+policy file at all.
+
+Structurally, and needing neither: a `policy` minter without a `policy_digest` is
+`approval-policy-provenance-missing`, and a `human` minter carrying one is
+`approval-invalid-minter`. The bloat restriction below stays where it is, defense in depth
+ahead of all of this.
 
 The inventory digest is deliberately **not** compared, and it is the one exception. It covers
 document content, so the applier's own writes move it — and a second subset of one report could
@@ -2100,17 +2137,21 @@ untracked and gone.
 
 ```bash
 python3 -m doclifecycle mint-approval --report report.json --repo . \
-  --record <record digest> --minter avery@example.com [--minter-kind policy] \
+  --record <record digest> --minter avery@example.com \
   [--out /tmp/approval.json]
 python3 -m doclifecycle validate-approval --approval approval.json --repo . \
   [--report report.json] [--audit-config-digest <sha256>] \
+  [--policy .doc-lifecycle/auto-apply-policy.json] \
   [--expected-digest <approval digest from the change's trailer>]
 python3 -m doclifecycle render-approval --approval approval.json [--trailers]
 ```
 
-`--record` is repeatable and required; naming none is a usage error (exit 2). Exit codes are
-the shared ones: 0 clean, 1 invalid, 2 usage, 3 stale. `render-approval` prints nothing when
-the approval set is invalid, exactly as `render-report` does.
+`--record` is repeatable and required; naming none is a usage error (exit 2). `--minter-kind`
+still takes `policy`, and the engine refuses it (exit 1, `approval-policy-minter-not-generic`)
+rather than argparse rejecting the spelling — what is wrong is what the flag asks for, not how
+it was typed. `--policy` is read only with `--repo`, and only for a policy-branded set. Exit
+codes are the shared ones: 0 clean, 1 invalid, 2 usage, 3 stale. `render-approval` prints
+nothing when the approval set is invalid, exactly as `render-report` does.
 
 ```python
 from doclifecycle.approval import Minter, mint_approval_set, validate_approval_set
@@ -2206,25 +2247,37 @@ typed reason it did not — because an unattended lane that reported "nothing to
 saying what it declined is one nobody can tell from a lane that never ran.
 
 **No bypass.** `mint_policy_approval_set` derives its selection from those decisions and hands
-it to `approval.mint_approval_set` — the same call a human dispatch makes, through the same
-reconciliation, path-authorization, and preimage refusals. There is no parameter through which
+it to `approval._mint_approval_set` — the same private construction a human dispatch reaches
+through `mint_approval_set`, with the same reconciliation, path-authorization, and preimage
+refusals. There is no parameter through which
 a caller names a record, and no second producer of approval sets. A policy-minted artifact and a
 human-minted one over the same selection differ in `minter` and nothing else
 (`tests/engine/acceptance/scenario_policy_test.py`), and it reaches the applier by the same
-route: the applier is handed an approval set and never asks who minted it. The
+route: the applier is handed an approval set and takes no branch on who minted it — the one
+thing the brand changes is what validation demands of the artifact before the applier sees a
+`clean` verdict at all. The
 operation half of the restriction is `RECORD_REMEDIES`, and the coupling is checked in both
 directions: no code any class admits maps to `create-document`, `retire-document`, or
 `move-with-provenance`, and every code any class admits has a non-empty entry there — a class
 whose code the table did not carry would mint authority the lane then refuses itself, which is
 fail-shut but is not a working default.
 
-**The restriction also lives on the artifact, not only in how a policy is allowed to produce
-one.** `policy_eligibility` and `RECORD_REMEDIES` are a defense in the *producer* — they decide
-what `mint_policy_approval_set` will select — but an approval set is a file, and `mint-approval
---minter-kind policy` (above) is a raw door that credits a policy without consulting one: it
-mints for any record class a human names, `minter.kind` included. A defense living only in the
-one producer that stays honest is not a defense against a caller who skips it. So
-`approval.POLICY_NEVER_ELIGIBLE_CODES` — the same six bloat verdict codes
+**This is the only producer of the brand, and the brand stays checkable.** `mint-approval
+--minter-kind policy` used to be a raw door that credited a policy without consulting one; it
+is now `approval-policy-minter-not-generic`, so a `policy` brand can only come from here. What
+this door mints records `policy.digest` in `minter.policy_digest` — the digest of the validated
+declaration (its `id` and enabled `classes`, so reformatting the file or spelling out the
+classes it would have defaulted to is the same delegation, and any change to what is authorized
+is a different one). Validation reloads the declaration from the repository and derives the
+selection again from it, which is what makes the brand something the artifact *proves* rather
+than something it claims: see "A policy brand is revalidated against the declaration it names"
+above for the two outcomes, and for why one is `stale` and the other `invalid`.
+
+**The bloat restriction also lives on the artifact, ahead of all of that.**
+`policy_eligibility` and `RECORD_REMEDIES` are a defense in the *producer* — they decide
+what `mint_policy_approval_set` will select — but an approval set is a file, and a defense
+living only in the one producer that stays honest is not a defense against a caller who skips
+it. So `approval.POLICY_NEVER_ELIGIBLE_CODES` — the same six bloat verdict codes
 (`policy.NEVER_ELIGIBLE_CODES` is its alias) — is checked directly against the artifact's own
 `minter.kind` and each selected record's `code`, structurally, needing no report and no
 repository: once at mint time inside `mint_approval_set` itself, and again inside

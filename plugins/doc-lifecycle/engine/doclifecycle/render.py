@@ -295,7 +295,15 @@ def render_approval_set(approval):
             else f", now {_code(approval.observed_report_state)}"
         ),
         f"- Reconciliation digest: {_code(approval.reconciliation_digest)}",
-        f"- Minter: {_code(approval.minter.kind)} {_code(approval.minter.id)}",
+        # The standing declaration a policy mint derived its selection from,
+        # beside the brand it justifies: the brand is the reviewer's reason to
+        # know nobody read these records, so what delegated it belongs on the
+        # same line. A person delegates from nothing and carries none.
+        f"- Minter: {_code(approval.minter.kind)} {_code(approval.minter.id)}"
+        + (
+            "" if approval.minter.policy_digest is None
+            else f", standing policy {_code(approval.minter.policy_digest)}"
+        ),
         f"- Repository: {_code(lineage.repository)}",
         f"- Base commit: {_code(lineage.base_commit)}",
         f"- Registry digest: {_code(lineage.registry_digest)}",

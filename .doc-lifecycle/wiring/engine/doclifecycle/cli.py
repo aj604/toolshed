@@ -23,6 +23,7 @@ from .applier import apply_edit_plan, load_approval_payload, load_edit_plan
 from .approval import (
     MINTER_HUMAN,
     MINTER_KINDS,
+    MINTER_POLICY,
     Minter,
     load_approval_set,
     mint_approval_set,
@@ -154,6 +155,14 @@ def _add_approval_arguments(command):
             "repository"
         ),
     )
+    command.add_argument(
+        "--policy", default=DEFAULT_POLICY_PATH,
+        help=(
+            f"auto-apply policy path, repo-relative (default: "
+            f"{DEFAULT_POLICY_PATH}); read only with --repo, and only for a "
+            f"policy-branded set, whose selection is derived from it again"
+        ),
+    )
     command.set_defaults(run=_validate_approval)
 
 
@@ -171,7 +180,7 @@ def _validate_approval(args):
         args.approval, report=report, repo_root=args.repo,
         registry_path=args.registry,
         audit_config_digest=args.audit_config_digest,
-        expected_digest=args.expected_digest,
+        expected_digest=args.expected_digest, policy_path=args.policy,
     )
 
 
@@ -743,11 +752,16 @@ def _parser():
     )
     mint.add_argument(
         "--minter", required=True,
-        help="who is approving: a person, or the name of an auto-apply policy",
+        help="who is approving: the person selecting these record digests",
     )
     mint.add_argument(
         "--minter-kind", default=MINTER_HUMAN, choices=list(MINTER_KINDS),
-        help=f"what kind of minter that is (default: {MINTER_HUMAN})",
+        help=(
+            f"what kind of minter that is (default: {MINTER_HUMAN}). "
+            f"{MINTER_POLICY!r} is refused here — a policy brand says a "
+            f"standing declaration chose the records, so policy-mint is the "
+            f"door that produces one"
+        ),
     )
     mint.add_argument(
         "--registry", default=DEFAULT_REGISTRY_PATH,

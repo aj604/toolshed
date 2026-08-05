@@ -1,8 +1,47 @@
 # Decisions
 
-> As of 2026-07-30 — entries are dated and appended, newest first; a superseded decision stays
+> As of 2026-08-04 — entries are dated and appended, newest first; a superseded decision stays
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
+
+## 2026-08-04 — a policy brand is provenance the artifact proves, not a label it claims (#186)
+- Evidence: the 2026-07-29 entry below closed the *record classes* a policy brand could carry, but
+  the brand itself stayed a field. `mint-approval --minter-kind policy` still minted a caller-named
+  selection under a standing policy's name, and validation had nothing to compare a `policy` minter
+  against — a repository's own declaration could have refused every record in it (waived, class
+  disabled, destination-bearing, command-evidenced, missing evidence or preimage, redirected fix)
+  and the artifact would still validate clean.
+- Decided: `mint_approval_set` is the human door and refuses `minter.kind == "policy"` outright
+  (`approval-policy-minter-not-generic`). `policy.mint_policy_approval_set` is the only producer of
+  the brand, and both reach one private construction (`approval._mint_approval_set`) so a policy
+  mint and a human mint keep identical reconciliation, scope, preimage, report-lineage, and digest
+  mechanics rather than a parallel implementation that could drift.
+- Decided: the minter carries `policy_digest`, the digest of the validated standing declaration —
+  its `id` and enabled `classes`, so reformatting the file is the same delegation and any change to
+  what is authorized is a different one. With a repository, validation reloads the declaration and
+  compares; with the report too, it recomputes eligibility and demands the selection be exactly the
+  derived set. The split is stale-versus-invalid: a consumer editing their own policy is the world
+  moving (`approval-policy-changed`, and it stands the recomputation down for the same reason a
+  changed report stands the selection checks down), while an inexact selection under an unchanged
+  declaration is a forgery (`approval-policy-selection-not-derived`) — eligibility is a pure
+  function of the declaration and the report, and the artifact pins the digest of both.
+- Decided: the approval set gets its own `SCHEMA_VERSION`, at 2, rather than bumping the
+  engine-wide `ARTIFACT_SCHEMA_VERSION` a report, registry, and cache entry share for no reason.
+  Version 1 is refused alone and before every other structural check
+  (`approval-schema-pre-provenance`): its `policy` brand named no declaration and nothing can
+  recover which one, so reading its fields under the new rules would report a missing field instead
+  of an artifact from another schema.
+- Still binds: the artifact-side bloat restriction below is untouched and still answers first — it
+  needs neither the report nor the repository, so it holds where the derivation check cannot run.
+- Verified: `tests/engine/policy_test.py` drives every eligibility refusal through all three public
+  routes (policy mint, generic mint, artifact validation) with the same authority outcome;
+  `tests/engine/approval_test.py`, `approval_cli_test.py`, and `policy_cli_test.py` cover the doors
+  and the pre-provenance migration; `tests/engine/acceptance/scenario_policy_test.py` narrows the
+  fixture's declaration on disk, as a consumer would, and applies through the same applier.
+- Code: plugins/doc-lifecycle/engine/doclifecycle/approval.py,
+  plugins/doc-lifecycle/engine/doclifecycle/policy.py,
+  plugins/doc-lifecycle/engine/doclifecycle/cli.py,
+  plugins/doc-lifecycle/engine/doclifecycle/render.py, plugins/doc-lifecycle/engine/README.md
 
 ## 2026-07-30 — policy-minted mechanical fixes run only through an audit-chained review PR (#143)
 - Evidence: the engine already owned `policy-eligibility`, `policy-mint`, artifact-side policy

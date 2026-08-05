@@ -115,17 +115,31 @@ class MintCommand(ApprovalCommandTestCase):
 
         self.assertEqual(result.returncode, EXIT_USAGE)
 
-    def test_a_policy_may_be_named_as_the_minter(self):
+    def test_a_policy_may_not_be_named_as_the_minter(self):
+        # The generic door from the CLI seam, on a record a policy would
+        # admit: this command mints a *person's* selection, so the brand is
+        # refused rather than the record (#186). It is a typed engine refusal
+        # and not a usage error — the flag value parses, and what it asks for
+        # is a policy's authority spent on records the policy never decided.
         result = self.mint_command(
             "--minter-kind", "policy", records=[self.one["digest"]]
         )
 
-        self.assertEqual(json.loads(result.stdout)["minter"],
-                         {"kind": "policy", "id": "avery@example.com"})
+        self.assertEqual(result.returncode, EXIT_INVALID)
+        self.assertIn("approval-policy-minter-not-generic", result.stderr)
+
+    def test_the_person_it_does_mint_for_carries_no_policy_provenance(self):
+        result = self.mint_command(records=[self.one["digest"]])
+
+        self.assertEqual(result.returncode, EXIT_OK, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout)["minter"],
+            {"kind": "human", "id": "avery@example.com", "policy_digest": None},
+        )
 
     def test_a_policy_brand_on_a_bloat_record_is_refused(self):
-        # The generic door, from the CLI seam: a policy minter can never
-        # select a bloat record, whichever way the caller reaches minting.
+        # The same door, reached with the record class no policy may ever
+        # select: still refused, and still before any record is looked at.
         unit = self.units(self.repo, DOC_A)[0]
         cut = self.finding("R-1", "CUT", DOC_A, [unit])
         report_path = self.json_file("cut-report.json", self.report([cut]).to_dict())
@@ -137,7 +151,7 @@ class MintCommand(ApprovalCommandTestCase):
         )
 
         self.assertEqual(result.returncode, EXIT_INVALID)
-        self.assertIn("approval-policy-ineligible-record", result.stderr)
+        self.assertIn("approval-policy-minter-not-generic", result.stderr)
 
     def test_an_unknown_minter_kind_is_a_usage_error(self):
         result = self.mint_command(
