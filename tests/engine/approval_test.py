@@ -477,35 +477,61 @@ class RemediableSelection(ApprovalTestCase):
 
 
 class PolicyBrandEligibility(ApprovalTestCase):
-    """A policy-branded approval set may never select a bloat record.
+    """The generic door mints for a person, and never a policy brand.
 
-    The restricted policy-mint door (`policy.mint_policy_approval_set`)
-    already refuses this; these tests close the generic door
-    (`mint_approval_set` itself, reachable by any caller) and the artifact
-    (a hand-edited minter field validation must catch on its own) — issue
-    #57 review, P1.
+    `policy.mint_policy_approval_set` is the only producer of one (#186); the
+    restriction that a policy brand may never select a bloat record survives
+    on the artifact, where a hand-edited minter field is all a forger needs —
+    issue #57 review, P1, kept as defense in depth behind the provenance
+    revalidation `policy_test.py` covers.
     """
 
-    def test_generic_mint_refuses_policy_brand_on_bloat_record(self):
+    def test_generic_mint_refuses_a_policy_brand_outright(self):
+        # Not "refuses it for this record": the caller named the selection, so
+        # crediting a standing declaration with it is the forgery, whatever
+        # the records are.
         unit = self.units(self.repo, DOC_A)[0]
         cut = self.finding("R-1", "CUT", DOC_A, [unit])
 
         result = self.mint(self.report([cut]), [cut["digest"]], minter=POLICY)
 
         self.assertIsInstance(result, Invalid, result)
-        self.assertIn("approval-policy-ineligible-record",
-                      [p.code for p in result.problems])
+        self.assertEqual(codes(result), ["approval-policy-minter-not-generic"])
+
+    def test_generic_mint_refuses_a_policy_brand_on_an_eligible_record_too(self):
+        # The record a policy *would* admit: the door is shut on the brand,
+        # not on the class of record reaching it.
+        one, _ = self.two_findings()
+
+        result = self.mint(self.report([one]), [one["digest"]], minter=POLICY)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-policy-minter-not-generic"])
+
+    def test_generic_mint_still_mints_for_a_person(self):
+        # The honest-path probe: closing the brand must not close the door.
+        one, _ = self.two_findings()
+
+        result = self.mint(self.report([one]), [one["digest"]])
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.minter, HUMAN)
+        self.assertIsNone(result.minter.policy_digest)
 
     def test_validate_refuses_hand_forged_policy_brand(self):
         # Mint legitimately as a human, then rewrite the minter field on the
-        # artifact — the hand-edit a producer-side check cannot see.
+        # artifact — the hand-edit a producer-side check cannot see. The
+        # provenance is well-formed, so this is the structural bloat refusal
+        # answering on its own, with no repository in hand.
         unit = self.units(self.repo, DOC_A)[0]
         cut = self.finding("R-1", "CUT", DOC_A, [unit])
         approval = self.mint(self.report([cut]), [cut["digest"]])
         self.assertIsInstance(approval, ApprovalSet, approval)
 
         payload = approval.to_dict()
-        payload["minter"] = {"kind": "policy", "id": "forged-policy"}
+        payload["minter"] = {
+            "kind": "policy", "id": "forged-policy", "policy_digest": "a" * 64,
+        }
 
         result = validate_approval_set(payload)
 
@@ -513,13 +539,70 @@ class PolicyBrandEligibility(ApprovalTestCase):
         self.assertIn("approval-policy-ineligible-record",
                       [p.code for p in result.problems])
 
-    def test_policy_brand_on_drift_stale_record_still_mints(self):
-        # The honest path stays open (honest-path probe): STALE is eligible.
+    def test_a_policy_brand_carrying_no_provenance_is_refused(self):
+        one, _ = self.two_findings()
+        approval = self.mint(self.report([one]), [one["digest"]])
+        self.assertIsInstance(approval, ApprovalSet, approval)
+
+        payload = approval.to_dict()
+        payload["minter"] = {
+            "kind": "policy", "id": "forged-policy", "policy_digest": None,
+        }
+
+        result = validate_approval_set(payload)
+
+        self.assertEqual(codes(result), ["approval-policy-provenance-missing"])
+
+    def test_a_person_carrying_policy_provenance_is_refused(self):
+        one, _ = self.two_findings()
+        approval = self.mint(self.report([one]), [one["digest"]])
+
+        payload = approval.to_dict()
+        payload["minter"]["policy_digest"] = "a" * 64
+
+        result = validate_approval_set(payload)
+
+        self.assertEqual(codes(result), ["approval-invalid-minter"])
+
+
+class ThePreProvenanceSchema(ApprovalTestCase):
+    """Version 1 is refused with a migration message, never reinterpreted."""
+
+    def payload(self):
+        one, _ = self.two_findings()
+        approval = self.mint(self.report([one]), [one["digest"]])
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        payload = approval.to_dict()
+        payload["schema_version"] = 1
+        payload["minter"] = {"kind": "human", "id": "avery@example.com"}
+        return resigned(payload)
+
+    def test_a_pre_provenance_artifact_is_refused(self):
+        result = validate_approval_set(self.payload())
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-schema-pre-provenance"])
+
+    def test_the_refusal_says_what_to_do_about_it(self):
+        result = validate_approval_set(self.payload())
+
+        self.assertIn("mint again from its report",
+                      result.problems[0].message)
+
+    def test_it_is_refused_before_its_fields_are_read_under_the_new_rules(self):
+        # The reinterpretation this version gate exists to stop: a version-1
+        # minter has no `policy_digest`, so reading it under version 2 would
+        # report a missing field rather than an artifact from another schema.
+        result = validate_approval_set(self.payload())
+
+        self.assertEqual(len(result.problems), 1)
+
+    def test_this_engine_mints_the_provenance_schema(self):
         one, _ = self.two_findings()
 
-        result = self.mint(self.report([one]), [one["digest"]], minter=POLICY)
+        approval = self.mint(self.report([one]), [one["digest"]])
 
-        self.assertNotIsInstance(result, Invalid, result)
+        self.assertEqual(approval.to_dict()["schema_version"], 2)
 
 
 class ReconciledSelection(ApprovalTestCase):

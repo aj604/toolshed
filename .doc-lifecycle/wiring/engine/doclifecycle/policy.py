@@ -9,14 +9,22 @@ lineage, and PR review is the designated semantic review for what it mints —
 change approval, a person merging the real pull request the apply lane opens,
 still lands everything.
 
-Four properties, and each one is a way this module refuses to become a second
+Five properties, and each one is a way this module refuses to become a second
 authority:
 
 **It decides eligibility, never authority.** `mint_policy_approval_set` selects
-digests and hands them to `approval.mint_approval_set` — the same call a human
-dispatch makes, through the same reconciliation, path-authorization, and
-preimage refusals. There is no policy-shaped approval set and no second
+digests and hands them to `approval._mint_approval_set` — the same construction
+a human dispatch reaches, through the same reconciliation, path-authorization,
+and preimage refusals. There is no policy-shaped approval set and no second
 producer of one; a policy mint differs from a human mint in exactly one field.
+
+**And it is the only door to that field.** The generic
+`approval.mint_approval_set` mints for a person only, so the brand cannot be
+spent on a caller's own selection. The set it mints here records this policy's
+`digest` — the declaration itself, canonically hashed — and validation reloads
+the declaration from the repository and derives the selection again from it. A
+declaration that has moved is stale; a selection the declaration does not
+derive was produced by something that is not this policy.
 
 **Its vocabulary is closed, and the closure is the restriction.** A consumer
 enables named classes, and the only names that exist are mechanical ones. A
@@ -61,6 +69,7 @@ from typing import Optional, Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION
 from . import approval as approval_mod
+from .digest import sha256_canonical
 from .drift import CODE_ANCHOR_STALE, VERDICT_STALE
 from .inventory import DEFAULT_REGISTRY_PATH
 from .paths import path_references
@@ -166,8 +175,29 @@ class AutoApplyPolicy:
             for code in CLASS_CODES[name]
         }
 
+    @property
+    def digest(self):
+        """This declaration's identity — the provenance of what it mints.
+
+        Over the validated declaration rather than the file's bytes, so
+        reformatting the JSON or omitting `classes` to take the defaults leaves
+        the delegation intact, while any change to *what is authorized* moves
+        it. Derived, never stored, for the same reason an approval set's digest
+        is: there is no second place it could be computed from a different set
+        of fields.
+        """
+        return sha256_canonical({
+            "artifact": ARTIFACT_KIND,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "id": self.id,
+            "classes": list(self.classes),
+        })
+
     def to_dict(self):
-        return {"id": self.id, "classes": list(self.classes)}
+        return {
+            "id": self.id, "classes": list(self.classes),
+            "digest": self.digest,
+        }
 
 
 @dataclass(frozen=True)
@@ -569,11 +599,17 @@ def mint_policy_approval_set(report, policy, *, repo_root,
 
     `ApprovalSet`, or `Invalid`. The selection is *derived* — there is no
     parameter through which a caller could name a record the policy did not
-    admit — and it is handed to `approval.mint_approval_set`, which is the one
+    admit — and it is handed to `approval._mint_approval_set`, which is the one
     producer of approval sets in this engine. Every refusal that function owns
     (reconciliation groups, path authorization, preimage) applies unchanged:
     the policy is a narrower gate in front of the same door, never a second
     door.
+
+    This is also the only door to the `policy` brand: the generic
+    `approval.mint_approval_set` refuses that minter kind outright. The minter
+    records `policy.digest`, so a reader with the repository can reload the
+    declaration and derive the selection again — and `policy` is what the
+    artifact *proves* rather than what it claims.
     """
     eligibility = policy_eligibility(policy, report)
     selected = eligibility.eligible_digests
@@ -589,10 +625,11 @@ def mint_policy_approval_set(report, policy, *, repo_root,
             location="records",
         ),) + eligibility.refusals)
 
-    return approval_mod.mint_approval_set(
+    return approval_mod._mint_approval_set(
         report, list(selected), repo_root=repo_root,
         minter=approval_mod.Minter(
-            kind=approval_mod.MINTER_POLICY, id=policy.id
+            kind=approval_mod.MINTER_POLICY, id=policy.id,
+            policy_digest=policy.digest,
         ),
         registry_path=registry_path,
     )

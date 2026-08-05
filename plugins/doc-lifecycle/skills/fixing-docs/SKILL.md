@@ -159,8 +159,9 @@ minted against; when the world moved, the artifact is what gets remade.
 the semantic approval, so you may not run `mint-approval` on an absent person's behalf,
 however confident you are of what they would say — a reviewer who approved this morning's
 report has not approved this afternoon's. Re-running the audit is yours; minting against
-the new report is theirs. (`--minter-kind policy` is the standing auto-apply policy's,
-and the engine documents it as not yet gated for use — it is not your workaround either.)
+the new report is theirs. (`--minter-kind policy` is refused here outright — a policy brand
+says a standing declaration selected these records, and `policy-mint` is the only door that
+produces one — so it is not your workaround either.)
 
 **Use the approval set you minted, or the one you were handed.** Another approval-set
 file on disk that happens to validate is not a substitute for the one covering the

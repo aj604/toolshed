@@ -5,7 +5,7 @@ change is an *approval set*: an immutable artifact binding a selection of
 record digests from one report to that report's lineage and to an enumerated
 allowed mutation scope, minted by a named minter.
 
-Four properties, and every one of them is what makes it worth having:
+Five properties, and every one of them is what makes it worth having:
 
 **It binds a selection, not a report.** Approving three of eleven findings
 mints an approval set naming those three. The other eight stay in the report,
@@ -27,6 +27,17 @@ to remember it — `write_approval_set` refuses to put one anywhere git would
 keep it. What travels with the change is its digest and its rendered summary,
 in the commit message and the PR body.
 
+**A policy brand is provenance, not a label.** `mint_approval_set` is the
+human door and mints for a person only: a `policy`-branded set comes from
+`policy.mint_policy_approval_set` alone, which reaches the same private
+construction path with the standing declaration's digest recorded in the
+minter. Validation reloads that declaration from the repository, decides the
+report under it again, and refuses a selection that is not exactly the one the
+policy derives. Eligibility is a pure function of the policy and the report,
+both of which the artifact pins, so an inexact selection is a forgery rather
+than the world moving — and a minter kind anybody could type into a file is
+not authority.
+
 *Why the inventory digest is deliberately not compared.* Every other lineage
 field is. The inventory digest covers document *content*, so the applier's own
 writes move it — and then a second subset of one report could never be applied,
@@ -43,7 +54,6 @@ import json
 from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 
-from . import ARTIFACT_SCHEMA_VERSION
 from .bloat import VERDICTS as BLOAT_VERDICTS
 from .digest import load_strict_json, sha256_canonical
 from .finding import finding_digest
@@ -78,6 +88,16 @@ from .segment import segment_document
 # records; without a self-declared kind, one could be handed to the applier
 # where the other is required and would parse far enough to be dangerous.
 ARTIFACT_KIND = "approval-set"
+
+# The approval set's own schema version, which has left the engine-wide
+# `ARTIFACT_SCHEMA_VERSION` behind: policy provenance is a field the applier's
+# trust now rests on, and a report, a registry, or a cache entry did not change
+# at all. Versioning it here is what lets version 1 be *refused* rather than
+# read under version 2's rules — a pre-provenance `policy` brand is a label
+# nothing can be revalidated against, and reinterpreting one silently is how a
+# migration turns into an unnoticed grant.
+SCHEMA_VERSION = 2
+PRE_PROVENANCE_SCHEMA_VERSION = 1
 
 # Who may mint. `human` is semantic approval — a person selecting record
 # digests. `policy` is a standing consumer-configured auto-apply policy, named
@@ -130,7 +150,7 @@ REQUIRED_FIELDS = tuple(
     f for f in FIELDS if f != "stale_reasons" and f not in RUN_FIELDS
 )
 
-MINTER_FIELDS = ("kind", "id")
+MINTER_FIELDS = ("kind", "id", "policy_digest")
 RECORD_FIELDS = ("digest", "id", "code", "path", "destination", "units")
 SKIPPED_FIELDS = ("digest", "id")
 SCOPE_FIELDS = ("roots", "paths")
@@ -168,6 +188,11 @@ REPORT_REASON_CODES = (
     "approval-report-changed",
     "approval-reconciliation-changed",
 )
+# The standing declaration a `policy` brand delegates from, re-read from the
+# repository — so it belongs to the repository check, and a run without one
+# cannot clear it. Listed after the two tuples above rather than inside them:
+# it is neither a lineage field nor a fact about the report.
+POLICY_REASON_CODES = ("approval-policy-changed",)
 
 # The checks that need something the caller may not have supplied, and what
 # each of them is the only thing that answers. A validation run names the ones
@@ -194,13 +219,25 @@ UNCHECKED_MEANING = {
 
 @dataclass(frozen=True)
 class Minter:
-    """Who minted this approval set."""
+    """Who minted this approval set.
+
+    `policy_digest` is the provenance of a `policy` mint: the digest of the
+    standing declaration whose decisions produced the selection. It is `None`
+    for a person, who is not a declaration and whose judgment nothing recomputes.
+    Inside the approval digest like every other field, so re-branding a human
+    mint means re-hashing the file — and then the reload below has something
+    exact to disagree with.
+    """
 
     kind: str
     id: str
+    policy_digest: Optional[str] = None
 
     def to_dict(self):
-        return {"kind": self.kind, "id": self.id}
+        return {
+            "kind": self.kind, "id": self.id,
+            "policy_digest": self.policy_digest,
+        }
 
 
 @dataclass(frozen=True)
@@ -302,7 +339,7 @@ class ApprovalSet:
         """
         return {
             "artifact": ARTIFACT_KIND,
-            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "schema_version": SCHEMA_VERSION,
             "minter": self.minter.to_dict(),
             "report_digest": self.report_digest,
             # The report's own state at the moment of minting. In the content,
@@ -616,12 +653,54 @@ def _preimage_problems(records, repo_root, registry_path):
 
 def mint_approval_set(report, selected, *, repo_root, minter,
                       registry_path=DEFAULT_REGISTRY_PATH):
-    """Mint an approval set from a selection of one report's record digests.
+    """Mint an approval set for a person's selection of record digests.
 
-    Returns an `ApprovalSet`, or `Invalid` naming every problem. A non-`Report`
-    or a non-`Minter` is a `TypeError`: minting authority from something that
-    has not been validated as a report, or crediting it to something that is
-    not a minter, is a programming error in the caller, not malformed data.
+    Returns an `ApprovalSet`, or `Invalid` naming every problem. This is the
+    generic door — the caller names the records — so it is human-only: a
+    caller-chosen selection credited to a standing policy would be that
+    policy's authority spent on records the policy never decided about, which
+    is the whole of what the eligibility table exists to prevent. A `policy`
+    minter here is `approval-policy-minter-not-generic`, and
+    `policy.mint_policy_approval_set` is the door that brands one, from a
+    selection it derives itself.
+    """
+    if not isinstance(minter, Minter):
+        raise TypeError(
+            f"a minter is a Minter, not {type(minter).__name__} — lineage "
+            f"records who approved, and an unnamed approver is not approval"
+        )
+    if minter.kind == MINTER_POLICY:
+        return Invalid((Problem(
+            code="approval-policy-minter-not-generic",
+            message=(
+                f"minting a {MINTER_POLICY!r}-branded approval set from a "
+                f"caller-named selection is refused: a policy brand says a "
+                f"standing declaration chose these records, and here a caller "
+                f"did. Mint through the policy, which derives its own selection "
+                f"and records the declaration it derived it from"
+            ),
+            location="minter",
+        ),))
+    return _mint_approval_set(
+        report, selected, repo_root=repo_root, minter=minter,
+        registry_path=registry_path,
+    )
+
+
+def _mint_approval_set(report, selected, *, repo_root, minter,
+                       registry_path=DEFAULT_REGISTRY_PATH):
+    """Construct an approval set. The one producer, whoever the minter is.
+
+    `policy.mint_policy_approval_set` is the only other caller, and it reaches
+    here rather than assembling an `ApprovalSet` of its own so that a policy
+    mint and a human mint share one set of reconciliation, path-authorization,
+    preimage, report-lineage, scope-derivation, and digest mechanics. A second
+    construction path would be a second place each of those could be forgotten.
+
+    A non-`Report` or a non-`Minter` is a `TypeError`: minting authority from
+    something that has not been validated as a report, or crediting it to
+    something that is not a minter, is a programming error in the caller, not
+    malformed data.
 
     The phases are ordered because each rests on the one before: a selection
     that names records the report does not carry cannot be checked against
@@ -772,7 +851,28 @@ def _minter(raw, bad):
             f"policy, and an unattributable approval is not approval",
             "minter")
         return None
-    return Minter(kind=raw["kind"], id=raw["id"])
+    provenance = raw["policy_digest"]
+    if raw["kind"] == MINTER_HUMAN:
+        if provenance is not None:
+            bad("approval-invalid-minter",
+                f"a {MINTER_HUMAN!r} minter carries no policy provenance, and "
+                f"this names {provenance!r}: a person's judgment is not "
+                f"delegated by a declaration and nothing recomputes it, so "
+                f"provenance here would be a revalidation that never runs",
+                "minter")
+            return None
+    elif not (isinstance(provenance, str) and DIGEST.match(provenance)):
+        bad("approval-policy-provenance-missing",
+            f"a {MINTER_POLICY!r}-branded approval set carries policy_digest — "
+            f"the digest of the standing declaration that selected it — and "
+            f"this carries {provenance!r}. The brand is what tells a change "
+            f"reviewer no person read these records, so a brand nothing can be "
+            f"revalidated against was never a policy mint",
+            "minter")
+        return None
+    return Minter(
+        kind=raw["kind"], id=raw["id"], policy_digest=provenance,
+    )
 
 
 def _path_problem(value):
@@ -1093,9 +1193,91 @@ def _preimage_reasons(problems):
     return reasons
 
 
+def _policy_provenance(minter, records, repo_root, policy_path, report):
+    """(stale reasons, problems) for a `policy` brand against its declaration.
+
+    Two kinds of answer again, and the split is the same one `_report_reasons`
+    makes. A consumer editing their standing declaration is the world moving:
+    the delegation this set was minted under no longer exists, which is
+    `stale` — re-run the lane against the policy in force. A selection that is
+    not the one the declaration derives is a *forgery*: eligibility is a pure
+    function of the policy and the report, and this set pins the digest of
+    both, so no repository state could have made an honest policy mint choose
+    a different set of records.
+
+    That is also why a changed declaration stands the recomputation down. Under
+    some other policy the derived set differs as a consequence, so running the
+    comparison anyway would accuse every honest re-run whose consumer narrowed
+    a class of forging its own approval set.
+
+    The import is deferred because `policy.py` imports this module: the policy
+    is a narrower gate in front of this door, and this door revalidates against
+    it, so the dependency has to run one way at import time and the other at
+    call time.
+    """
+    if minter.kind != MINTER_POLICY:
+        return [], []
+
+    from .policy import (
+        DEFAULT_POLICY_PATH,
+        load_auto_apply_policy,
+        policy_eligibility,
+    )
+
+    policy = load_auto_apply_policy(
+        repo_root, DEFAULT_POLICY_PATH if policy_path is None else policy_path
+    )
+    if isinstance(policy, Invalid):
+        return [StaleReason(
+            code="approval-policy-changed",
+            message=(
+                f"the standing auto-apply policy this set was minted under "
+                f"cannot be read from the repository, so whether it still "
+                f"admits this selection is unknown: "
+                f"{policy.problems[0].message}"
+            ),
+            reported=minter.policy_digest,
+            current=policy.problems[0].code,
+        )], []
+    if policy.digest != minter.policy_digest:
+        return [StaleReason(
+            code="approval-policy-changed",
+            message=(
+                f"the set was minted under standing policy {minter.id!r} "
+                f"declaring {minter.policy_digest}, and the repository now "
+                f"declares {policy.digest} — a policy brand is authority a "
+                f"declaration delegated, so a declaration that has moved is a "
+                f"delegation nobody made"
+            ),
+            reported=minter.policy_digest,
+            current=policy.digest,
+        )], []
+
+    if report is None:
+        return [], []
+    eligible = set(policy_eligibility(policy, report).eligible_digests)
+    selected = {record.digest for record in records}
+    if selected == eligible:
+        return [], []
+    return [], [Problem(
+        code="approval-policy-selection-not-derived",
+        message=(
+            f"policy {policy.id!r} does not derive this selection from the "
+            f"report it names: the set adds {sorted(selected - eligible)} and "
+            f"omits {sorted(eligible - selected)}. A policy mint has no "
+            f"parameter through which a record is named — the selection is "
+            f"every record the declaration admits and nothing else — so a set "
+            f"branded with a policy that would not have chosen it was produced "
+            f"by something that is not that policy"
+        ),
+        location="records",
+    )]
+
+
 def validate_approval_set(payload, *, report=None, repo_root=None,
                           registry_path=DEFAULT_REGISTRY_PATH,
-                          audit_config_digest=None, expected_digest=None):
+                          audit_config_digest=None, expected_digest=None,
+                          policy_path=None):
     """Validate an approval set. Returns an `ApprovalSet` or `Invalid`.
 
     Structural validation is exhaustive and runs alone: an artifact that cannot
@@ -1114,6 +1296,11 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
     only part of an approval set that survives in the repository — to bind this
     file to the change that claims it. A file the trailer does not name is
     `approval-digest-unexpected`, whatever it validates to on its own.
+
+    `policy_path` names where the repository's standing auto-apply policy
+    lives, for the provenance check a `policy`-branded set gets; it defaults to
+    `policy.DEFAULT_POLICY_PATH` and is read only when `repo_root` is supplied.
+    A human-minted set never reads it.
     """
     if report is not None and not isinstance(report, Report):
         raise TypeError(
@@ -1130,6 +1317,30 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
                 f"approval set and nothing else."
             ),
             location="artifact",
+        ),))
+
+    declared_version = payload.get("schema_version")
+    if (isinstance(declared_version, int)
+            and not isinstance(declared_version, bool)
+            and declared_version == PRE_PROVENANCE_SCHEMA_VERSION):
+        # Alone, and before every other structural check: this artifact was
+        # written under rules that had no policy provenance in them, so reading
+        # its fields under version 2's rules would be reinterpreting it. A
+        # `policy` brand minted then names no declaration, and there is nothing
+        # to recover it from — the report it selects from is what a fresh mint
+        # starts at.
+        return Invalid((Problem(
+            code="approval-schema-pre-provenance",
+            message=(
+                f"this approval set declares schema_version "
+                f"{PRE_PROVENANCE_SCHEMA_VERSION}, which predates policy "
+                f"provenance: a {MINTER_POLICY!r} brand was descriptive text "
+                f"there, carrying nothing the standing declaration could be "
+                f"revalidated against. It is refused rather than read as "
+                f"version {SCHEMA_VERSION} — mint again from its report, which "
+                f"costs a re-mint and never a silent reinterpretation"
+            ),
+            location="schema_version",
         ),))
 
     problems = []
@@ -1151,11 +1362,11 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
     version = payload.get("schema_version")
     if "schema_version" in payload and not (
         isinstance(version, int) and not isinstance(version, bool)
-        and version == ARTIFACT_SCHEMA_VERSION
+        and version == SCHEMA_VERSION
     ):
         bad("approval-schema-version",
             f"approval-set schema_version {version!r} is not supported; this "
-            f"engine reads integer version {ARTIFACT_SCHEMA_VERSION}",
+            f"engine reads integer version {SCHEMA_VERSION}",
             "schema_version")
 
     status = payload.get("status")
@@ -1269,6 +1480,11 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
         ),))
 
     reasons = []
+    # Whether the report supplied is the one this set names. The policy
+    # recomputation below is a fact about *that* report's records, so like
+    # every other check in `_report_reasons` it has nothing to run against
+    # when some other report was handed over.
+    report_bound = False
     if report is not None:
         reasons, forged = _report_reasons(
             payload, records, skipped, report, lineage
@@ -1278,6 +1494,7 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
             # minter would have produced, so the artifact was never authority —
             # and `invalid` beats `stale` for the same reason it does above.
             return Invalid(tuple(forged))
+        report_bound = payload["report_digest"] == report.digest
     if repo_root is not None:
         current, current_problems = current_lineage(
             repo_root, registry_path, audit_config_digest
@@ -1286,6 +1503,13 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
             return Invalid(tuple(current_problems))
         reasons += _lineage_reasons(lineage, current)
         reasons += _scope_reasons(scope, repo_root, registry_path)
+        policy_reasons, forged_policy_brand = _policy_provenance(
+            minter, records, repo_root, policy_path,
+            report if report_bound else None,
+        )
+        if forged_policy_brand:
+            return Invalid(tuple(forged_policy_brand))
+        reasons += policy_reasons
         preimage_problems = _preimage_problems(
             records, repo_root, registry_path
         )
@@ -1308,7 +1532,7 @@ def validate_approval_set(payload, *, report=None, repo_root=None,
     rechecked = {reason.code for reason in reasons}
     if repo_root is not None:
         rechecked |= {code for field, code, _ in COMPARABLE if field in current}
-        rechecked |= set(REPOSITORY_REASON_CODES)
+        rechecked |= set(REPOSITORY_REASON_CODES) | set(POLICY_REASON_CODES)
     if report is not None:
         rechecked |= set(REPORT_REASON_CODES)
     reasons += [r for r in carried if r.code not in rechecked]
@@ -1504,7 +1728,8 @@ def _report_reasons(payload, records, skipped, report, approval_lineage):
 
 def load_approval_set(path, *, report=None, repo_root=None,
                       registry_path=DEFAULT_REGISTRY_PATH,
-                      audit_config_digest=None, expected_digest=None):
+                      audit_config_digest=None, expected_digest=None,
+                      policy_path=None):
     """Read an approval-set file and validate it. `ApprovalSet` or `Invalid`."""
     payload, problem = load_strict_json(
         path,
@@ -1517,7 +1742,7 @@ def load_approval_set(path, *, report=None, repo_root=None,
     return validate_approval_set(
         payload, report=report, repo_root=repo_root,
         registry_path=registry_path, audit_config_digest=audit_config_digest,
-        expected_digest=expected_digest,
+        expected_digest=expected_digest, policy_path=policy_path,
     )
 
 

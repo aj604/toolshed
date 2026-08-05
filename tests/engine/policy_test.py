@@ -7,6 +7,8 @@ that mocked the repository would be testing the eligibility table twice and the
 seam that matters not at all.
 """
 
+import json
+import os
 import unittest
 
 from support import ENGINE, RepoTestCase  # noqa: F401 (engine onto sys.path)
@@ -16,8 +18,10 @@ from approval_test import (
     DOC_A,
     DOC_B,
     FILES,
+    HUMAN,
     PLAN_DOC,
     ApprovalTestCase,
+    resigned,
 )
 
 from doclifecycle import approval as approval_mod
@@ -28,7 +32,11 @@ from doclifecycle.applier import (
     OP_RETIRE,
     RECORD_REMEDIES,
 )
-from doclifecycle.approval import ApprovalSet, MINTER_POLICY
+from doclifecycle.approval import (
+    MINTER_POLICY,
+    ApprovalSet,
+    validate_approval_set,
+)
 from doclifecycle.policy import (
     CLASS_ANCHOR_REFRESH,
     CLASS_DRIFT_STALE,
@@ -42,7 +50,7 @@ from doclifecycle.policy import (
     mint_policy_approval_set,
     policy_eligibility,
 )
-from doclifecycle.results import Invalid
+from doclifecycle.results import STATE_CLEAN, STATE_STALE, Invalid
 
 POLICY_ID = "nightly-doc-sync"
 
@@ -377,7 +385,9 @@ class WhatAPolicyMayNeverMint(PolicyTestCase):
         # The release-gate criterion — "provably cannot mint for a bloat
         # finding" — has to hold against both doors: the restricted
         # policy-mint door above, and the generic `mint_approval_set` any
-        # caller can reach directly with a policy `Minter`.
+        # caller can reach directly with a policy `Minter`. Since #186 the
+        # generic door refuses the brand before the record, so the answer is
+        # the same refusal for a stronger reason.
         record = self.bloat()
 
         result = approval_mod.mint_approval_set(
@@ -386,7 +396,7 @@ class WhatAPolicyMayNeverMint(PolicyTestCase):
         )
 
         self.assertIsInstance(result, Invalid, result)
-        self.assertIn("approval-policy-ineligible-record", codes(result))
+        self.assertIn("approval-policy-minter-not-generic", codes(result))
 
     def test_the_never_eligible_codes_are_every_bloat_operation(self):
         # Issue #57 review: this asserted the same six literals the tuple was
@@ -690,16 +700,18 @@ class NoBypass(PolicyTestCase):
     def test_the_policy_mints_through_the_one_minting_function(self):
         # Not "an equivalent artifact": the call itself. A second producer of
         # approval sets would be a second place the reconciliation, path, and
-        # preimage refusals could be forgotten.
+        # preimage refusals could be forgotten. The shared construction is
+        # private since #186 — the public generic door is human-only — and
+        # this is the assertion that it is still shared.
         calls = []
-        original = approval_mod.mint_approval_set
+        original = approval_mod._mint_approval_set
 
         def spy(*args, **kwargs):
             calls.append((args, kwargs))
             return original(*args, **kwargs)
 
-        approval_mod.mint_approval_set = spy
-        self.addCleanup(setattr, approval_mod, "mint_approval_set", original)
+        approval_mod._mint_approval_set = spy
+        self.addCleanup(setattr, approval_mod, "_mint_approval_set", original)
 
         approval = self.mint([self.stale()])
 
@@ -797,6 +809,337 @@ class TheEligibilityPayload(PolicyTestCase):
 
         self.assertIsInstance(eligibility, Eligibility)
         self.assertEqual(eligibility.eligible_digests, ())
+
+
+# --------------------------------------------------------------------------
+# Policy provenance (#186): the brand is producible only from the standing
+# declaration, and stays revalidatable against it.
+# --------------------------------------------------------------------------
+
+class ProvenanceTestCase(PolicyTestCase):
+    """A real policy on disk, and the two ways to reach a branded artifact."""
+
+    def declared(self):
+        """The declaration the repository holds right now."""
+        loaded = load_auto_apply_policy(self.repo)
+        self.assertIsInstance(loaded, AutoApplyPolicy, loaded)
+        return loaded
+
+    def declare(self, *, identifier=POLICY_ID, classes=None):
+        """Write a standing declaration and return it as the engine reads it."""
+        payload = {
+            "artifact": "auto-apply-policy", "schema_version": 1,
+            "id": identifier,
+        }
+        if classes is not None:
+            payload["classes"] = list(classes)
+        self.write(self.repo, DEFAULT_POLICY_PATH, json.dumps(payload))
+        return self.declared()
+
+    def check(self, payload, report):
+        return validate_approval_set(
+            payload, report=report, repo_root=self.repo,
+            audit_config_digest=CONFIG_DIGEST,
+        )
+
+    def forge(self, records, selected=None):
+        """`(report, payload)`: a branded artifact no policy derived.
+
+        Minted honestly as a *human* — through every refusal minting owns —
+        then re-branded with the repository's real declaration and re-signed.
+        That is the whole of what a text editor or an alternate producer can
+        do, and it is exactly the artifact the applier would be handed.
+        """
+        report = self.report(records)
+        digests = (
+            [r["digest"] for r in records] if selected is None else selected
+        )
+        approval = approval_mod.mint_approval_set(
+            report, digests, repo_root=self.repo, minter=HUMAN,
+        )
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        declared = self.declared()
+        payload = approval.to_dict()
+        payload["minter"] = {
+            "kind": MINTER_POLICY, "id": declared.id,
+            "policy_digest": declared.digest,
+        }
+        return report, resigned(payload)
+
+
+class TheOnlyProducerOfAPolicyBrand(ProvenanceTestCase):
+    def test_the_policy_mint_records_the_declaration_it_derived_from(self):
+        approval = self.mint([self.stale()])
+
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        self.assertEqual(approval.minter.policy_digest, self.declared().digest)
+
+    def test_the_declaration_digest_is_over_what_it_authorizes(self):
+        # Not over the file's bytes: reformatting the JSON, or spelling out the
+        # classes it would have defaulted to, is the same delegation.
+        spelled_out = self.declare(classes=DEFAULT_CLASSES)
+
+        self.assertEqual(spelled_out.digest, self.policy().digest)
+
+    def test_narrowing_the_classes_is_a_different_declaration(self):
+        self.assertNotEqual(
+            self.policy(classes=(CLASS_DRIFT_STALE,)).digest,
+            self.policy().digest,
+        )
+
+    def test_renaming_the_policy_is_a_different_declaration(self):
+        self.assertNotEqual(
+            self.policy(id="someone-elses-nightly").digest,
+            self.policy().digest,
+        )
+
+    def test_the_generic_door_mints_no_brand_at_all(self):
+        record = self.stale()
+
+        result = approval_mod.mint_approval_set(
+            self.report([record]), [record["digest"]], repo_root=self.repo,
+            minter=approval_mod.Minter(
+                kind=MINTER_POLICY, id=POLICY_ID,
+                policy_digest=self.declared().digest,
+            ),
+        )
+
+        # Even with the real declaration's digest in hand: the selection came
+        # from the caller, and provenance is a claim about who selected.
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(codes(result), ["approval-policy-minter-not-generic"])
+
+    def test_a_policy_minted_set_validates_against_its_declaration(self):
+        # The honest path, end to end: mint from the standing policy, then
+        # revalidate with the report and the repository.
+        record = self.stale()
+        report = self.report([record])
+        approval = mint_policy_approval_set(
+            report, self.declared(), repo_root=self.repo)
+        self.assertIsInstance(approval, ApprovalSet, approval)
+
+        result = self.check(approval.to_dict(), report)
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_CLEAN)
+        self.assertEqual(result.stale_reasons, ())
+
+
+class AnArtifactNoPolicyDerived(ProvenanceTestCase):
+    """Every policy refusal, re-reached through the artifact (#186 AC2).
+
+    Each record here is one a *person* may legitimately approve, so each mints
+    cleanly through the human door and can then be re-branded. What must not
+    differ is the authority outcome: the standing declaration does not derive
+    the selection, so the artifact is refused for the same reason eligibility
+    refused the record.
+    """
+
+    def mutations(self):
+        """Every mutation class, with the eligibility refusal it earns."""
+        return {
+            "waived": (self.stale(waived={
+                "claim": "charges a flat 2% fee",
+                "source": ".github/waivers.json",
+                "source_digest": "d" * 64, "matched": 1,
+            }), "policy-record-waived"),
+            "destination-bearing": (self.stale(destination={
+                "path": DOC_B, "kind": "living", "set": None,
+            }), "policy-record-has-destination"),
+            "command-evidenced": (self.stale(evidence={
+                "command": "gh pr list --json bogus",
+                "observed": "authorAssociation is not an available field",
+            }), "policy-external-evidence"),
+            "missing-evidence": (self.stale(evidence=None),
+                                 "policy-missing-evidence"),
+            "missing-preimage": (self.stale(assertion=""),
+                                 "policy-missing-preimage"),
+            "redirected-document": (self.stale(
+                assertion=DRIFT_023_ASSERTION, fix=DRIFT_023_FIX,
+                evidence=dict(DRIFT_023_EVIDENCE),
+            ), "policy-fix-names-other-document"),
+        }
+
+    def test_eligibility_refuses_every_one_of_them(self):
+        # The authority outcome the artifact side must match, stated once.
+        for name, (record, refusal) in self.mutations().items():
+            with self.subTest(mutation=name):
+                self.assertEqual(refusals(self.eligibility([record])),
+                                 {record["id"]: refusal})
+
+    def test_the_policy_mint_produces_nothing_for_any_of_them(self):
+        for name, (record, refusal) in self.mutations().items():
+            with self.subTest(mutation=name):
+                result = self.mint([record])
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertIn(refusal, codes(result))
+
+    def test_the_generic_mint_refuses_the_brand_for_any_of_them(self):
+        for name, (record, _) in self.mutations().items():
+            with self.subTest(mutation=name):
+                result = approval_mod.mint_approval_set(
+                    self.report([record]), [record["digest"]],
+                    repo_root=self.repo,
+                    minter=approval_mod.Minter(
+                        kind=MINTER_POLICY, id=POLICY_ID,
+                        policy_digest=self.declared().digest,
+                    ),
+                )
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertEqual(codes(result),
+                                 ["approval-policy-minter-not-generic"])
+
+    def test_a_branded_artifact_selecting_one_fails_closed(self):
+        for name, (record, _) in self.mutations().items():
+            with self.subTest(mutation=name):
+                report, payload = self.forge([record])
+
+                result = self.check(payload, report)
+
+                self.assertIsInstance(result, Invalid, result)
+                self.assertEqual(
+                    codes(result), ["approval-policy-selection-not-derived"]
+                )
+
+    def test_the_refusal_names_the_record_the_declaration_did_not_admit(self):
+        record, _ = self.mutations()["waived"]
+        report, payload = self.forge([record])
+
+        result = self.check(payload, report)
+
+        self.assertIn(record["digest"], result.problems[0].message)
+
+    def test_a_bloat_record_is_refused_structurally_as_well(self):
+        # Defense in depth, and it answers first: the bloat restriction is a
+        # pure function of the artifact's own fields, so it needs neither the
+        # report nor the repository the derivation check depends on.
+        record = self.bloat()
+        report, payload = self.forge([record])
+
+        self.assertEqual(
+            codes(validate_approval_set(payload)),
+            ["approval-policy-ineligible-record"],
+        )
+        self.assertIn("approval-policy-ineligible-record",
+                      codes(self.check(payload, report)))
+
+    def test_a_class_the_consumer_disabled_is_refused_on_the_artifact(self):
+        # Repository configuration is the authority, so the artifact is judged
+        # against the declaration in force, not the one that was in force.
+        self.declare(classes=(CLASS_DRIFT_STALE,))
+        report, payload = self.forge([self.anchor_stale()])
+
+        result = self.check(payload, report)
+
+        self.assertIsInstance(result, Invalid, result)
+        self.assertEqual(
+            codes(result), ["approval-policy-selection-not-derived"]
+        )
+
+    def test_a_set_that_hides_an_eligible_record_is_refused_too(self):
+        # The other direction: a policy mint takes every record the
+        # declaration admits, so a narrower branded selection was derived by
+        # something that is not this policy either.
+        one, two = self.stale(), self.stale("R-8", path=DOC_B)
+        report, payload = self.forge([one, two], selected=[one["digest"]])
+
+        result = self.check(payload, report)
+
+        self.assertEqual(
+            codes(result), ["approval-policy-selection-not-derived"]
+        )
+
+    def test_the_derivation_check_is_invalid_rather_than_stale(self):
+        # Eligibility is a pure function of the declaration and the report,
+        # and this artifact pins the digest of both — so no repository state
+        # could make an honest policy mint have chosen this selection.
+        record, _ = self.mutations()["waived"]
+        report, payload = self.forge([record])
+
+        self.assertNotIsInstance(self.check(payload, report), ApprovalSet)
+
+
+class TheDeclarationTheBrandDelegatesFrom(ProvenanceTestCase):
+    def minted(self):
+        record = self.stale()
+        report = self.report([record])
+        approval = mint_policy_approval_set(
+            report, self.declared(), repo_root=self.repo)
+        self.assertIsInstance(approval, ApprovalSet, approval)
+        return report, approval
+
+    def test_a_declaration_that_moved_is_stale_not_a_forgery(self):
+        # A consumer narrowing their policy is the world moving: re-run the
+        # lane against the policy in force. Calling it a forgery would accuse
+        # the consumer of forging their own approval set.
+        report, approval = self.minted()
+        self.declare(classes=(CLASS_ANCHOR_REFRESH,))
+
+        result = self.check(approval.to_dict(), report)
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual([r.code for r in result.stale_reasons],
+                         ["approval-policy-changed"])
+
+    def test_the_stale_reason_names_both_declarations(self):
+        report, approval = self.minted()
+        self.declare(classes=(CLASS_ANCHOR_REFRESH,))
+
+        reason = self.check(approval.to_dict(), report).stale_reasons[0]
+
+        self.assertEqual(reason.reported, approval.minter.policy_digest)
+        self.assertEqual(reason.current, self.declared().digest)
+
+    def test_a_repository_that_revoked_its_policy_is_stale_too(self):
+        # An absent declaration delegates nothing, and "the policy cannot be
+        # read" is an unanswered question about the authority — never a pass.
+        report, approval = self.minted()
+        os.remove(os.path.join(self.repo, DEFAULT_POLICY_PATH))
+
+        result = self.check(approval.to_dict(), report)
+
+        self.assertEqual(result.status, STATE_STALE)
+        self.assertEqual([r.code for r in result.stale_reasons],
+                         ["approval-policy-changed"])
+        self.assertEqual(result.stale_reasons[0].current,
+                         "policy-not-configured")
+
+    def test_a_changed_declaration_stands_the_derivation_check_down(self):
+        # Under some other declaration the derived set differs *as a
+        # consequence*, so running the comparison anyway would report a
+        # forgery at every honest re-run whose consumer narrowed a class.
+        report, approval = self.minted()
+        self.declare(classes=(CLASS_ANCHOR_REFRESH,))
+
+        result = self.check(approval.to_dict(), report)
+
+        self.assertNotIn("approval-policy-selection-not-derived",
+                         [r.code for r in result.stale_reasons])
+
+    def test_without_a_repository_the_declaration_is_not_consulted(self):
+        # And the verdict says so: `unchecked` already names the repository
+        # check, which is the one this provenance rides in.
+        _, approval = self.minted()
+
+        result = validate_approval_set(approval.to_dict())
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertIn("repository", result.unchecked)
+
+    def test_a_human_minted_set_needs_no_policy_at_all(self):
+        record = self.stale()
+        report = self.report([record])
+        approval = approval_mod.mint_approval_set(
+            report, [record["digest"]], repo_root=self.repo, minter=HUMAN)
+        os.remove(os.path.join(self.repo, DEFAULT_POLICY_PATH))
+
+        result = self.check(approval.to_dict(), report)
+
+        self.assertIsInstance(result, ApprovalSet, result)
+        self.assertEqual(result.stale_reasons, ())
 
 
 if __name__ == "__main__":
