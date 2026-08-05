@@ -698,26 +698,43 @@ class AFixThatSpeaksForAnotherDocument(PolicyTestCase):
 
 class NoBypass(PolicyTestCase):
     def test_the_policy_mints_through_the_one_minting_function(self):
-        # Not "an equivalent artifact": the call itself. A second producer of
-        # approval sets would be a second place the reconciliation, path, and
-        # preimage refusals could be forgotten. The shared construction is
-        # private since #186 — the public generic door is human-only — and
-        # this is the assertion that it is still shared.
-        calls = []
-        original = approval_mod._mint_approval_set
+        # Not "an equivalent artifact": the construction site itself. A second
+        # producer of approval sets would be a second place the reconciliation,
+        # path, and preimage refusals could be forgotten. The shared
+        # construction is private since #186 — the public generic door is
+        # human-only — and this is the assertion that it is still shared.
+        #
+        # Asserted statically, in the manner of test_the_policy_module_never_
+        # writes below: "which function was called" is not a runtime
+        # observation worth reaching into another module's private namespace
+        # for, and a spy would only have proved it for the one input it ran.
+        # The source says it for every input.
+        import ast
+        import inspect
 
-        def spy(*args, **kwargs):
-            calls.append((args, kwargs))
-            return original(*args, **kwargs)
+        from doclifecycle import policy as policy_mod
 
-        approval_mod._mint_approval_set = spy
-        self.addCleanup(setattr, approval_mod, "_mint_approval_set", original)
+        tree = ast.parse(inspect.getsource(policy_mod))
+        called = [
+            ast.unparse(node.func) for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func).endswith(
+                ("mint_approval_set", "ApprovalSet"))
+        ]
 
+        # Exactly one minting call, and it is the shared private one. Not the
+        # public human door (which refuses a policy minter), and not a direct
+        # `ApprovalSet(...)` that would skip the refusals entirely.
+        self.assertEqual(called, ["approval_mod._mint_approval_set"], called)
+
+    def test_the_policy_hands_the_shared_minting_function_a_policy_minter(self):
+        # The other half of the previous test: the call exists, and this is
+        # what it carries. Observable through the public seam, so it is
+        # asserted there rather than statically.
         approval = self.mint([self.stale()])
 
         self.assertIsInstance(approval, ApprovalSet, approval)
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][1]["minter"].kind, MINTER_POLICY)
+        self.assertEqual(approval.minter.kind, MINTER_POLICY)
 
     def test_a_policy_mint_is_the_human_mint_with_a_different_minter(self):
         record = self.stale()
