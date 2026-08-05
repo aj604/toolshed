@@ -339,7 +339,11 @@ class TheWriterCanOnlyOpenAReviewableChange(unittest.TestCase):
     def test_the_lane_pushes_a_derived_branch_and_opens_a_real_pr(self):
         body = "\n".join(jobs()["apply"])
 
-        self.assertIn('git push origin "HEAD:refs/heads/', body)
+        # The branch is derived, and what it carries is the commit
+        # `verify-apply-bytes.py commit` certified — never `HEAD`, which is
+        # whatever the last thing to run left behind (aj604/toolshed#191).
+        self.assertIn('verified-commit.txt"):refs/heads/', body)
+        self.assertNotIn('"HEAD:refs/heads/', body)
         self.assertIn("gh pr create", body)
         self.assertIn("--body-file", body)
         self.assertNotIn("--draft", body)

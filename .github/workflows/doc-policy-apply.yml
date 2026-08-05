@@ -387,6 +387,19 @@ jobs:
             --staged "${RUNNER_TEMP}/staged.txt" \
             --unstaged "${RUNNER_TEMP}/unstaged.txt"
 
+      # Byte binding at the index boundary, the counterpart to the path
+      # confinement above and the same implementation the manual apply lane
+      # runs: what `git add` stored is compared against the postimage manifest
+      # the applier certified off disk, so a `clean` filter, an end-of-line
+      # attribute, or anything that rewrote an approved document after the
+      # engine read it back refuses here rather than riding into the commit. A
+      # retired document is checked as absence.
+      - name: Verify every staged blob against the certified postimages
+        run: |
+          set -euo pipefail
+          python3 .doc-lifecycle/wiring/verify-apply-bytes.py index \
+            --result "${RUNNER_TEMP}/apply-result.json" --repo .
+
       - name: Render the commit message and pull request
         run: |
           set -euo pipefail
@@ -406,13 +419,28 @@ jobs:
             --approval-summary "${RUNNER_TEMP}/apply/approval-summary.md" \
             --out "${RUNNER_TEMP}/pr-body.md"
 
-      - name: Commit and push the derived branch
+      - name: Commit the verified change
         run: |
           set -euo pipefail
           git config user.name "doc-lifecycle[bot]"
           git config user.email "doc-lifecycle@users.noreply.github.com"
           git commit -F "${RUNNER_TEMP}/commit-message.txt"
-          git push origin "HEAD:refs/heads/$(cat "${RUNNER_TEMP}/apply/branch.txt")"
+
+      # The tree, after hooks and index normalization have had their say — the
+      # index checked above is not the tree that would be pushed. The commit id
+      # this writes is the one the push names, so the derived branch carries
+      # provably the tree that passed and not whatever `HEAD` points at by then.
+      - name: Verify the commit tree against the certified postimages
+        run: |
+          set -euo pipefail
+          python3 .doc-lifecycle/wiring/verify-apply-bytes.py commit \
+            --result "${RUNNER_TEMP}/apply-result.json" --repo . \
+            --out "${RUNNER_TEMP}/verified-commit.txt"
+
+      - name: Push the verified commit
+        run: |
+          set -euo pipefail
+          git push origin "$(cat "${RUNNER_TEMP}/verified-commit.txt"):refs/heads/$(cat "${RUNNER_TEMP}/apply/branch.txt")"
 
       # A real pull request, never a draft. The policy minted without a human selecting records,
       # so PR review is the semantic review, and merging it is change approval of the actual diff.

@@ -73,7 +73,7 @@ The `plugins:` selector stays bare `doc-lifecycle@toolshed` (`claude-code-action
 The five workflow templates are in this skill's base directory (announced when the skill
 loads), and its own scripts one level down in `scripts/` — `upgrade-gate.py`,
 `stage-upgrade.py`, `render-report.py`, `render-audit-summary.py`, `render-apply-summary.py`,
-`probe-evidence-tool.py`, and `bloat-cadence.py`. The chunk planner and the two output validators stay in the sibling
+`probe-evidence-tool.py`, `verify-apply-bytes.py`, and `bloat-cadence.py`. The chunk planner and the two output validators stay in the sibling
 skills that own them (`detecting-doc-bloat`, `detecting-doc-drift`) and are never vendored here
 — both always dispatch their own copy via `${CLAUDE_PLUGIN_ROOT}`, so a copy under
 `.doc-lifecycle/wiring/` would have no reader (aj604/toolshed#77 follow-up).
@@ -186,8 +186,10 @@ write scope) binds the downloaded report artifact to the dispatched digest, re-v
 against the requested base, and mints the approval set; `plan` (the only model, `contents: read`
 + `id-token: write`, no GH_TOKEN, `persist-credentials: false`) authors an edit plan and nothing
 else; `apply` (`contents: write` + `pull-requests: write`, no model) runs `apply-plan`, stages
-exactly the paths the verified result emitted, commits with the engine's approval trailers,
-pushes a branch named for the approval digest, and opens a real pull request — never a draft.
+exactly the paths the verified result emitted, checks every staged blob against the applier's
+certified postimage manifest, commits with the engine's approval trailers, checks the commit tree
+the same way, pushes that exact commit onto a branch named for the approval digest, and opens a
+real pull request — never a draft.
 
 A stale report refuses at revalidation naming the lineage field that moved, and `apply` runs only
 on both other jobs succeeding, so nothing is created. Dispatch inputs reach no shell: they travel
@@ -195,9 +197,16 @@ through `env:` or an action's `with:`, and the record selection is validated to 
 before it becomes argv. `scripts/render-apply-summary.py` owns this lane's run surface — every
 refusal, the staged path list, and the PR title, body, and commit message
 (`tests/scripts/render-apply-summary_test.py`, `tests/scripts/apply-workflow_test.py`).
+`scripts/verify-apply-bytes.py` owns the byte binding past that surface: the engine certifies
+the postimages it read back off disk, and this compares the staged index and then the commit
+tree against them, so a `clean` filter, an end-of-line attribute, a hook, or any other writer
+between the apply and the push refuses rather than landing content nobody approved
+(`tests/scripts/verify-apply-bytes_test.py`). Both apply lanes run it identically, which
+`tests/scripts/apply-lane-parity_test.py` holds true.
 
 **Installed on the same condition `doc-audit.yml` is**: it needs a landed
-`.doc-lifecycle/registry.json`, the vendored engine, and `render-apply-summary.py` in
+`.doc-lifecycle/registry.json`, the vendored engine, and `render-apply-summary.py` plus
+`verify-apply-bytes.py` in
 `.doc-lifecycle/wiring/`, so Upgrade mode installs it for exactly the repos that carry a registry.
 It has no knob — manual dispatch carries no schedule to preserve.
 
@@ -214,7 +223,9 @@ repository-credential-free `plan` is the sole model job, and model-free `apply` 
 and `pull-requests: write`. The model artifact downloads separately from the trusted approval
 bundle; `apply-plan` enforces operation authority, exact preimages, every approved record being
 executed, complete remedies, and whole-diff confinement. The writer stages the resulting
-explicit path list and opens a real pull request, never a draft and never a direct write to the
+explicit path list, verifies the staged index and the commit tree against the applier's certified
+postimages through the same `verify-apply-bytes.py` the manual lane runs, pushes the commit that
+verification named, and opens a real pull request, never a draft and never a direct write to the
 default branch.
 
 Autonomous minting is an explicit consumer choice. The standing declaration lives at
@@ -256,7 +267,7 @@ the bytes:
       installed-version                                                          version lockfile
       wiring/    upgrade-gate.py stage-upgrade.py render-report.py               plugin-owned
                  render-audit-summary.py render-apply-summary.py
-                 probe-evidence-tool.py
+                 probe-evidence-tool.py verify-apply-bytes.py
                  engine/                                                         vendored wholesale
       state/     sync-marker                                                     machine-written
 
@@ -321,9 +332,10 @@ and are the only doc-lifecycle content left under `.github/`.
    that lockfile.
 5. Copy this skill's scripts into `.doc-lifecycle/wiring/`: `scripts/upgrade-gate.py`,
    `scripts/stage-upgrade.py`, `scripts/render-report.py`, `scripts/render-audit-summary.py`,
-   `scripts/render-apply-summary.py`, `scripts/probe-evidence-tool.py` (the version-comparison
-   gate, the upgrade lane's path authority, and each lane's run-surface rendering — run from the
-   repo, unit-tested upstream). The chunk planner and the two output validators stay in the
+   `scripts/render-apply-summary.py`, `scripts/probe-evidence-tool.py`,
+   `scripts/verify-apply-bytes.py` (the version-comparison gate, the upgrade lane's path
+   authority, each lane's run-surface rendering, and the apply lanes' byte verification at the
+   index and commit boundaries — run from the repo, unit-tested upstream). The chunk planner and the two output validators stay in the
    sibling skills that own them (`detecting-doc-bloat`, `detecting-doc-drift`) and are never
    vendored here — both always dispatch their own copy via `${CLAUDE_PLUGIN_ROOT}`, so a copy
    under `.doc-lifecycle/wiring/` would have no reader (aj604/toolshed#77 follow-up).
@@ -362,14 +374,15 @@ and are the only doc-lifecycle content left under `.github/`.
     so on a fresh install always write it. `doc-sync-upgrade.yml` reads it to decide whether a
     newer release exists; it advances only when an upgrade PR merges.
 12. Tell the user, concretely:
-    - the fifteen always-installed files to commit, plus the vendored `engine/` tree: the five
+    - the sixteen always-installed files to commit, plus the vendored `engine/` tree: the five
       workflows under `.github/workflows/` (`doc-audit.yml`, `doc-bloat-audit.yml`,
-      `doc-apply.yml`, `doc-policy-apply.yml`, `doc-sync-upgrade.yml`); the six
+      `doc-apply.yml`, `doc-policy-apply.yml`, `doc-sync-upgrade.yml`); the seven
       scripts under `.doc-lifecycle/wiring/` (`upgrade-gate.py`, `stage-upgrade.py`,
       `render-report.py`, `render-audit-summary.py`,
-      `render-apply-summary.py`, `probe-evidence-tool.py`); and, at `.doc-lifecycle/`, the
+      `render-apply-summary.py`, `probe-evidence-tool.py`, `verify-apply-bytes.py`); and, at
+      `.doc-lifecycle/`, the
       three seeded state files (`audit-scope.json`, `drift-waivers.json`, `evidence-tools.json`)
-      and `installed-version`. When enabled, the consumer policy is a sixteenth file.
+      and `installed-version`. When enabled, the consumer policy is a seventeenth file.
       `.doc-lifecycle/state/` stays empty on a fresh install — the marker it holds arrives only
       from a relocation;
     - both audit lanes run on their crons and write nothing — drift publishes `audit-report`,
@@ -446,7 +459,7 @@ Ownership is the whole game — total on wiring, idempotent on state (this table
 | `.doc-lifecycle/drift-waivers.json` | consumer (accepted-claim record) | **Never touch.** Seed `{"waivers": []}` only if absent (pre-0.11 installs lack it). |
 | `.doc-lifecycle/state/sync-marker` | legacy state | **Never touch.** No lane reads it. A relocation carries it here byte-for-byte, once; every upgrade after that leaves it alone (`stage-upgrade.py` authorizes it as a create only). |
 | `doc-audit.yml`, `doc-bloat-audit.yml`, `doc-apply.yml`, `doc-policy-apply.yml` | plugin (wiring) | **Regenerate**, knobs preserved — but only for an install holding `.doc-lifecycle/registry.json`. An install without one is left exactly as it was. |
-| `.doc-lifecycle/wiring/render-audit-summary.py`, `render-apply-summary.py`, `probe-evidence-tool.py` | plugin (wiring) | **Overwrite**, on the same registry condition. |
+| `.doc-lifecycle/wiring/render-audit-summary.py`, `render-apply-summary.py`, `probe-evidence-tool.py`, `verify-apply-bytes.py` | plugin (wiring) | **Overwrite**, on the same registry condition. |
 | `.doc-lifecycle/evidence-tools.json` | consumer (declared tools) | **Never touch.** Seed `{"tools": []}` only if absent, on the same registry condition — tool-free is what a consumer opts out of, never what an upgrade hands them. |
 | `.doc-lifecycle/auto-apply-policy.json` | consumer (standing authorization) | **Never touch and never seed on upgrade.** Absence keeps autonomous minting disabled; a relocation carries an existing file byte-for-byte. |
 | `.doc-lifecycle/wiring/engine/` | plugin (wiring) | **Replace wholesale**, on the same registry condition — the destination is emptied first, so a module deleted upstream stops being importable. Never edited in place. |

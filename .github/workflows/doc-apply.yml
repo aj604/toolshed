@@ -505,6 +505,20 @@ jobs:
             --staged "${RUNNER_TEMP}/staged.txt" \
             --unstaged "${RUNNER_TEMP}/unstaged.txt"
 
+      # The step above settled which paths git staged; this settles the bytes at
+      # that boundary, against the postimage manifest the applier certified off
+      # disk. `git add` need not store what it was pointed at — a `clean` filter
+      # or an end-of-line attribute rewrites content on the way in — and
+      # anything that mutated an approved document between the apply and the
+      # staging lands in the index under a path this plan legitimately writes,
+      # so every path set the lane checks still names it and only the stored
+      # bytes betray it. A retired document is checked as absence.
+      - name: Verify every staged blob against the certified postimages
+        run: |
+          set -euo pipefail
+          python3 .doc-lifecycle/wiring/verify-apply-bytes.py index \
+            --result "${RUNNER_TEMP}/apply-result.json" --repo .
+
       - name: Render the commit message, pull-request title, and body
         run: |
           set -euo pipefail
@@ -524,13 +538,31 @@ jobs:
             --approval-summary "${RUNNER_TEMP}/apply/approval-summary.md" \
             --out "${RUNNER_TEMP}/pr-body.md"
 
-      - name: Commit and push the branch
+      - name: Commit the verified change
         run: |
           set -euo pipefail
           git config user.name "doc-lifecycle[bot]"
           git config user.email "doc-lifecycle@users.noreply.github.com"
           git commit -F "${RUNNER_TEMP}/commit-message.txt"
-          git push origin "HEAD:refs/heads/$(cat "${RUNNER_TEMP}/apply/branch.txt")"
+
+      # Committing runs hooks and re-reads the index, so the tree that would be
+      # pushed is not the one verified above: a `pre-commit` that rewrote and
+      # re-staged a target moved it in between. The tree is therefore compared
+      # against the same certified manifest, and its whole diff against its
+      # parent must lie inside it. What this writes is the commit id it
+      # verified, and the push below names that id rather than `HEAD` — so what
+      # lands is provably the tree that passed.
+      - name: Verify the commit tree against the certified postimages
+        run: |
+          set -euo pipefail
+          python3 .doc-lifecycle/wiring/verify-apply-bytes.py commit \
+            --result "${RUNNER_TEMP}/apply-result.json" --repo . \
+            --out "${RUNNER_TEMP}/verified-commit.txt"
+
+      - name: Push the verified commit
+        run: |
+          set -euo pipefail
+          git push origin "$(cat "${RUNNER_TEMP}/verified-commit.txt"):refs/heads/$(cat "${RUNNER_TEMP}/apply/branch.txt")"
 
       # A real pull request, never a draft: merging it is the change approval that lands the
       # diff, and a draft cannot be merged.

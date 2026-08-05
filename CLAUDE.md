@@ -3,7 +3,7 @@
 This repo is a **Claude Code plugin marketplace**, not an application. It is almost entirely
 Markdown; the executable code published is the engine package
 (`plugins/doc-lifecycle/engine/doclifecycle/`, stdlib-only — the single owner the #57
-re-architecture absorbed the helper scripts into; see its `README.md`) plus eleven skill
+re-architecture absorbed the helper scripts into; see its `README.md`) plus twelve skill
 helper scripts
 (`plugins/doc-lifecycle/skills/detecting-doc-drift/scripts/validate-drift-output.py`,
 `plugins/doc-lifecycle/skills/detecting-doc-bloat/scripts/validate-bloat-output.py` and
@@ -24,7 +24,11 @@ and summary — #72),
 `scripts/probe-evidence-tool.py` (the audit lane's declared-tool probe — it renders
 `drift-audit --evidence-command` from `evidence-tools.json` and runs each declared tool only as
 a `--help`/`--version` read, under the model step's existing `Bash(python3 *)` grant rather than
-a wider one, #118), and
+a wider one, #118),
+`scripts/verify-apply-bytes.py` (both apply lanes' byte verification at the two git boundaries the
+engine cannot see, #191 — it takes the applier's certified postimage manifest and compares the
+staged index and then the commit tree against it, refusing when git holds anything else and
+naming the commit the push carries so the pushed tree is the verified one), and
 `scripts/bloat-cadence.py` (the scheduled bloat lane's trusted prompt renderer and
 schema-bound action-output collector — it validates chunk returns, selects one retry, and runs
 from the release-pinned marketplace rather than being vendored), and
@@ -53,7 +57,8 @@ plugin-regenerated wiring under `wiring/`, machine-written state under `state/`)
 `wiring/upgrade-gate.py`,
 `wiring/stage-upgrade.py`,
 `wiring/render-report.py`, `wiring/render-audit-summary.py`,
-`wiring/render-apply-summary.py`, `wiring/probe-evidence-tool.py` — the chunk planner and the
+`wiring/render-apply-summary.py`, `wiring/probe-evidence-tool.py`,
+`wiring/verify-apply-bytes.py` — the chunk planner and the
 two output validators are NOT vendored here; both detecting skills always dispatch their own
 copy via `${CLAUDE_PLUGIN_ROOT}`, so a copy under `wiring/` would have no reader
 (aj604/toolshed#77 follow-up),
@@ -195,7 +200,14 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   run surface (every refusal, the staged path list, and the rendered PR body, title, and commit
   message), and `apply-workflow_test.py` adds `doc-apply.yml`'s static checks (three-job trust
   split, no dispatch input in any `run:` block, staging confined to the apply result's paths, a
-  real PR rather than a draft). `policy-workflow_test.py` covers the audit-chained policy lane:
+  real PR rather than a draft). `verify-apply-bytes_test.py` covers the byte verification both
+  apply lanes run past that surface, executed against real temporary git repositories (an
+  approved path mutated between the apply and the staging, index normalization by a `clean`
+  filter, a hook rewriting and re-staging after the index was verified, a deletion checked as
+  absence at both boundaries, and a refusal leaving no commit id for the push to name), and
+  `apply-lane-parity_test.py` is what holds selection and trigger to being the only differences
+  between the two lanes — every `run:` block of their credentialed jobs must be byte-identical
+  (#191). `policy-workflow_test.py` covers the audit-chained policy lane:
   completed-run artifact binding, revalidation before `policy-eligibility`/`policy-mint`,
   absent/no-eligible clean stops, the same trust split and staging confinement, real-PR-only
   delivery, dogfood policy configuration, and both user-facing opt-in docs.
