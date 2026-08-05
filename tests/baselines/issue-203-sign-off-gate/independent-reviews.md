@@ -6,9 +6,24 @@ reviewers must not be agents that authored the fixes."*
 
 ## How the reviews were dispatched
 
+**The raw output of all three reviewers is retained verbatim in `reviewer-output-verbatim.md`,
+with their dispatch record. Read it first — this file is disposition, and a disposition table
+written by the party under review is not itself evidence of an independent review.**
+
 Via the `mattpocock-skills:code-review` skill, which is built for exactly this shape: two axes,
 two parallel sub-agents, no aggregation or reranking across axes so neither can mask the other.
-Fixed point `8ded7d7`, diff `git diff 8ded7d7...HEAD` (81 files, +10469/-1471).
+
+Fixed point **`8ded7d7`**, head **`c75fd59`** — the remediation head, before #203's own commits.
+The reviewers' own reports name the diff as `8ded7d7...HEAD`, which is how they were briefed; at
+the time they ran, `HEAD` *was* `c75fd59`, and the stats they quote (81 files, +10469/-1471) are
+`8ded7d7...c75fd59`. The spelling is pinned here because `8ded7d7...HEAD` no longer reproduces
+what was reviewed: at this branch's head it resolves to a larger diff.
+
+**A limit, stated rather than papered over: #203's own commits were reviewed by no independent
+agent.** The three reviews all predate them. Everything #203 changed — the manifest criterion, the
+US28 guard, the race-test byte assertions, the `cache.py` fix, the static policy guard, and these
+records — carries only the #203 pull-request review, which is a separate mechanism from #168's
+User Story 42. This is not fixable by my reviewing my own work, so it is recorded as a gap.
 
 Both reviewers were fresh general-purpose agents that authored none of the ten fixes. Neither was
 given a summary of the remediation written by the ticket's own agent: they were pointed at the
@@ -44,48 +59,70 @@ lineage, nested records, and scope, and that policy provenance reloads the decla
 exact set equality in both directions. Six findings, no scope creep, and nothing contradicting
 #57's distilled decisions.
 
-Neither review found a P1. Both are recorded below by disposition rather than verbatim, because a
-finding's disposition is what a later reader needs.
+Neither of those two reviews found a P1.
+
+**The #203 pull-request review did.** It ran mutation testing across all six P1s and found two
+with real gaps — #185's lane wiring guarded only by static strings that survive `|| true` on the
+gate's own invocation, and a live crash in #187's `cache.get()`. Both are dispositioned below.
+That review is a separate mechanism from #168's User Story 42, and its findings are marked as
+such: attributing them to the three retained reviewers would be false, since none of them
+reported either. The per-P1 picture it established is in `gate-results.md`.
 
 ## Disposition of every finding
 
 Criterion: fixed, or explicitly accepted with rationale, or filed as its own issue. Deferral is a
 decision, not silence.
 
+Source column: **S** = Standards reviewer, **P** = Spec reviewer, **R** = race-test auditor
+(all three verbatim in `reviewer-output-verbatim.md`), **PR** = the #203 pull-request review.
+
 ### Fixed in #203
 
-| Finding | Axis | Disposition |
+| Finding | Source | Disposition |
 |---|---|---|
-| `doc-contract_test.py` is the one new suite CLAUDE.md never documented, while the other four were | Standards | Fixed — documented as the fourth wiring suite, and the "Three suites" count corrected |
-| CLAUDE.md's run-surface renderer list omits `verify-apply-bytes.py`, which writes its own refusals to `$GITHUB_STEP_SUMMARY` | Standards | Fixed — added, with why it states them itself rather than handing back to the summary renderer |
-| `docs/decisions.md` cites `docs/plans/HANDOFF.md` at two places; #200 deleted it | Standards + Spec (US37) | Fixed — both pinned `@ b7efcb5`, matching the `path @ <sha>` convention already used in `design-rationale.md` |
-| `verify-apply-bytes_test.py`, `apply-recovery_test.py`, `apply-lane-parity_test.py`, `doc-contract_test.py` are wired to no gate criterion, so a silent deletion would go unreported | Spec (US40) | Fixed — new `issue #168 sign-off regressions` criterion in `release-manifest.py` |
-| US28's "identity stable across harmless reordering" has no test; #193's ordinals could leak into `finding_digest` with a green gate | Spec (US28, US40) | Fixed — new guard in `tests/engine/finding_test.py`, proven load-bearing |
-| Seven race tests assert transaction state without surviving bytes | Criterion 3 | Fixed — see `race-test-audit.md` |
+| **P1 #187: `cache.get()` crashes on a non-UTF-8 entry.** `UnicodeDecodeError` is a `ValueError`, so it escaped `except OSError` — reachable from `bloat.load_chunk`, contradicting `get()`'s own docstring and #187's acceptance text | PR | **Fixed test-first.** No existing test could reach it (every corrupt-payload test writes *with* `encoding="utf-8"` and fails at the parser). New test writes real non-UTF-8 bytes, verified RED before GREEN. Forces the 0.46.10 bump |
+| **P1 #185: the lane's integrity wiring has no execution-level guard.** Appending `\|\| true` to the gate invocation lets a dirty checkout publish a report, and `audit-workflow_test`, `workflow-permissions_test`, and `check-repo-integrity_test` all stay green | PR | **Fixed.** New execution-based class in `audit-workflow_test.py` runs the step's real `run:` body under `bash -e` against a dirtied repository. Verified by running that exact mutation: two new tests fail, the other two suites stay green as before |
+| `audit-workflow_test.py` carries the only lane-level assertions for #185 but is not in the criterion | PR | Fixed — pinned alongside `check-repo-integrity_test.py`, with why neither alone covers that P1 |
+| `approval_cli_test.py`, `render-apply-summary_test.py`, `render-audit-summary_test.py` are pinned by no criterion, and #203's own rationale covers them | PR | Fixed — pinned; the criterion now names eighteen suites |
+| `policy_test.py` monkeypatches the private `approval._mint_approval_set`, against "engine suites test only the two public seams" | S | **Fixed, having first been wrongly accepted.** The acceptance rationale ("no public seam observes which function was called") was contradicted 46 lines below in the same file, where an equally un-runtime-observable property is proven statically. Replaced with a static AST guard; verified load-bearing by adding a second producer to `policy.py` |
+| `doc-contract_test.py` is the one new suite CLAUDE.md never documented, while the other four were | S | Fixed — documented as the fourth wiring suite, and the "Three suites" count corrected |
+| CLAUDE.md's run-surface renderer list omits `verify-apply-bytes.py`, which writes its own refusals to `$GITHUB_STEP_SUMMARY` | S | Fixed — added, with why it states them itself rather than handing back to the summary renderer |
+| `docs/decisions.md` cites `docs/plans/HANDOFF.md` at two places; #200 deleted it | S + P (US37) | Fixed — both pinned `@ b7efcb5`, matching the `path @ <sha>` convention already used in `design-rationale.md` |
+| `verify-apply-bytes_test.py`, `apply-recovery_test.py`, `apply-lane-parity_test.py`, `doc-contract_test.py` are wired to no gate criterion, so a silent deletion would go unreported | P (US40) | Fixed — new `issue #168 sign-off regressions` criterion in `release-manifest.py` |
+| US28's "identity stable across harmless reordering" has no test; #193's ordinals could leak into `finding_digest` with a green gate | P (US28, US40) | Fixed — new guard in `tests/engine/finding_test.py`, proven load-bearing |
+| Nine race tests assert transaction state without surviving bytes | R | Seven fixed, two accepted — see `race-test-audit.md` |
 
 ### Filed as issues
 
-| Finding | Axis | Issue |
-|---|---|---|
-| Nothing asserts the report's `base_commit` equals the head the integrity gate verified; the binding rests on step ordering alone | Spec (US12) | [#223](https://github.com/aj604/toolshed/issues/223) |
-| Only the refusal half of US26 shipped — no public way to name which occurrence was reviewed, so a legitimately repeated passage has no supported remedy | Spec (US26) | [#224](https://github.com/aj604/toolshed/issues/224) |
-| `--integrity` is passed only under `[ -f … ]`, so a missing verdict artifact renders a summary with no integrity evidence rather than refusing — the one place this rendering defaults open | Spec | [#225](https://github.com/aj604/toolshed/issues/225) |
-| `check-repo-integrity.py` runs git with inherited env and no timeout while its sibling `verify-apply-bytes.py` scrubs `GIT_DIR`/`GIT_WORK_TREE` and bounds every call — the more security-critical script has the weaker invocation | Standards | [#226](https://github.com/aj604/toolshed/issues/226) |
-| Residue an insight walk misses is permanently unreachable by the fix door once an artifact is retired; the only control is a prose gate in `fixing-docs/SKILL.md` | known item, published-plugin gap | [#227](https://github.com/aj604/toolshed/issues/227) |
-| The hardened lanes do not run, and the release tag their tooling fetch names is not cut | known item | [#228](https://github.com/aj604/toolshed/issues/228) |
+All are labelled with this repo's canonical triage labels and listed in a comment on #57, so the
+deferrals are visible in the tracker a human would actually use rather than only in this file.
+
+| Finding | Source | Issue | Triage |
+|---|---|---|---|
+| Nothing asserts the report's `base_commit` equals the head the integrity gate verified; the binding rests on step ordering alone | P (US12) | [#223](https://github.com/aj604/toolshed/issues/223) | `ready-for-agent` |
+| Only the refusal half of US26 shipped — no public way to name which occurrence was reviewed, so a legitimately repeated passage has no supported remedy | P (US26) | [#224](https://github.com/aj604/toolshed/issues/224) | `ready-for-human` |
+| `--integrity` is passed only under `[ -f … ]`, so a missing verdict artifact renders a summary with no integrity evidence rather than refusing — the one place this rendering defaults open | P | [#225](https://github.com/aj604/toolshed/issues/225) | `ready-for-agent` |
+| `check-repo-integrity.py` runs git with inherited env and no timeout while its sibling `verify-apply-bytes.py` scrubs `GIT_DIR`/`GIT_WORK_TREE` and bounds every call — the more security-critical script has the weaker invocation | S | [#226](https://github.com/aj604/toolshed/issues/226) | `ready-for-agent` |
+| Residue an insight walk misses is permanently unreachable by the fix door once an artifact is retired; the only control is a prose gate in `fixing-docs/SKILL.md` | known item, published-plugin gap | [#227](https://github.com/aj604/toolshed/issues/227) | `ready-for-human` |
+| The hardened lanes do not run, and the release tag their tooling fetch names is not cut | known item | [#228](https://github.com/aj604/toolshed/issues/228) | `ready-for-human` |
+| `apply_edit_plan` does not thread `policy_path` into `validate_approval_set`, so a policy approval is revalidated against a different declaration than the one that minted it | PR | [#230](https://github.com/aj604/toolshed/issues/230) | `ready-for-human` |
+| **#185's third acceptance clause is untested**: nothing links evidence-integrity failure to policy eligibility. The similarly-named `test_a_fresh_checkout_cannot_re_derive_the_failure` asserts the converse | PR | [#231](https://github.com/aj604/toolshed/issues/231) | `ready-for-human` |
+
+#228 is a native `blocked_by` edge on #57 — the one deferral that leaves this remediation's
+central claim unproven rather than merely incomplete. It is a visibility mechanism, removable in
+one click, not a veto on a human's decision.
 
 ### Accepted, with rationale
 
-- **`tests/engine/policy_test.py` monkeypatches `approval_mod._mint_approval_set`**, a private
-  cross-module symbol, against CLAUDE.md's "engine suites test only the two public seams".
-  Accepted. The property under test is *"the policy mints through the one minting function"* —
-  that there is not a second producer where reconciliation, path, and preimage refusals could be
-  forgotten. #186 made the shared constructor private deliberately; there is no public seam that
-  observes which function was called, and the sibling test immediately below already proves
-  equivalence of *output* through the public door. Two implementations can agree today and diverge
-  tomorrow, so the call assertion is not redundant with it. Noted honestly: #168's own carve-out
-  for private tests is narrower than this ("canonical hashing or parsing edge cases"), so this is
-  an accepted stretch of it rather than a clean fit.
+> **One acceptance was withdrawn.** An earlier version of this record accepted
+> `policy_test.py`'s private-symbol spy, on the rationale that no public seam observes which
+> function was called. The #203 pull-request review showed that premise is contradicted 46 lines
+> below in the same file, where an equally un-runtime-observable property is proven statically
+> with `inspect`. The spy is now a static AST guard and the finding moved to the fixed table.
+> Recorded here rather than quietly deleted, because an acceptance that did not survive scrutiny
+> is the most useful thing in this file: it is what a rationale looks like when it is doing work
+> for the author rather than for the reader.
+
 - **`_unsafe_path_reason` and `write_surface` are byte-identical between `verify-apply-bytes.py`
   and `render-apply-summary.py`.** Accepted. Both are vendored, standalone, stdlib-only scripts
   that a consumer's install copies and runs independently; a shared module between them would be a

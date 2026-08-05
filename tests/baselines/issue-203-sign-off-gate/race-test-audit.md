@@ -53,8 +53,14 @@ equality alongside `apply-unconfined-change` and the rollback message.
 
 ## Where the rule's letter was not met, and what #203 did
 
-Seven tests asserted the transaction state but not the surviving bytes — a weaker form of the same
-gap the rule exists to close. Six were fixed in #203; one was accepted.
+Nine tests asserted the transaction state but not the surviving bytes — a weaker form of the same
+gap the rule exists to close. **Seven were fixed in #203; two were accepted.**
+
+(The auditor's raw output — retained verbatim in `reviewer-output-verbatim.md` — numbers these
+1–7, but two of its numbered items name two tests each: item 2 covers
+`apply-recovery_test.py:610` and `:621`, and item 7 covers `check-repo-integrity_test.py:87` and
+`:107`. Counting items rather than tests is what produced the "six fixed" figure this record
+carried before; the table below counts tests, and seven is the number the diff shows.)
 
 | Test | Missing | Disposition |
 |---|---|---|

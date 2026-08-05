@@ -212,7 +212,10 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   reaches Tier-2 tool evidence (#118: the model grant unchanged, `--evidence-command` rendered
   by `probe-evidence-tool.py` rather than typed into the YAML) and on the repository-integrity
   gate (#185: it stands between the model and `drift-audit`, exempts exactly `verdicts.json`,
-  and its verdict reaches the run surface);
+  and its verdict reaches the run surface) — plus, since #203, an execution-based class that
+  runs the gate step's own `run:` body under `bash -e` against a real dirtied repository and
+  asserts the step *fails*, because every static check above survives appending `|| true` to the
+  gate's invocation, which is P1 #185 itself;
   `check-repo-integrity_test.py` covers the gate itself against real git repositories — the
   dirtied non-document evidence source both lanes must refuse, every mutation surface named
   exhaustively, the allowlist exempting nothing but its own untracked path, and the
