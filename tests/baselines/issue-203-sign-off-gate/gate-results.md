@@ -25,8 +25,9 @@ half and the component list a later reader can re-execute.
 
 ## The root cause this record kept demonstrating on itself
 
-The same defect recurred in every review round below, and once more after the record had shipped.
-A human caught every instance that was caught before merge; the last one was not:
+The same defect recurred in every review round below, and again after the record had shipped —
+including in the correction that closed it. A human caught every instance; none was caught by the
+gate:
 
 The table below quotes the wrong numbers deliberately — it is the record of what went wrong, so
 every claim in it is false by construction. It is fenced from `sign-off-record_test.py` for that
@@ -42,22 +43,40 @@ reason; see the note under "Two boundaries" about why fencing it is not the same
 | 3 | "1348 engine tests" (inline) | 1349 in the same file's own table | reviewer |
 | 4 | "28/28 suites passed", ×3 | 29/29 once this guard existed | reviewer |
 | 4 | "60 suites wired" | 61 once this guard existed | reviewer |
-| shipped in #229 | "inside the 28" | the script-suite total, one higher | verification agent, after merge |
+| shipped in #229 | "inside the 28" | the script-suite total, one higher | after merge |
+| shipped in #229 | "a release tag matching `.doc-lifecycle/installed-version` (v0.46.9)" | that file reads 0.46.10, bumped by this record's own commit | review of this correction |
+| shipped in #229 | "Seven were wired to no criterion before this" | twelve of the seventeen were | review of this correction |
+| shipped in #229 | "#168 has zero comments" | it has two | review of this correction |
+| shipped in #229 | "Two boundaries that suite deliberately keeps" | three bullets follow it | review of this correction |
+| this correction | "three lines above" the totals round 4 fixed | four lines below them | review of this correction |
 
 <!-- END QUOTED-CLAIMS -->
 
-**The last row is the seventh instance, and the first to ship.** It merged in #229 in this
-record's own gate table, three lines above two counts round 4 had corrected in that same table,
-and `sign-off-record_test.py` — added in round 4 for exactly this class — stayed green on it. Its
-derived checks match the phrasings that had drifted, `N/N suite` and `N suites wired`; the
-parenthetical quoted in that row is a third way of saying the script-suite total and matches
-neither. **The guard derived the instances it had seen, not the class.** It was found by a
-verification agent sweeping past the terms it had been given, and missed by two reviewers whose
-sweeps searched for the phrasings already known to have drifted — the guard's own mistake, made
-by hand. The row is now reworded count-free rather than renumbered, and
-`NoUncheckedGateCountReachesTheProse` inverts the default so that an unknown phrasing fails
-closed: in any paragraph mentioning the suites, a gate-shaped number is a failure unless it is a
-value derived from the tools. Its limits are stated on the class.
+**The install-parity row is the seventh instance, and the first to ship.** It merged in #229 in
+this record's own gate table, four lines below the two totals round 4 had corrected in that same
+table, and `sign-off-record_test.py` — added in round 4 for exactly this class — stayed green on
+it. Its derived checks match the phrasings that had drifted, `N/N suite` and `N suites wired`;
+the parenthetical quoted in that row is a third way of saying the script-suite total and matches
+neither. **The guard derived the instances it had seen, not the class.** No retained artifact
+records how it was found; what the repository shows is that `713de63` carries it and that the
+suite written to catch exactly this passed on it. The row is now reworded count-free rather than
+renumbered, and `NoUncheckedGateCountReachesTheProse` inverts the default so that an unknown
+phrasing fails closed: in any paragraph mentioning the suites or the gate, a gate-shaped number is
+a failure unless it is a value derived from the tools.
+
+**The four rows after it are the more useful finding, and they are worse for this record.** A
+sweep of the correction above, given no list of terms to look for, found four further false claims
+already in this file — a version literal contradicting the lockfile this same ticket bumped, a
+count of previously-unpinned suites, a count of an issue's comments, and a count of the bullets
+under a heading — plus one in the correction itself, the misstated direction now in the last row.
+Every one of them is this defect class, and the new check flags none of them: two are suite counts
+written as words ("Seven were wired…", "Two boundaries…"), which it cannot see by design, and the
+rest count things no tool here enumerates. **The guard is one narrow instrument, not a closing of
+the class.** Its measured reach is on the class rather than here, because the check
+itself forbids this record from stating that reach in digits — a real cost of the design, noted
+rather than worked around. What can be said in prose is the shape: most paragraphs in this record
+are never examined, and every claim in it that is not a suite count is held by nothing but a
+reader.
 
 And in a further instance the drifting claim was not a number but a *provenance*: this record
 asserted that its three reviewers "never reported" two defects, when in fact one reviewer found
@@ -116,7 +135,7 @@ that guards the record. That is not a claim about unpinned suites generally: rou
 this tree's suites are pinned to no criterion and are fine that way. This one is named because
 deleting it would restore exactly the blind spot it exists to close.
 
-Two boundaries that suite deliberately keeps:
+Boundaries that suite deliberately keeps:
 
 - **It exempts the quoted blocks, not the files holding them.** The reviewers ran before #203
   changed anything, so their reports state the gate totals of that moment — correctly, and
@@ -144,24 +163,28 @@ Two boundaries that suite deliberately keeps:
   Found the hard way: the guard flagged the drift-history table minutes after it was written, on
   the same run that confirmed round 4's fixes. That is the guard working — it does not know which
   false numbers are deliberate — but it is also the boundary the first design lacked.
-- **It inherits `doc-contract_test.py`'s ceiling**: it holds the claims it names, not new false
-  claims appearing. It could not have caught the provenance error above, and nothing mechanical
-  would have — that needed someone to ask whether the retained set was the whole set.
+- **Its derived checks inherit `doc-contract_test.py`'s ceiling**: they hold the claims they name,
+  not new false claims appearing. `NoUncheckedGateCountReachesTheProse` is the one exception, and
+  only for gate counts in paragraphs it reaches. Neither could have caught the provenance error
+  above, and nothing mechanical would have — that needed someone to ask whether the retained set
+  was the whole set.
 
 ## Read this first: two of criterion 1's own subjects are not stated anywhere
 
 Criterion 1 requires "regression tests present for each of the six P1 findings and each P2
-finding's fix". **Neither set is enumerated in any authoritative record.** This is a defect in the
+finding's fix". **Neither set is enumerated in full anywhere.** This is a defect in the
 record, not in the remediation — but it means the criterion cannot be discharged by evidence
 alone, only by inference, and a human weighing #57 should know which parts of the claim below
 rest on inference.
 
-- **The six P1s.** #168's Further Notes give a count and a commit range, never a list. #57's only
-  substantive comment *does* enumerate P1s — **seven of them, from an earlier review of a
-  different range** (`8136061...origin/main` at `4bfbdef`). Those seven are not these six. The
+- **The six P1s.** #168's Further Notes give a count and a commit range, never a list. #57's
+  distilled-decisions comment *does* enumerate P1s — **seven of them, from an earlier review of a
+  different range** (`8136061...origin/main` at `4bfbdef`). Those seven are not these six. A later
+  comment on #57 names one member of this set (#185) without listing the rest. The
   table below infers the six from the child issues #168 opened.
 - **The six P2s.** Worse: #168 states "three Standards P2 findings and three Spec P2 findings"
-  and decomposes neither half anywhere. #168 has zero comments. The four P2-carrying child issues
+  and neither its body nor either of its comments decomposes either half. The four P2-carrying
+  child issues
   (#198, #189, #194, #200) and their PRs never use the words "P2", "Standards", or "Spec" at all.
   So there are **four child issues for six stated findings, with no mapping between them.** Any
   reading — #194 absorbing three documentation contracts, #189 as Standards-shaped, #198 and #200
@@ -174,8 +197,8 @@ Everything below is the most defensible reading available. It is not a quotation
 Criterion 1 requires "regression tests present for each of the six P1 findings". **No document
 lists those six.** #168's Further Notes give only a count ("six P1 correctness/authority
 findings, three Standards P2 findings, and three Spec P2 findings") and a commit range, and it
-never decomposes the P2 halves anywhere. #57's substantive comment *does* enumerate P1s — but
-**seven of them, from an earlier review of a different range** (`8136061...origin/main` at
+never decomposes the P2 halves anywhere. #57's distilled-decisions comment *does* enumerate P1s —
+but **seven of them, from an earlier review of a different range** (`8136061...origin/main` at
 `4bfbdef`). Those seven are not these six. A reader who takes #57's list as this remediation's
 list will be reading the wrong findings.
 
@@ -300,11 +323,16 @@ when plugin content changes" step diffs `-- plugins/doc-lifecycle/` only. `.doc-
   #168 User Story 40 asks for "regression tests for every reproduced sign-off failure, so that a
   green gate proves the properties the final review found missing". Discovery ran those suites
   already; naming them is what makes deleting one a reported failure rather than a quietly smaller
-  gate. Seven were wired to no criterion before this: `verify-apply-bytes_test.py`,
+  gate. Comparing `GATE_MANIFEST` at `c75fd59` against this one, twelve of the seventeen were
+  wired to no criterion before this — `tests/scripts/verify-apply-bytes_test.py`,
   `apply-recovery_test.py`, `apply-lane-parity_test.py`, `doc-contract_test.py`,
-  `approval_cli_test.py` (#186's CLI-route refusals), `render-apply-summary_test.py` (#198's
-  recovery-state strings — a recovery that runs correctly and reports the wrong state is the same
-  operator-facing failure), and `render-audit-summary_test.py` (#185's integrity-refused surface).
+  `render-apply-summary_test.py` (#198's recovery-state strings — a recovery that runs correctly
+  and reports the wrong state is the same operator-facing failure),
+  `render-audit-summary_test.py` (#185's integrity-refused surface), `render-report_test.py` and
+  `upgrade-workflow_test.py`, plus four under `tests/engine/`:
+  `approval_cli_test.py` (#186's CLI-route refusals), `cache_test.py`, `finding_test.py` and
+  `policy_cli_test.py`. An earlier version of this passage said seven and listed
+  `approval_cli_test.py` among the script suites; both were wrong.
   `audit-workflow_test.py` is pinned alongside `check-repo-integrity_test.py` for #185, because
   the two fail to different mutations and neither alone covers that P1.
 - `tests/engine/finding_test.py` — the US28 guard. The property ("finding identity remains stable
@@ -348,10 +376,15 @@ checkout where the `__pycache__` caveat does not arise.
 
 ## The limit of this evidence
 
+**What the correction to this record re-executed, and what it did not.** The gate components in
+the table above were re-run in full and their results are this file's; the per-P1 mutation
+verdicts and the two un-run mutations noted in this file were not re-executed and stand on #203's
+own run as recorded here, not on any later observation.
+
 Every property above is proven by tests, including execution-based ones that run the lanes' own
 `run:` blocks under `bash -e` against real git remotes. **None of the gates this remediation added
 has fired in a real lane.** `doc-apply` has never executed, `doc-policy-apply` has failed both its
 runs, `doc-bloat-audit` has failed all fourteen, and `doc-audit` is disabled. The audit lane also
-fetches its tooling from a release tag matching `.doc-lifecycle/installed-version` (v0.46.9), and
-that tag is not cut. Tracked in #228; recorded here so a reader of the green gate does not
+fetches its tooling from a release tag matching `.doc-lifecycle/installed-version` (0.46.10, this
+ticket's own bump), and that tag is not cut — the newest tag in the repository is `v0.45.0`. Tracked in #228; recorded here so a reader of the green gate does not
 mistake it for production evidence.

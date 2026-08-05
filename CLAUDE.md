@@ -208,9 +208,12 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   `GATE_MANIFEST`, holds every engine-test count in `tests/baselines/issue-203-sign-off-gate/`'s
   authored prose to agreeing with every other, and holds the race audit's totals to its own
   table. Each of those pins a phrasing, so it also carries a phrasing-independent check,
-  `NoUncheckedGateCountReachesTheProse`: in any paragraph of that record mentioning the suites, a
-  two- or three-digit number fails unless it equals a total derived from the tools — added after
-  a third phrasing of the script-suite total shipped in #229 past both derived checks. The
+  `NoUncheckedGateCountReachesTheProse`: in any paragraph of that record mentioning the suites or
+  the gate, a two- or three-digit number fails unless it equals a total derived from the tools,
+  carries its own unit with the suites not renamed just after it, is a reference rather than a
+  tally, or is one of a capped list of per-suite tallies nothing there can derive — added after a
+  third phrasing of the script-suite total shipped in #229 past both derived checks. Its measured
+  reach and every exit are on the class docstring. The
   exemption is per fenced block, not per file: `<!-- BEGIN VERBATIM -->` marks frozen reviewer
   quotations, `<!-- BEGIN QUOTED-CLAIMS -->` the record's quotations of its own wrong numbers, and
   editing either to satisfy a consistency check would be falsifying evidence).

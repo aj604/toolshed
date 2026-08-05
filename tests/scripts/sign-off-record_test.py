@@ -25,7 +25,7 @@ that cannot be. Specifically:
 5. **No gate-shaped number reaches the record's prose except a derived one.**
    Checks 1-4 each pin a *phrasing*, and a phrasing they do not know is a
    phrasing they do not check: a seventh instance of this record's own defect
-   class shipped in #229 as "(inside the 28)", three lines above two counts
+   class shipped in #229 as "(inside the 28)", four lines below two counts
    round 4 had corrected, because that is a third way of saying the
    script-suite total and neither pattern matches it. Check 5 inverts the
    default — in any paragraph that mentions the suites, a number is a failure
@@ -352,7 +352,7 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
     """Every gate-shaped number in suite prose is a derived one — or a failure.
 
     The seventh instance of this record's defect class, and the first to ship:
-    #229 merged `(inside the 28)` in the gate-results table three lines above
+    #229 merged `(inside the 28)` in the gate-results table four lines below
     two totals round 4 had just corrected. Every check above stayed green,
     because each of them matches a phrasing — `N/N suite`,
     `N suites wired`, `pinning the <word> suites` — and "inside the 28" is a
@@ -377,11 +377,39 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
       `applier_test.py:1089`).
     * a literal in `UNCHECKED_TALLIES` — the closed, capped list below.
 
-    Its limits, stated rather than implied:
+    Its limits, stated rather than implied — starting with its reach, because
+    that is the number a reader would otherwise have to assume:
 
+    * **Measured reach: 14 numbers examined in 41 of 182 paragraphs.** That
+      is the whole of what this check has looked at, and stating it is the
+      point — "no unchecked gate count" is a claim about a small minority of
+      this record. The figure is held to the code by
+      `test_the_stated_reach_is_the_measured_reach` rather than typed here and
+      trusted, because a hand-typed coverage number in a docstring is this
+      record's own defect class one level out. A human sweep run against this
+      record *after* this check was written found five further false claims it
+      does not flag — every one of them this same defect class, two of them
+      suite counts written as words. They are in `gate-results.md`'s drift
+      history for that reason.
     * **Digits only.** A spelled-out total ("twenty-nine script suites")
       escapes; `ThePinnedSuiteCountIsDerived` covers the one spelled phrasing
-      the record actually uses, and nothing covers a new one.
+      the record actually uses, and nothing covers a new one. A live instance
+      exists: "Two boundaries that suite deliberately keeps" has three bullets
+      under it, and no check here can see that.
+    * **A unit word still exempts when the suites are not renamed after it.**
+      `28 tests worth`, `28 tests, of which this is one` and `28 lines in the
+      runner's glob` escape. The exemption is narrower than it was, not gone.
+    * **The `#`, `:` and `-` exclusions in `NUMBER` are exits too.**
+      `suite #28`, `suites:28`, and the range `suites 1-28` all escape;
+      they are the price of not reading `#168`, `14:38:35` and `2026-08-05`
+      as tallies. `NAMES_A_THING` is the same kind of exit: prefix a total
+      with "user stories" and it reads as a reference.
+    * **`test_the_stated_reach_is_the_measured_reach` is not a second
+      detector.** It goes red whenever the record gains or loses a number in
+      an anchored paragraph, which incidentally means an added count cannot
+      land silently — but it says nothing about whether that count is true,
+      and a replant battery run against the whole suite will mistake it for
+      this check catching something. Run this check by name when measuring.
     * **One-digit and four-digit runs are out of range** — a plausible
       gate-suite total in this tree is two or three digits, and the bound is
       what keeps "Round 4" and `1349` from being read as suite counts. The
@@ -394,17 +422,30 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
       is added, so the record states its own history count-free instead. That
       is a real cost, and the trade it buys is that no stale count survives by
       being phrased in a way nobody anticipated.
+    * **A decimal escapes** — `28.0` reads as a version, not a tally.
     * **The record only.** `docs/decisions.md` quotes this history too, with
       no fence mechanism to mark quotation from assertion, so it is out of
       scope here and stays covered only by the phrasing checks above.
     * It says nothing about non-numeric drift. The provenance error this
-      record also carries would still pass.
+      record also carries would still pass, and so would a count of something
+      no tool here enumerates — the record's per-mutation tallies, for
+      instance, which stand on #203's run and were not re-executed.
     """
 
     # A paragraph mentioning any of these is talking about the suites, so a
     # number in it is presumed to be a count of them. Deliberately broad: the
-    # defect row named no count word at all, only the suite file it describes.
-    ANCHOR = re.compile(r"suites?\b|tests/scripts|run-script-suites", re.I)
+    # defect row named no count word at all, only the suite file it describes,
+    # and `gate` is included because a paragraph can state the gate's size
+    # without ever using the word "suite". Measured reach is on the class
+    # docstring — the anchor is what bounds it, so it is the first thing to
+    # widen when a number escapes.
+    ANCHOR = re.compile(
+        r"suites?\b|tests/scripts|run-script-suites|\bgate\b", re.I)
+
+    # A markdown link destination is not prose: `[#223](…/issues/223)` states
+    # no count. Masked rather than excluded in `NUMBER`, because a bare `/`
+    # exclusion there would also swallow the second half of `28/28`.
+    LINK_TARGET = re.compile(r"\]\([^)]*\)")
 
     # Two to three digits, not glued to an identifier, `#`, `.`, `:` or `-` on
     # the left, and not continued by more digits or by a `.`/`:` group on the
@@ -415,10 +456,29 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
     # straight through, which is the same fail-open shape as the defect.
     NUMBER = re.compile(r"(?<![\w.#:-])(\d{2,3})(?!\d)(?![.:]\d)")
 
+    # Digits glued to letters are one token, not a tally: `713de63` is a
+    # commit. Ordinal suffixes are the exception, because `the 28th suite` is
+    # a count — found by the check flagging a SHA in this record's own prose.
+    ORDINAL = re.compile(r"\A(st|nd|rd|th)\b", re.I)
+    IDENTIFIER_TAIL = re.compile(r"\A[A-Za-z]")
+
     # A number carrying its own unit is a count of that unit, not of suites.
     # Only the units the record actually uses — every entry is a hole, so an
     # unused one is a hole for nothing.
-    OWN_UNIT = re.compile(r"\A\s*(tests?|lines?)\b", re.I)
+    #
+    # This exit shipped with a hole of its own, and it was the widest one in
+    # the check: reading an *adjective* as the noun being counted. `28 test
+    # suites` — the ordinary English phrasing of the very total that drifted —
+    # passed, as did `28 test files`, `28 tests in tests/scripts`, and
+    # `28 lines of suites`. So the unit must be plural and unhyphenated, and
+    # `_carries_its_own_unit` refuses the exemption outright when the suites
+    # are named again just after the unit word.
+    OWN_UNIT = re.compile(r"\A\s*(tests|lines)\b(?![-/])", re.I)
+
+    # How far past the unit word to look for the suites being named again.
+    # Wide enough for `tests in tests/scripts`, narrow enough that the next
+    # table row is not read as context for this one.
+    UNIT_WINDOW = 24
 
     # ...and a number that names something is a reference, like `#168`.
     NAMES_A_THING = re.compile(r"user stor(y|ies)\s+\Z", re.I)
@@ -451,10 +511,24 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
             if block.strip():
                 yield block
 
+    def _carries_its_own_unit(self, after):
+        """True if `after` starts with a unit this number is plainly counting.
+
+        Refused when the suites are named again inside the unit's window:
+        `28 tests in tests/scripts` counts suites and says "tests", which is
+        the shape that let the first draft of this exit exempt a statement of
+        the drifted total.
+        """
+        unit = self.OWN_UNIT.match(after)
+        if not unit:
+            return False
+        return not self.ANCHOR.search(after[unit.end():unit.end()
+                                             + self.UNIT_WINDOW])
+
     def _mask_registered(self, block):
         for tally in self.UNCHECKED_TALLIES:
             block = block.replace(tally, " " * len(tally))
-        return block
+        return self.LINK_TARGET.sub(lambda m: " " * len(m.group(0)), block)
 
     def test_every_gate_shaped_number_in_suite_prose_is_derived(self):
         allowed = set(self.derived.values())
@@ -466,10 +540,12 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
                 for match in self.NUMBER.finditer(scanned):
                     if int(match.group(1)) in allowed:
                         continue
-                    after = scanned[match.end():match.end() + 20]
+                    after = scanned[match.end():match.end() + 48]
                     before = scanned[max(0, match.start() - 20):match.start()]
-                    if (self.OWN_UNIT.match(after)
-                            or self.NAMES_A_THING.search(before)):
+                    if (self._carries_its_own_unit(after)
+                            or self.NAMES_A_THING.search(before)
+                            or (self.IDENTIFIER_TAIL.match(after)
+                                and not self.ORDINAL.match(after))):
                         continue
                     line = block.splitlines()[
                         scanned[:match.start()].count("\n")]
@@ -484,6 +560,33 @@ class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
                         f"or not be a count at all. Renumbering it recurs on "
                         f"the next suite added — reword the claim count-free, "
                         f"the way the record does elsewhere.")
+
+    def _reach(self):
+        """(numbers examined, paragraphs anchored, paragraphs) over the record."""
+        paragraphs = anchored = examined = 0
+        for path in record_files():
+            for block in self._paragraphs(authored(read(path))):
+                paragraphs += 1
+                if not self.ANCHOR.search(block):
+                    continue
+                anchored += 1
+                examined += len(
+                    self.NUMBER.findall(self._mask_registered(block)))
+        return examined, anchored, paragraphs
+
+    def test_the_stated_reach_is_the_measured_reach(self):
+        # The docstring states how little this check covers. That figure is a
+        # number in prose about an artifact, which is the defect this whole
+        # suite exists for — so it is derived, not trusted.
+        stated = re.search(
+            r"(\d+) numbers examined in (\d+) of (\d+) paragraphs",
+            self.__class__.__doc__)
+        self.assertIsNotNone(
+            stated, "the class must state its measured reach")
+        self.assertEqual(
+            tuple(int(g) for g in stated.groups()), self._reach(),
+            "the stated reach is not the measured reach; measured now: "
+            "%d numbers examined in %d of %d paragraphs" % self._reach())
 
     def test_the_unchecked_tally_registry_has_no_stale_entries(self):
         # A registered literal that no longer appears would be an exemption

@@ -8,7 +8,7 @@
 - Context: the entry below closed a defect class — prose numbers drifting from the artifacts they
   describe — with `tests/scripts/sign-off-record_test.py`. A further instance shipped in #229
   anyway, in the gate table the guard exists to hold: install parity was described as being
-  "inside the 28" three lines above two totals the same review round had corrected. The guard
+  "inside the 28" four lines below two totals the same review round had corrected. The guard
   stayed green because each of its derived checks matches a *phrasing* — `N/N suite`,
   `N suites wired` — and that was a third way of stating the same total. Two reviewers missed it
   the same way, by sweeping for the phrasings already known to have drifted.
@@ -66,7 +66,10 @@
   it was briefly silently deletable. Roughly a third of this tree's suites are pinned to no
   criterion and are fine that way; this one is named because deleting it restores the blind spot
   it exists to close. It inherits `doc-contract_test.py`'s ceiling and could not have caught the
-  provenance error; nothing mechanical would have.
+  provenance error; nothing mechanical would have. *Superseded in part by the entry above: the
+  ceiling still describes the suite's derived checks, but not
+  `NoUncheckedGateCountReachesTheProse`, which is written against the class within its measured
+  reach.*
 - Standing: **the review apparatus lost a finding, and that is why two defects reached the
   pull-request review instead of this record.** Each axis fanned out internally — Spec into five
   leaf reviewers, Standards into two — and the Spec aggregate returned at 14:38:35.302Z, 45
