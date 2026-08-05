@@ -22,11 +22,22 @@ that cannot be. Specifically:
    it is an internal-consistency check, which is precisely the failure that
    occurred: `gate-results.md` disagreed with itself.
 4. The race-test audit's prose totals match the rows of its own table.
+5. **No gate-shaped number reaches the record's prose except a derived one.**
+   Checks 1-4 each pin a *phrasing*, and a phrasing they do not know is a
+   phrasing they do not check: a seventh instance of this record's own defect
+   class shipped in #229 as "(inside the 28)", three lines above two counts
+   round 4 had corrected, because that is a third way of saying the
+   script-suite total and neither pattern matches it. Check 5 inverts the
+   default — in any paragraph that mentions the suites, a number is a failure
+   *unless* it is a value derived here or one of a short list of documented
+   non-counts. An unknown phrasing now fails closed instead of passing
+   silently.
 
-A wiring suite in the manner of `doc-contract_test.py`, and it inherits that
-suite's documented ceiling: it catches *the claims it names* drifting, not new
-false claims appearing. That ceiling is stated in `gate-results.md` rather than
-pretended away.
+A wiring suite in the manner of `doc-contract_test.py`. Checks 1-4 inherit that
+suite's documented ceiling: they catch *the claims they name* drifting, not new
+false claims appearing. Check 5 is the deliberate exception — it is written
+against the class rather than the instances — and its own limits are stated on
+`NoUncheckedGateCountReachesTheProse` rather than pretended away.
 
 Run: python3 tests/scripts/sign-off-record_test.py
 """
@@ -130,11 +141,28 @@ def record_files():
                   if name.endswith(".md"))
 
 
-def gate_manifest():
-    spec = importlib.util.spec_from_file_location("release_manifest", MANIFEST)
+def _load(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.GATE_MANIFEST
+    return module
+
+
+def gate_manifest():
+    return _load(MANIFEST, "release_manifest").GATE_MANIFEST
+
+
+def script_suites():
+    """Every suite `run-script-suites.py` runs, from its own glob."""
+    runner = _load(
+        os.path.join(ROOT, ".github", "scripts", "run-script-suites.py"),
+        "run_script_suites")
+    return runner.discover(os.path.join(ROOT, "tests", "scripts"))
+
+
+def wired_suites():
+    """Every suite `release-manifest.py` accounts for, from its own audit."""
+    return _load(MANIFEST, "release_manifest").audit(ROOT).gate
 
 
 QUOTE_BEARING = ("reviewer-output-verbatim.md",
@@ -285,23 +313,8 @@ class TheGateSizeCountsAreDerived(unittest.TestCase):
     """
 
     def setUp(self):
-        self.scripts = self._script_suites()
-        self.wired = self._wired_suites()
-
-    def _script_suites(self):
-        spec = importlib.util.spec_from_file_location(
-            "run_script_suites",
-            os.path.join(ROOT, ".github", "scripts", "run-script-suites.py"))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module.discover(os.path.join(ROOT, "tests", "scripts"))
-
-    def _wired_suites(self):
-        spec = importlib.util.spec_from_file_location(
-            "release_manifest", MANIFEST)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module.audit(ROOT).gate
+        self.scripts = script_suites()
+        self.wired = wired_suites()
 
     def test_every_stated_script_suite_total_matches_the_glob(self):
         # `28/28`, `29/29` — the runner reports passed/total, so a correct
@@ -333,6 +346,161 @@ class TheGateSizeCountsAreDerived(unittest.TestCase):
         # record honest is exactly the one whose removal must be reported.
         pinned = {path for paths in gate_manifest().values() for path in paths}
         self.assertIn("tests/scripts/sign-off-record_test.py", pinned)
+
+
+class NoUncheckedGateCountReachesTheProse(unittest.TestCase):
+    """Every gate-shaped number in suite prose is a derived one — or a failure.
+
+    The seventh instance of this record's defect class, and the first to ship:
+    #229 merged `(inside the 28)` in the gate-results table three lines above
+    two totals round 4 had just corrected. Every check above stayed green,
+    because each of them matches a phrasing — `N/N suite`,
+    `N suites wired`, `pinning the <word> suites` — and "inside the 28" is a
+    third way of saying the script-suite total that matches none of them. The
+    guard derived the instances it had seen, not the class, so a fourth
+    phrasing would have been the eighth instance. Two reviewers swept for the
+    phrasings already known to have drifted and missed it for the same reason.
+
+    Adding "the 28" to a pattern list would repeat that error one step out. So
+    this check inverts the default instead. In any paragraph that mentions the
+    suites at all, a gate-shaped number is a *failure* unless it is one of:
+
+    * a value derived here — the script-suite total, the wired-suite total, or
+      the pinned-suite count. This is the property that makes renumbering
+      pointless: correcting `28` to `29` does not satisfy this check, deriving
+      it does, and the next suite added invalidates a stale `29` in any
+      phrasing at all, including one nobody has written yet.
+    * a shape that cannot be a suite count: a number followed by its own unit
+      (`43 tests`, `66 lines`), a reference rather than a tally
+      (`User Story 40`), or a run that is part of an identifier, issue number,
+      version, date, or line reference (`#168`, `0.46.10`, `python3`,
+      `applier_test.py:1089`).
+    * a literal in `UNCHECKED_TALLIES` — the closed, capped list below.
+
+    Its limits, stated rather than implied:
+
+    * **Digits only.** A spelled-out total ("twenty-nine script suites")
+      escapes; `ThePinnedSuiteCountIsDerived` covers the one spelled phrasing
+      the record actually uses, and nothing covers a new one.
+    * **One-digit and four-digit runs are out of range** — a plausible
+      gate-suite total in this tree is two or three digits, and the bound is
+      what keeps "Round 4" and `1349` from being read as suite counts. The
+      engine counts have their own check; a one-digit count of anything has
+      none.
+    * **A wrong number that happens to equal another derived total passes.**
+      Writing `61` where `29` was meant is not caught.
+    * **It cannot tell a live count from a historical one.** "made it the 29th
+      script suite" stays true forever and still fails here the moment a suite
+      is added, so the record states its own history count-free instead. That
+      is a real cost, and the trade it buys is that no stale count survives by
+      being phrased in a way nobody anticipated.
+    * **The record only.** `docs/decisions.md` quotes this history too, with
+      no fence mechanism to mark quotation from assertion, so it is out of
+      scope here and stays covered only by the phrasing checks above.
+    * It says nothing about non-numeric drift. The provenance error this
+      record also carries would still pass.
+    """
+
+    # A paragraph mentioning any of these is talking about the suites, so a
+    # number in it is presumed to be a count of them. Deliberately broad: the
+    # defect row named no count word at all, only the suite file it describes.
+    ANCHOR = re.compile(r"suites?\b|tests/scripts|run-script-suites", re.I)
+
+    # Two to three digits, not glued to an identifier, `#`, `.`, `:` or `-` on
+    # the left, and not continued by more digits or by a `.`/`:` group on the
+    # right — so `#168`, `0.46.10`, `2026-08-05`, `python3`, `US40`,
+    # `14:38:35` and `applier_test.py:1089` are references, not tallies. The
+    # right-hand test is deliberately narrow: an earlier draft rejected any
+    # trailing `.` and so let a sentence-final count ("there are 28.") walk
+    # straight through, which is the same fail-open shape as the defect.
+    NUMBER = re.compile(r"(?<![\w.#:-])(\d{2,3})(?!\d)(?![.:]\d)")
+
+    # A number carrying its own unit is a count of that unit, not of suites.
+    # Only the units the record actually uses — every entry is a hole, so an
+    # unused one is a hole for nothing.
+    OWN_UNIT = re.compile(r"\A\s*(tests?|lines?)\b", re.I)
+
+    # ...and a number that names something is a reference, like `#168`.
+    NAMES_A_THING = re.compile(r"user stor(y|ies)\s+\Z", re.I)
+
+    # The closed list of gate-shaped numbers this suite cannot derive. Each is
+    # a per-suite test tally, not a gate total, and each is therefore an
+    # unchecked claim — the same kind this record exists to be honest about.
+    # It is capped for the same reason the quoted-claim fences are: a list that
+    # grew freely would be a way around the check rather than a stated limit.
+    UNCHECKED_TALLIES = (
+        "`apply-recovery_test.py` 14/14",
+        "`verify-apply-bytes_test.py` 31/31",
+    )
+
+    def setUp(self):
+        self.derived = {
+            "script suites in tests/scripts": len(script_suites()),
+            "suites wired in release-manifest.py": len(wired_suites()),
+            f"suites pinned to {CRITERION}": len(gate_manifest()[CRITERION]),
+        }
+
+    @staticmethod
+    def _paragraphs(text):
+        """Blank-line-separated blocks, so a wrapped sentence stays whole.
+
+        Anchoring per line would miss a count whose subject sits on the line
+        above it, which is one edit away in prose this heavily wrapped.
+        """
+        for block in re.split(r"\n\s*\n", text):
+            if block.strip():
+                yield block
+
+    def _mask_registered(self, block):
+        for tally in self.UNCHECKED_TALLIES:
+            block = block.replace(tally, " " * len(tally))
+        return block
+
+    def test_every_gate_shaped_number_in_suite_prose_is_derived(self):
+        allowed = set(self.derived.values())
+        for path in record_files():
+            for block in self._paragraphs(authored(read(path))):
+                if not self.ANCHOR.search(block):
+                    continue
+                scanned = self._mask_registered(block)
+                for match in self.NUMBER.finditer(scanned):
+                    if int(match.group(1)) in allowed:
+                        continue
+                    after = scanned[match.end():match.end() + 20]
+                    before = scanned[max(0, match.start() - 20):match.start()]
+                    if (self.OWN_UNIT.match(after)
+                            or self.NAMES_A_THING.search(before)):
+                        continue
+                    line = block.splitlines()[
+                        scanned[:match.start()].count("\n")]
+                    self.fail(
+                        f"{os.path.relpath(path, ROOT)} states '"
+                        f"{match.group(1)}' in prose about the suites:\n"
+                        f"    {line.strip()}\n"
+                        f"Derived totals are "
+                        + ", ".join(f"{v} {k}" for k, v in
+                                    sorted(self.derived.items()))
+                        + ".\nA count here must either match a derived total "
+                        f"or not be a count at all. Renumbering it recurs on "
+                        f"the next suite added — reword the claim count-free, "
+                        f"the way the record does elsewhere.")
+
+    def test_the_unchecked_tally_registry_has_no_stale_entries(self):
+        # A registered literal that no longer appears would be an exemption
+        # nothing needs, quietly widening what the check skips.
+        prose = "\n".join(authored(read(path)) for path in record_files())
+        for tally in self.UNCHECKED_TALLIES:
+            self.assertEqual(
+                prose.count(tally), 1,
+                f"UNCHECKED_TALLIES registers {tally!r}, which appears "
+                f"{prose.count(tally)} times in the record — an entry is "
+                f"stale, or a number is being exempted more than once")
+
+    def test_the_unchecked_tally_registry_stays_small(self):
+        self.assertLessEqual(
+            len(self.UNCHECKED_TALLIES), 3,
+            "the registry is a list of numbers nothing checks; growing it is "
+            "how this check would stop being one")
 
 
 class TheEngineTestCountIsInternallyConsistent(unittest.TestCase):

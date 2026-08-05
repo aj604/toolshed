@@ -4,6 +4,29 @@
 > standing and is marked superseded by the entry that replaced it, so an old entry is a record of
 > what was true then, not a claim about now.
 
+## 2026-08-05 — an anti-drift guard must be written against the class, not the instances (#229)
+- Context: the entry below closed a defect class — prose numbers drifting from the artifacts they
+  describe — with `tests/scripts/sign-off-record_test.py`. A further instance shipped in #229
+  anyway, in the gate table the guard exists to hold: install parity was described as being
+  "inside the 28" three lines above two totals the same review round had corrected. The guard
+  stayed green because each of its derived checks matches a *phrasing* — `N/N suite`,
+  `N suites wired` — and that was a third way of stating the same total. Two reviewers missed it
+  the same way, by sweeping for the phrasings already known to have drifted.
+- Decided: **a guard against a drift class fails closed on phrasings it does not know.**
+  `NoUncheckedGateCountReachesTheProse` inverts the default for the sign-off record: in any
+  paragraph of authored prose that mentions the suites, a gate-shaped number is a failure unless
+  it equals a total derived from the tools, carries its own unit, or is one of a short capped list
+  of tallies nothing here can derive. Adding the missed phrasing to a pattern list was rejected —
+  that is the same error one step out, and the eighth instance would have been the fourth
+  phrasing.
+- Decided: **the drifting line is reworded count-free, not renumbered.** Renumbering recurs on the
+  next suite added, which is what the entry below already found; the record now states its own
+  history without stating a total, the way its HANDOFF sentence was reworded in the same round.
+- Standing limits, stated rather than implied: the check is digits-only (a spelled-out total
+  escapes), reads one- and four-digit runs as out of range, cannot distinguish a historically true
+  count from a live one, and covers the record only — `docs/decisions.md` quotes the same wrong
+  numbers with no fence mechanism to separate quotation from assertion.
+
 ## 2026-08-05 — the #168 sign-off gate is evidence in the repository, not a claim in a PR (#203)
 - Decided: the sign-off gate's output is five retained records under
   `tests/baselines/issue-203-sign-off-gate/` — `reviewer-output-verbatim.md` (the three dispatched

@@ -207,8 +207,13 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   it derives the `issue #168 sign-off regressions` suite count from `release-manifest.py`'s own
   `GATE_MANIFEST`, holds every engine-test count in `tests/baselines/issue-203-sign-off-gate/`'s
   authored prose to agreeing with every other, and holds the race audit's totals to its own
-  table. It exempts the two `*-verbatim.md` files, which are frozen quotations — editing one to
-  satisfy a consistency check would be falsifying evidence).
+  table. Each of those pins a phrasing, so it also carries a phrasing-independent check,
+  `NoUncheckedGateCountReachesTheProse`: in any paragraph of that record mentioning the suites, a
+  two- or three-digit number fails unless it equals a total derived from the tools — added after
+  a third phrasing of the script-suite total shipped in #229 past both derived checks. The
+  exemption is per fenced block, not per file: `<!-- BEGIN VERBATIM -->` marks frozen reviewer
+  quotations, `<!-- BEGIN QUOTED-CLAIMS -->` the record's quotations of its own wrong numbers, and
+  editing either to satisfy a consistency check would be falsifying evidence).
   `render-audit-summary_test.py` covers the
   audit lane's run-surface rendering (every report result state, plus the
   report-never-produced case, the integrity-refused case — which outranks any report on

@@ -25,7 +25,8 @@ half and the component list a later reader can re-execute.
 
 ## The root cause this record kept demonstrating on itself
 
-Across four review rounds, the same defect recurred six times, and a human caught it every time:
+The same defect recurred in every review round below, and once more after the record had shipped.
+A human caught every instance that was caught before merge; the last one was not:
 
 The table below quotes the wrong numbers deliberately — it is the record of what went wrong, so
 every claim in it is false by construction. It is fenced from `sign-off-record_test.py` for that
@@ -41,17 +42,31 @@ reason; see the note under "Two boundaries" about why fencing it is not the same
 | 3 | "1348 engine tests" (inline) | 1349 in the same file's own table | reviewer |
 | 4 | "28/28 suites passed", ×3 | 29/29 once this guard existed | reviewer |
 | 4 | "60 suites wired" | 61 once this guard existed | reviewer |
+| shipped in #229 | "inside the 28" | the script-suite total, one higher | verification agent, after merge |
 
 <!-- END QUOTED-CLAIMS -->
+
+**The last row is the seventh instance, and the first to ship.** It merged in #229 in this
+record's own gate table, three lines above two counts round 4 had corrected in that same table,
+and `sign-off-record_test.py` — added in round 4 for exactly this class — stayed green on it. Its
+derived checks match the phrasings that had drifted, `N/N suite` and `N suites wired`; the
+parenthetical quoted in that row is a third way of saying the script-suite total and matches
+neither. **The guard derived the instances it had seen, not the class.** It was found by a
+verification agent sweeping past the terms it had been given, and missed by two reviewers whose
+sweeps searched for the phrasings already known to have drifted — the guard's own mistake, made
+by hand. The row is now reworded count-free rather than renumbered, and
+`NoUncheckedGateCountReachesTheProse` inverts the default so that an unknown phrasing fails
+closed: in any paragraph mentioning the suites, a gate-shaped number is a failure unless it is a
+value derived from the tools. Its limits are stated on the class.
 
 And in a further instance the drifting claim was not a number but a *provenance*: this record
 asserted that its three reviewers "never reported" two defects, when in fact one reviewer found
 both and its report was lost to a race (see `reviewer-leaf-output-verbatim.md`).
 
-**Round 4's pair is the sharpest, and it is self-inflicted.** Adding this guard's own suite made
-it the 29th script suite and the 61st wired suite, invalidating four claims in the same commit
-whose stated purpose was to close this defect class. Extracting the previous commit and running
-the gate there shows what it then produced:
+**Round 4's pair is the sharpest of the instances caught before merge, and it is self-inflicted.**
+Adding this guard's own suite raised both the script-suite and the wired-suite total by one,
+invalidating four claims in the same commit whose stated purpose was to close this defect class.
+Extracting the previous commit and running the gate there shows what it then produced:
 
 <!-- BEGIN QUOTED-CLAIMS -->
 
@@ -72,7 +87,7 @@ whose entire subject is evidentiary discipline. The gate proved the code; nothin
 record about the code.
 
 **Fixed here rather than deferred**, because the fix is small and the alternative is asking a
-reader to trust a record whose numbers went wrong six times.
+reader to trust a record whose numbers went wrong in every round.
 `tests/scripts/sign-off-record_test.py` derives, from the tools themselves rather than from a
 number typed twice: the pinned-suite count (from `release-manifest.py`'s own `GATE_MANIFEST`),
 the script-suite total (from `run-script-suites.py`'s own glob), and the wired-suite total (from
@@ -81,6 +96,18 @@ engine-test count in the authored prose to agreeing with every other, and holds 
 totals to its own table. **Every numeric drift in the table above was replanted and confirmed to
 fail it** — including round 4's pair, which the extended guard flagged before any prose was
 corrected, naming both the stated and the real number.
+
+Those checks each pin a phrasing, which is why the seventh instance walked past all of them.
+`NoUncheckedGateCountReachesTheProse` is the one written against the class instead: in any
+paragraph of authored record prose that mentions the suites, a two- or three-digit number is a
+failure unless it equals one of the three derived totals, carries its own unit (`tests`, `lines`),
+names something rather than counting it (`User Story`, `#`-prefixed, a version, a date, a line
+reference), or is one of a short capped list of per-suite tallies this suite cannot derive. Its
+value is that renumbering does not satisfy it and deriving does — a corrected number goes stale
+again on the next suite added, in any phrasing, including one nobody has written yet. What it
+still cannot see is spelled-out totals, one- and four-digit counts, a wrong number that happens to
+equal a different derived total, and every kind of non-numeric drift, the provenance error above
+included. Those limits are listed on the class rather than left to be discovered.
 
 The suite is pinned to its own gate criterion, `sign-off record integrity`. It was briefly not,
 and was therefore silently deletable — the manifest guard stayed green without it, which is the
@@ -221,7 +248,7 @@ test catches that mutation, so the property is covered — but not by the test w
 | Release-manifest guard's own suite | `python3 tests/scripts/release-manifest_test.py` | 43 tests, OK |
 | Plugin validation | `claude plugin validate plugins/doc-lifecycle` | Validation passed |
 | Compilation | `python3 -m compileall -q` over engine, wiring, skills, `.github/scripts` | clean |
-| Install parity | `tests/scripts/install-parity_test.py` (inside the 28) | PASS |
+| Install parity | `tests/scripts/install-parity_test.py` (one of the script suites above, not a separate run) | PASS |
 | Source/vendor parity | `diff -r -x __pycache__ plugins/doc-lifecycle/engine/ .doc-lifecycle/wiring/engine/` | identical |
 | Exact-commit CI | the pull request's own run | see the PR |
 
