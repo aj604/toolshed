@@ -21,9 +21,17 @@ The applier's whole job is refusal discipline around one small write:
   are, write only that record's own targets, declare a declarable target class,
   spell its paths canonically (`paths.write_target_problem`, the same owner the
   approval set uses), carry an exact preimage, and overlap or repeat nothing.
-- **The write is total or absent.** Every post-content is computed and checked
-  against the plan's declared postimages before any byte lands; any problem
-  leaves the tree byte-identical.
+- **The write is an explicit validated transaction.** Every target's preimage
+  is captured, every post-content computed from it and checked against the
+  plan's declared postimages before any byte lands, every target re-read
+  immediately before it is mutated, and every final target compared with its
+  postimage before the run may call itself clean. A target that moved between
+  the preimage and the write boundary is a typed concurrency refusal
+  (`apply-write-boundary-race`) that overwrites nothing; final bytes that are
+  not the computed postimage are another (`apply-postimage-not-on-disk`). Any
+  problem leaves the tree byte-identical — except where a later writer has
+  taken a target over, which rollback leaves alone rather than making a second
+  lost update of it.
 - **The whole diff is confined.** Before writing, the complete working-tree
   diff (index, work tree, and untracked files) is read from git and must be
   both inside the approval set's allowed mutation scope and empty: the applier
@@ -226,17 +234,24 @@ class AppliedOperation:
 class ApplyResult:
     """What one apply run did, or why it refused without touching anything.
 
-    `clean` means the plan's postimages are on disk and the complete
-    working-tree diff is inside the approval set's allowed mutation scope —
-    whether this run wrote them (`applied` names each operation) or found them
-    already there (`already_applied`, the idempotent re-run — a narrower claim
-    in that this run wrote nothing, but not a weaker one: the bytes on disk
-    were re-derived by applying the plan to the committed baseline, so they
-    are the operations' own result and not something the plan declared them to
-    be). `stale` means the
+    `clean` means the plan's postimages are on disk — re-read from it and
+    compared byte for byte, not inferred from having written them — and the
+    complete working-tree diff is inside the approval set's allowed mutation
+    scope, whether this run wrote them (`applied` names each operation) or
+    found them already there (`already_applied`, the idempotent re-run — a
+    narrower claim in that this run wrote nothing, but not a weaker one: the
+    bytes on disk were re-derived by applying the plan to the committed
+    baseline, so they are the operations' own result and not something the
+    plan declared them to be). `stale` means the
     approval expired and nothing was touched; the reasons name every field that
     moved and say to re-run the audit and mint afresh. Anything else about the
     run is `Invalid`, never a weaker success.
+
+    `postimages` is that verified manifest — each written path with the sha256
+    of the bytes this run *read back* from it, `None` for one it retired — so
+    a later trust boundary (a staged index, a commit tree) checks its own
+    bytes against what the applier certified rather than against the plan it
+    was handed. It is empty on every refusal: nothing was certified.
     """
 
     status: str
@@ -246,6 +261,7 @@ class ApplyResult:
     changed_paths: Tuple[str, ...] = ()
     already_applied: bool = False
     stale_reasons: Tuple[StaleReason, ...] = ()
+    postimages: Tuple[Tuple[str, Optional[str]], ...] = ()
 
     def to_dict(self):
         payload = {
@@ -256,6 +272,7 @@ class ApplyResult:
             "applied": [op.to_dict() for op in self.applied],
             "changed_paths": list(self.changed_paths),
             "already_applied": self.already_applied,
+            "postimages": dict(self.postimages),
         }
         if self.stale_reasons:
             payload["stale_reasons"] = [r.to_dict() for r in self.stale_reasons]
@@ -950,7 +967,8 @@ def _current_bytes(repo_root, path):
 
 
 def _already_applied(repo_root, operations, postimages):
-    """True when this plan, applied to the committed baseline, is what is on disk.
+    """The verified postimage manifest when this plan, applied to the committed
+    baseline, is what is on disk — `None` when it is not.
 
     Derived, never declared. The plan is attacker-controlled by assumption, so
     a check that only asks "are the bytes the plan *names* on disk?" lets the
@@ -968,35 +986,40 @@ def _already_applied(repo_root, operations, postimages):
     Any question that cannot be answered — an unreadable path, a preimage that
     does not match the baseline — is a no, and the normal path then produces
     the honest refusal.
+
+    The manifest returned on a yes is the same certified thing the write path
+    returns: every digest in it was compared against the bytes read off disk
+    here, so an idempotent re-run makes no weaker claim about the content than
+    the run that wrote it.
     """
     baseline = {}
     for path in sorted(_written_paths(operations)):
         data, problem = head_bytes(repo_root, path)
         if problem is not None:
-            return False
+            return None
         try:
             baseline[path] = None if data is None else data.decode("utf-8")
         except UnicodeDecodeError:
-            return False
+            return None
 
     derived = _compute_postimages(baseline, operations, [])
     if derived is None:
-        return False
+        return None
 
     for path, digest in postimages.items():
         data, unreadable = _current_bytes(repo_root, path)
         if unreadable is not None:
-            return False
+            return None
         expected = derived.get(path)
         if expected is None or digest is None:
             if expected is not None or digest is not None or data is not None:
-                return False
+                return None
             continue
         if data is None or data.decode("utf-8", "replace") != expected:
-            return False
+            return None
         if sha256_bytes(data) != digest:
-            return False
-    return True
+            return None
+    return tuple(sorted(postimages.items()))
 
 
 def _read_texts(repo_root, operations, problems):
@@ -1155,16 +1178,43 @@ def _compute_postimages(texts, operations, problems):
     return None if problems else new_texts
 
 
-def _write(repo_root, new_texts):
-    """Write every computed post-content.
+@dataclass(frozen=True)
+class _WriteTransaction:
+    """What one write found at each target, and what it left there.
 
-    Returns (snapshots, created dirs, Invalid|None). Snapshots are the
-    pre-write bytes (None for a path that was absent), taken path by path as
-    each is written, so any failure — mid-write or the post-apply confinement
-    check — can put back exactly what was there; the created directories are
-    recorded so a rolled-back create leaves no empty tree behind.
+    `snapshots` is the pre-write bytes of every path the write reached (None
+    for one that was absent) — what rollback puts back. `written` is what this
+    run left at that path (None for one it removed), recorded only once the
+    write succeeded, which is what makes rollback compare-aware: a path in
+    `snapshots` and not in `written` is one whose own write failed mid-flight,
+    so whatever is there is this run's damage and is restored unconditionally.
+    `created_dirs` are the directories a create brought into being, so a
+    rolled-back one leaves no empty tree behind.
     """
-    snapshots, created_dirs = {}, []
+
+    snapshots: dict
+    written: dict
+    created_dirs: list
+
+
+def _write(repo_root, new_texts, preimages):
+    """Recheck every target at the write boundary, then write it.
+
+    The preimages were read, and the post-contents computed from them, before
+    this — so between there and here another writer can have taken a target
+    over, and writing then would silently overwrite work nobody in this
+    transaction ever read. Each target is re-read immediately before it is
+    mutated and must still be byte-for-byte the preimage this run captured; a
+    target that moved is `apply-write-boundary-race`, and nothing of that
+    writer's is touched.
+
+    Returns (the transaction, Invalid|None); a refusal has already rolled this
+    run's own writes back.
+    """
+    transaction = _WriteTransaction(snapshots={}, written={}, created_dirs=[])
+    snapshots, written = transaction.snapshots, transaction.written
+    created_dirs = transaction.created_dirs
+    raced = None
     path = None
     try:
         for path in sorted(new_texts):
@@ -1173,10 +1223,15 @@ def _write(repo_root, new_texts):
             if unreadable is not None:
                 # Checked before anything was computed; only a race gets here.
                 raise OSError(f"{path} {unreadable}")
+            expected = preimages[path]
+            if data != (None if expected is None else expected.encode("utf-8")):
+                raced = path
+                break
             snapshots[path] = data
             text = new_texts[path]
             if text is None:
                 os.remove(full)
+                written[path] = None
                 continue
             parent = os.path.dirname(full)
             if parent:
@@ -1185,26 +1240,56 @@ def _write(repo_root, new_texts):
                     created_dirs.append(probe)
                     probe = os.path.dirname(probe)
                 os.makedirs(parent, exist_ok=True)
+            payload = text.encode("utf-8")
             with open(full, "wb") as fh:
-                fh.write(text.encode("utf-8"))
+                fh.write(payload)
+            written[path] = payload
     except OSError as exc:
-        unrestored = _rollback(repo_root, snapshots, created_dirs)
-        return snapshots, created_dirs, Invalid((Problem(
+        return transaction, Invalid((Problem(
             code="apply-write-failed",
             message=(
                 f"writing the plan failed at {path}: {exc} — "
-                + _rollback_outcome(unrestored)
+                + _rollback_outcome(*_rollback(repo_root, transaction))
             ),
             location=path,
         ),))
-    return snapshots, created_dirs, None
+    if raced is not None:
+        return transaction, Invalid((Problem(
+            code="apply-write-boundary-race",
+            message=(
+                f"{raced} is no longer the text this run read to compute the "
+                f"plan's result — it changed between that read and the moment "
+                f"it was to be written, so another writer holds it and the "
+                f"post-content computed here is a remedy for text that is not "
+                f"there. Nothing of theirs was overwritten. Commit or discard "
+                f"what is there, then re-run the audit and mint afresh ("
+                + _rollback_outcome(*_rollback(repo_root, transaction)) + ")"
+            ),
+            location=raced,
+        ),))
+    return transaction, None
 
 
-def _rollback(repo_root, snapshots, created_dirs=()):
-    """Restore every path this run touched. Returns the paths it could not."""
-    unrestored = []
-    for path, data in snapshots.items():
+def _rollback(repo_root, transaction):
+    """Put back every path this run wrote — and only where it is still this
+    run's to put back.
+
+    Compare-aware, because an unconditional restore is a second lost update:
+    a target holding something other than the bytes this transaction wrote has
+    been taken over by another writer since, and overwriting it would destroy
+    exactly the work the refusal exists to preserve. Such a path is left
+    precisely as found and named in the outcome instead.
+
+    Returns (paths it could not restore, paths it left to a later writer).
+    """
+    unrestored, foreign = [], []
+    for path, data in transaction.snapshots.items():
         full = os.path.join(repo_root, path)
+        if path in transaction.written:
+            current, unreadable = _current_bytes(repo_root, path)
+            if unreadable is not None or current != transaction.written[path]:
+                foreign.append(path)
+                continue
         try:
             if data is None:
                 if os.path.lexists(full):
@@ -1214,23 +1299,86 @@ def _rollback(repo_root, snapshots, created_dirs=()):
                     fh.write(data)
         except OSError:
             unrestored.append(path)
-    for full in sorted(created_dirs, key=len, reverse=True):
+    for full in sorted(transaction.created_dirs, key=len, reverse=True):
         try:
             os.rmdir(full)
         except OSError:
             # Not empty, or already gone — either way not this run's to force.
             continue
-    return tuple(sorted(unrestored))
+    return tuple(sorted(unrestored)), tuple(sorted(foreign))
 
 
-def _rollback_outcome(unrestored):
+def _rollback_outcome(unrestored, foreign=()):
     """The honest sentence about what the rollback achieved."""
-    if not unrestored:
+    if not unrestored and not foreign:
         return "every write this run made has been rolled back"
-    return (
-        f"rolling back failed for {list(unrestored)}, so the working tree is "
-        f"NOT restored there — inspect it before trusting any diff"
-    )
+    parts = []
+    if unrestored:
+        parts.append(
+            f"rolling back failed for {list(unrestored)}, so the working tree "
+            f"is NOT restored there"
+        )
+    if foreign:
+        parts.append(
+            f"{list(foreign)} no longer held the bytes this run wrote, so it "
+            f"was left exactly as found rather than overwriting whoever wrote "
+            f"it since"
+        )
+    return "; ".join(parts) + " — inspect it before trusting any diff"
+
+
+def _certify(repo_root, new_texts):
+    """Every written target's final bytes, against the post-content computed
+    for it. Returns (the verified postimage manifest, None), or (None, problem).
+
+    The last thing between a write and a `clean` result, and a different
+    question from confinement: confinement asks which paths differ from HEAD,
+    and a target whose content was replaced after this run wrote it is a path
+    this plan legitimately writes, so it rides inside every path set the run
+    checks. Only re-reading the bytes catches it — which is what makes `clean`
+    mean the approved postimages are on disk rather than that this run once
+    put them there.
+    """
+    manifest = []
+    for path in sorted(new_texts):
+        expected = new_texts[path]
+        data, unreadable = _current_bytes(repo_root, path)
+        if unreadable is not None:
+            return None, Problem(
+                code="apply-postimage-not-on-disk",
+                message=(
+                    f"{path} {unreadable}, so this run cannot certify that it "
+                    f"holds the result the plan was approved for — something "
+                    f"replaced it after the write"
+                ),
+                location=path,
+            )
+        if expected is None:
+            if data is not None:
+                return None, Problem(
+                    code="apply-postimage-not-on-disk",
+                    message=(
+                        f"{path} was retired by this run and is on disk again "
+                        f"— the final state of a retired document is its "
+                        f"absence, and something wrote it back"
+                    ),
+                    location=path,
+                )
+            manifest.append((path, None))
+            continue
+        if data != expected.encode("utf-8"):
+            return None, Problem(
+                code="apply-postimage-not-on-disk",
+                message=(
+                    f"{path} does not hold the post-content this run wrote — "
+                    f"it changed between the write and this certification, so "
+                    f"the bytes on disk are not the ones the approval "
+                    f"authorized and this run will not certify them as such"
+                ),
+                location=path,
+            )
+        manifest.append((path, sha256_bytes(data)))
+    return tuple(manifest), None
 
 
 def _confinement_problem(repo_root, scope, code):
@@ -1358,7 +1506,8 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
     if dests:
         return Invalid(dests)
 
-    if _already_applied(repo_root, operations, plan["postimages"]):
+    certified = _already_applied(repo_root, operations, plan["postimages"])
+    if certified is not None:
         # This plan applied to the committed baseline is exactly what is on
         # disk, and the diff is confined to the paths the plan writes. A
         # narrower fact than an apply — this run wrote nothing — but a derived
@@ -1378,6 +1527,7 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
             plan_digest=plan["digest"],
             changed_paths=changed,
             already_applied=True,
+            postimages=certified,
         )
 
     if approval.stale_reasons:
@@ -1426,13 +1576,14 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
     if problems:
         return Invalid(tuple(problems))
 
-    snapshots, created_dirs, failed = _write(repo_root, new_texts)
+    transaction, failed = _write(repo_root, new_texts, texts)
     if failed is not None:
         return failed
 
     changed, problem = _confinement_problem(
         repo_root, approval.scope, "apply-unconfined-change"
     )
+    certified = ()
     if problem is None:
         # The scope check above is path-granular against the whole approval,
         # not this plan's operations — a record with a destination puts both
@@ -1446,14 +1597,24 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
         problem = _unaccounted_problem(
             sorted(set(changed) - _written_paths(operations))
         )
+    if problem is None:
+        # Path confinement and byte binding are separate checks, and this is
+        # the byte one: every target re-read and compared with the
+        # post-content computed for it. A path set cannot answer it — a target
+        # somebody replaced after the write is still a path this plan writes —
+        # so nothing may be reported clean until this has held.
+        certified, problem = _certify(repo_root, new_texts)
     if problem is not None:
-        # An unaccounted change surfaced after the write — roll this run's own
-        # writes back to the snapshotted bytes and refuse; whatever else moved
-        # the tree is left exactly as found, for a human to look at.
-        unrestored = _rollback(repo_root, snapshots, created_dirs)
+        # An unaccounted change or a moved target surfaced after the write —
+        # roll this run's own writes back to the snapshotted bytes and refuse;
+        # whatever else moved the tree is left exactly as found, for a human to
+        # look at.
         return Invalid((Problem(
             code=problem.code,
-            message=problem.message + " (" + _rollback_outcome(unrestored) + ")",
+            message=(
+                problem.message + " ("
+                + _rollback_outcome(*_rollback(repo_root, transaction)) + ")"
+            ),
             location=problem.location,
         ),))
 
@@ -1472,4 +1633,5 @@ def apply_edit_plan(repo_root, plan, approval_payload, *, report=None,
         plan_digest=plan["digest"],
         applied=applied,
         changed_paths=changed,
+        postimages=certified,
     )

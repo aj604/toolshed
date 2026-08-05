@@ -2373,10 +2373,32 @@ The order of refusals is the contract:
    writes both ends — `DISTILL`'s `create-document` writes only the destination, leaving the
    planning artifact it retires in scope yet unwritten by *this* plan. A concurrent change
    landing there would pass the scope check and then ride into the diff as this run's own.
-   Either post-write refusal rolls this run's writes back to what was snapshotted before
+   Every post-write refusal rolls this run's writes back to what was snapshotted before
    failing, so a caught race leaves the tree exactly as found for a human to inspect, never
    half-written. Nothing is ever staged or committed here: change
    approval — a person merging or committing — is the only thing that lands anything.
+7. **The write boundary, and the bytes at it.** Preimages are read and post-contents computed
+   from them before anything lands, so a target can move in between — and writing then
+   overwrites work nobody in this transaction ever read. Each target is therefore re-read
+   immediately before it is mutated and must still be byte-for-byte the preimage this run
+   captured; one that moved is `apply-write-boundary-race`, refused with nothing of the other
+   writer's touched.
+8. **Final-byte certification.** Before the run may call itself `clean`, every written target is
+   read back and compared with the post-content computed for it — absence, for a retired
+   document. A target something replaced after the write is a path this plan legitimately
+   writes, so every path set the run checks still names it and only the bytes betray it:
+   `apply-postimage-not-on-disk`. Path confinement and byte binding stay separate checks, and
+   both must hold. What a `clean` result then carries is the *verified* postimage manifest —
+   `postimages`, each written path with the sha256 of the bytes read back from it (`null` for a
+   retired one), so a later trust boundary checks a staged index or a commit tree against what
+   the applier certified rather than against the plan it was handed. An idempotent re-run
+   certifies the same manifest, having derived it the same way; every refusal certifies nothing.
+9. **Rollback is compare-aware.** It restores a target only where that target still holds the
+   bytes this transaction wrote (or, for one it removed, is still absent). A target another
+   writer has taken over since is left exactly as found and named in the refusal, because
+   restoring it would be a second lost update — the very thing the refusal exists to prevent. A
+   path whose own write failed mid-flight is this run's own damage and is restored
+   unconditionally.
 
 Application order is deterministic: per document, span edits apply bottom-up so the plan's line
 numbers stay true, and moved text is appended to its destination (in source-path, span order)
