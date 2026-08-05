@@ -171,7 +171,10 @@ gh workflow run doc-bloat-audit
 Both audit lanes deliberately stop at reports. `doc-apply.yml` currently binds its dispatch to
 the drift lane's `audit-report`; for a scheduled bloat report, download
 `bloat-audit-report`, select the record digests, and invoke `fixing-docs` interactively. In
-either path, applying is a second, deliberate act and no scheduled job authors a change.
+either path, applying is a second, deliberate act you take. The one job the schedule can reach
+that authors a change is `doc-policy-apply.yml`, and only once you commit the standing policy
+below: it then runs after every successful scheduled drift audit, and what it authors is a real
+pull request for the mechanical classes you declared — never a write to the default branch.
 
 For a drift report:
 

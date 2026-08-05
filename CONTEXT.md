@@ -7,11 +7,11 @@ The documentation-lifecycle plugin: detects drift and bloat in repo documentatio
 ### Components
 
 **Audit engine**:
-The read-only component that examines documentation against the repo and produces a report. Never mutates anything.
+The read-only component that examines documentation against the repo and produces a report. Mutates no repository document; the one thing it writes is a lineage-keyed cache entry (`cache.put()`), a derived artifact rather than documentation.
 _Avoid_: detector (that's a policy, not the component), scanner
 
 **Applier**:
-The deterministic, capability-limited component that executes an edit plan authorized by an approval set. The only component that writes.
+The deterministic, capability-limited component that executes an edit plan authorized by an approval set. The only component that writes a repository document, and it writes the working tree, never the index.
 _Avoid_: fixer, executor
 
 **Scheduler adapter**:
@@ -75,11 +75,11 @@ An immutable artifact binding selected record digests from one report, plus its 
 _Avoid_: approval layer, dispatch list, approved records (informal)
 
 **Semantic approval**:
-A person selecting record digests from one report — the act that mints an approval set. Authorizes planning and application, not the final diff.
+A person selecting record digests from one report — the act that mints a `human`-branded approval set, through `approval.mint_approval_set()`. Authorizes planning and application, not the final diff.
 _Avoid_: approval (unqualified), dispatch
 
 **Auto-apply policy**:
-A standing, consumer-configured declaration of which finding classes may have approval sets minted without a human — mechanical remedies only (default: drift STALE with exact preimage and evidence; narrative as-of/anchor refresh; never bloat, create, or retire). Recorded as the minter in the approval set's lineage; PR review is the designated semantic review for what it mints.
+A standing, consumer-configured declaration of which finding classes may have approval sets minted without a human — mechanical remedies only (default: drift STALE with exact preimage and evidence; narrative as-of/anchor refresh; never bloat, create, or retire). `policy.mint_policy_approval_set()` is the only producer of a `policy`-branded set: it derives the selection from the declaration instead of taking one, and `approval.mint_approval_set()` refuses the brand outright (`approval-policy-minter-not-generic`). Recorded as the approval set's `minter` — kind `policy`, carrying the declaration's digest as `policy_digest` — a field alongside the lineage, not inside it; PR review is the designated semantic review for what it mints.
 _Avoid_: auto-fix, autonomous mode
 
 **Change approval**:

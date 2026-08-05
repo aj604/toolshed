@@ -95,7 +95,7 @@ GATE_MANIFEST = {
     # must produce: hostile filenames and malformed input that change nothing
     # (scenario one, scenario drift), the applier's and approval set's forgery
     # refusals, path authorization, and the static no-shell/no-exec capability
-    # assertion over the one component that writes.
+    # assertion over the only component that writes a repository document.
     "adversarial corpus": [
         "tests/engine/acceptance/scenario_one_test.py",
         "tests/engine/acceptance/scenario_drift_test.py",
