@@ -24,8 +24,21 @@ that validates cleanly but describes a different document/source pair (a
 mismatched chunk sitting at the right path) is also a miss rather than a false
 hit.
 
+None of that would catch an entry rewritten in place into another *valid*
+entry, so every entry `put()` writes also declares the report contract's own
+content digest over the whole payload — its lineage and its records, to any
+depth, including everything a semantic result carries in a record's own
+fields. `validate_report` recomputes that digest on read, so a verdict edited
+after it was written no longer digests to what it declares and is a miss with
+its own reason (issue #187), and an entry declaring no digest this module can
+recompute — absent, or the `null` the report contract skips rather than fails
+— is a miss too, since nothing about it can be proven unaltered.
+
 Fails closed throughout: any lookup this module cannot positively confirm is
 still valid comes back as a miss, never a warning and never the stale payload.
+Every refusal is a miss and nothing more: a poisoned or undigested entry costs
+the caller a re-evaluation of that one document, never an exception raised in
+the middle of an audit.
 """
 
 import json
@@ -37,7 +50,7 @@ from typing import Optional
 from . import ARTIFACT_SCHEMA_VERSION
 from .digest import sha256_canonical
 from .inventory import DEFAULT_REGISTRY_PATH
-from .report import validate_report
+from .report import DIGEST_MISMATCH, validate_report
 from .results import STATE_FINDINGS, STATE_PARTIAL, STATE_STALE, Invalid
 
 # Why a lookup missed, named rather than left to be inferred from a bare
@@ -50,6 +63,12 @@ MISS_STALE = "cache-miss-stale-lineage"
 MISS_INCOMPLETE = "cache-miss-incomplete-result"
 MISS_IDENTITY = "cache-miss-identity-mismatch"
 MISS_RECORD_COUNT = "cache-miss-unexpected-record-count"
+# The two the payload digest adds (#187), kept distinct from each other and
+# from `MISS_INVALID`: "this entry was altered after it was written" and "this
+# entry never declared what it should digest to" are different facts about a
+# store, and an operator watching miss reasons should see which one happened.
+MISS_PAYLOAD_DIGEST = "cache-miss-payload-digest-mismatch"
+MISS_UNDIGESTED = "cache-miss-undeclared-payload-digest"
 
 # Everything that can change a semantic judgment about one document checked
 # against one piece of source evidence. The tuple's order is for readability
@@ -167,6 +186,14 @@ def put(cache_dir, key, record, evidence_sources=("cached-semantic-result",)):
     since the report contract's lineage has no notion of "one document" and
     this is how a read tells one cache entry's subject from another's.
 
+    The entry declares the report contract's own content digest over
+    everything written — the lineage, the record, and every field the record
+    carries at any depth — so a `get()` can prove the payload it reads is the
+    payload that was stored. It is computed by the same validator that
+    recomputes it (`validate_report`, structural only: freshness is a
+    read-time question), never by a cache-local digest that could drift from
+    what the reader expects.
+
     The write is atomic (write-then-rename), so a reader never observes a
     half-written entry.
     """
@@ -193,6 +220,17 @@ def put(cache_dir, key, record, evidence_sources=("cached-semantic-result",)):
         "records": [record],
         "incomplete": [],
     }
+    # Declared by the same validator `get()` recomputes it with, and taken
+    # over everything above (the digest field itself is never part of it —
+    # the report contract's own rule). A record that contract refuses has no
+    # content digest to declare, and would read back as `MISS_INVALID` on that
+    # record's own account; it is written undigested rather than raised on,
+    # because a caller storing a malformed result should lose the entry, not
+    # the audit it is halfway through.
+    validated = validate_report(payload)
+    if not isinstance(validated, Invalid):
+        payload["digest"] = validated.digest
+
     path = entry_path(cache_dir, key)
     # Unique per call, not just per process: two threads in one process
     # writing the same key concurrently must not interleave into one temp
@@ -211,9 +249,20 @@ def get(cache_dir, key, repo_root, registry_path=DEFAULT_REGISTRY_PATH):
     structurally invalid record, a lineage the repository has since outgrown
     (including one naming a different repository or commit entirely, or an
     audit configuration/registry/inventory/ruleset/plugin that no longer
-    matches), a result admitting it did not finish, or a payload describing a
-    different document/source pair than `key` names are each a miss — never a
-    warning, and never the stale payload.
+    matches), a result admitting it did not finish, a payload describing a
+    different document/source pair than `key` names, a payload that no longer
+    digests to the value it declares, and one declaring no digest this module
+    can recompute are each a miss — never a warning, and never the stale
+    payload.
+
+    A declared digest that no longer matches is caught where the validator
+    recomputes it, ahead of every freshness question — an altered entry is
+    refused whether or not its lineage still stands. The undigested refusal
+    is answered last instead, so an entry that is also malformed,
+    foreign, incomplete, or about another document keeps that more specific
+    reason. Nothing is weakened by that ordering: every branch it follows is
+    a miss too, and the only path that reaches a hit is the one where a
+    declared digest was recomputed and matched.
     """
     path = entry_path(cache_dir, key)
     try:
@@ -239,6 +288,13 @@ def get(cache_dir, key, repo_root, registry_path=DEFAULT_REGISTRY_PATH):
         audit_config_digest=key.audit_config_digest,
     )
     if isinstance(result, Invalid):
+        if any(problem.code == DIGEST_MISMATCH for problem in result.problems):
+            # Structurally sound, and about this repository, but it no longer
+            # digests to what it declares: a verdict was rewritten in place
+            # after it was stored. The digest covers the payload whole, so
+            # this is reached however deep the edit was — a nested finding
+            # inside a cached chunk result, or one field of one record.
+            return CacheResult(False, reason=MISS_PAYLOAD_DIGEST)
         return CacheResult(False, reason=MISS_INVALID)
     if result.status == STATE_STALE:
         return CacheResult(False, reason=MISS_STALE)
@@ -261,5 +317,20 @@ def get(cache_dir, key, repo_root, registry_path=DEFAULT_REGISTRY_PATH):
         # the one being asked about — a mismatched chunk sitting at the
         # right path is not a hit for this key.
         return CacheResult(False, reason=MISS_IDENTITY)
+
+    if not isinstance(payload.get("digest"), str):
+        # Every check above passed, but the entry declares nothing this
+        # module can recompute — an entry written before the payload binding
+        # existed, or one whose digest was blanked out. The test is on the
+        # value, never on the key: the report contract *skips* a declared
+        # digest of `None` rather than failing it, so `"digest": null` is a
+        # one-token edit that a presence check would wave through, and the
+        # gap between the two checks is exactly where a poisoned entry would
+        # sit. A hit here would be a verdict this module cannot show is the
+        # one that was stored, so the caller re-evaluates the document
+        # instead, and the entry is replaced by a digested one on the next
+        # `put()`. Any other type never reaches this line: it is not `None`,
+        # so the validator already refused it as a mismatch above.
+        return CacheResult(False, reason=MISS_UNDIGESTED)
 
     return CacheResult(True, record=record.to_dict())

@@ -282,6 +282,251 @@ class CachePoisoning(CacheTestCase):
         self.assertEqual(result.reason, cache.MISS_INVALID)
 
 
+class ThePayloadDigest(CacheTestCase):
+    """Issue #187: every entry declares a digest over the whole payload, and a
+    read recomputes it.
+
+    The class above proves the refusals that can be seen in the shape of a
+    payload; none of them sees an entry rewritten into another *valid* one.
+    These do — and note that every test above hand-builds a payload carrying
+    no digest at all, which is exactly why they still answer `MISS_INVALID`,
+    `MISS_STALE`, `MISS_INCOMPLETE`, `MISS_RECORD_COUNT` and `MISS_IDENTITY`:
+    the two reasons added here are the last word on a payload, never the first.
+    """
+
+    def chunk_record(self, verdict="CUT", **extra):
+        """A record shaped like the one the bloat lane caches: the semantic
+        result is a list of findings *inside* the record, each with its own
+        digest, so the interesting corruption is a nested one."""
+        return self.valid_record(
+            record_id="BLOAT-CHUNK:docs/a.md",
+            code="bloat-chunk-result",
+            path="docs/a.md",
+            records=[{"id": "B-1", "digest": "b" * 64, "verdict": verdict,
+                      "units": ["docs/a.md#L1-L4"]}],
+            **extra,
+        )
+
+    def poison(self, cache_dir, key, mutate):
+        """Rewrite a stored entry in place, restoring the digest it was
+        written with — the shape every real poisoning has: the payload is
+        edited, the declared digest is not."""
+        path = cache.entry_path(cache_dir, key)
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        declared = payload["digest"]
+        mutate(payload)
+        payload["digest"] = declared
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        return payload
+
+    def test_a_written_entry_declares_a_payload_digest(self):
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+
+        path = cache.put(cache_dir, key, self.chunk_record())
+
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        self.assertRegex(payload["digest"], r"\A[0-9a-f]{64}\Z")
+        self.assertTrue(cache.get(cache_dir, key, repo_root=repo).hit)
+
+    def test_a_mutated_nested_verdict_is_a_miss_with_its_own_reason(self):
+        # The verdict is flipped two levels down, inside the record's own
+        # list of findings, and that finding's digest is left alone — the
+        # entry is a structurally perfect cache entry about this repository,
+        # and every check that predates #187 passes it.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        cache.put(cache_dir, key, self.chunk_record(verdict="CUT"))
+        self.assertTrue(cache.get(cache_dir, key, repo_root=repo).hit)
+
+        def flip(payload):
+            payload["records"][0]["records"][0]["verdict"] = "RETIRE-DOC"
+
+        self.poison(cache_dir, key, flip)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertIsNone(result.record)
+        self.assertEqual(result.reason, cache.MISS_PAYLOAD_DIGEST)
+
+    def test_the_document_is_re_evaluated_after_a_poisoned_entry(self):
+        # A miss is the whole point: the caller re-judges the document and
+        # stores what it found, and the next lookup hits that — the poisoned
+        # verdict never reaches a reader, and the store recovers on its own.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        cache.put(cache_dir, key, self.chunk_record(verdict="CUT"))
+        self.poison(
+            cache_dir, key,
+            lambda payload: payload["records"][0]["records"][0].update(
+                {"verdict": "RETIRE-DOC"}),
+        )
+        self.assertEqual(
+            cache.get(cache_dir, key, repo_root=repo).reason,
+            cache.MISS_PAYLOAD_DIGEST,
+        )
+
+        cache.put(cache_dir, key, self.chunk_record(verdict="CONDENSE"))
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertTrue(result.hit)
+        self.assertEqual(result.record["records"][0]["verdict"], "CONDENSE")
+
+    def test_the_digest_covers_every_field_of_the_payload(self):
+        # One entry, poisoned one way at a time: the digest is over the
+        # payload whole, so a semantic field of the record, a field of a
+        # nested finding, the record's own identity fields, and the lineage
+        # are each covered — including a field added or removed rather than
+        # changed. The mutation that moves the repository would also read
+        # stale, and the one that moves the record's
+        # `document_digest` would also miss on identity; both answer the
+        # digest instead, because an altered entry is refused before the
+        # question of what it says about the world is asked at all.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+
+        mutations = {
+            "a nested finding's verdict":
+                lambda p: p["records"][0]["records"][0].update({"verdict": "CUT"}),
+            "a nested finding's units":
+                lambda p: p["records"][0]["records"][0]["units"].append("docs/a.md#L9"),
+            "a nested finding removed":
+                lambda p: p["records"][0]["records"].clear(),
+            "a semantic field of the record":
+                lambda p: p["records"][0].update({"code": "bloat-chunk-result-2"}),
+            "the record's id":
+                lambda p: p["records"][0].update({"id": "BLOAT-CHUNK:docs/b.md"}),
+            "the record's own digest":
+                lambda p: p["records"][0].update({"digest": "c" * 64}),
+            "the record's document digest":
+                lambda p: p["records"][0].update({"document_digest": "f" * 64}),
+            "a field added to the record":
+                lambda p: p["records"][0].update({"severity": "high"}),
+            "a field removed from the record":
+                lambda p: p["records"][0].pop("path"),
+            "the lineage's evidence boundary":
+                lambda p: p["lineage"]["evidence_boundary"]["sources"].append("*.md"),
+            "the lineage's audit mode":
+                lambda p: p["lineage"].update({"audit_mode": "full"}),
+            "the lineage's repository":
+                lambda p: p["lineage"].update(
+                    {"repository": "origin:github.com/foreign/repo"}),
+        }
+        for what, mutate in mutations.items():
+            with self.subTest(mutated=what):
+                cache.put(cache_dir, key, self.chunk_record(verdict="RETIRE-DOC"))
+                self.assertTrue(cache.get(cache_dir, key, repo_root=repo).hit)
+
+                self.poison(cache_dir, key, mutate)
+
+                result = cache.get(cache_dir, key, repo_root=repo)
+
+                self.assertFalse(result.hit)
+                self.assertEqual(result.reason, cache.MISS_PAYLOAD_DIGEST)
+
+    def test_an_entry_declaring_no_digest_is_a_miss(self):
+        # An entry written before the payload binding existed: valid, fresh,
+        # about this very document — and unprovable, so it is a miss with its
+        # own reason rather than a hit or a crash, and the caller re-evaluates.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        record = self.valid_record(document_digest=DOCUMENT_DIGEST,
+                                   source_digest=SOURCE_DIGEST)
+        self.write_raw(cache_dir, key, self.raw_payload_for(key, record))
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertIsNone(result.record)
+        self.assertEqual(result.reason, cache.MISS_UNDIGESTED)
+
+    def test_a_null_declared_digest_is_a_miss(self):
+        # The one-token defeat of the whole binding, and the reason the guard
+        # is on the value rather than the key: `"digest": null` leaves the
+        # field present, so a presence check passes it, while the report
+        # contract skips a declared digest of `None` rather than failing it.
+        # An entry landing between those two would be a clean hit carrying
+        # whatever the poisoner wrote. `poison()` cannot reach this — it
+        # restores the digest the entry was written with — so the edit is
+        # made here.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        cache.put(cache_dir, key, self.chunk_record(verdict="CUT"))
+        path = cache.entry_path(cache_dir, key)
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        payload["records"][0]["records"][0]["verdict"] = "RETIRE-DOC"
+        payload["digest"] = None
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertIsNone(result.record)
+        self.assertEqual(result.reason, cache.MISS_UNDIGESTED)
+
+    def test_a_declared_digest_that_is_not_a_digest_is_a_miss(self):
+        # Any other type is refused where the validator recomputes it: a
+        # declared value that is not `None` never equals the digest of the
+        # payload, whatever it is.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        cache.put(cache_dir, key, self.chunk_record())
+        path = cache.entry_path(cache_dir, key)
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        payload["digest"] = 123
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+
+        result = cache.get(cache_dir, key, repo_root=repo)
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.reason, cache.MISS_PAYLOAD_DIGEST)
+
+    def test_re_storing_an_undigested_entry_repairs_it(self):
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+        record = self.valid_record(document_digest=DOCUMENT_DIGEST,
+                                   source_digest=SOURCE_DIGEST)
+        self.write_raw(cache_dir, key, self.raw_payload_for(key, record))
+
+        cache.put(cache_dir, key, record)
+
+        self.assertTrue(cache.get(cache_dir, key, repo_root=repo).hit)
+
+    def test_storing_a_record_the_contract_refuses_does_not_raise(self):
+        # `put()` digests through the report contract, so a record that
+        # contract would refuse has no digest to declare. The write still
+        # returns rather than raising in the middle of an audit, and the
+        # entry reads back as the miss that record has always earned.
+        repo = self.git_repo()
+        cache_dir = self.cache_dir()
+        key = self.fresh_key(repo)
+
+        path = cache.put(cache_dir, key, {"id": "R1"})  # no 'digest'
+
+        with open(path, encoding="utf-8") as fh:
+            self.assertNotIn("digest", json.load(fh))
+        self.assertEqual(
+            cache.get(cache_dir, key, repo_root=repo).reason, cache.MISS_INVALID,
+        )
+
+
 class CacheKeyDigest(unittest.TestCase):
     def test_the_default_schema_version_is_the_engines_own(self):
         state = {
