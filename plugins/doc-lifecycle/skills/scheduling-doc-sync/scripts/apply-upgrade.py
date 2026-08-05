@@ -139,6 +139,10 @@ NEW_LANE_SCRIPTS = {
     "render-audit-summary.py": "scheduling-doc-sync/scripts",
     "render-apply-summary.py": "scheduling-doc-sync/scripts",
     "probe-evidence-tool.py": "scheduling-doc-sync/scripts",
+    # Both apply lanes' byte verification at the index and commit boundaries
+    # (aj604/toolshed#191). Vendored because the credentialed apply job runs it
+    # from the installed checkout, between staging and the push.
+    "verify-apply-bytes.py": "scheduling-doc-sync/scripts",
 }
 
 # Early daily, so a morning reader finds the night's report already published.

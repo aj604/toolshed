@@ -52,7 +52,8 @@ SCRIPT_SOURCES = {
 # Wiring only an install that adopted `.doc-lifecycle/registry.json` receives.
 NEW_LANE_SCRIPT_SOURCES = {
     "scheduling-doc-sync/scripts": ["render-audit-summary.py", "render-apply-summary.py",
-                                    "probe-evidence-tool.py"],
+                                    "probe-evidence-tool.py",
+                                    "verify-apply-bytes.py"],
 }
 
 
