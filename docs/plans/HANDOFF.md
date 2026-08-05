@@ -1,6 +1,6 @@
 # Documentation Skills Suite — Handoff
 
-> Status: pending-implementation
+> Status: ready
 
 **Last updated:** 2026-07-29
 **HEAD at handoff:** issue #57 review remediation's implementation landed; two process steps
