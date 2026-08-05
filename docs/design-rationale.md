@@ -15,6 +15,18 @@ provenance anchor to the text that decided it.
   rationale UNVERIFIABLE. Automation never silently rewrites rationale.
   (docs/plans/2026-06-09-documentation-skills-suite-design.md @ 09f4300, Decision 2)
 
+## Engine
+
+- **`cache_dir` placement is unconstrained, deliberately.** A release review proposed
+  constraining where the engine writes cache entries. It was declined after verification
+  showed nothing reaches the cache: no CLI command, skill, or workflow names a cache
+  directory, and `bloat.store_chunk` — the package's one caller — takes the directory as a
+  parameter rather than deriving one. A cache entry is a derived artifact, not a repository
+  document, so `paths.authorize_path` is deliberately not consulted for it and placement is
+  the caller's to get right. A location constraint with no consumer would be speculative.
+  Revisit only if a CLI surface ever reaches it.
+  (docs/plans/2026-07-28-issue-57-review-remediation.md @ 4e7f27b, Self-Review Notes)
+
 ## Sync and bloat automation
 
 - **The bloat lanes have no blast-radius cap, deliberately.** The drift nightly caps

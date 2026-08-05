@@ -122,7 +122,7 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   doc-lifecycle content under `.github/`.
 - `CONTEXT.md` — the ubiquitous language for the #57 re-architecture (component, contract, and
   document-model terms, each with an _Avoid_ list). Use its vocabulary in engine code and tests.
-- `docs/` — `plans/` (design docs + `HANDOFF.md`), `guides/` (narrative user guides). Not published.
+- `docs/` — `plans/` (design docs), `guides/` (narrative user guides). Not published.
 - `tests/` — `fixtures/` (runnable sample repos), `baselines/` (RED/GREEN skill-test records,
   plus `shadow-parity-gate/`, the #76 gate's first-cycle run evidence, and
   `shadow-parity-gate-rerun/`, #117's second cycle — the FAIL both cycles reached is recorded in
@@ -158,7 +158,7 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   `tests/baselines/fixing-docs-merge-red/` / `fixing-docs-merge-green/`; the policy lane's retained
   test-first record is at `tests/baselines/policy-lane-red/`, and the scheduled bloat cadence's
   at `tests/baselines/scheduling-bloat-cadence-red/`;
-  method, status, and resume notes: `docs/plans/HANDOFF.md`; design: `docs/decisions.md`
+  method: `docs/guides/building-skills-test-first.md`; design: `docs/decisions.md`
   (2026-06-09 suite entry; 2026-06-20 `docs/reference/` shape; 2026-07-06 rearchitecture
   entry; 2026-07-07 scale-hardening entry; 2026-07-09 distill-fan-out entry).
 - Apply discipline has one owner, the applier contract in
