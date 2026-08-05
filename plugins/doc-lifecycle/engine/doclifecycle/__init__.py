@@ -48,7 +48,7 @@ RULESET_VERSION = 10
 # `plugins/doc-lifecycle/.claude-plugin/plugin.json` — the engine is also
 # vendored into consumers without that manifest, so it cannot read it.
 # `tests/engine/report_test.py` fails loudly when the two drift.
-PLUGIN_VERSION = "0.46.0"
+PLUGIN_VERSION = "0.46.3"
 
 # The artifact-facing engine compatibility marker stored in lineage's existing
 # `plugin_version` field. Bump it only when a plugin release makes prior
