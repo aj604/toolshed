@@ -131,9 +131,14 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   `shadow-parity-gate-rerun/`, #117's second cycle — the FAIL both cycles reached is recorded in
   `docs/plans/2026-07-27-shadow-parity-gate-rerun.md`, which #77 cites; the gate's harness left
   with the legacy lane in #77, the run evidence stayed; and `issue-203-sign-off-gate/`, the #168
-  remediation's gate rerun, the two independent reviews with every finding's disposition, and the
-  per-test audit of #168's surviving-bytes rule for race tests — the evidence a human weighs when
-  deciding whether to close #57, which #203 deliberately did not do),
+  remediation's gate rerun, the per-P1 mutation picture, every finding's disposition, the per-test
+  audit of #168's surviving-bytes rule, and the reviewers' raw output in two tiers
+  (`reviewer-output-verbatim.md`, the three dispatched agents' aggregates;
+  `reviewer-leaf-output-verbatim.md`, the seven leaves beneath them — retained because one leaf
+  returned 45s after its parent aggregated and its two real findings were lost, which no other
+  artifact would have revealed). That directory is the evidence a human weighs when
+  deciding whether to close #57, which #203 deliberately did not do; `sign-off-record_test.py` is
+  what holds its numeric claims to the artifacts they describe),
   `scripts/` (helper-script suites), `engine/` (engine suites), `docs-ab/` (the doc-form A/B
   harness — tooling, not a suite). Neither `baselines/` nor
   `fixtures/` gates a release — `release-manifest.py` declares both non-gate roots. Not published.
@@ -181,7 +186,7 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   run-surface strings, and
   `apply-upgrade_test.py` that workflow's
   deterministic wiring-regeneration engine (knob preservation, script overwrite, fail-loud on
-  unextractable knobs). Four suites cover the
+  unextractable knobs). Five suites cover the
   wiring itself rather than one script: `workflow-permissions_test.py` (model jobs read-only and
   token-free; every write job model-free and staging an explicit path list, with no `git add -A`
   exemption left — #127 replaced the upgrade lane's last broad add with the path set
@@ -197,7 +202,13 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   writer of a repository document against `cache.put()`/`write_approval_set()` as artifact
   writers, the human-only generic mint door against `mint_policy_approval_set` as the sole
   `policy`-brand producer, and the read-only audit lanes against the opted-in policy lane that
-  authors a real review PR; it pins phrases and code-derived facts, never whole-file snapshots).
+  authors a real review PR; it pins phrases and code-derived facts, never whole-file snapshots),
+  and `sign-off-record_test.py` (#203 — the same idea aimed at a record rather than the engine:
+  it derives the `issue #168 sign-off regressions` suite count from `release-manifest.py`'s own
+  `GATE_MANIFEST`, holds every engine-test count in `tests/baselines/issue-203-sign-off-gate/`'s
+  authored prose to agreeing with every other, and holds the race audit's totals to its own
+  table. It exempts the two `*-verbatim.md` files, which are frozen quotations — editing one to
+  satisfy a consistency check would be falsifying evidence).
   `render-audit-summary_test.py` covers the
   audit lane's run-surface rendering (every report result state, plus the
   report-never-produced case, the integrity-refused case — which outranks any report on

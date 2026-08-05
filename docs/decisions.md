@@ -5,14 +5,38 @@
 > what was true then, not a claim about now.
 
 ## 2026-08-05 — the #168 sign-off gate is evidence in the repository, not a claim in a PR (#203)
-- Decided: the sign-off gate's output is four retained records under
-  `tests/baselines/issue-203-sign-off-gate/` — `reviewer-output-verbatim.md` (all three
-  reviewers' raw output, unedited, with their dispatch record), `gate-results.md` (every gate
+- Decided: the sign-off gate's output is five retained records under
+  `tests/baselines/issue-203-sign-off-gate/` — `reviewer-output-verbatim.md` (the three dispatched
+  agents' aggregate reports, unedited), `reviewer-leaf-output-verbatim.md` (the seven leaf reports
+  beneath them, and the timeline of the one that was lost), `gate-results.md` (every gate
   component, its command, and its result, plus the per-P1 mutation picture),
   `independent-reviews.md` (the disposition of every finding), and `race-test-audit.md` (the
   per-test audit of #168's surviving-bytes rule). A sign-off whose evidence lives only in a pull
   request body is a claim; the point of #168 was that authority binds to bytes a later reader can
   check.
+- Decided: **prose that states a number about an artifact is checked against that artifact.**
+  Across three review rounds the same defect recurred four times — the race count, the suite count
+  twice, and the engine-test count — each caught by a human, each invisible to a fully green gate,
+  on a ticket whose subject is evidentiary discipline. A fifth instance drifted a *provenance*
+  rather than a number. The root cause is one thing: a claim in prose and the artifact under it
+  had no mechanical relationship. `tests/scripts/sign-off-record_test.py` now derives the
+  pinned-suite count from `release-manifest.py`'s own `GATE_MANIFEST`, holds every engine-test
+  count in the authored prose to agreeing with every other, and holds the race audit's totals to
+  its own table; all three historical drifts were replanted and confirmed to fail it. It exempts
+  the verbatim files, because those are quotations and editing one to satisfy a consistency check
+  would be falsifying evidence — a distinction the suite forced on its first run by failing on the
+  reviewers' correct, permanent "1344". It inherits `doc-contract_test.py`'s ceiling and could not
+  have caught the provenance error; nothing mechanical would have.
+- Standing: **the review apparatus lost a finding, and that is why two defects reached the
+  pull-request review instead of this record.** Each axis fanned out internally — Spec into five
+  leaf reviewers, Standards into two — and the Spec aggregate returned at 14:38:35.302Z, 45
+  seconds before its `rev-policy-cache` leaf finished at 14:39:20.675Z. That leaf found both the
+  `cache.get()` non-UTF-8 crash and the `policy_path` asymmetry. Four of five Spec leaves landed
+  in time; the only one that found a real defect did not. The skill's guarantee is no aggregation
+  *across* axes, which held; the intra-axis path had no guarantee at all. All seven leaf reports
+  are now retained in `tests/baselines/issue-203-sign-off-gate/reviewer-leaf-output-verbatim.md`,
+  none unrecoverable, so a recurrence is detectable by comparing leaves against the aggregate that
+  claims to summarize them.
 - Decided, and it is the load-bearing one: **the raw reviewer output is retained, not
   paraphrased.** A disposition table written by the party under review is that party's account of
   a review, and #168's User Story 42 exists so #57 closes "on evidence rather than implementation
@@ -30,7 +54,7 @@
   that covers weakening was done by hand, once, and is not part of the gate.
 - Decided: a gate criterion is what makes a regression test durable, so
   `.github/scripts/release-manifest.py` gained `issue #168 sign-off regressions`, naming the
-  eighteen suites that carry the reproduced failures' regressions and mapping each to its finding.
+  seventeen suites that carry the reproduced failures' regressions and mapping each to its finding.
   Discovery ran seven of them (`verify-apply-bytes_test.py`, `apply-recovery_test.py`,
   `apply-lane-parity_test.py`, `doc-contract_test.py`, `approval_cli_test.py`,
   `render-apply-summary_test.py`, `render-audit-summary_test.py`) while no criterion did, so

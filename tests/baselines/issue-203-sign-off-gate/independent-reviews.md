@@ -6,12 +6,23 @@ reviewers must not be agents that authored the fixes."*
 
 ## How the reviews were dispatched
 
-**The raw output of all three reviewers is retained verbatim in `reviewer-output-verbatim.md`,
-with their dispatch record. Read it first — this file is disposition, and a disposition table
-written by the party under review is not itself evidence of an independent review.**
+**Raw output is retained verbatim in two files — read them first.** This file is disposition, and
+a disposition table written by the party under review is not itself evidence of an independent
+review. `reviewer-output-verbatim.md` holds the three dispatched agents' aggregate reports;
+`reviewer-leaf-output-verbatim.md` holds the seven leaf reports beneath them, and the record of
+the one that was lost.
 
-Via the `mattpocock-skills:code-review` skill, which is built for exactly this shape: two axes,
-two parallel sub-agents, no aggregation or reranking across axes so neither can mask the other.
+Via the `mattpocock-skills:code-review` skill: two axes, dispatched in parallel, **with no
+aggregation or reranking _across_ axes** so neither can mask the other.
+
+> **That is the whole of what the axis separation guarantees, and an earlier version of this line
+> overstated it** by saying "no aggregation or reranking" without qualification. There was
+> aggregation — *inside* each axis. Spec fanned out into five leaf reviewers and Standards into
+> two, each aggregating its leaves before returning. That is exactly where the review's one real
+> failure occurred: the Spec aggregate returned 45 seconds before its fifth leaf finished, and
+> that leaf was the one carrying two live defects. The cross-axis property held; the intra-axis
+> path had no guarantee at all, and nothing in the three aggregates revealed that seven other
+> agents existed. See `reviewer-leaf-output-verbatim.md`.
 
 Fixed point **`8ded7d7`**, head **`c75fd59`** — the remediation head, before #203's own commits.
 The reviewers' own reports name the diff as `8ded7d7...HEAD`, which is how they were briefed; at
@@ -64,9 +75,15 @@ Neither of those two reviews found a P1.
 **The #203 pull-request review did.** It ran mutation testing across all six P1s and found two
 with real gaps — #185's lane wiring guarded only by static strings that survive `|| true` on the
 gate's own invocation, and a live crash in #187's `cache.get()`. Both are dispositioned below.
-That review is a separate mechanism from #168's User Story 42, and its findings are marked as
-such: attributing them to the three retained reviewers would be false, since none of them
-reported either. The per-P1 picture it established is in `gate-results.md`.
+
+The `cache.get()` crash and the `policy_path` asymmetry are marked `PR` in the source column
+because that review is where they reached *this record*. **But they were found earlier**, by the
+`rev-policy-cache` leaf under the Spec axis, whose report was discarded by a race before its
+parent aggregated. Marking them `PR` alone would repeat the earlier mistake of crediting the
+finding to the wrong mechanism, so the column reads `PR (found by rev-policy-cache, lost)`.
+`reviewer-leaf-output-verbatim.md` has that report in full and the timeline.
+
+The per-P1 picture the PR review established is in `gate-results.md`.
 
 ## Disposition of every finding
 
@@ -74,16 +91,17 @@ Criterion: fixed, or explicitly accepted with rationale, or filed as its own iss
 decision, not silence.
 
 Source column: **S** = Standards reviewer, **P** = Spec reviewer, **R** = race-test auditor
-(all three verbatim in `reviewer-output-verbatim.md`), **PR** = the #203 pull-request review.
+(the three aggregates verbatim in `reviewer-output-verbatim.md`, the seven leaves beneath them in
+`reviewer-leaf-output-verbatim.md`), **PR** = the #203 pull-request review.
 
 ### Fixed in #203
 
 | Finding | Source | Disposition |
 |---|---|---|
-| **P1 #187: `cache.get()` crashes on a non-UTF-8 entry.** `UnicodeDecodeError` is a `ValueError`, so it escaped `except OSError` — reachable from `bloat.load_chunk`, contradicting `get()`'s own docstring and #187's acceptance text | PR | **Fixed test-first.** No existing test could reach it (every corrupt-payload test writes *with* `encoding="utf-8"` and fails at the parser). New test writes real non-UTF-8 bytes, verified RED before GREEN. Forces the 0.46.10 bump |
+| **P1 #187: `cache.get()` crashes on a non-UTF-8 entry.** `UnicodeDecodeError` is a `ValueError`, so it escaped `except OSError` — reachable from `bloat.load_chunk`, contradicting `get()`'s own docstring and #187's acceptance text | PR (found by `rev-policy-cache`, lost) | **Fixed test-first.** No existing test could reach it (every corrupt-payload test writes *with* `encoding="utf-8"` and fails at the parser). New test writes real non-UTF-8 bytes, verified RED before GREEN. Forces the 0.46.10 bump |
 | **P1 #185: the lane's integrity wiring has no execution-level guard.** Appending `\|\| true` to the gate invocation lets a dirty checkout publish a report, and `audit-workflow_test`, `workflow-permissions_test`, and `check-repo-integrity_test` all stay green | PR | **Fixed.** New execution-based class in `audit-workflow_test.py` runs the step's real `run:` body under `bash -e` against a dirtied repository. Verified by running that exact mutation: two new tests fail, the other two suites stay green as before |
 | `audit-workflow_test.py` carries the only lane-level assertions for #185 but is not in the criterion | PR | Fixed — pinned alongside `check-repo-integrity_test.py`, with why neither alone covers that P1 |
-| `approval_cli_test.py`, `render-apply-summary_test.py`, `render-audit-summary_test.py` are pinned by no criterion, and #203's own rationale covers them | PR | Fixed — pinned; the criterion now names eighteen suites |
+| `approval_cli_test.py`, `render-apply-summary_test.py`, `render-audit-summary_test.py` are pinned by no criterion, and #203's own rationale covers them | PR | Fixed — pinned; the criterion now names seventeen suites |
 | `policy_test.py` monkeypatches the private `approval._mint_approval_set`, against "engine suites test only the two public seams" | S | **Fixed, having first been wrongly accepted.** The acceptance rationale ("no public seam observes which function was called") was contradicted 46 lines below in the same file, where an equally un-runtime-observable property is proven statically. Replaced with a static AST guard; verified load-bearing by adding a second producer to `policy.py` |
 | `doc-contract_test.py` is the one new suite CLAUDE.md never documented, while the other four were | S | Fixed — documented as the fourth wiring suite, and the "Three suites" count corrected |
 | CLAUDE.md's run-surface renderer list omits `verify-apply-bytes.py`, which writes its own refusals to `$GITHUB_STEP_SUMMARY` | S | Fixed — added, with why it states them itself rather than handing back to the summary renderer |
@@ -105,7 +123,7 @@ deferrals are visible in the tracker a human would actually use rather than only
 | `check-repo-integrity.py` runs git with inherited env and no timeout while its sibling `verify-apply-bytes.py` scrubs `GIT_DIR`/`GIT_WORK_TREE` and bounds every call — the more security-critical script has the weaker invocation | S | [#226](https://github.com/aj604/toolshed/issues/226) | `ready-for-agent` |
 | Residue an insight walk misses is permanently unreachable by the fix door once an artifact is retired; the only control is a prose gate in `fixing-docs/SKILL.md` | known item, published-plugin gap | [#227](https://github.com/aj604/toolshed/issues/227) | `ready-for-human` |
 | The hardened lanes do not run, and the release tag their tooling fetch names is not cut | known item | [#228](https://github.com/aj604/toolshed/issues/228) | `ready-for-human` |
-| `apply_edit_plan` does not thread `policy_path` into `validate_approval_set`, so a policy approval is revalidated against a different declaration than the one that minted it | PR | [#230](https://github.com/aj604/toolshed/issues/230) | `ready-for-human` |
+| `apply_edit_plan` does not thread `policy_path` into `validate_approval_set`, so a policy approval is revalidated against a different declaration than the one that minted it | PR (found by `rev-policy-cache`, lost) | [#230](https://github.com/aj604/toolshed/issues/230) | `ready-for-human` |
 | **#185's third acceptance clause is untested**: nothing links evidence-integrity failure to policy eligibility. The similarly-named `test_a_fresh_checkout_cannot_re_derive_the_failure` asserts the converse | PR | [#231](https://github.com/aj604/toolshed/issues/231) | `ready-for-human` |
 
 #228 is a native `blocked_by` edge on #57 — the one deferral that leaves this remediation's

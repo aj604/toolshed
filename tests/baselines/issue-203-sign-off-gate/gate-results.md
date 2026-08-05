@@ -23,6 +23,45 @@ half and the component list a later reader can re-execute.
 | #198 | #220 | Idempotent apply-workflow recovery — reuse, never force-push |
 | #200 | #221 | Retired the Issue #57 planning trackers through the plugin's own fix door |
 
+## The root cause this record kept demonstrating on itself
+
+Across three review rounds, the same defect recurred four times, and a human caught it every
+time:
+
+| Round | Claim | Artifact | Caught by |
+|---|---|---|---|
+| 1 | "six race tests fixed" | seven tests in the diff | reviewer |
+| 2 | "fourteen suites pinned" | manifest held a different number | reviewer |
+| 3 | "eighteen suites pinned" | manifest held seventeen | reviewer |
+| 3 | "1348 engine tests" (inline) | 1349 in the same file's own table | reviewer |
+
+And in a fifth instance the drifting claim was not a number but a *provenance*: this record
+asserted that its three reviewers "never reported" two defects, when in fact one reviewer found
+both and its report was lost to a race (see `reviewer-leaf-output-verbatim.md`).
+
+**The root cause is one thing: a claim in prose and the artifact it describes had no mechanical
+relationship.** Every count was typed by hand from something read a moment earlier, and nothing in
+the release gate compared the two — so each drift was invisible to a fully green run, on a ticket
+whose entire subject is evidentiary discipline. The gate proved the code; nothing proved the
+record about the code.
+
+**Fixed here rather than deferred**, because the fix is small and the alternative is asking a
+reader to trust a record whose numbers went wrong four times:
+`tests/scripts/sign-off-record_test.py` derives the pinned-suite count from `release-manifest.py`'s
+own `GATE_MANIFEST`, checks every suite it names exists, holds every engine-test count in the
+authored prose to agreeing with every other, and holds the race audit's totals to its own table.
+Each of the three numeric drifts above was replanted and confirmed to fail it.
+
+Two boundaries that suite deliberately keeps:
+
+- **It exempts the verbatim files.** Those are frozen quotations — the reviewers ran before #203
+  changed anything, so they correctly and permanently say 1344. Editing a quotation to satisfy a
+  consistency check would be falsifying evidence. (The suite caught this itself on its first run,
+  which is how the distinction got drawn.)
+- **It inherits `doc-contract_test.py`'s ceiling**: it holds the claims it names, not new false
+  claims appearing. It could not have caught the provenance error above, and nothing mechanical
+  would have — that needed someone to ask whether the retained set was the whole set.
+
 ## Read this first: two of criterion 1's own subjects are not stated anywhere
 
 Criterion 1 requires "regression tests present for each of the six P1 findings and each P2
@@ -171,7 +210,7 @@ when plugin content changes" step diffs `-- plugins/doc-lifecycle/` only. `.doc-
   An honest-path case and the allowlist cases are asserted alongside, so the refusal is evidence
   the gate discriminates rather than evidence it always fails.
 - `.github/scripts/release-manifest.py` — a named gate criterion, `issue #168 sign-off
-  regressions`, pinning the eighteen suites that carry the reproduced failures' regressions.
+  regressions`, pinning the seventeen suites that carry the reproduced failures' regressions.
   #168 User Story 40 asks for "regression tests for every reproduced sign-off failure, so that a
   green gate proves the properties the final review found missing". Discovery ran those suites
   already; naming them is what makes deleting one a reported failure rather than a quietly smaller
@@ -203,7 +242,7 @@ git fetch origin main
 git checkout ajones/issue-203-sign-off-gate      # or the merge commit
 
 python3 .github/scripts/run-script-suites.py                        # 28/28
-python3 -m unittest discover -s tests/engine -p '*_test.py'         # 1348, OK
+python3 -m unittest discover -s tests/engine -p '*_test.py'         # 1349, OK
 python3 .github/scripts/release-manifest.py                         # manifest coverage
 python3 tests/scripts/release-manifest_test.py                      # the guard's own suite
 python3 tests/scripts/install-parity_test.py                        # install parity

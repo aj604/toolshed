@@ -1,4 +1,8 @@
-# Issue #203 — the three reviewers' raw output, verbatim
+# Issue #203 — the three dispatched reviewers' aggregate output, verbatim
+
+> Titled "aggregate" deliberately. An earlier version called these "the three reviewers' raw
+> output", which concealed that two of the three are themselves summaries of a fan-out. The seven
+> leaves are in `reviewer-leaf-output-verbatim.md`.
 
 Retained because a disposition table written by the party under review is not evidence of an
 independent review — it is the reviewed agent's account of one. #168's User Story 42 exists so
@@ -23,11 +27,28 @@ All three were fresh `general-purpose` agents that authored none of the ten reme
 The Standards and Spec pair ran in parallel via the `mattpocock-skills:code-review` skill; the
 race audit ran separately.
 
-**A limit worth stating plainly.** The two findings the #203 pull-request review later raised —
-the `cache.get()` non-UTF-8 crash and the `apply_edit_plan` `policy_path` asymmetry — appear
-nowhere below. They were not paraphrased away; the three agents retained here never reported
-them. That is a finding about the reviews themselves, and it is checkable now only because the
-raw output is retained.
+**This file is the aggregates, not the whole review — and one leaf was lost.**
+
+Each axis fanned out again internally: Spec into five leaf reviewers, Standards into two. The
+seven leaf reports are retained in **`reviewer-leaf-output-verbatim.md`**, which should be read
+alongside this file.
+
+The two findings the #203 pull-request review later raised — the `cache.get()` non-UTF-8 crash
+and the `apply_edit_plan` `policy_path` asymmetry — appear nowhere in the three aggregates below.
+**One of the Spec leaves found both.** `rev-policy-cache` (user stories 16-24, the #186 and #187
+halves) returned at **14:39:20.675Z**, 45.4 seconds *after* its parent had already aggregated and
+returned at 14:38:35.302Z. Its report opens finding 5 with
+`**5. US24 — PARTIAL / implementation-wrong (real finding).**` and names the exact fix that
+landed. Its parent never received it. Four of five Spec leaves landed in time; the only one that
+found a real defect did not.
+
+> **An earlier version of this paragraph said the opposite** — that "the three agents retained
+> here never reported them", framing it as a reviewer blind spot. Every clause of that was true
+> of the three retained agents and materially wrong about what happened. A reviewer looked, found
+> it, wrote it up, and a race between a background agent and its parent's aggregation discarded
+> the result. The correction is kept visible rather than silently applied, because a human closing
+> #57 would have drawn precisely the wrong lesson about how reliable this apparatus is.
+> `reviewer-leaf-output-verbatim.md` carries the full timeline and the lost report in full.
 
 ---
 

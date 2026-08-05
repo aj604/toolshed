@@ -73,6 +73,16 @@ carried before; the table below counts tests, and seven is the number the diff s
 | `verify-apply-bytes_test.py` `test_a_matching_trailer_over_different_bytes_is_refused` | code only, despite "different bytes" being the scenario's whole point | Fixed: the existing commit's tree still holds `"not what was approved\n"`, plus the certified digest |
 | `check-repo-integrity_test.py` `test_a_dirtied_tracked_evidence_source_refuses_with_a_typed_reason` (`:87`) and `test_a_fresh_checkout_cannot_re_derive_the_failure` (`:107`) | neither asserts `src/server.py` still holds `"PORT = 9090\n"` at refusal time | **Accepted.** `test_the_gate_never_repairs_what_it_refuses` (`:230`) asserts exactly that read-back, plus a non-empty `git status --porcelain`, for the gate as a whole. This is a redundancy gap, not a hole: the gate is read-only by construction and one test owns the property. |
 
+## A known ceiling, not a defect
+
+`verify-apply-bytes_test.py:505`'s `assertIn("apply-bytes-not-certified", completed.stdout)` is
+weaker than it reads. `certify` writes that refusal to the surface *before* returning, and
+`parent=None` independently trips the lineage check — so a behaviourally-neutral mutation can
+escape both this suite and its sibling while the string still appears. The honest removal of the
+certification does fail, so the property genuinely holds; this is recorded as a ceiling on what a
+surface-string assertion can prove, not as a gap to fix. A surface string is evidence that
+*something* refused, never evidence of *which* check refused.
+
 ## Proof the new assertions are load-bearing
 
 Two were spot-checked by breaking the thing they assert and confirming only the new assertion
