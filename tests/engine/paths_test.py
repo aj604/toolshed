@@ -8,8 +8,10 @@ Two seams, and the module owns both halves of "what is a repository path":
 - `path_references(text)` — the recognizer: which tokens in a piece of prose a
   reader would take as naming a file or directory in this repository. It
   authorizes nothing and touches no filesystem.
+- `open_repository_read(path, repo_root=)` — one no-follow handle that pins the
+  authorized object across every evidence read.
 
-Nothing below either seam is tested directly.
+Nothing below these seams is tested directly.
 
 Run: python3 tests/engine/paths_test.py
 """
@@ -22,7 +24,31 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from support import RepoTestCase  # noqa: E402  (also puts the engine on sys.path)
 
-from doclifecycle.paths import authorize_path, path_references  # noqa: E402
+from doclifecycle.paths import (  # noqa: E402
+    authorize_path,
+    open_repository_read,
+    path_references,
+)
+
+
+class RepositoryReads(RepoTestCase):
+    def test_open_handle_cannot_be_redirected_by_a_path_swap(self):
+        repo = self.repo({"source.txt": "authorized\n", "outside.txt": "other\n"})
+        handle = open_repository_read("source.txt", repo_root=repo)
+        os.rename(
+            os.path.join(repo, "source.txt"),
+            os.path.join(repo, "original.txt"),
+        )
+        os.symlink(
+            os.path.join(repo, "outside.txt"),
+            os.path.join(repo, "source.txt"),
+        )
+
+        try:
+            self.assertEqual(handle.kind, "file")
+            self.assertEqual(handle.read_bytes(), b"authorized\n")
+        finally:
+            handle.close()
 
 
 class Authorized(RepoTestCase):

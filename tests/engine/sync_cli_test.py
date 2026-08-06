@@ -94,6 +94,55 @@ class SyncPlanCommand(SyncRepoTestCase):
                 self.assertNotIn("work_order", payload)
                 self.assertNotIn("Traceback", result.stderr)
 
+    def test_unknown_probe_kind_escalates_its_entry_on_command_seam(self):
+        repo = self.repo({**FILES, "src/app.py": "class App:\n    pass\n"})
+        records = self.ledger_records(repo)
+        records[1]["strategy"] = "probe"
+        records[1]["probe"] = {
+            "kind": "shell",
+            "args": {"path": "src/app.py"},
+            "expect": {},
+        }
+        records[1]["deps"] = [{"path": "src/app.py", "digest": "c" * 64}]
+        self.write_ledger(repo, records)
+
+        result = run_command("sync-plan", "--repo", repo, "--as-of", AS_OF)
+
+        self.assertEqual(result.returncode, 4, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(len(payload["work_order"]["units"]), 1)
+        refusal = payload["work_order"]["units"][0]
+        self.assertEqual(refusal["reason"], "deterministic-probe-refused")
+        self.assertEqual(refusal["probe_problem"]["code"],
+                         "probe-unknown-kind")
+
+    def test_unordered_probe_dependencies_escalate_on_command_seam(self):
+        repo = self.repo({
+            **FILES,
+            "src/a.py": "a = True\n",
+            "src/z.py": "z = True\n",
+        })
+        records = self.ledger_records(repo)
+        records[1]["strategy"] = "probe"
+        records[1]["probe"] = {
+            "kind": "path_exists",
+            "args": {"path": "src/z.py", "kind": "file"},
+            "expect": {},
+        }
+        records[1]["deps"] = [
+            {"path": "src/z.py", "digest": "c" * 64},
+            {"path": "src/a.py", "digest": "d" * 64},
+        ]
+        self.write_ledger(repo, records)
+
+        result = run_command("sync-plan", "--repo", repo, "--as-of", AS_OF)
+
+        self.assertEqual(result.returncode, 4, result.stderr)
+        refusal = json.loads(result.stdout)["work_order"]["units"][0]
+        self.assertEqual(refusal["reason"], "deterministic-probe-refused")
+        self.assertEqual(refusal["probe_problem"]["code"],
+                         "probe-malformed-deps")
+
     def test_as_of_is_required_on_the_command_seam(self):
         result = run_command("sync-plan", "--repo", self.sync_repo())
         self.assertEqual(result.returncode, 2)
