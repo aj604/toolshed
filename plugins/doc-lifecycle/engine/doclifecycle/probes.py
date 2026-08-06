@@ -3,14 +3,14 @@
 import ast
 import json
 import keyword
-import os
+import math
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 
-from .digest import sha256_file
-from .paths import repository_read_problem, repository_relative_problem
+from .digest import sha256_bytes
+from .paths import open_repository_read, repository_relative_problem
 from .results import Problem
 
 PROBE_KINDS = (
@@ -51,6 +51,40 @@ def _reject_constant(value):
     raise ValueError(f"{value} is not JSON")
 
 
+def _strict_json_value(value):
+    """Whether a value belongs to strict JSON, with bounded nesting."""
+    pending = [(value, 1)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > 64:
+            return False
+        if item is None or type(item) in (bool, int, str):
+            continue
+        if type(item) is float:
+            if not math.isfinite(item):
+                return False
+            continue
+        if type(item) is list:
+            pending.extend((child, depth + 1) for child in item)
+            continue
+        if type(item) is dict and all(type(key) is str for key in item):
+            pending.extend((child, depth + 1) for child in item.values())
+            continue
+        return False
+    try:
+        json.dumps(value, allow_nan=False)
+    except (TypeError, ValueError, RecursionError):
+        return False
+    return True
+
+
+def _canonical_json(value):
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False,
+    )
+
+
 def _path_shape(value, *, glob=False):
     problem = repository_relative_problem(value)
     if problem is not None:
@@ -75,6 +109,31 @@ def _path_shape(value, *, glob=False):
 
 def _pattern(value):
     if not (_one_line(value) and len(value) <= _MAX_PATTERN_LENGTH):
+        return None
+    escaped = in_class = False
+    for char in value:
+        if escaped:
+            if char.isdigit():
+                return None              # backreferences are not in v1
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == "[" and not in_class:
+            in_class = True
+            continue
+        if char == "]" and in_class:
+            in_class = False
+            continue
+        if in_class:
+            continue
+        # Repetition and branching are the sources of Python re's
+        # input-dependent backtracking. v1 accepts the useful linear subset:
+        # literals, classes, anchors, escapes, and dot.
+        if char in "*+?{}()|":
+            return None
+    if escaped or in_class:
         return None
     try:
         return re.compile(value)
@@ -175,6 +234,11 @@ def _validate(probe):
                 "probe-malformed-args", "invalid json_value arguments", "probe"
             )
         fault = _path_shape(args["path"])
+        if not _strict_json_value(expect["equals"]):
+            return None, Problem(
+                "probe-malformed-args", "json_value equals must be strict JSON",
+                "probe.expect.equals",
+            )
         pointer = args["pointer"]
         if (not isinstance(pointer, str)
                 or (pointer and not pointer.startswith("/"))
@@ -212,13 +276,9 @@ def _validate(probe):
     return compiled, fault
 
 
-def _declared_tools(repo_root, config_path):
-    absolute = os.path.join(repo_root, config_path)
+def _declared_tools(data, config_path):
     try:
-        with open(absolute, encoding="utf-8") as fh:
-            raw = json.load(fh, parse_constant=_reject_constant)
-    except FileNotFoundError:
-        return (), None
+        raw = json.loads(data.decode("utf-8"), parse_constant=_reject_constant)
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         return None, Problem(
             "probe-evidence-tools-unreadable",
@@ -235,7 +295,7 @@ def _declared_tools(repo_root, config_path):
     return tuple(tools), None
 
 
-def _safe_dependencies(repo_root, deps):
+def _dependency_paths(deps):
     if not isinstance(deps, (list, tuple)) or not deps:
         return None, Problem(
             "probe-malformed-deps", "a probe requires non-empty dependencies",
@@ -254,32 +314,40 @@ def _safe_dependencies(repo_root, deps):
         fault = _path_shape(path)
         if fault is not None:
             return None, fault
-        fault = repository_read_problem(path, repo_root=repo_root)
-        if fault is not None:
-            return None, Problem(
-                ("probe-symlink-escape" if fault.code == "symlinked-path"
-                 else "probe-unsafe-path"),
-                fault.message, fault.location,
-            )
         paths.append(path)
     return tuple(paths), None
 
 
-def _file_bytes(path):
-    with open(path, "rb") as fh:
-        data = fh.read(_MAX_FILE_BYTES + 1)
-    if len(data) > _MAX_FILE_BYTES:
-        raise ValueError(f"file exceeds {_MAX_FILE_BYTES} byte probe bound")
-    return data
-
-
-def _dependency_evidence(repo_root, paths):
-    evidence = []
+def _open_dependencies(repo_root, paths):
+    handles = []
     for path in paths:
-        absolute = os.path.join(repo_root, path)
-        digest = sha256_file(absolute) if os.path.isfile(absolute) else None
-        evidence.append({"path": path, "digest": digest})
-    return evidence
+        opened = open_repository_read(path, repo_root=repo_root)
+        if isinstance(opened, Problem):
+            for handle in handles:
+                handle.close()
+            return None, Problem(
+                ("probe-symlink-escape" if opened.code == "symlinked-path"
+                 else "probe-unsafe-path"),
+                opened.message, opened.location,
+            )
+        handles.append(opened)
+    return tuple(handles), None
+
+
+def _read_dependencies(handles):
+    """Read each authorized file once; observations and digests share bytes."""
+    contents, evidence = {}, []
+    for handle in handles:
+        data = (
+            handle.read_bytes(limit=_MAX_FILE_BYTES)
+            if handle.kind == "file" else None
+        )
+        contents[handle.path] = data
+        evidence.append({
+            "path": handle.path,
+            "digest": sha256_bytes(data) if data is not None else None,
+        })
+    return contents, evidence
 
 
 def _pointer(document, pointer):
@@ -347,7 +415,7 @@ def execute_probe(repo_root, probe, deps,
     compiled, fault = _validate(probe)
     if fault is not None:
         return ProbeOutcome(False, {}, fault)
-    dep_paths, fault = _safe_dependencies(repo_root, deps)
+    dep_paths, fault = _dependency_paths(deps)
     if fault is not None:
         return ProbeOutcome(False, {}, fault)
     kind, args, expect = probe["kind"], probe["args"], probe["expect"]
@@ -364,18 +432,21 @@ def execute_probe(repo_root, probe, deps,
     else:
         matches = ()
 
+    handles, fault = _open_dependencies(repo_root, dep_paths)
+    if fault is not None:
+        return ProbeOutcome(False, {}, fault)
+    by_path = {handle.path: handle for handle in handles}
+
     try:
-        dep_evidence = _dependency_evidence(repo_root, dep_paths)
+        contents, dep_evidence = _read_dependencies(handles)
         observed = {"dependencies": dep_evidence}
         if kind == "path_exists":
             paths = matches if "glob" in args else (args["path"],)
             resolved = []
             for path in paths:
-                absolute = os.path.join(repo_root, path)
-                actual = (
-                    "file" if os.path.isfile(absolute)
-                    else "dir" if os.path.isdir(absolute) else None
-                )
+                actual = by_path[path].kind
+                if actual == "missing":
+                    actual = None
                 if actual is not None:
                     resolved.append({"path": path, "kind": actual})
             required = args["kind"]
@@ -385,9 +456,10 @@ def execute_probe(repo_root, probe, deps,
             )
             observed["resolved_paths"] = resolved
         elif kind == "content_match":
-            text = _file_bytes(
-                os.path.join(repo_root, args["path"])
-            ).decode("utf-8")
+            data = contents[args["path"]]
+            if data is None:
+                raise OSError(f"{args['path']!r} is not a regular file")
+            text = data.decode("utf-8")
             found = [match.group(0) for match in compiled.finditer(text)]
             if len(found) > _MAX_MATCH_EVIDENCE:
                 return _problem(
@@ -403,8 +475,11 @@ def execute_probe(repo_root, probe, deps,
                 "path": args["path"], "matched_text": found, "count": count,
             })
         elif kind == "json_value":
+            data = contents[args["path"]]
+            if data is None:
+                raise OSError(f"{args['path']!r} is not a regular file")
             document = json.loads(
-                _file_bytes(os.path.join(repo_root, args["path"])).decode("utf-8"),
+                data.decode("utf-8"),
                 parse_constant=_reject_constant,
             )
             try:
@@ -412,15 +487,19 @@ def execute_probe(repo_root, probe, deps,
                 resolved = True
             except KeyError:
                 value, resolved = None, False
-            passed = resolved and value == expect["equals"]
+            passed = (
+                resolved
+                and _canonical_json(value) == _canonical_json(expect["equals"])
+            )
             observed.update({
                 "path": args["path"], "pointer": args["pointer"],
                 "resolved": resolved, "value": value,
             })
         elif kind == "symbol_defined":
-            text = _file_bytes(
-                os.path.join(repo_root, args["path"])
-            ).decode("utf-8")
+            data = contents[args["path"]]
+            if data is None:
+                raise OSError(f"{args['path']!r} is not a regular file")
+            text = data.decode("utf-8")
             defined = _symbol_exists(
                 ast.parse(text, filename=args["path"]), args["name"]
             )
@@ -437,7 +516,14 @@ def execute_probe(repo_root, probe, deps,
                      "declared dependencies"),
                     evidence_tools_path,
                 )
-            tools, fault = _declared_tools(repo_root, evidence_tools_path)
+            config = contents[evidence_tools_path]
+            if config is None:
+                return _problem(
+                    "probe-evidence-tools-unreadable",
+                    f"{evidence_tools_path} is not a regular file",
+                    evidence_tools_path,
+                )
+            tools, fault = _declared_tools(config, evidence_tools_path)
             if fault is not None:
                 return ProbeOutcome(False, {}, fault)
             if args["tool"] not in tools:
@@ -459,6 +545,12 @@ def execute_probe(repo_root, probe, deps,
             version_line = next(
                 (line for line in version_output.splitlines() if line.strip()), ""
             )
+            if not version_line:
+                return _problem(
+                    "probe-tool-version-missing",
+                    f"tool {args['tool']!r} produced no version line",
+                    "probe.args.tool",
+                )
             match = compiled.search(output)
             passed = match is not None
             observed.update({
@@ -474,3 +566,6 @@ def execute_probe(repo_root, probe, deps,
             "probe-execution-unavailable",
             f"probe could not read its evidence: {exc}",
         )
+    finally:
+        for handle in handles:
+            handle.close()

@@ -24,7 +24,7 @@ repository document.
 |---|---|
 | `doclifecycle/registry.py` | registry parsing, validation, classification, glob matching, `without_rules()`, registry digest |
 | `doclifecycle/inventory.py` | `build_inventory()`, `load_registry()`, the closed-world walk, document/inventory digests |
-| `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, `repository_relative_problem()`, `repository_read_problem()`, `write_target_problem()`, the canonical path form and target classes |
+| `doclifecycle/paths.py` | `authorize_path()`, `open_repository_read()`, `classify_target()`, `repository_relative_problem()`, `repository_read_problem()`, `write_target_problem()`, the canonical path form, no-follow evidence handles, and target classes |
 | `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
 | `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
 | `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
@@ -370,25 +370,32 @@ The closed strategies are `probe`, `deps`, `on-change`, and `reconcile-only`; pr
 `path_exists`, `content_match`, `json_value`, `symbol_defined`, and `tool_probe`.
 Normative and rationale entries cannot carry probes. `probe` and `deps` require `deps`;
 `on-change` and `reconcile-only` forbid them. Every entry carries lineage including `model`
-(`null` when no model produced it). Unknown schema or probe vocabulary, malformed record
-shape, duplicate identity, incompatible ruleset, or a registry digest mismatch invalidates
-the whole ledger. In `sync` mode an absent ledger is `ledger-missing`, never bootstrap.
+(`null` when no model produced it). Unknown schema, a malformed outer record, duplicate
+identity, incompatible ruleset, or a registry digest mismatch invalidates the whole ledger.
+An otherwise usable probe entry with an unknown kind or unsafe nested control data remains
+entry-local: execution revalidates it into typed judgment work. In `sync` mode an absent ledger
+is `ledger-missing`, never bootstrap.
 
-The nested v1 probe schemas are closed too; an extra or missing field is
-`ledger-invalid-probe-shape`, not ignored data:
+The nested v1 probe schemas are closed too; an extra or missing field is a typed probe refusal,
+not ignored data:
 
 | kind | `args` | `expect` |
 |---|---|---|
 | `path_exists` | exactly `path` or `glob`, plus `kind: file\|dir\|any` | `{}` |
-| `content_match` | exactly `path`, `pattern` (a bounded valid regular expression) | exactly `presence: present\|absent`, optionally `count` as a non-negative integer |
+| `content_match` | exactly `path`, `pattern` (a bounded linear-time regular-expression subset: literals, classes, anchors, escapes, and dot; no repetition, branching, backreferences, or lookaround) | exactly `presence: present\|absent`, optionally `count` as a non-negative integer |
 | `json_value` | exactly `path`, RFC 6901 `pointer` | exactly `equals` (any strict JSON value) |
 | `symbol_defined` | exactly `path`, `language: python`, dotted Python `name` | `{}` |
-| `tool_probe` | exactly bare `tool`, `flag: --help\|--version`, bounded valid `pattern` | `{}` |
+| `tool_probe` | exactly bare `tool`, `flag: --help\|--version`, bounded linear-time `pattern` | `{}` |
 
 Every path is a canonical repository-relative data string with no shell syntax; literal paths
 cannot contain glob metacharacters, while a `glob` must contain one. Before opening or running
-anything, probe execution revalidates this shape, asks `paths.py` to establish repository and
-symlink safety, and treats the entry's exact `deps` paths as its evidence boundary.
+anything, probe execution revalidates this shape, asks `paths.py` for no-follow handles that pin
+the authorized filesystem objects, and treats the entry's exact `deps` paths as its evidence
+boundary. Each dependency is read once through that handle; its observation and digest derive
+from those same bytes even if the pathname is replaced concurrently.
+`tool_probe` resolves only a declared bare executable, invokes only `--help` or `--version`
+through direct argv with a fixed minimal environment, and requires a nonblank `--version` line
+as its recorded change signal before a pattern can provide coverage.
 
 The consumer's optional `.doc-lifecycle/config.json` has a `sync` section. Missing files,
 sections, and fields use `max_work_order_units: 40`, `max_model_calls: 1`, `max_turns: 40`,

@@ -154,6 +154,7 @@ class LedgerEntry:
     lineage: dict
     status: str
     raw: dict
+    probe_problems: Tuple[Problem, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -668,13 +669,18 @@ def _parse_entry(raw, problems, where):
                         f"entry status must be one of {list(STATUSES)}",
                         f"{where}.status")
 
+    probe_problems = []
     if strategy == STRATEGY_PROBE:
-        _validate_probe(raw["probe"], problems, f"{where}.probe")
+        # A structurally usable assertion remains usable even when its nested
+        # probe control data is unsafe. Execution revalidates that data and
+        # turns the typed refusal into work for this entry alone; invalidating
+        # the whole accepted ledger here would make that escalation unreachable.
+        _validate_probe(raw["probe"], probe_problems, f"{where}.probe")
         if assertion_class in (NORMATIVE, RATIONALE):
             _record_problem(problems, "ledger-forbidden-probe-class",
                             "normative and rationale entries may not use probes",
                             f"{where}.strategy")
-        _validate_deps(raw["deps"], problems, f"{where}.deps")
+        _validate_deps(raw["deps"], probe_problems, f"{where}.deps")
     elif strategy == STRATEGY_DEPS:
         _validate_deps(raw["deps"], problems, f"{where}.deps")
 
@@ -706,7 +712,7 @@ def _parse_entry(raw, problems, where):
         doc=doc, unit=unit, assertion_class=assertion_class,
         obligation=raw["obligation"], strategy=strategy,
         provenance=raw["provenance"], lineage=dict(raw["lineage"]),
-        status=status, raw=dict(raw),
+        status=status, raw=dict(raw), probe_problems=tuple(probe_problems),
     )
 
 

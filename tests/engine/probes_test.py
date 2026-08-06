@@ -6,12 +6,14 @@ import json
 import os
 import subprocess
 import sys
+import time
 import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from support import RepoTestCase  # noqa: E402
+from doclifecycle.paths import RepositoryReadHandle  # noqa: E402
 from doclifecycle.probes import execute_probe  # noqa: E402
 
 
@@ -70,8 +72,8 @@ class ProbeVocabulary(RepoTestCase):
               "expect": {"presence": "present"}}, "probe-command-shaped-path"),
         )
         for probe, code in cases:
-            with self.subTest(code=code), mock.patch(
-                    "doclifecycle.probes._file_bytes",
+            with self.subTest(code=code), mock.patch.object(
+                    RepositoryReadHandle, "read_bytes",
                     side_effect=AssertionError("unsafe probe executed")):
                 outcome = execute_probe(repo, probe, deps)
                 self.assertEqual(outcome.problem.code, code)
@@ -87,11 +89,135 @@ class ProbeVocabulary(RepoTestCase):
         }
         deps = [{"path": "alias.txt", "digest": digest("secret\n")}]
 
-        with mock.patch("doclifecycle.probes._file_bytes",
-                        side_effect=AssertionError("symlink was followed")):
+        with mock.patch.object(
+                RepositoryReadHandle, "read_bytes",
+                side_effect=AssertionError("symlink was followed")):
             outcome = execute_probe(repo, probe, deps)
 
         self.assertEqual(outcome.problem.code, "probe-symlink-escape")
+
+    def test_path_swap_after_authorization_cannot_redirect_bytes_or_digest(self):
+        original = "trusted evidence\n"
+        outside = self.repo_with({"outside.txt": "hostile evidence\n"})
+        repo = self.repo_with({"source.txt": original})
+        probe = {
+            "kind": "content_match",
+            "args": {"path": "source.txt", "pattern": "trusted evidence"},
+            "expect": {"presence": "present"},
+        }
+        real_read = RepositoryReadHandle.read_bytes
+        swapped = False
+
+        def swap_then_read(handle, limit=None):
+            nonlocal swapped
+            if not swapped:
+                swapped = True
+                os.rename(
+                    os.path.join(repo, "source.txt"),
+                    os.path.join(repo, "authorized-inode.txt"),
+                )
+                os.symlink(
+                    os.path.join(outside, "outside.txt"),
+                    os.path.join(repo, "source.txt"),
+                )
+            return real_read(handle, limit=limit)
+
+        with mock.patch.object(
+                RepositoryReadHandle, "read_bytes", new=swap_then_read):
+            outcome = execute_probe(repo, probe, self.dep("source.txt", original))
+
+        self.assertTrue(outcome.passed, outcome)
+        self.assertEqual(outcome.observed["matched_text"], ["trusted evidence"])
+        self.assertEqual(
+            outcome.observed["dependencies"][0]["digest"], digest(original)
+        )
+        self.assertTrue(os.path.islink(os.path.join(repo, "source.txt")))
+
+    def test_backtracking_regex_is_refused_before_read_in_constant_time(self):
+        text = "a" * 30 + "!"
+        repo = self.repo_with({"source.txt": text})
+        patterns = (
+            "(a+)+$",
+            "(a|a)" * 30 + "b",
+        )
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                probe = {
+                    "kind": "content_match",
+                    "args": {"path": "source.txt", "pattern": pattern},
+                    "expect": {"presence": "present"},
+                }
+                started = time.monotonic()
+                with mock.patch.object(
+                        RepositoryReadHandle, "read_bytes",
+                        side_effect=AssertionError(
+                            "unsafe regex reached content")):
+                    outcome = execute_probe(
+                        repo, probe, self.dep("source.txt", text)
+                    )
+
+                self.assertLess(time.monotonic() - started, 0.1)
+                self.assertEqual(outcome.problem.code, "probe-malformed-args")
+
+    @mock.patch("doclifecycle.probes.subprocess.run")
+    def test_backtracking_tool_regex_is_refused_before_tool_execution(self, run):
+        tools = '{"tools":["fake"]}\n'
+        repo = self.repo_with({".doc-lifecycle/evidence-tools.json": tools})
+        probe = {
+            "kind": "tool_probe",
+            "args": {"tool": "fake", "flag": "--version",
+                     "pattern": "(a+)+$"},
+            "expect": {},
+        }
+
+        outcome = execute_probe(
+            repo, probe,
+            self.dep(".doc-lifecycle/evidence-tools.json", tools),
+        )
+
+        self.assertEqual(outcome.problem.code, "probe-malformed-args")
+        run.assert_not_called()
+
+    def test_json_pointer_equality_is_strict_and_decodes_escaped_tokens(self):
+        text = '{"a/b":{"~key":[1,true]}}\n'
+        repo = self.repo_with({"value.json": text})
+        deps = self.dep("value.json", text)
+
+        number = execute_probe(repo, {
+            "kind": "json_value",
+            "args": {"path": "value.json", "pointer": "/a~1b/~0key/0"},
+            "expect": {"equals": 1},
+        }, deps)
+        wrong_type = execute_probe(repo, {
+            "kind": "json_value",
+            "args": {"path": "value.json", "pointer": "/a~1b/~0key/0"},
+            "expect": {"equals": True},
+        }, deps)
+        boolean = execute_probe(repo, {
+            "kind": "json_value",
+            "args": {"path": "value.json", "pointer": "/a~1b/~0key/1"},
+            "expect": {"equals": True},
+        }, deps)
+
+        self.assertTrue(number.passed)
+        self.assertFalse(wrong_type.passed)
+        self.assertTrue(boolean.passed)
+
+    def test_json_expected_value_is_validated_before_read(self):
+        text = "{}\n"
+        repo = self.repo_with({"value.json": text})
+        probe = {
+            "kind": "json_value",
+            "args": {"path": "value.json", "pointer": ""},
+            "expect": {"equals": ("not", "JSON")},
+        }
+
+        with mock.patch.object(
+                RepositoryReadHandle, "read_bytes",
+                side_effect=AssertionError("invalid expectation reached content")):
+            outcome = execute_probe(repo, probe, self.dep("value.json", text))
+
+        self.assertEqual(outcome.problem.code, "probe-malformed-args")
 
     @mock.patch("doclifecycle.probes.shutil.which", return_value="/usr/bin/fake")
     @mock.patch("doclifecycle.probes.subprocess.run")

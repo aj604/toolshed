@@ -7,8 +7,10 @@ Run: python3 tests/engine/sync_test.py
 import json
 import hashlib
 import os
+import subprocess
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -318,7 +320,11 @@ class LedgerRefusals(SyncRepoTestCase):
             records[1]["probe"]["kind"] = "shell"
 
         result = self.changed(bad)
-        self.assertIn("ledger-forbidden-probe-kind", codes(result))
+        payload = result.to_dict()
+        self.assertEqual(payload["work_order"]["units"][0]["reason"],
+                         "deterministic-probe-refused")
+        self.assertEqual(payload["work_order"]["units"][0]["probe_problem"]["code"],
+                         "probe-unknown-kind")
 
     def test_forbidden_probe_field_shape_fails_closed(self):
         def bad(records):
@@ -326,7 +332,9 @@ class LedgerRefusals(SyncRepoTestCase):
             records[1]["probe"].pop("expect")
 
         result = self.changed(bad)
-        self.assertIn("ledger-invalid-probe-shape", codes(result))
+        payload = result.to_dict()
+        self.assertEqual(payload["work_order"]["units"][0]["probe_problem"]["code"],
+                         "probe-malformed-args")
 
     def test_forbidden_nested_probe_fields_fail_closed_for_every_kind(self):
         probes = (
@@ -365,10 +373,16 @@ class LedgerRefusals(SyncRepoTestCase):
                     records[1]["probe"] = probe
 
                 result = self.changed(bad)
-                self.assertTrue(set(codes(result)) & {
-                    "ledger-invalid-probe-shape", "ledger-invalid-probe-field",
-                })
-                self.assertNotIn("work_order", result.to_dict())
+                payload = result.to_dict()
+                self.assertEqual(len(payload["work_order"]["units"]), 1)
+                self.assertEqual(
+                    payload["work_order"]["units"][0]["reason"],
+                    "deterministic-probe-refused",
+                )
+                self.assertEqual(
+                    payload["work_order"]["units"][0]["probe_problem"]["code"],
+                    "probe-malformed-args",
+                )
 
     def test_command_shaped_dependency_path_fails_closed(self):
         def bad(records):
@@ -376,8 +390,11 @@ class LedgerRefusals(SyncRepoTestCase):
             records[1]["deps"][0]["path"] = "src/app.py;rm"
 
         result = self.changed(bad)
-        self.assertIn("ledger-invalid-probe-field", codes(result))
-        self.assertNotIn("work_order", result.to_dict())
+        payload = result.to_dict()
+        self.assertEqual(payload["work_order"]["units"][0]["reason"],
+                         "deterministic-probe-refused")
+        self.assertEqual(payload["work_order"]["units"][0]["probe_problem"]["code"],
+                         "probe-command-shaped-path")
 
     def test_every_probe_kind_has_a_closed_nested_schema(self):
         probes = (
@@ -721,6 +738,33 @@ class ProbePlanning(SyncRepoTestCase):
         self.assertEqual(refusal["reason"], "deterministic-probe-refused")
         self.assertEqual(refusal["probe_problem"]["code"],
                          "probe-path-outside-boundary")
+        self.assertEqual(payload["deterministic_results"]["unchanged"], [])
+
+    @mock.patch("doclifecycle.probes.shutil.which", return_value="/usr/bin/fake")
+    @mock.patch("doclifecycle.probes.subprocess.run")
+    def test_tool_without_version_line_is_typed_work_not_coverage(self,
+                                                                  run, _which):
+        tools = '{"tools":["fake"]}\n'
+        repo = self.repo({
+            **FILES,
+            ".doc-lifecycle/evidence-tools.json": tools,
+        })
+        records = self.ledger_records(repo)
+        self.probe_entry(records[1], {
+            "kind": "tool_probe",
+            "args": {"tool": "fake", "flag": "--version", "pattern": "$"},
+            "expect": {},
+        }, ".doc-lifecycle/evidence-tools.json",
+            hashlib.sha256(tools.encode()).hexdigest())
+        self.write_ledger(repo, records)
+        run.return_value = subprocess.CompletedProcess([], 0, "", "")
+
+        payload = plan_sync(repo, AS_OF).to_dict()
+
+        refusal = payload["work_order"]["units"][0]
+        self.assertEqual(refusal["reason"], "deterministic-probe-refused")
+        self.assertEqual(refusal["probe_problem"]["code"],
+                         "probe-tool-version-missing")
         self.assertEqual(payload["deterministic_results"]["unchanged"], [])
 
 

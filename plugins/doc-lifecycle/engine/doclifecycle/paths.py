@@ -17,6 +17,7 @@ it answers "what did this sentence put in front of a reader as a file", which
 is a question about spelling, and this module is where spelling is decided.
 """
 
+import errno
 import os
 import re
 import stat
@@ -479,73 +480,186 @@ def repository_read_problem(path, *, repo_root):
     to *ask about* (``path_exists`` needs that answer), while every existing
     component must be the canonically named, non-symlinked repository entry.
     """
+    opened = open_repository_read(path, repo_root=repo_root)
+    if isinstance(opened, Problem):
+        return opened
+    opened.close()
+    return None
+
+
+@dataclass
+class RepositoryReadHandle:
+    """One no-follow repository object held open across evidence reads."""
+
+    path: str
+    kind: str
+    fd: Optional[int]
+
+    def close(self):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+    def read_bytes(self, limit=None):
+        if self.kind != "file" or self.fd is None:
+            raise OSError(f"{self.path!r} is not an open regular file")
+        os.lseek(self.fd, 0, os.SEEK_SET)
+        chunks, size = [], 0
+        while True:
+            chunk = os.read(self.fd, 64 * 1024)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+            size += len(chunk)
+            if limit is not None and size > limit:
+                raise ValueError(f"file exceeds {limit} byte probe bound")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+def _read_refusal(code, message, location):
+    return Problem(code=code, message=message, location=location)
+
+
+def open_repository_read(path, *, repo_root):
+    """Open a canonical repository object without following any alias.
+
+    Authorization and use are one operation: every component is opened
+    relative to the already-authorized parent directory with ``O_NOFOLLOW``.
+    The returned descriptor pins the inode that was authorized, so replacing
+    the pathname afterward cannot redirect a probe or separate its digest from
+    the bytes it examined. Missing paths return a ``kind='missing'`` handle,
+    which lets ``path_exists`` answer safely without inventing an open target.
+    """
     fault = _spelling_problem(path)
     if fault:
         code, reason = fault
-        return Problem(code=code, message=f"{path!r} {reason}", location=path)
-    if not os.path.isdir(repo_root):
-        return Problem(
-            code="repo-root-missing",
-            message=f"the repository root {repo_root!r} is not a directory",
-            location=repo_root,
+        return _read_refusal(code, f"{path!r} {reason}", path)
+
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    if not nofollow or not directory:
+        return _read_refusal(
+            "path-no-follow-unavailable",
+            "this platform cannot open repository evidence without following aliases",
+            path,
         )
-
-    current = repo_root
-    components = path.split("/")
-    for index, name in enumerate(components):
-        parent, current = current, os.path.join(current, name)
-        so_far = "/".join(components[: index + 1])
-        folded = _folded_entry(parent, name)
-        if folded:
-            code, entry = folded
-            if code == "path-unreadable":
-                message = (
-                    f"the directory holding {so_far!r} cannot be listed, so "
-                    "its filesystem identity cannot be established"
-                )
-            else:
-                message = (
-                    f"{so_far!r} differs from the existing entry {entry!r} "
-                    "only by case or Unicode normalization"
-                )
-            return Problem(code=code, message=message, location=so_far)
-        if os.path.islink(current):
-            return Problem(
-                code="symlinked-path",
-                message=(f"{so_far!r} is a symlink — evidence reads never "
-                         "follow aliases inside or outside the repository"),
-                location=so_far,
-            )
-        if not os.path.lexists(current):
-            return None
-        if index != len(components) - 1 and not os.path.isdir(current):
-            return Problem(
-                code="path-not-a-directory",
-                message=f"{so_far!r} is not a directory",
-                location=so_far,
-            )
-
     try:
-        info = os.stat(current)
+        current_fd = os.open(
+            repo_root, os.O_RDONLY | directory | nofollow | cloexec
+        )
     except OSError as exc:
-        return Problem(
-            code="path-unreadable", message=f"cannot inspect {path!r}: {exc}",
-            location=path,
+        code = "symlinked-path" if exc.errno == errno.ELOOP else "repo-root-missing"
+        return _read_refusal(
+            code, f"cannot open repository root {repo_root!r}: {exc}", repo_root,
         )
-    if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
-        return Problem(
-            code="path-special-file",
-            message=f"{path!r} is neither a regular file nor a directory",
-            location=path,
-        )
-    if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
-        return Problem(
-            code="path-hardlinked",
-            message=(f"{path!r} has {info.st_nlink} hard links — its content "
-                     "does not have one repository identity"),
-            location=path,
-        )
-    return None
+
+    components = path.split("/")
+    try:
+        for index, name in enumerate(components):
+            so_far = "/".join(components[: index + 1])
+            try:
+                entries = os.listdir(current_fd)
+            except OSError as exc:
+                return _read_refusal(
+                    "path-unreadable",
+                    f"cannot list the directory holding {so_far!r}: {exc}",
+                    so_far,
+                )
+            if name not in entries:
+                folded = next(
+                    (entry for entry in entries
+                     if entry.casefold() == name.casefold()
+                     or unicodedata.normalize("NFC", entry)
+                     == unicodedata.normalize("NFC", name)),
+                    None,
+                )
+                if folded is not None:
+                    code = (
+                        "path-case-mismatch"
+                        if folded.casefold() == name.casefold()
+                        else "path-unicode-collision"
+                    )
+                    return _read_refusal(
+                        code,
+                        f"{so_far!r} differs from existing entry {folded!r}",
+                        so_far,
+                    )
+                return RepositoryReadHandle(path, "missing", None)
+
+            is_leaf = index == len(components) - 1
+            try:
+                before = os.stat(name, dir_fd=current_fd, follow_symlinks=False)
+            except OSError as exc:
+                return _read_refusal(
+                    "path-unreadable", f"cannot inspect {so_far!r}: {exc}",
+                    so_far,
+                )
+            if stat.S_ISLNK(before.st_mode):
+                return _read_refusal(
+                    "symlinked-path",
+                    f"{so_far!r} is a symlink — evidence reads never follow aliases",
+                    so_far,
+                )
+            if not is_leaf and not stat.S_ISDIR(before.st_mode):
+                return _read_refusal(
+                    "path-not-a-directory", f"{so_far!r} is not a directory",
+                    so_far,
+                )
+            if is_leaf and not (
+                    stat.S_ISREG(before.st_mode) or stat.S_ISDIR(before.st_mode)):
+                return _read_refusal(
+                    "path-special-file",
+                    f"{path!r} is neither a regular file nor a directory",
+                    path,
+                )
+            flags = os.O_RDONLY | nofollow | cloexec | nonblock
+            if not is_leaf:
+                flags |= directory
+            try:
+                next_fd = os.open(name, flags, dir_fd=current_fd)
+            except OSError as exc:
+                code = (
+                    "symlinked-path" if exc.errno == errno.ELOOP
+                    else "path-not-a-directory" if exc.errno == errno.ENOTDIR
+                    else "path-unreadable"
+                )
+                return _read_refusal(
+                    code, f"cannot open {so_far!r} without following aliases: {exc}",
+                    so_far,
+                )
+            os.close(current_fd)
+            current_fd = next_fd
+
+        info = os.fstat(current_fd)
+        if stat.S_ISREG(info.st_mode):
+            if info.st_nlink > 1:
+                return _read_refusal(
+                    "path-hardlinked",
+                    f"{path!r} has {info.st_nlink} hard links",
+                    path,
+                )
+            kind = "file"
+        elif stat.S_ISDIR(info.st_mode):
+            kind = "dir"
+        else:
+            return _read_refusal(
+                "path-special-file",
+                f"{path!r} is neither a regular file nor a directory",
+                path,
+            )
+        handle = RepositoryReadHandle(path, kind, current_fd)
+        current_fd = None
+        return handle
+    finally:
+        if current_fd is not None:
+            os.close(current_fd)
 
 
 def write_target_problem(path):
