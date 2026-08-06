@@ -137,6 +137,10 @@ def _whole_positive(value):
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _whole_nonnegative(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _reject_constant(name):
     raise ValueError(f"{name} is not JSON")
 
@@ -1398,11 +1402,16 @@ def _validate_work_order_shape(raw):
                 "each work-order unit must be an object",
                 f"work_order.units[{index}]",
             )
-        for name in ("ordinal", "line", "end_line"):
-            if not _whole_positive(unit.get(name)):
+        numeric_fields = (
+            ("ordinal", _whole_nonnegative, "non-negative"),
+            ("line", _whole_positive, "positive"),
+            ("end_line", _whole_positive, "positive"),
+        )
+        for name, validator, bound in numeric_fields:
+            if not validator(unit.get(name)):
                 return _invalid(
                     "sync-work-order-invalid-unit-metadata",
-                    f"work-order unit {name} must be a positive non-boolean integer",
+                    f"work-order unit {name} must be a {bound} non-boolean integer",
                     f"work_order.units[{index}].{name}",
                 )
     if not (_one_line(raw.get("session_id")) and _one_line(raw.get("chunk_id"))):

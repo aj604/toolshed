@@ -18,11 +18,16 @@ AS_OF = "2026-08-06"
 
 
 class SyncAcceptCommand(SyncRepoTestCase):
-    def fixture(self):
+    def fixture(self, first_assertion_at_ordinal_zero=False):
         repo = self.sync_repo()
-        self.write(repo, "docs/architecture.md", (
-            "# Architecture\n\nThe service has a newly judged CLI contract.\n"
-        ))
+        if first_assertion_at_ordinal_zero:
+            self.write(repo, "docs/architecture.md", (
+                "The service has a newly judged CLI contract.\n"
+            ))
+        else:
+            self.write(repo, "docs/architecture.md", (
+                "# Architecture\n\nThe service has a newly judged CLI contract.\n"
+            ))
         subprocess.run(["git", "-C", repo, "init", "-q", "-b", "main"], check=True)
         subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
         subprocess.run([
@@ -71,6 +76,18 @@ class SyncAcceptCommand(SyncRepoTestCase):
             json.loads(first.stdout), SyncAcceptance(report, proposal).to_dict()
         )
 
+    def test_cli_accepts_a_zero_based_ordinal(self):
+        repo, work, _ = self.fixture(first_assertion_at_ordinal_zero=True)
+
+        result = run_command(
+            "sync-accept", "--repo", repo, "--as-of", AS_OF,
+            "--work-order", os.path.join(repo, "tmp/work.json"),
+            "--judgments", os.path.join(repo, "tmp/judgments.json"),
+        )
+
+        self.assertEqual(work["units"][0]["ordinal"], 0)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_unreadable_input_is_typed_and_prints_no_traceback(self):
         repo, _, _ = self.fixture()
         result = run_command(
@@ -116,7 +133,7 @@ class SyncAcceptCommand(SyncRepoTestCase):
         )
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
-    def test_cli_refuses_boolean_and_float_numeric_substitutions(self):
+    def test_cli_refuses_invalid_numeric_substitutions(self):
         repo, original, _ = self.fixture()
         argv = (
             "sync-accept", "--repo", repo, "--as-of", AS_OF,
@@ -129,6 +146,8 @@ class SyncAcceptCommand(SyncRepoTestCase):
             ("chunk-float", lambda work: work.update(total_chunk_count=1.0),
              "sync-work-order-invalid-chunk-count"),
             ("ordinal-bool", lambda work: work["units"][0].update(ordinal=True),
+             "sync-work-order-invalid-unit-metadata"),
+            ("ordinal-negative", lambda work: work["units"][0].update(ordinal=-1),
              "sync-work-order-invalid-unit-metadata"),
             ("line-float", lambda work: work["units"][0].update(
                 line=float(work["units"][0]["line"])),

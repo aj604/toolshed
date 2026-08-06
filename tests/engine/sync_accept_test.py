@@ -29,9 +29,13 @@ class PhaseTwoRepo(SyncRepoTestCase):
         with open(os.path.join(repo, path), "rb") as fh:
             return fh.read()
 
-    def committed_repo(self, changed=False):
+    def committed_repo(self, changed=False, first_assertion_at_ordinal_zero=False):
         repo = self.sync_repo()
-        if changed:
+        if first_assertion_at_ordinal_zero:
+            self.write(repo, "docs/architecture.md", (
+                "The service has a newly judged contract.\n"
+            ))
+        elif changed:
             self.write(repo, "docs/architecture.md", (
                 "# Architecture\n\nThe service has a newly judged contract.\n"
             ))
@@ -74,6 +78,18 @@ class PhaseTwoRepo(SyncRepoTestCase):
 
 
 class EmptyAndComplete(PhaseTwoRepo):
+    def test_zero_based_ordinal_flows_through_phase_two(self):
+        repo = self.committed_repo(first_assertion_at_ordinal_zero=True)
+        work = plan_sync(repo, AS_OF).work_order.to_dict()
+        judgment = self.valid_judgment(work["units"][0])
+
+        result = accept_sync_judgments(
+            repo, work, self.envelope(work, [judgment]), AS_OF
+        )
+
+        self.assertEqual(work["units"][0]["ordinal"], 0)
+        self.assertNotIsInstance(result, Invalid, result)
+
     def test_empty_order_flows_through_phase_two_without_a_request(self):
         repo = self.committed_repo()
         plan = plan_sync(repo, AS_OF)
@@ -229,6 +245,8 @@ class RefusalsAndPartial(PhaseTwoRepo):
             ("chunk-float", lambda work: work.update(total_chunk_count=1.0),
              "sync-work-order-invalid-chunk-count"),
             ("ordinal-bool", lambda work: work["units"][0].update(ordinal=True),
+             "sync-work-order-invalid-unit-metadata"),
+            ("ordinal-negative", lambda work: work["units"][0].update(ordinal=-1),
              "sync-work-order-invalid-unit-metadata"),
             ("line-float", lambda work: work["units"][0].update(
                 line=float(work["units"][0]["line"])),
