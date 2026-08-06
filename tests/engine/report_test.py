@@ -137,6 +137,12 @@ def coverage_payload(mode=COVERAGE_INCREMENTAL, units=None):
     return {"mode": mode, "units": units}
 
 
+def covered_record(units=None):
+    return dict(RECORD, units=list(
+        (UNIT_A, UNIT_B, UNIT_C) if units is None else units
+    ))
+
+
 def codes(result):
     return sorted(p.code for p in result.problems)
 
@@ -300,6 +306,7 @@ class VersionedUnitCoverage(unittest.TestCase):
         payload = report_payload(
             schema_version=REPORT_SCHEMA_VERSION,
             lineage=lineage_payload(audit_mode="incremental"),
+            records=[covered_record()],
             coverage=coverage_payload(),
         )
         payload.update(overrides)
@@ -343,6 +350,16 @@ class VersionedUnitCoverage(unittest.TestCase):
 
         self.assertEqual(codes(result), ["report-invalid-probe-coverage"])
 
+    def test_probe_observation_must_contain_evidence(self):
+        for observed in ({}, [], "", "   "):
+            with self.subTest(observed=observed):
+                coverage = coverage_payload()
+                coverage["units"][1]["probe"]["observed"] = observed
+
+                result = validate_report(self.extended_report(coverage=coverage))
+
+                self.assertEqual(codes(result), ["report-invalid-probe-coverage"])
+
     def test_carried_without_reason_and_originating_lineage_fails_closed(self):
         coverage = coverage_payload()
         coverage["units"][2] = {
@@ -372,6 +389,10 @@ class VersionedUnitCoverage(unittest.TestCase):
                 "documents": ["docs/architecture.md"],
                 "excluded": [],
             },
+            examined=[{
+                "scope": "docs/architecture.md",
+                "verified": [{"unit": UNIT_A}, {"unit": UNIT_B}, {"unit": UNIT_C}],
+            }],
         )
 
         result = validate_report(payload)
@@ -397,6 +418,59 @@ class VersionedUnitCoverage(unittest.TestCase):
         ))
 
         self.assertIsInstance(result, Report, result)
+
+    def test_coverage_cannot_omit_a_finding_unit(self):
+        coverage = coverage_payload()
+        coverage["units"] = []
+
+        result = validate_report(self.extended_report(coverage=coverage))
+
+        self.assertEqual(codes(result), ["report-coverage-not-derived"])
+        self.assertIn(UNIT_C, result.problems[0].message)
+
+    def test_coverage_cannot_add_an_unreported_unit(self):
+        coverage = coverage_payload()
+        coverage["units"].append({
+            "path": "docs/architecture.md", "unit": "8" * 64,
+            "source": "judged",
+        })
+
+        result = validate_report(self.extended_report(coverage=coverage))
+
+        self.assertEqual(codes(result), ["report-coverage-not-derived"])
+        self.assertIn("8" * 64, result.problems[0].message)
+
+    def test_coverage_path_and_unit_must_match_as_one_identity(self):
+        coverage = coverage_payload()
+        coverage["units"][0]["path"] = "docs/somewhere-else.md"
+
+        result = validate_report(self.extended_report(coverage=coverage))
+
+        self.assertEqual(codes(result), ["report-coverage-not-derived"])
+        self.assertIn("docs/somewhere-else.md", result.problems[0].message)
+
+    def test_verified_examined_units_are_part_of_the_exact_accounting(self):
+        payload = self.extended_report(
+            status=STATE_CLEAN,
+            records=[],
+            scope={
+                "basis": "documents affected by the requested commit range",
+                "coverage": SCOPE_DECLARED_ONLY,
+                "documents": ["docs/architecture.md"],
+                "excluded": [],
+            },
+            examined=[{
+                "scope": "docs/architecture.md",
+                "verified": [{"unit": UNIT_A}, {"unit": UNIT_B}, {"unit": UNIT_C}],
+            }],
+        )
+
+        self.assertIsInstance(validate_report(payload), Report)
+
+        payload["coverage"]["units"].pop()
+        self.assertEqual(
+            codes(validate_report(payload)), ["report-coverage-not-derived"]
+        )
 
 
 class LineageFields(unittest.TestCase):
@@ -1250,6 +1324,7 @@ class LoadReport(GitRepoTestCase):
         payload = report_payload(
             schema_version=REPORT_SCHEMA_VERSION,
             lineage=lineage_payload(audit_mode="incremental"),
+            records=[covered_record()],
             coverage=coverage_payload(),
         )
         repo = self.repo({"report.json": json.dumps(payload)})
@@ -1258,6 +1333,35 @@ class LoadReport(GitRepoTestCase):
 
         self.assertIsInstance(result, Report, result)
         self.assertEqual(result.to_dict()["coverage"], coverage_payload())
+
+    def test_load_refuses_missing_extra_and_mismatched_coverage_identities(self):
+        cases = []
+        missing = coverage_payload()
+        missing["units"] = []
+        cases.append(("missing", missing))
+        extra = coverage_payload()
+        extra["units"].append({
+            "path": "docs/architecture.md", "unit": "8" * 64,
+            "source": "judged",
+        })
+        cases.append(("extra", extra))
+        mismatched = coverage_payload()
+        mismatched["units"][0]["path"] = "docs/somewhere-else.md"
+        cases.append(("mismatched", mismatched))
+
+        for name, coverage in cases:
+            with self.subTest(case=name):
+                payload = report_payload(
+                    schema_version=REPORT_SCHEMA_VERSION,
+                    lineage=lineage_payload(audit_mode="incremental"),
+                    records=[covered_record()],
+                    coverage=coverage,
+                )
+                repo = self.repo({"report.json": json.dumps(payload)})
+
+                result = load_report(os.path.join(repo, "report.json"))
+
+                self.assertEqual(codes(result), ["report-coverage-not-derived"])
 
     def test_an_unparseable_report_file_is_invalid(self):
         repo = self.repo({"report.json": "{ not json"})

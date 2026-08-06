@@ -598,10 +598,18 @@ Schema version 2 adds a closed, document-bound proof of how each covered unit go
 ```
 
 `judged` is a fresh model judgment and carries no variant fields. `probe` must name the probe
-kind and attach finite, bounded observed evidence. `carried` must say why reuse was safe and
+kind and attach non-empty, finite, bounded observed evidence. `carried` must say why reuse was safe and
 name both the originating report digest and commit. The `(path, unit)` identity is unique in
 the list; an unknown source, missing variant field, duplicate, malformed digest, or malformed
 lineage is a typed refusal and the report has no content.
+
+The identity set is derived, not trusted: it is exactly every finding's `(path, units[])` plus
+every clean answer in `examined[].verified[]` (paired with that examined entry's `scope`). A v2
+finding must therefore name its path and non-empty unit list, and each examined entry must carry
+its `verified` list even when that list is empty. Missing an outcome identity, adding an identity
+the report does not contain, or pairing a real unit with a different path is
+`report-coverage-not-derived`. Multiple related findings may still name an overlapping unit;
+reconciliation owns that relationship, while the unit declares one coverage source here.
 
 `coverage.mode` is `incremental` or `full-reconciliation`. It is deliberately separate from
 `scope.coverage`: the latter accounts for documents in the inventory, while this token bounds

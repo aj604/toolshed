@@ -1292,10 +1292,16 @@ def _coverage(raw, bad, audit_mode):
                         "probe that ran",
                         f"{where}.probe.kind")
                     valid = False
-                if probe["observed"] is None or too_deep or nonfinite:
+                observed = probe["observed"]
+                empty_observation = (
+                    observed is None
+                    or isinstance(observed, str) and not _nonempty_str(observed)
+                    or isinstance(observed, (dict, list)) and not observed
+                )
+                if empty_observation or too_deep or nonfinite:
                     bad("report-invalid-probe-coverage",
                         f"coverage.units[{index}].probe.observed must attach "
-                        "finite, bounded observed evidence",
+                        "non-empty, finite, bounded observed evidence",
                         f"{where}.probe.observed")
                     valid = False
         elif source == COVERAGE_CARRIED:
@@ -1341,6 +1347,94 @@ def _coverage(raw, bad, audit_mode):
         else:
             ok = False
     return Coverage(mode=mode, units=tuple(entries)) if ok else None
+
+
+def _covered_unit_identities(records, examined, bad):
+    """The exact document-bound units whose outcomes the report carries.
+
+    Findings carry their identities as `path` plus `units`; clean VERIFIED
+    answers carry theirs in each examined document's `verified` entries. Schema
+    v1 deliberately leaves both as producer-owned detail. Schema v2 needs this
+    stricter read because its coverage list claims to account for every one.
+    """
+    identities, ok = set(), True
+
+    def add(path, unit, where):
+        nonlocal ok
+        if not _printable(path) or not (
+            isinstance(unit, str) and DIGEST.fullmatch(unit)
+        ):
+            bad("report-invalid-covered-unit",
+                f"{where} must identify a covered unit with a printable "
+                "document path and sha256 unit digest",
+                where)
+            ok = False
+            return
+        identities.add((path, unit))
+
+    for index, record in enumerate(records):
+        path, units = record.extra.get("path"), record.extra.get("units")
+        where = f"records[{index}]"
+        if not _printable(path) or not (
+            isinstance(units, list) and units
+        ):
+            bad("report-invalid-covered-unit",
+                f"{where} in a schema version {REPORT_SCHEMA_VERSION} report "
+                "must name a printable 'path' and a non-empty 'units' list so "
+                "its coverage sources can be accounted for",
+                where)
+            ok = False
+            continue
+        for unit_index, unit in enumerate(units):
+            add(path, unit, f"{where}.units[{unit_index}]")
+
+    for index, entry in enumerate(examined):
+        verified = entry.detail.get("verified")
+        where = f"examined[{index}].verified"
+        if not isinstance(verified, list):
+            bad("report-invalid-covered-unit",
+                f"{where} must be a list in a schema version "
+                f"{REPORT_SCHEMA_VERSION} report — unit coverage cannot be "
+                "derived from summary counts",
+                where)
+            ok = False
+            continue
+        for unit_index, item in enumerate(verified):
+            unit_where = f"{where}[{unit_index}].unit"
+            if not isinstance(item, dict) or "unit" not in item:
+                bad("report-invalid-covered-unit",
+                    f"{where}[{unit_index}] must be an object naming its "
+                    "deterministic 'unit' identity",
+                    f"{where}[{unit_index}]")
+                ok = False
+                continue
+            add(entry.scope, item["unit"], unit_where)
+    return identities if ok else None
+
+
+def _coverage_accounting(records, examined, coverage, bad):
+    """Require v2's coverage identities to equal its actual report outcomes."""
+    covered = _covered_unit_identities(records, examined, bad)
+    if covered is None:
+        return
+    declared = {(entry.path, entry.unit) for entry in coverage.units}
+    missing = sorted(covered - declared)
+    extra = sorted(declared - covered)
+    if not missing and not extra:
+        return
+
+    def summary(identities):
+        shown = [f"{path}:{unit}" for path, unit in identities[:5]]
+        if len(identities) > 5:
+            shown.append(f"+{len(identities) - 5} more")
+        return canonical(shown)
+
+    bad("report-coverage-not-derived",
+        "coverage.units is not the exact set of covered report units — "
+        f"missing {summary(missing)}, extra {summary(extra)}. Every finding "
+        "unit and every examined VERIFIED unit declares exactly one coverage "
+        "source; unrelated identities cannot be added",
+        "coverage.units")
 
 
 def _scope_summary(paths, limit=5):
@@ -1728,6 +1822,11 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
         )
         if extended and "coverage" in payload else None
     )
+    if (
+        extended and records is not None and examined is not None
+        and coverage is not None
+    ):
+        _coverage_accounting(records, examined, coverage, bad)
 
     status = payload.get("status")
     if "status" in payload and status not in CARRIED_STATES:
