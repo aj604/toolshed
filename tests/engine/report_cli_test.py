@@ -20,6 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from report_test import (  # noqa: E402
     CONFIG_DIGEST,
     GitRepoTestCase,
+    coverage_payload,
+    covered_record,
     lineage_payload,
     report_payload,
 )
@@ -27,6 +29,7 @@ from support import ENGINE, run_command as run  # noqa: E402
 
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import load_report  # noqa: E402
+from doclifecycle.report import REPORT_SCHEMA_VERSION  # noqa: E402
 from doclifecycle.results import (  # noqa: E402
     STATE_CLEAN,
     STATE_PARTIAL,
@@ -65,6 +68,71 @@ class ValidateCommand(ReportCommandTestCase):
 
         self.assertEqual(result.returncode, EXIT_OK, result.stderr)
         self.assertEqual(json.loads(result.stdout)["status"], "clean")
+
+    def test_a_v2_report_with_per_unit_sources_reaches_the_cli_seam(self):
+        payload = report_payload(
+            schema_version=REPORT_SCHEMA_VERSION,
+            lineage=lineage_payload(audit_mode="incremental"),
+            records=[covered_record()],
+            coverage=coverage_payload(),
+        )
+        path = self.report_file(payload)
+
+        result = run("validate-report", "--report", path)
+
+        self.assertEqual(result.returncode, EXIT_OK, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["coverage"], coverage_payload())
+
+    def test_a_malformed_v2_coverage_source_is_a_cli_refusal(self):
+        coverage = coverage_payload()
+        del coverage["units"][1]["probe"]["observed"]
+        path = self.report_file(report_payload(
+            schema_version=REPORT_SCHEMA_VERSION,
+            lineage=lineage_payload(audit_mode="incremental"),
+            coverage=coverage,
+        ))
+
+        result = run("validate-report", "--report", path)
+
+        self.assertEqual(result.returncode, EXIT_INVALID)
+        self.assertEqual(
+            [problem["code"] for problem in json.loads(result.stdout)["problems"]],
+            ["report-invalid-probe-coverage"],
+        )
+        self.assertIn("report-invalid-probe-coverage", result.stderr)
+
+    def test_cli_refuses_missing_extra_and_mismatched_coverage_identities(self):
+        cases = []
+        missing = coverage_payload()
+        missing["units"] = []
+        cases.append(("missing", missing))
+        extra = coverage_payload()
+        extra["units"].append({
+            "path": "docs/architecture.md", "unit": "8" * 64,
+            "source": "judged",
+        })
+        cases.append(("extra", extra))
+        mismatched = coverage_payload()
+        mismatched["units"][0]["path"] = "docs/somewhere-else.md"
+        cases.append(("mismatched", mismatched))
+
+        for name, coverage in cases:
+            with self.subTest(case=name):
+                path = self.report_file(report_payload(
+                    schema_version=REPORT_SCHEMA_VERSION,
+                    lineage=lineage_payload(audit_mode="incremental"),
+                    records=[covered_record()],
+                    coverage=coverage,
+                ))
+
+                result = run("validate-report", "--report", path)
+
+                self.assertEqual(result.returncode, EXIT_INVALID)
+                self.assertEqual(
+                    [problem["code"] for problem in
+                     json.loads(result.stdout)["problems"]],
+                    ["report-coverage-not-derived"],
+                )
 
     def test_a_partial_run_is_not_a_success(self):
         path = self.report_file(report_payload(

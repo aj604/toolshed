@@ -43,7 +43,8 @@ applier — the only component that writes a repository document.
 | `doclifecycle/cli.py`, `__main__.py`, `doc-lifecycle.py` | argv parsing and exit codes only |
 
 `__init__.py` holds the release identity and the versions lineage pins:
-`ARTIFACT_SCHEMA_VERSION` (the shape of the payloads below), `RULESET_VERSION` (the audit
+`ARTIFACT_SCHEMA_VERSION` (the unchanged version of the shared payloads below),
+`report.REPORT_SCHEMA_VERSION` (the report-only extension), `RULESET_VERSION` (the audit
 policy), and `PLUGIN_COMPATIBILITY_VERSION` (the engine-compatibility marker written to the
 existing `plugin_version` lineage field). `PLUGIN_VERSION` must track
 `plugins/doc-lifecycle/.claude-plugin/plugin.json`; `tests/engine/report_test.py` fails when
@@ -395,6 +396,12 @@ report's top level, where every other engine artifact carries it, rather than be
 twice in two places that could disagree. A version this engine does not read is
 `report-schema-version`: migrate the report, never guess at a shape.
 
+The existing report contract is schema version **1** and remains readable with exactly its
+previous fields and digest. Schema version **2** is a report-only extension: it requires the
+unit-level `coverage` block below, while version 1 rejects that field instead of silently
+retrofitting new meaning onto an old artifact. Advancing the report did not advance inventory,
+plan, or other artifact schemas.
+
 Path *authorization* for `evidence_boundary` globs — traversal, symlinks, forbidden target
 classes — is issue #67's single owner. The contract checks shape and log hygiene only; a
 boundary is lineage here, never opened.
@@ -571,6 +578,46 @@ PR #87, finding N3). Requiring a scope is the structural fix rather than constra
 current inventory, because the latter would need a `repo_root` this validation phase does not
 have — and costs nothing in practice, because `audit_drift` always emits a scope alongside its
 recorded coverage.
+
+### Version 2 unit coverage sources
+
+Schema version 2 adds a closed, document-bound proof of how each covered unit got its answer:
+
+```json
+"coverage": {
+  "mode": "incremental",
+  "units": [
+    {"path": "docs/architecture.md", "unit": "<sha256>", "source": "judged"},
+    {"path": "docs/architecture.md", "unit": "<sha256>", "source": "probe",
+     "probe": {"kind": "path_exists", "observed": {"path": "src/app.py", "kind": "file"}}},
+    {"path": "docs/architecture.md", "unit": "<sha256>", "source": "carried",
+     "reason": "declared dependencies are unchanged",
+     "lineage": {"report_digest": "<sha256>", "commit": "<full git id>"}}
+  ]
+}
+```
+
+`judged` is a fresh model judgment and carries no variant fields. `probe` must name the probe
+kind and attach non-empty, finite, bounded observed evidence. `carried` must say why reuse was safe and
+name both the originating report digest and commit. The `(path, unit)` identity is unique in
+the list; an unknown source, missing variant field, duplicate, malformed digest, or malformed
+lineage is a typed refusal and the report has no content.
+
+The identity set is derived, not trusted: it is exactly every finding's `(path, units[])` plus
+every clean answer in `examined[].verified[]` (paired with that examined entry's `scope`). A v2
+finding must therefore name its path and non-empty unit list, and each examined entry must carry
+its `verified` list even when that list is empty. Missing an outcome identity, adding an identity
+the report does not contain, or pairing a real unit with a different path is
+`report-coverage-not-derived`. Multiple related findings may still name an overlapping unit;
+reconciliation owns that relationship, while the unit declares one coverage source here.
+
+`coverage.mode` is `incremental` or `full-reconciliation`. It is deliberately separate from
+`scope.coverage`: the latter accounts for documents in the inventory, while this token bounds
+the unit-reconciliation claim. An `incremental` lineage may only carry `incremental` here;
+claiming `full-reconciliation` is `report-incremental-reconciliation-coverage`. Conversely,
+only a `full` audit may make the full-reconciliation claim. The block participates in the
+report digest. Finding records do not: evidence and complete STALE replacements keep their
+existing shapes, so reconciliation, approval, and apply consume them unchanged.
 
 ### The five result states
 

@@ -45,7 +45,12 @@ from doclifecycle.bloat import record_verdicts
 from doclifecycle.context import build_context_index
 from doclifecycle.digest import sha256_canonical
 from doclifecycle.reconcile import reconcile
-from doclifecycle.report import EvidenceBoundary, validate_report
+from doclifecycle.report import (
+    COVERAGE_FULL_RECONCILIATION,
+    REPORT_SCHEMA_VERSION,
+    EvidenceBoundary,
+    validate_report,
+)
 from doclifecycle.results import STATE_CLEAN, STATE_STALE, Invalid
 
 NEW_SENTENCE = "The payment service charges a flat 2.5% fee."
@@ -174,6 +179,51 @@ class AppliesApprovedPlan(ApplierTestCase):
         # else, and nothing was staged or committed.
         self.assertEqual(self.status_paths(self.repo), [DOC_A])
         self.assertEqual(self.staged_paths(self.repo), [])
+
+    def test_v2_stale_evidence_and_complete_replacement_reach_apply_unchanged(self):
+        unit = self.units(self.repo, DOC_A)[0]
+        evidence = {
+            "source": "src/payments.py",
+            "observed": "the configured fee is 2.5%, not the documented 2%",
+        }
+        record = self.finding(
+            "DRIFT-001", "STALE", DOC_A, [unit],
+            evidence=evidence, fix=NEW_SENTENCE,
+        )
+        report = self.report(
+            [record],
+            schema_version=REPORT_SCHEMA_VERSION,
+            coverage={
+                "mode": COVERAGE_FULL_RECONCILIATION,
+                "units": [{"path": DOC_A, "unit": unit, "source": "judged"}],
+            },
+        )
+
+        carried = report.records[0].to_dict()
+        self.assertEqual(carried["evidence"], evidence)
+        self.assertEqual(carried["fix"], NEW_SENTENCE)
+        self.assertNotIsInstance(reconcile(report), Invalid)
+        approval = mint_approval_set(
+            report, [record["digest"]], repo_root=self.repo, minter=HUMAN,
+        )
+        self.assertNotIsInstance(approval, Invalid)
+
+        post = DOC_A_TEXT.replace(OLD_SENTENCE, NEW_SENTENCE)
+        plan = self.plan(approval, [{
+            "op": "replace",
+            "record": record["digest"],
+            "target_class": "documentation",
+            "path": DOC_A,
+            "start_line": 3,
+            "end_line": 3,
+            "preimage": OLD_SENTENCE,
+            "text": carried["fix"],
+        }], {DOC_A: sha256_text(post)})
+
+        result = self.apply(plan, approval, report=report)
+
+        self.assertIsInstance(result, ApplyResult, result)
+        self.assertEqual(self.read(self.repo, DOC_A), post)
 
     def test_result_names_the_plan_and_the_approval(self):
         report, approval, plan, _ = self.replace_fixture()
