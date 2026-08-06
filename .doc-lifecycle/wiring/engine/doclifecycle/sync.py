@@ -18,7 +18,13 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION, PLUGIN_VERSION, RULESET_VERSION
-from .digest import load_strict_json, sha256_bytes, sha256_canonical, sha256_file
+from .digest import (
+    canonical,
+    load_strict_json,
+    sha256_bytes,
+    sha256_canonical,
+    sha256_file,
+)
 from .drift import (
     DEFAULT_EVIDENCE,
     OBLIGATION_ANCHOR,
@@ -1379,6 +1385,26 @@ def _validate_work_order_shape(raw):
             "sync-work-order-invalid-shape", "work-order units must be a list",
             "work_order.units",
         )
+    if not _whole_positive(raw.get("total_chunk_count")):
+        return _invalid(
+            "sync-work-order-invalid-chunk-count",
+            "work-order total_chunk_count must be a positive non-boolean integer",
+            "work_order.total_chunk_count",
+        )
+    for index, unit in enumerate(raw["units"]):
+        if not isinstance(unit, dict):
+            return _invalid(
+                "sync-work-order-invalid-unit-metadata",
+                "each work-order unit must be an object",
+                f"work_order.units[{index}]",
+            )
+        for name in ("ordinal", "line", "end_line"):
+            if not _whole_positive(unit.get(name)):
+                return _invalid(
+                    "sync-work-order-invalid-unit-metadata",
+                    f"work-order unit {name} must be a positive non-boolean integer",
+                    f"work_order.units[{index}].{name}",
+                )
     if not (_one_line(raw.get("session_id")) and _one_line(raw.get("chunk_id"))):
         return _invalid(
             "sync-work-order-invalid-shape",
@@ -1403,6 +1429,15 @@ def _validate_work_order_shape(raw):
 def _expected_orchestration_refusal(raw, expected_session_id, expected_chunk_id,
                                     expected_total_chunk_count):
     """Compare caller-supplied trusted topology before any repository replan."""
+    if (
+        expected_total_chunk_count is not None
+        and not _whole_positive(expected_total_chunk_count)
+    ):
+        return _invalid(
+            "sync-invalid-expected-binding",
+            "expected_total_chunk_count must be a positive non-boolean integer",
+            "expected_total_chunk_count",
+        )
     if expected_session_id is not None and raw["session_id"] != expected_session_id:
         return _invalid(
             "sync-wrong-session",
@@ -1468,7 +1503,15 @@ def _binding_refusal(raw, fresh, expected_session_id, expected_chunk_id,
     # The digests bind current state; this exact comparison also refuses a
     # spliced or edited unit list under otherwise current bindings.
     for name in ("mode", "budget", "units"):
-        if raw[name] != expected[name]:
+        try:
+            exact = canonical(raw[name]) == canonical(expected[name])
+        except (TypeError, ValueError, RecursionError):
+            return _invalid(
+                "sync-work-order-invalid-shape",
+                f"work-order {name} must be strict, bounded JSON data",
+                f"work_order.{name}",
+            )
+        if not exact:
             return _invalid(
                 "sync-stale-chunk",
                 f"work-order {name} is not the phase-1 chunk for these bindings",

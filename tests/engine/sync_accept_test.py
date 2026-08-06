@@ -222,6 +222,43 @@ class RefusalsAndPartial(PhaseTwoRepo):
                 ), "sync-judgment-invalid-identity")
                 self.assertEqual(adapter.request_count, 1)
 
+    def test_work_order_numeric_bindings_are_type_exact(self):
+        cases = (
+            ("chunk-bool", lambda work: work.update(total_chunk_count=True),
+             "sync-work-order-invalid-chunk-count"),
+            ("chunk-float", lambda work: work.update(total_chunk_count=1.0),
+             "sync-work-order-invalid-chunk-count"),
+            ("ordinal-bool", lambda work: work["units"][0].update(ordinal=True),
+             "sync-work-order-invalid-unit-metadata"),
+            ("line-float", lambda work: work["units"][0].update(
+                line=float(work["units"][0]["line"])),
+             "sync-work-order-invalid-unit-metadata"),
+        )
+        for name, mutate, code in cases:
+            with self.subTest(name=name):
+                work = json.loads(json.dumps(self.work))
+                mutate(work)
+                adapter = FakeJudgmentAdapter.partial()
+                self.assert_refused(accept_sync_judgments(
+                    self.repo_root, work, adapter.request(work), AS_OF,
+                ), code)
+                self.assertEqual(adapter.request_count, 1)
+
+        custom = plan_sync(
+            self.repo_root, AS_OF, session_id="session-types",
+            chunk_id="chunk-types", total_chunk_count=2,
+        ).work_order.to_dict()
+        for count in (True, 2.0):
+            with self.subTest(expected_count=count):
+                adapter = FakeJudgmentAdapter.partial()
+                self.assert_refused(accept_sync_judgments(
+                    self.repo_root, custom, adapter.request(custom), AS_OF,
+                    expected_session_id="session-types",
+                    expected_chunk_id="chunk-types",
+                    expected_total_chunk_count=count,
+                ), "sync-invalid-expected-binding")
+                self.assertEqual(adapter.request_count, 1)
+
     def test_partial_and_denied_are_partial_without_an_extra_request(self):
         adapter = FakeJudgmentAdapter.partial()
         response = adapter.request(self.work)

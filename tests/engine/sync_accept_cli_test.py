@@ -116,6 +116,38 @@ class SyncAcceptCommand(SyncRepoTestCase):
         )
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
+    def test_cli_refuses_boolean_and_float_numeric_substitutions(self):
+        repo, original, _ = self.fixture()
+        argv = (
+            "sync-accept", "--repo", repo, "--as-of", AS_OF,
+            "--work-order", os.path.join(repo, "tmp/work.json"),
+            "--judgments", os.path.join(repo, "tmp/judgments.json"),
+        )
+        cases = (
+            ("chunk-bool", lambda work: work.update(total_chunk_count=True),
+             "sync-work-order-invalid-chunk-count"),
+            ("chunk-float", lambda work: work.update(total_chunk_count=1.0),
+             "sync-work-order-invalid-chunk-count"),
+            ("ordinal-bool", lambda work: work["units"][0].update(ordinal=True),
+             "sync-work-order-invalid-unit-metadata"),
+            ("line-float", lambda work: work["units"][0].update(
+                line=float(work["units"][0]["line"])),
+             "sync-work-order-invalid-unit-metadata"),
+        )
+        for name, mutate, code in cases:
+            with self.subTest(name=name):
+                work = json.loads(json.dumps(original))
+                mutate(work)
+                self.write(repo, "tmp/work.json", json.dumps(work))
+
+                result = run_command(*argv)
+
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(
+                    json.loads(result.stdout)["problems"][0]["code"], code
+                )
+                self.assertNotIn("Traceback", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
