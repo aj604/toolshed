@@ -25,13 +25,15 @@ half and the component list a later reader can re-execute.
 
 ## The root cause this record kept demonstrating on itself
 
-The same defect recurred in every review round below, and again after the record had shipped —
-including in the correction that closed it. A human caught every instance; none was caught by the
-gate:
+The retained review history below records the same defect recurring before merge and again after
+the record had shipped — including in the correction that addressed it. Because #229 was
+squash-merged, the repository does not preserve every intermediate review state or how each
+instance was found. The repository-backed claims below are limited to the merged artifacts.
 
 The table below quotes the wrong numbers deliberately — it is the record of what went wrong, so
-every claim in it is false by construction. It is fenced from `sign-off-record_test.py` for that
-reason; see the note under "Two boundaries" about why fencing it is not the same as excusing it.
+every entry in its Claim column is false by construction. It is fenced from
+`sign-off-record_test.py` for that reason; see "Boundaries that suite deliberately keeps" below
+for why fencing it is not the same as excusing it.
 
 <!-- BEGIN QUOTED-CLAIMS -->
 
@@ -44,18 +46,19 @@ reason; see the note under "Two boundaries" about why fencing it is not the same
 | 4 | "28/28 suites passed", ×3 | 29/29 once this guard existed | reviewer |
 | 4 | "60 suites wired" | 61 once this guard existed | reviewer |
 | shipped in #229 | "inside the 28" | the script-suite total, one higher | after merge |
-| shipped in #229 | "a release tag matching `.doc-lifecycle/installed-version` (v0.46.9)" | that file reads 0.46.10, bumped by this record's own commit | review of this correction |
-| shipped in #229 | "Seven were wired to no criterion before this" | twelve of the seventeen were | review of this correction |
-| shipped in #229 | "#168 has zero comments" | it has two | review of this correction |
-| shipped in #229 | "Two boundaries that suite deliberately keeps" | three bullets follow it | review of this correction |
-| this correction | "three lines above" the totals round 4 fixed | four lines below them | review of this correction |
+| shipped in #229 | "a release tag matching `.doc-lifecycle/installed-version` (v0.46.9)" | at `713de63`, that file reads 0.46.10 | review of this correction |
+| shipped in #229 | "Seven were wired to no criterion before this" | at `713de63`, the manifest comparison shows twelve of seventeen | review of this correction |
+| shipped in #229 | "#168 has zero comments" | as reviewed on 2026-08-05, the issue has two | review of this correction |
+| shipped in #229 | "Two boundaries that suite deliberately keeps" | at `713de63`, three bullets follow that heading | review of this correction |
+| this correction | "three lines above" the totals round 4 fixed | at `713de63`, the row is below both totals | review of this correction |
 
 <!-- END QUOTED-CLAIMS -->
 
 **The install-parity row is the seventh instance, and the first to ship.** It merged in #229 in
-this record's own gate table, four lines below the two totals round 4 had corrected in that same
-table, and `sign-off-record_test.py` — added in round 4 for exactly this class — stayed green on
-it. Its derived checks match the phrasings that had drifted, `N/N suite` and `N suites wired`;
+this record's own gate table, beneath the two totals the record says its final review round had
+corrected, and `sign-off-record_test.py` — added in that round for exactly this class — stayed
+green on it. Its derived checks match the phrasings that had drifted, `N/N suite` and
+`N suites wired`;
 the parenthetical quoted in that row is a third way of saying the script-suite total and matches
 neither. **The guard derived the instances it had seen, not the class.** No retained artifact
 records how it was found; what the repository shows is that `713de63` carries it and that the
@@ -69,9 +72,9 @@ sweep of the correction above, given no list of terms to look for, found four fu
 already in this file — a version literal contradicting the lockfile this same ticket bumped, a
 count of previously-unpinned suites, a count of an issue's comments, and a count of the bullets
 under a heading — plus one in the correction itself, the misstated direction now in the last row.
-Every one of them is this defect class, and the new check flags none of them: two are suite counts
-written as words ("Seven were wired…", "Two boundaries…"), which it cannot see by design, and the
-rest count things no tool here enumerates. **The guard is one narrow instrument, not a closing of
+Every one of them is this defect class, and the new check flags none of them: one is a suite count
+written as words ("Seven were wired…"), another counts bullets under a heading, and the rest count
+things no tool here enumerates. **The guard is one narrow instrument, not a closing of
 the class.** Its measured reach is on the class rather than here, because the check
 itself forbids this record from stating that reach in digits — a real cost of the design, noted
 rather than worked around. What can be said in prose is the shape: most paragraphs in this record
@@ -82,10 +85,10 @@ And in a further instance the drifting claim was not a number but a *provenance*
 asserted that its three reviewers "never reported" two defects, when in fact one reviewer found
 both and its report was lost to a race (see `reviewer-leaf-output-verbatim.md`).
 
-**Round 4's pair is the sharpest of the instances caught before merge, and it is self-inflicted.**
-Adding this guard's own suite raised both the script-suite and the wired-suite total by one,
-invalidating four claims in the same commit whose stated purpose was to close this defect class.
-Extracting the previous commit and running the gate there shows what it then produced:
+**The final round's pair is the sharpest pre-merge instance in the retained record.** Adding this
+guard's own suite raised both the script-suite and the wired-suite total by one, invalidating four
+claims in the correction. The retained record reports these as the preceding run's output; #229's
+squash merge means that intermediate commit is not reproducible from repository history:
 
 <!-- BEGIN QUOTED-CLAIMS -->
 
@@ -112,9 +115,9 @@ number typed twice: the pinned-suite count (from `release-manifest.py`'s own `GA
 the script-suite total (from `run-script-suites.py`'s own glob), and the wired-suite total (from
 `release-manifest.py`'s own `audit()`). It also checks every pinned suite exists, holds every
 engine-test count in the authored prose to agreeing with every other, and holds the race audit's
-totals to its own table. **Every numeric drift in the table above was replanted and confirmed to
-fail it** — including round 4's pair, which the extended guard flagged before any prose was
-corrected, naming both the stated and the real number.
+totals to its own table. **The numeric drifts in the table's first four review rounds were
+replanted and confirmed to fail the derived checks.** The later rows include both the phrasing
+that motivated the new class-wide check and claim shapes no numeric detector here covers.
 
 Those checks each pin a phrasing, which is why the seventh instance walked past all of them.
 `NoUncheckedGateCountReachesTheProse` is the one written against the class instead: in any
@@ -127,32 +130,31 @@ for as long as that number stays right — a hand-typed total goes stale again o
 added, in any phrasing, including one nobody has written yet. What it still cannot see is
 spelled-out totals, one- and four-digit counts, a wrong number that happens to equal a different
 derived total, a suite named by bare filename rather than by its `tests/scripts/` path, and every
-kind of non-numeric drift, the provenance error above included. Those limits are listed on the
-class rather than left to be discovered — and each is planted into synthetic prose by
-`ThisCheckFiresOnThePhrasingsItClaimsToCatch`, which asserts the verdict for the phrasings the
-check catches and for the ones it does not. An exit widened to quiet a false positive, or a
-stated limit that has stopped being one, is a reported failure rather than a quieter guard.
+kind of non-numeric drift, the provenance error above included. The numeric detector's limits are
+listed on the class rather than left to be discovered, and each is planted into synthetic prose
+by `ThisCheckFiresOnThePhrasingsItClaimsToCatch`, which asserts the verdict for the phrasings the
+check catches and for the ones it does not. The separate fence exit is planted against
+`authored()` too. An exit widened to quiet a false positive, or a stated limit that has stopped
+being one, is a reported failure rather than a quieter guard.
 
 The suite is pinned to its own gate criterion, `sign-off record integrity`. It was briefly not,
 and was therefore silently deletable — the manifest guard stayed green without it, which is the
-same US40 defect this ticket fixed for seven other suites in round 1, recurring on the one suite
-that guards the record. That is not a claim about unpinned suites generally: roughly a third of
-this tree's suites are pinned to no criterion and are fine that way. This one is named because
-deleting it would restore exactly the blind spot it exists to close.
+same US40 defect this ticket fixed elsewhere, recurring on the one suite that guards the record.
+That is not a claim that every unpinned suite is defective; this suite is named because deleting
+it would restore exactly the blind spot it exists to close.
 
 Boundaries that suite deliberately keeps:
 
 - **It exempts the quoted blocks, not the files holding them.** The reviewers ran before #203
   changed anything, so their reports state the gate totals of that moment — correctly, and
   permanently. Editing one to satisfy a consistency check would be falsifying evidence. But the
-  two quote-bearing files also carry ~66 lines of *authored* analysis, including the corrected
-  provenance narrative, and a file-level exemption left that prose unguarded: a deliberately
+  two quote-bearing files also carry substantial *authored* analysis alongside the quotations,
+  and a file-level exemption left that prose unguarded: a deliberately
   false sentence about the suite and engine counts, planted in an authored header, passed the
   entire gate. The boundary is now explicit — `<!-- BEGIN VERBATIM -->` / `<!-- END VERBATIM -->`
-  markers, placed by matching each quotation against its session transcript and refusing unless
-  it matched verbatim exactly once, so the markers sit outside the quote and change not one
-  character of it. Inferring the boundary from the surrounding `---` rules would have been wrong:
-  several reviewers' reports contain `---` lines. Tests keep the markers balanced in every record
+  markers placed outside the retained quotations. Inferring the boundary from the surrounding
+  `---` rules would have been wrong: one reviewer's report contains those lines. Tests keep the
+  markers balanced in every record
   file, since an unterminated one would quietly restore the hole.
 - **A second fence, `<!-- BEGIN QUOTED-CLAIMS -->`, covers this record quoting its own mistakes.**
   The drift-history table above states false numbers by construction — that is what it is for —
@@ -164,10 +166,6 @@ Boundaries that suite deliberately keeps:
   *quoted rather than asserted*, and misusing it to smuggle a live claim out of the guard's reach
   would be exactly the dishonesty the guard exists to prevent. The fences are few, contiguous, and
   visible in the diff for that reason.
-
-  Found the hard way: the guard flagged the drift-history table minutes after it was written, on
-  the same run that confirmed round 4's fixes. That is the guard working — it does not know which
-  false numbers are deliberate — but it is also the boundary the first design lacked.
 - **Its derived checks inherit `doc-contract_test.py`'s ceiling**: they hold the claims they name,
   not new false claims appearing. `NoUncheckedGateCountReachesTheProse` is the one exception, and
   only for gate counts in paragraphs it reaches. Neither could have caught the provenance error
@@ -189,8 +187,7 @@ rest on inference.
   table below infers the six from the child issues #168 opened.
 - **The six P2s.** Worse: #168 states "three Standards P2 findings and three Spec P2 findings"
   and neither its body nor either of its comments decomposes either half. The four P2-carrying
-  child issues
-  (#198, #189, #194, #200) and their PRs never use the words "P2", "Standards", or "Spec" at all.
+  child issues (#198, #189, #194, #200) never use the words "P2", "Standards", or "Spec" at all.
   So there are **four child issues for six stated findings, with no mapping between them.** Any
   reading — #194 absorbing three documentation contracts, #189 as Standards-shaped, #198 and #200
   as Spec-shaped — is inference and nothing more.
@@ -301,14 +298,14 @@ when plugin content changes" step diffs `-- plugins/doc-lifecycle/` only. `.doc-
   is not UTF-8 left the function as a traceback rather than the miss the module promises.
   Reachable from `bloat.load_chunk`; contradicts `get()`'s own docstring and closed P1 #187's
   acceptance text ("a corrupted cache entry triggers re-evaluation rather than a hard crash or
-  false hit"). `cache.py` was the outlier — `digest.py` documents this exact trap and sixteen
-  other sites in the same engine catch it. Fixed test-first: no existing test could reach the
+  false hit"). `cache.py` was the outlier — `digest.py` documents this exact trap and other sites
+  in the same engine already catch it. Fixed test-first: no existing test could reach the
   path, because every corrupt-payload test writes its garbage *with* `encoding="utf-8"` and so
   fails at the parser one step later. The new test writes real non-UTF-8 bytes and was verified
   RED (`UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0`) before the fix.
 - `tests/engine/policy_test.py` — the private-symbol spy on `approval._mint_approval_set`,
   accepted in an earlier version of this record, is replaced by a static AST guard in the manner
-  of `test_the_policy_module_never_writes` 46 lines below it. The acceptance rationale ("no public
+  of the later `test_the_policy_module_never_writes`. The acceptance rationale ("no public
   seam observes which function was called") did not survive review: the same file already proves
   an equally un-runtime-observable property statically. The static form is also stronger — the spy
   proved single-construction for the one input it ran; the source says it for every input.
@@ -383,8 +380,8 @@ checkout where the `__pycache__` caveat does not arise.
 
 **What the correction to this record re-executed, and what it did not.** The gate components in
 the table above were re-run in full and their results are this file's; the per-P1 mutation
-verdicts and the two un-run mutations noted in this file were not re-executed and stand on #203's
-own run as recorded here, not on any later observation.
+verdicts were not re-executed and stand on #203's own run as recorded here, not on any later
+observation.
 
 Every property above is proven by tests, including execution-based ones that run the lanes' own
 `run:` blocks under `bash -e` against real git remotes. **None of the gates this remediation added

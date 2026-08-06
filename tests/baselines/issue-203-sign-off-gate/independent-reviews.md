@@ -102,7 +102,7 @@ Source column: **S** = Standards reviewer, **P** = Spec reviewer, **R** = race-t
 | **P1 #185: the lane's integrity wiring has no execution-level guard.** Appending `\|\| true` to the gate invocation lets a dirty checkout publish a report, and `audit-workflow_test`, `workflow-permissions_test`, and `check-repo-integrity_test` all stay green | PR | **Fixed.** New execution-based class in `audit-workflow_test.py` runs the step's real `run:` body under `bash -e` against a dirtied repository. Verified by running that exact mutation: two new tests fail, the other two suites stay green as before |
 | `audit-workflow_test.py` carries the only lane-level assertions for #185 but is not in the criterion | PR | Fixed — pinned alongside `check-repo-integrity_test.py`, with why neither alone covers that P1 |
 | `approval_cli_test.py`, `render-apply-summary_test.py`, `render-audit-summary_test.py` are pinned by no criterion, and #203's own rationale covers them | PR | Fixed — pinned; the criterion now names seventeen suites |
-| `policy_test.py` monkeypatches the private `approval._mint_approval_set`, against "engine suites test only the two public seams" | S | **Fixed, having first been wrongly accepted.** The acceptance rationale ("no public seam observes which function was called") was contradicted 46 lines below in the same file, where an equally un-runtime-observable property is proven statically. Replaced with a static AST guard; verified load-bearing by adding a second producer to `policy.py` |
+| `policy_test.py` monkeypatches the private `approval._mint_approval_set`, against "engine suites test only the two public seams" | S | **Fixed, having first been wrongly accepted.** The acceptance rationale ("no public seam observes which function was called") was contradicted later in the same file, where an equally un-runtime-observable property is proven statically. Replaced with a static AST guard; verified load-bearing by adding a second producer to `policy.py` |
 | `doc-contract_test.py` is the one new suite CLAUDE.md never documented, while the other four were | S | Fixed — documented as the fourth wiring suite, and the "Three suites" count corrected |
 | CLAUDE.md's run-surface renderer list omits `verify-apply-bytes.py`, which writes its own refusals to `$GITHUB_STEP_SUMMARY` | S | Fixed — added, with why it states them itself rather than handing back to the summary renderer |
 | `docs/decisions.md` cites `docs/plans/HANDOFF.md` at two places; #200 deleted it | S + P (US37) | Fixed — both pinned `@ b7efcb5`, matching the `path @ <sha>` convention already used in `design-rationale.md` |
@@ -134,8 +134,8 @@ one click, not a veto on a human's decision.
 
 > **One acceptance was withdrawn.** An earlier version of this record accepted
 > `policy_test.py`'s private-symbol spy, on the rationale that no public seam observes which
-> function was called. The #203 pull-request review showed that premise is contradicted 46 lines
-> below in the same file, where an equally un-runtime-observable property is proven statically
+> function was called. The #203 pull-request review showed that premise is contradicted later in
+> the same file, where an equally un-runtime-observable property is proven statically
 > with `inspect`. The spy is now a static AST guard and the finding moved to the fixed table.
 > Recorded here rather than quietly deleted, because an acceptance that did not survive scrutiny
 > is the most useful thing in this file: it is what a rationale looks like when it is doing work

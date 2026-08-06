@@ -5,39 +5,42 @@
 > what was true then, not a claim about now.
 
 ## 2026-08-05 — an anti-drift guard must be written against the class, not the instances (#229)
-- Context: the entry below closed a defect class — prose numbers drifting from the artifacts they
-  describe — with `tests/scripts/sign-off-record_test.py`. A further instance shipped in #229
-  anyway, in the gate table the guard exists to hold: install parity was described as being
-  "inside the 28" four lines below two totals the same review round had corrected. The guard
-  stayed green because each of its derived checks matches a *phrasing* — `N/N suite`,
-  `N suites wired` — and that was a third way of stating the same total. Two reviewers missed it
-  the same way, by sweeping for the phrasings already known to have drifted.
+- Decided: the entry below addressed prose numbers drifting from the artifacts they describe with
+  `tests/scripts/sign-off-record_test.py`, but a further instance shipped in #229. The merged gate
+  table described install parity as being "inside the 28" beneath the corrected gate totals, and
+  the suite stayed green because its derived checks match the phrasings `N/N suite` and
+  `N suites wired`. The repository establishes that `713de63` contained the third phrasing while
+  the suite passed; no retained artifact establishes how reviewers searched or how it was found.
 - Decided: **a guard against a drift class fails closed on phrasings it does not know.**
   `NoUncheckedGateCountReachesTheProse` inverts the default for the sign-off record: in any
   paragraph of authored prose that mentions the suites, a gate-shaped number is a failure unless
-  it equals a total derived from the tools, carries its own unit, or is one of a short capped list
-  of tallies nothing here can derive. Adding the missed phrasing to a pattern list was rejected —
-  that is the same error one step out, and the eighth instance would have been the fourth
-  phrasing.
-- Decided: **the drifting line is reworded count-free, not renumbered.** Renumbering recurs on the
-  next suite added, which is what the entry below already found; the record now states its own
-  history without stating a total, the way its HANDOFF sentence was reworded in the same round.
+  it equals a total derived from the tools, carries its own unit, is a reference rather than a
+  tally, or is one of a short capped list of tallies nothing here can derive. Adding the missed
+  phrasing to a pattern list was rejected — that is the same error one step out, and the eighth
+  instance would have been the fourth phrasing.
+- Decided: **the drifting line is reworded count-free, not renumbered.** A hand-typed current total
+  can satisfy the guard today and drift on the next suite added, so the record states the property
+  without embedding a live count.
 - Decided: **a guard written against a class carries its own planted cases, in both directions.**
   Asserting the check against the live record says only that the record is clean today — it cannot
   tell a working detector from one widened until nothing trips it, and this check shipped a draft
   whose unit exit read an adjective as the noun counted, so `28 test suites` passed. So
-  `ThisCheckFiresOnThePhrasingsItClaimsToCatch` plants each phrasing into synthetic prose and
-  asserts the verdict for what the check catches *and* for every limit it claims. A stated limit
-  that has stopped being one fails too: a limits list that overstates what escapes is the same
-  defect as prose that overstates a count.
+  `ThisCheckFiresOnThePhrasingsItClaimsToCatch` plants each numeric detector boundary into
+  synthetic prose and asserts the verdict for what the check catches *and* for what it deliberately
+  excludes. It also plants the separate fenced-block exclusion against `authored()`. A stated
+  limit that has stopped being one fails too: a limits list that overstates what escapes is the
+  same defect as prose that overstates a count.
 - Standing limits, stated rather than implied: the check is digits-only (a spelled-out total
   escapes), reads one- and four-digit runs as out of range, does not reach a paragraph naming a
   suite only by bare filename, cannot distinguish a historically true
   count from a live one, and covers the record only — `docs/decisions.md` quotes the same wrong
   numbers with no fence mechanism to separate quotation from assertion. The bare-filename gap was
-  measured before it was accepted: anchoring on `_test.py` reaches three more per-suite tallies
-  nothing here can derive, which would push the exemption registry past the cap that keeps it from
+  measured before it was accepted: anchoring on `_test.py` reaches additional per-suite tallies
+  nothing here can derive and would push the exemption registry past the cap that keeps it from
   becoming the way around the check.
+- Code: `tests/scripts/sign-off-record_test.py`.
+- Evidence: `ThisCheckFiresOnThePhrasingsItClaimsToCatch` plants the detector's accepted and
+  refused boundaries; `TheQuotationBoundaryIsWellFormed` holds the separate record fences.
 
 ## 2026-08-05 — the #168 sign-off gate is evidence in the repository, not a claim in a PR (#203)
 - Decided: the sign-off gate's output is five retained records under
@@ -49,39 +52,39 @@
   per-test audit of #168's surviving-bytes rule). A sign-off whose evidence lives only in a pull
   request body is a claim; the point of #168 was that authority binds to bytes a later reader can
   check.
-- Decided: **prose that states a number about an artifact is checked against that artifact.**
-  Across four review rounds the same defect recurred six times — the race count, the suite count
-  three times, the engine-test count, and the script/wired gate totals — each caught by a human,
-  each invisible to a fully green gate, on a ticket whose subject is evidentiary discipline. A
-  further instance drifted a *provenance* rather than a number. The root cause is one thing: a
-  claim in prose and the artifact under it had no mechanical relationship.
+- Decided: **prose that states a number about an artifact is checked against that artifact.** The
+  retained review history records repeated drift in race, suite, engine, and gate totals. The
+  squash merge does not preserve each intermediate state or how every instance was found; it does
+  preserve the structural gap: the green release gate did not compare those prose claims with
+  their artifacts. A further instance drifted a *provenance* rather than a number. The root cause
+  is one thing: a claim in prose and the artifact under it had no mechanical relationship.
   `tests/scripts/sign-off-record_test.py` now derives all three counts from the tools themselves —
   the pinned-suite count from `release-manifest.py`'s `GATE_MANIFEST`, the script-suite total from
   `run-script-suites.py`'s glob, the wired-suite total from `release-manifest.py`'s `audit()` —
-  and holds the engine counts and race totals to internal agreement. Every historical drift was
-  replanted and confirmed to fail it.
+  and holds the engine counts and race totals to internal agreement. The numeric drifts from the
+  retained history's first four rounds were replanted and confirmed to fail those derived checks.
 - Standing, and the sharpest illustration of why the guard had to *derive* rather than assert:
   **the commit that added that guard introduced the next instance of the defect it closes.** The
   new suite became the 29th script suite and 61st wired suite, invalidating four "28/28" and "60
-  suites" claims; the guard as first written could not match those strings at all. Extracting the
-  prior commit and running the gate there confirms both numbers were correct when written. A fix
-  that only corrected the strings would have recurred on the next suite added.
+  suites" claims; the guard as first written could not match those strings at all. The record
+  retains the preceding run's output, but the squash merge does not make that intermediate commit
+  reproducible. A fix that only corrected the strings would have recurred on the next suite added.
 - Decided: **the quotation exemption is per block, not per file.** A file-level exemption left
-  ~66 lines of authored analysis inside the two quote-bearing files unguarded — a planted false
+  substantial authored analysis inside the two quote-bearing files unguarded — a planted false
   count in an authored header passed the whole gate. Quotations are now delimited by explicit
-  `<!-- BEGIN VERBATIM -->` markers, placed by matching each against its session transcript and
-  refusing unless it matched verbatim exactly once, so the markers sit outside the quoted text.
-  Inferring the boundary from `---` rules would have been wrong: reviewers' own reports contain
-  them. The principle is unchanged and now precise — a quotation must never be edited to satisfy
+  `<!-- BEGIN VERBATIM -->` markers outside the retained quotations. Inferring the boundary from
+  `---` rules would have been wrong: one reviewer's report contains them. The principle is
+  unchanged and now precise — a quotation must never be edited to satisfy
   a consistency check, and authored analysis is guarded like any other prose.
 - Standing: the guard suite is pinned to its own criterion, `sign-off record integrity`, because
-  it was briefly silently deletable. Roughly a third of this tree's suites are pinned to no
-  criterion and are fine that way; this one is named because deleting it restores the blind spot
-  it exists to close. It inherits `doc-contract_test.py`'s ceiling and could not have caught the
-  provenance error; nothing mechanical would have. *Superseded in part by the entry above: the
-  ceiling still describes the suite's derived checks, but not
+  it was briefly silently deletable. Unpinned suites are not categorically defective; this one is
+  named because deleting it restores the blind spot it exists to close. It inherits
+  `doc-contract_test.py`'s ceiling and could not have caught the
+  provenance error; nothing mechanical would have. **Superseded in part by “2026-08-05 — an
+  anti-drift guard must be written against the class, not the instances” above:** the ceiling
+  still describes the suite's derived checks, but not
   `NoUncheckedGateCountReachesTheProse`, which is written against the class within its measured
-  reach.*
+  reach.
 - Standing: **the review apparatus lost a finding, and that is why two defects reached the
   pull-request review instead of this record.** Each axis fanned out internally — Spec into five
   leaf reviewers, Standards into two — and the Spec aggregate returned at 14:38:35.302Z, 45
@@ -123,9 +126,10 @@
   prevent, so it stays under "acceptance seam" where it belongs.
 - Standing, and it is the limit a human weighing #57 most needs: **two of criterion 1's own
   subjects are not enumerated anywhere.** #168 states six P1 findings and "three Standards P2 /
-  three Spec P2" without listing either set; it has no comments; the four P2-carrying child
-  issues and their PRs never use the words "P2", "Standards", or "Spec". So there are four child
-  issues for six stated P2 findings with no mapping between them, and criterion 1's P2 clause
+  three Spec P2" without listing either set; the four P2-carrying child issues never use the words
+  "P2", "Standards", or "Spec". #168's body and comments do not supply the missing mapping. So
+  there are four child issues for six stated P2 findings with no mapping between them, and
+  criterion 1's P2 clause
   cannot be discharged by evidence — only by inference. #57's comment enumerates seven P1s from
   an earlier review of a different range, which is a trap for anyone reading it as this
   remediation's list.
