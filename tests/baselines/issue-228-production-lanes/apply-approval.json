@@ -1,0 +1,78 @@
+{
+  "artifact": "approval-set",
+  "schema_version": 3,
+  "minter": {
+    "kind": "human",
+    "id": "aj604",
+    "policy_digest": null
+  },
+  "report_digest": "24d8057c735efc5b9c4cf529a408993d5a062781e316adef69a86a68736f9089",
+  "report_state": "partial",
+  "lineage": {
+    "repository": "origin:github.com/aj604/toolshed",
+    "base_commit": "32b65fcac8c6a7616d7e260983ae04e862674013",
+    "audit_mode": "full",
+    "inventory_digest": "de526cc8a55155b562ae0e36bb2e99676a58a77ab85b0a245b7f62db43f4d445",
+    "audit_config_digest": "9151d8e6235fe469a84925c6c5ad5bed08aeaa68a865c0006c177fce7f7186ab",
+    "registry_digest": "c9a6c7b809679ff2c18a26de544d9f2d0b15c404821098c66286a7cd6ef05bc8",
+    "ruleset_version": 10,
+    "plugin_version": "0.44.3",
+    "evidence_boundary": {
+      "sources": [
+        "**"
+      ],
+      "excluded": [],
+      "commands": [
+        "gh"
+      ]
+    }
+  },
+  "reconciliation_digest": "a98451e5624755d7d343534cc38c1b16c71bb85588417055bd271d9cc4bc5649",
+  "records": [
+    {
+      "digest": "9d26bfdfaede228de5d73c58a84edaa2c47b23577cdf16bd790388b14b8eb89f",
+      "id": "DRIFT-002",
+      "code": "ANCHOR-STALE",
+      "path": "docs/guides/auditing-doc-bloat.md",
+      "destination": null,
+      "units": [
+        "488477de540d655762fcfb7ad77ab19910d76e513527e5940d26c4ce8993218f"
+      ],
+      "occurrences": [
+        1
+      ]
+    }
+  ],
+  "skipped": [
+    {
+      "digest": "460177f57d902c8dc376772a2f42fa97685b268f2a3fb092bd02715292b4818f",
+      "id": "DRIFT-004"
+    },
+    {
+      "digest": "57d82e686a68b4d53c0ef81a9a058e05e99a031172418ea219ec0b114d126d49",
+      "id": "DRIFT-001"
+    },
+    {
+      "digest": "5f112949dcaeaf42f952f013228f7fde21f5764843d993450cbdb8b571252d4a",
+      "id": "DRIFT-003"
+    },
+    {
+      "digest": "f1f555b3bd1ce7337bd418c072ce94a939adafeb1da6ba7c0a532fb901225f52",
+      "id": "DRIFT-005"
+    }
+  ],
+  "scope": {
+    "roots": [
+      "CLAUDE.md",
+      "CONTEXT.md",
+      "README.md",
+      "docs",
+      "plugins"
+    ],
+    "paths": [
+      "docs/guides/auditing-doc-bloat.md"
+    ]
+  },
+  "status": "clean",
+  "digest": "2be0c786cfc52815224037bd796bd1bc6754d003936d89100538b6c0e01cbfcb"
+}

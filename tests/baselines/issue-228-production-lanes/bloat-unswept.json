@@ -1,0 +1,71 @@
+[
+  {
+    "chunk": "c-aa28b3d4104e191b",
+    "docs": [
+      "CLAUDE.md",
+      "CONTEXT.md",
+      "README.md"
+    ]
+  },
+  {
+    "chunk": "c-11fdf2927c452d8c",
+    "docs": [
+      "docs/decisions.md"
+    ]
+  },
+  {
+    "chunk": "c-21b59ff75b63249a",
+    "docs": [
+      "docs/plans/2026-07-05-marketing-overhaul-design.md",
+      "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md"
+    ]
+  },
+  {
+    "chunk": "c-343cd82c2e263447",
+    "docs": [
+      "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-plan.md",
+      "docs/plans/2026-07-07-bloat-scale-hardening-design.md"
+    ]
+  },
+  {
+    "chunk": "c-b957ded3cebece09",
+    "docs": [
+      "docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md",
+      "docs/plans/2026-07-11-docs-ab-experiment.md",
+      "docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md"
+    ]
+  },
+  {
+    "chunk": "c-c923e00c3d6e3c1a",
+    "docs": [
+      "docs/plans/2026-07-26-shadow-parity-gate.md",
+      "docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md"
+    ]
+  },
+  {
+    "chunk": "c-39e1633b4d245180",
+    "docs": [
+      "docs/plans/2026-07-27-shadow-parity-gate-rerun.md"
+    ]
+  },
+  {
+    "chunk": "c-d83ccb33fdc8098a",
+    "docs": [
+      "docs/plans/2026-08-02-assertion-ledger-bootstrap-phase-b.md",
+      "docs/plans/2026-08-02-assertion-ledger-incremental-sync-phase-a.md"
+    ]
+  },
+  {
+    "chunk": "c-50fbb3ff72963c22",
+    "docs": [
+      "docs/superpowers/specs/2026-07-07-doc-sync-self-upgrade-design.md"
+    ]
+  },
+  {
+    "chunk": "c-4a54ec8014778ba2",
+    "docs": [
+      "plugins/doc-lifecycle/agents/doc-distiller.md",
+      "plugins/doc-lifecycle/agents/llm-doc-writer.md"
+    ]
+  }
+]

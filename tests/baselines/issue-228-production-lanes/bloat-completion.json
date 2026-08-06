@@ -1,0 +1,381 @@
+{
+  "schema_version": 1,
+  "verdicts": [
+    {
+      "evidence": "SKILL.md's \"## The contract\" section (lines 160-175) restates facts output-contract.md already states canonically: the ten-key field list and six-value verdict enum duplicate output-contract.md's \"A verdict carries only these ten keys, all optional except as ruled below: id, verdict, path, units, evidence, destination, proposal, status, scope, sample\" plus its verdict-field row; the refused-fields sentence is near-verbatim to output-contract.md's \"Fields a verdict may never carry: files, members, occurrences, contention. A bulk finding's members are enumerated from the index, never asserted by the model\"; and the DISTILL destination/retire-only-distillation rule duplicates output-contract.md's destination row (\"DISTILL: optional, and a path nobody has written yet ... absent means a retire-only distillation\"). SKILL.md's very next sentence after this passage reads \"Field rules, the worked example, and the chunk-result seam shape: output-contract.md\", naming that file as the field rules' one home, so this passage duplicates the doc it explicitly defers to one sentence later.",
+      "id": "B1",
+      "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+      "proposal": "Verdicts are `CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`/`MERGE-DOC`/`RETIRE-DOC`/`DISTILL`; the assembler authors the envelope's `completion`, chunk executors author only `verdicts`.",
+      "units": [
+        "89de8fde545d430f772d1b9f0f534197717719d526de826f8159fbcb114a1321",
+        "77b9bd5edaac08103cb704557d653ee7c85c47930035db0326fc762b1307a4bb",
+        "d58ca1797582313b8ac2aa268ab622564b3037713591b528b2cfd3b801ee669b",
+        "53d8b6c02eba9de072f3db8a0511344dacc58c69889b8f216500a66d9401580e",
+        "eae2a555ba1fdbfbe2934f77b5be4cb07b2a957981ff66f48adf9ac4f440633a",
+        "0fe27516a3a9b0768787904a8ff9c3ff650e9473c3b0dd10006ac7afa37b43a1"
+      ],
+      "verdict": "CONDENSE"
+    }
+  ],
+  "completion": {
+    "plan": {
+      "status": "ok",
+      "schema_version": 1,
+      "index_digest": "8f2c2e3cadcadca86540085a487ec7865a9011a39fc87770d0d1e2ddfaf4fb51",
+      "max_documents": 8,
+      "max_units": 400,
+      "digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c",
+      "chunks": [
+        {
+          "id": "c-aa28b3d4104e191b",
+          "documents": [
+            "CLAUDE.md",
+            "CONTEXT.md",
+            "README.md"
+          ],
+          "unit_count": 201
+        },
+        {
+          "id": "c-a65891afde66246d",
+          "documents": [
+            "docs/doc-scope.md"
+          ],
+          "unit_count": 6
+        },
+        {
+          "id": "c-11fdf2927c452d8c",
+          "documents": [
+            "docs/decisions.md"
+          ],
+          "unit_count": 426
+        },
+        {
+          "id": "c-d5a9e2b613d742d3",
+          "documents": [
+            "docs/design-rationale.md"
+          ],
+          "unit_count": 20
+        },
+        {
+          "id": "c-3328325ca26cd02e",
+          "documents": [
+            "docs/agents/domain.md",
+            "docs/agents/issue-tracker.md",
+            "docs/agents/triage-labels.md"
+          ],
+          "unit_count": 61
+        },
+        {
+          "id": "c-49f0257ce019b8d7",
+          "documents": [
+            "docs/guides/auditing-doc-bloat.md",
+            "docs/guides/building-skills-test-first.md",
+            "docs/guides/principles.md",
+            "docs/guides/scheduling-doc-sync.md",
+            "docs/guides/starting-docs-from-scratch.md"
+          ],
+          "unit_count": 256
+        },
+        {
+          "id": "c-21b59ff75b63249a",
+          "documents": [
+            "docs/plans/2026-07-05-marketing-overhaul-design.md",
+            "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md"
+          ],
+          "unit_count": 104
+        },
+        {
+          "id": "c-343cd82c2e263447",
+          "documents": [
+            "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-plan.md",
+            "docs/plans/2026-07-07-bloat-scale-hardening-design.md"
+          ],
+          "unit_count": 362
+        },
+        {
+          "id": "c-b957ded3cebece09",
+          "documents": [
+            "docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md",
+            "docs/plans/2026-07-11-docs-ab-experiment.md",
+            "docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md"
+          ],
+          "unit_count": 170
+        },
+        {
+          "id": "c-c923e00c3d6e3c1a",
+          "documents": [
+            "docs/plans/2026-07-26-shadow-parity-gate.md",
+            "docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md"
+          ],
+          "unit_count": 343
+        },
+        {
+          "id": "c-39e1633b4d245180",
+          "documents": [
+            "docs/plans/2026-07-27-shadow-parity-gate-rerun.md"
+          ],
+          "unit_count": 302
+        },
+        {
+          "id": "c-d83ccb33fdc8098a",
+          "documents": [
+            "docs/plans/2026-08-02-assertion-ledger-bootstrap-phase-b.md",
+            "docs/plans/2026-08-02-assertion-ledger-incremental-sync-phase-a.md"
+          ],
+          "unit_count": 295
+        },
+        {
+          "id": "c-50fbb3ff72963c22",
+          "documents": [
+            "docs/superpowers/specs/2026-07-07-doc-sync-self-upgrade-design.md"
+          ],
+          "unit_count": 78
+        },
+        {
+          "id": "c-4a54ec8014778ba2",
+          "documents": [
+            "plugins/doc-lifecycle/agents/doc-distiller.md",
+            "plugins/doc-lifecycle/agents/llm-doc-writer.md"
+          ],
+          "unit_count": 95
+        },
+        {
+          "id": "c-a5bd9433e33d3859",
+          "documents": [
+            "plugins/doc-lifecycle/engine/README.md"
+          ],
+          "unit_count": 973
+        },
+        {
+          "id": "c-8e71127373e1ab87",
+          "documents": [
+            "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+            "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md"
+          ],
+          "unit_count": 116
+        },
+        {
+          "id": "c-9adf257d63fcc710",
+          "documents": [
+            "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+            "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md"
+          ],
+          "unit_count": 110
+        },
+        {
+          "id": "c-70a98162c38b6bfa",
+          "documents": [
+            "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/planning-artifacts.md",
+            "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/verdict-lenses.md"
+          ],
+          "unit_count": 80
+        },
+        {
+          "id": "c-767eb602e998816d",
+          "documents": [
+            "plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md",
+            "plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md"
+          ],
+          "unit_count": 96
+        },
+        {
+          "id": "c-1cbbc8c2ff9fd4a1",
+          "documents": [
+            "plugins/doc-lifecycle/skills/fixing-docs/SKILL.md"
+          ],
+          "unit_count": 115
+        },
+        {
+          "id": "c-d019db1f0a70d1d3",
+          "documents": [
+            "plugins/doc-lifecycle/skills/growing-docs/SKILL.md"
+          ],
+          "unit_count": 59
+        },
+        {
+          "id": "c-dc2f6ea9d701c71a",
+          "documents": [
+            "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md"
+          ],
+          "unit_count": 256
+        },
+        {
+          "id": "c-bcf4dd5e8db17750",
+          "documents": [
+            "plugins/doc-lifecycle/skills/writing-docs/SKILL.md",
+            "plugins/doc-lifecycle/skills/writing-docs/agent-context.md",
+            "plugins/doc-lifecycle/skills/writing-docs/readme.md",
+            "plugins/doc-lifecycle/skills/writing-docs/runbooks.md"
+          ],
+          "unit_count": 164
+        }
+      ]
+    },
+    "chunks": [
+      {
+        "id": "c-aa28b3d4104e191b",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-a65891afde66246d",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "77a64f652faaa34ae94ad1f8efdc3ea7804be991720db9b08e8640c88ddfbedb",
+        "reason": ""
+      },
+      {
+        "id": "c-11fdf2927c452d8c",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-d5a9e2b613d742d3",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "96a59dddbae2fe09d84cf9b11a000e9edb9be115d179399d4ec9097d73dca19c",
+        "reason": ""
+      },
+      {
+        "id": "c-3328325ca26cd02e",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "9327ecac451d516198c8b2ca7d1ad2602ad1c6c0990f59d824799baeda543123",
+        "reason": ""
+      },
+      {
+        "id": "c-49f0257ce019b8d7",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "cbd50a1aff114c6e39485f4884a7d68876682339ef7217ab7598962f36294c61",
+        "reason": ""
+      },
+      {
+        "id": "c-21b59ff75b63249a",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-343cd82c2e263447",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-b957ded3cebece09",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-c923e00c3d6e3c1a",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-39e1633b4d245180",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-d83ccb33fdc8098a",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-50fbb3ff72963c22",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-4a54ec8014778ba2",
+        "completion_state": "missing",
+        "verdict_ids": [],
+        "result_digest": null,
+        "reason": "result file was not produced"
+      },
+      {
+        "id": "c-a5bd9433e33d3859",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "52244bcdc5f548734944bc6b6c17d453f36db6e4ad6842dee9a1e5591c0684e4",
+        "reason": ""
+      },
+      {
+        "id": "c-8e71127373e1ab87",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "28157509c1b7d5a1d835281adfc2a8ba9396b4d01b7ce08a76a54df5e45a1342",
+        "reason": ""
+      },
+      {
+        "id": "c-9adf257d63fcc710",
+        "completion_state": "complete",
+        "verdict_ids": [
+          "B1"
+        ],
+        "result_digest": "9c6484ceda0a0c084d50ae294f1a5e89a36b65307f8954ae22d5b4b49c1e889a",
+        "reason": ""
+      },
+      {
+        "id": "c-70a98162c38b6bfa",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "593bb1aa24e30dcc05d4d4f5e80062d24158121a03b1b0eb3cfb6951ef42fe40",
+        "reason": ""
+      },
+      {
+        "id": "c-767eb602e998816d",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "4de65476053431bd09f9f3da85d6c963e80c10bfdd5f4366a1e4cbab5072efc2",
+        "reason": ""
+      },
+      {
+        "id": "c-1cbbc8c2ff9fd4a1",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "0caaf3c41aeb444c91aedaeb74b701a8f500ce7ace0db7fec4c7e9a4322e172c",
+        "reason": ""
+      },
+      {
+        "id": "c-d019db1f0a70d1d3",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "b0c39e219d0da2c64fcd8139303d45cf7773efdd2574ca969913e5c6d4aa24b8",
+        "reason": ""
+      },
+      {
+        "id": "c-dc2f6ea9d701c71a",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "eaaffdbbb04c7fb3b0b0a5f62bf2fb517c36ba8cb611453b00c35f1706a12364",
+        "reason": ""
+      },
+      {
+        "id": "c-bcf4dd5e8db17750",
+        "completion_state": "complete",
+        "verdict_ids": [],
+        "result_digest": "26d648bf6e271de7dfdc3a3c6dc8c6bca919abf2f893a6037b4d1eccd43f2e62",
+        "reason": ""
+      }
+    ],
+    "digest": "e9579f32bd1c48323c4ba453d84d74a50ca1dd98c22fe4d9986cbf34c97e37fa"
+  }
+}
