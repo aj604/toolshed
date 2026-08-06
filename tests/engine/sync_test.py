@@ -5,6 +5,7 @@ Run: python3 tests/engine/sync_test.py
 """
 
 import json
+import hashlib
 import os
 import sys
 import unittest
@@ -13,9 +14,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sync_support import FILES, SyncRepoTestCase  # noqa: E402
 
-from doclifecycle.digest import sha256_canonical  # noqa: E402
+from doclifecycle import ARTIFACT_SCHEMA_VERSION  # noqa: E402
 from doclifecycle.inventory import build_inventory  # noqa: E402
 from doclifecycle.results import Invalid  # noqa: E402
+from doclifecycle.segment import segment_document  # noqa: E402
 from doclifecycle.sync import (  # noqa: E402
     DEFAULT_LEDGER_PATH,
     MODE_BOOTSTRAP,
@@ -29,6 +31,13 @@ AS_OF = "2026-08-06"
 
 def codes(result):
     return [problem.code for problem in result.problems]
+
+
+def canonical_digest(value):
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class UnchangedSync(SyncRepoTestCase):
@@ -46,12 +55,90 @@ class UnchangedSync(SyncRepoTestCase):
         self.assertEqual(payload["work_order"]["total_chunk_count"], 1)
         self.assertTrue(payload["work_order"]["session_id"].startswith("s-"))
         self.assertTrue(payload["work_order"]["chunk_id"].startswith("c-"))
-        self.assertEqual(
-            set(payload["work_order"]["bindings"]),
-            {"ledger_digest", "inventory_digest", "unit_set_digest",
-             "budget_digest"},
-        )
+        bindings = payload["work_order"]["bindings"]
+        with open(os.path.join(repo, DEFAULT_LEDGER_PATH), "rb") as fh:
+            expected_ledger = hashlib.sha256(fh.read()).hexdigest()
+        inventory = build_inventory(repo)
+        segmentation = segment_document(repo, "docs/architecture.md")
+        expected_unit_set = canonical_digest({
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "documents": [{
+                "doc": "docs/architecture.md",
+                "units": [unit.digest for unit in segmentation.units
+                          if unit.assertion_capable],
+            }],
+        })
+        self.assertEqual(bindings, {
+            "ledger_digest": expected_ledger,
+            "inventory_digest": inventory.digest,
+            "unit_set_digest": expected_unit_set,
+            "budget_digest": canonical_digest(payload["work_order"]["budget"]),
+        })
         self.assertEqual(len(payload["deterministic_results"]["unchanged"]), 1)
+
+    def test_each_bound_input_rekeys_its_corresponding_digest(self):
+        baseline_repo = self.sync_repo()
+        baseline = plan_sync(baseline_repo, AS_OF).to_dict()["work_order"][
+            "bindings"
+        ]
+
+        ledger_repo = self.sync_repo()
+        records = self.ledger_records(ledger_repo)
+        tombstone = dict(records[1])
+        tombstone["unit"] = "d" * 64
+        tombstone["status"] = "tombstone"
+        tombstone["removed"] = {"commit": "e" * 40, "date": AS_OF}
+        records.append(tombstone)
+        self.write_ledger(ledger_repo, records)
+        ledger_changed = plan_sync(ledger_repo, AS_OF).to_dict()["work_order"][
+            "bindings"
+        ]
+        self.assertNotEqual(ledger_changed["ledger_digest"],
+                            baseline["ledger_digest"])
+        self.assertEqual(ledger_changed["inventory_digest"],
+                         baseline["inventory_digest"])
+        self.assertEqual(ledger_changed["unit_set_digest"],
+                         baseline["unit_set_digest"])
+
+        inventory_repo = self.sync_repo()
+        self.write(inventory_repo, "docs/guides/history.md",
+                   "> As of 2026-08-06 (changed context)\n")
+        inventory_changed = plan_sync(
+            inventory_repo, AS_OF
+        ).to_dict()["work_order"]["bindings"]
+        self.assertNotEqual(inventory_changed["inventory_digest"],
+                            baseline["inventory_digest"])
+        self.assertEqual(inventory_changed["ledger_digest"],
+                         baseline["ledger_digest"])
+        self.assertEqual(inventory_changed["unit_set_digest"],
+                         baseline["unit_set_digest"])
+
+        unit_files = dict(FILES)
+        unit_files["docs/architecture.md"] = (
+            "# Architecture\n\nThe service has a new identity.\n"
+        )
+        unit_repo = self.repo(unit_files)
+        self.write_ledger(unit_repo)
+        unit_changed = plan_sync(unit_repo, AS_OF).to_dict()["work_order"][
+            "bindings"
+        ]
+        self.assertNotEqual(unit_changed["unit_set_digest"],
+                            baseline["unit_set_digest"])
+
+        budget_repo = self.sync_repo(json.dumps({
+            "sync": {"max_turns": 12},
+        }))
+        budget_changed = plan_sync(budget_repo, AS_OF).to_dict()["work_order"][
+            "bindings"
+        ]
+        self.assertNotEqual(budget_changed["budget_digest"],
+                            baseline["budget_digest"])
+        self.assertEqual(budget_changed["ledger_digest"],
+                         baseline["ledger_digest"])
+        self.assertEqual(budget_changed["inventory_digest"],
+                         baseline["inventory_digest"])
+        self.assertEqual(budget_changed["unit_set_digest"],
+                         baseline["unit_set_digest"])
 
     def test_repeated_calls_are_byte_identical_and_never_write_the_ledger(self):
         repo = self.sync_repo()
@@ -123,7 +210,7 @@ class BudgetContract(SyncRepoTestCase):
             "sync_model": "sonnet",
         })
         self.assertEqual(work["bindings"]["budget_digest"],
-                         sha256_canonical(work["budget"]))
+                         canonical_digest(work["budget"]))
 
     def test_sync_section_overrides_each_default_and_is_carried(self):
         config = json.dumps({
@@ -240,6 +327,102 @@ class LedgerRefusals(SyncRepoTestCase):
 
         result = self.changed(bad)
         self.assertIn("ledger-invalid-probe-shape", codes(result))
+
+    def test_forbidden_nested_probe_fields_fail_closed_for_every_kind(self):
+        probes = (
+            {
+                "kind": "path_exists",
+                "args": {"command": "rm -rf /"},
+                "expect": {"anything": True},
+            },
+            {
+                "kind": "content_match",
+                "args": {"path": "src/app.py", "pattern": "App",
+                         "command": "run"},
+                "expect": {"presence": "present"},
+            },
+            {
+                "kind": "json_value",
+                "args": {"path": "package.json", "pointer": "/name"},
+                "expect": {"value": "app"},
+            },
+            {
+                "kind": "symbol_defined",
+                "args": {"path": "src/app.py", "language": "javascript",
+                         "name": "App.run"},
+                "expect": {},
+            },
+            {
+                "kind": "tool_probe",
+                "args": {"tool": "gh", "flag": "--execute", "pattern": "gh"},
+                "expect": {},
+            },
+        )
+        for probe in probes:
+            with self.subTest(kind=probe["kind"]):
+                def bad(records):
+                    self.probe(records)
+                    records[1]["probe"] = probe
+
+                result = self.changed(bad)
+                self.assertTrue(set(codes(result)) & {
+                    "ledger-invalid-probe-shape", "ledger-invalid-probe-field",
+                })
+                self.assertNotIn("work_order", result.to_dict())
+
+    def test_command_shaped_dependency_path_fails_closed(self):
+        def bad(records):
+            self.probe(records)
+            records[1]["deps"][0]["path"] = "src/app.py;rm"
+
+        result = self.changed(bad)
+        self.assertIn("ledger-invalid-probe-field", codes(result))
+        self.assertNotIn("work_order", result.to_dict())
+
+    def test_every_probe_kind_has_a_closed_nested_schema(self):
+        probes = (
+            {"kind": "path_exists",
+             "args": {"path": "src/app.py", "kind": "file"}, "expect": {}},
+            {"kind": "content_match",
+             "args": {"path": "src/app.py", "pattern": "class App"},
+             "expect": {"presence": "present", "count": 1}},
+            {"kind": "json_value",
+             "args": {"path": "package.json", "pointer": "/name"},
+             "expect": {"equals": "app"}},
+            {"kind": "symbol_defined",
+             "args": {"path": "src/app.py", "language": "python",
+                      "name": "App.run"}, "expect": {}},
+            {"kind": "tool_probe",
+             "args": {"tool": "gh", "flag": "--version", "pattern": "gh"},
+             "expect": {}},
+        )
+        for probe in probes:
+            with self.subTest(kind=probe["kind"]):
+                repo = self.repo(FILES)
+                records = self.ledger_records(repo)
+                self.probe(records)
+                records[1]["probe"] = probe
+                self.write_ledger(repo, records)
+                ledger = load_assertion_ledger(
+                    repo, build_inventory(repo).registry_digest
+                )
+                self.assertNotIsInstance(ledger, Invalid)
+
+    def test_parseable_wrong_json_types_are_typed_not_exceptions(self):
+        cases = {
+            "class-list": lambda records: records[1].update({"class": []}),
+            "doc-object": lambda records: records[1].update({"doc": {}}),
+            "unit-list": lambda records: records[1].update({"unit": []}),
+            "lineage-list": lambda records: records[1].update({"lineage": []}),
+            "status-object": lambda records: records[1].update({"status": {}}),
+            "covered-nested": lambda records: records[0].update({"covered": [[]]}),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(case=name):
+                result = self.changed(mutate)
+                self.assertIsInstance(result, Invalid)
+                self.assertTrue(codes(result))
+                self.assertNotIn("work_order", result.to_dict())
 
     def test_valid_tombstone_retains_active_fields_and_removal_lineage(self):
         repo = self.sync_repo()

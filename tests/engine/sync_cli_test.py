@@ -12,7 +12,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from support import run_command  # noqa: E402
-from sync_support import SyncRepoTestCase  # noqa: E402
+from sync_support import FILES, SyncRepoTestCase  # noqa: E402
 
 from doclifecycle.sync import plan_sync  # noqa: E402
 
@@ -70,6 +70,29 @@ class SyncPlanCommand(SyncRepoTestCase):
                     json.loads(result.stdout)["problems"][0]["code"],
                     f"sync-{mode}-not-implemented",
                 )
+
+    def test_parseable_wrong_ledger_types_are_typed_not_tracebacks(self):
+        cases = {
+            "class": [],
+            "lineage": [],
+        }
+        for field, value in cases.items():
+            with self.subTest(field=field):
+                repo = self.repo(FILES)
+                records = self.ledger_records(repo)
+                records[1][field] = value
+                self.write_ledger(repo, records)
+
+                result = run_command(
+                    "sync-plan", "--repo", repo, "--as-of", AS_OF
+                )
+
+                self.assertEqual(result.returncode, 1, result.stderr)
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["status"], "invalid")
+                self.assertTrue(payload["problems"])
+                self.assertNotIn("work_order", payload)
+                self.assertNotIn("Traceback", result.stderr)
 
     def test_as_of_is_required_on_the_command_seam(self):
         result = run_command("sync-plan", "--repo", self.sync_repo())

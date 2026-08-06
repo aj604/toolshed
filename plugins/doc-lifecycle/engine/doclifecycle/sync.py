@@ -10,6 +10,7 @@ instead of being mistaken for a clean run.
 
 import datetime
 import json
+import keyword
 import os
 import re
 from dataclasses import dataclass
@@ -69,6 +70,10 @@ STATUSES = ("active", "tombstone")
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_TOOL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+_SHELL_SYNTAX = ";&|<>()$`"
+_GLOB_META = "*?["
+_MAX_PATTERN_LENGTH = 4096
 _HEADER_FIELDS = {
     "record", "schema", "ruleset", "registry_digest", "plugin_version",
     "established", "covered", "uncovered",
@@ -339,11 +344,9 @@ def _validate_deps(raw, problems, where):
             ok = False
             continue
         path = dep["path"]
-        path_problem = repository_relative_problem(path)
-        if path_problem is not None:
-            _record_problem(problems, "ledger-invalid-deps",
-                            f"dependency path {path!r} {path_problem[1]}",
-                            f"{place}.path")
+        before_path = len(problems)
+        _validate_probe_path(path, problems, f"{place}.path")
+        if len(problems) != before_path:
             ok = False
         if not (isinstance(dep["digest"], str)
                 and _DIGEST.fullmatch(dep["digest"])):
@@ -359,6 +362,186 @@ def _validate_deps(raw, problems, where):
         if isinstance(path, str):
             prior = path
     return ok
+
+
+def _validate_probe_path(value, problems, where, *, glob=False):
+    """Validate one stored probe path without resolving or opening it.
+
+    Existence and boundary authorization belong to probe execution (#199), but
+    shape is part of the persisted ledger contract: a path cannot be a command
+    string, and a literal path cannot smuggle glob semantics.
+    """
+    problem = repository_relative_problem(value)
+    if problem is not None:
+        _record_problem(problems, "ledger-invalid-probe-field",
+                        f"probe path {value!r} {problem[1]}", where)
+        return False
+    if any(char in value for char in _SHELL_SYNTAX):
+        _record_problem(problems, "ledger-invalid-probe-field",
+                        "probe paths are data and may not contain shell syntax", where)
+        return False
+    if not glob and any(char in value for char in _GLOB_META):
+        _record_problem(problems, "ledger-invalid-probe-field",
+                        "a literal probe path may not contain glob metacharacters",
+                        where)
+        return False
+    if glob and not any(char in value for char in _GLOB_META):
+        _record_problem(problems, "ledger-invalid-probe-field",
+                        "a probe glob must contain a glob metacharacter", where)
+        return False
+    return True
+
+
+def _validate_pattern(value, problems, where):
+    if not (_one_line(value) and len(value) <= _MAX_PATTERN_LENGTH):
+        _record_problem(problems, "ledger-invalid-probe-field",
+                        f"probe pattern must be 1–{_MAX_PATTERN_LENGTH} characters",
+                        where)
+        return False
+    try:
+        re.compile(value)
+    except re.error as exc:
+        _record_problem(problems, "ledger-invalid-probe-field",
+                        f"probe pattern is not a valid regular expression: {exc}",
+                        where)
+        return False
+    return True
+
+
+def _validate_probe(probe, problems, where):
+    """Validate the exact v1 schema of one stored deterministic probe."""
+    if not isinstance(probe, dict) or set(probe) != {"kind", "args", "expect"}:
+        _record_problem(problems, "ledger-invalid-probe-shape",
+                        "probe must carry exactly 'kind', 'args', and 'expect'",
+                        where)
+        return False
+    kind, args, expect = probe["kind"], probe["args"], probe["expect"]
+    if not isinstance(kind, str) or kind not in PROBE_KINDS:
+        _record_problem(problems, "ledger-forbidden-probe-kind",
+                        f"probe kind {kind!r} is not in the closed vocabulary "
+                        f"{list(PROBE_KINDS)}", f"{where}.kind")
+        return False
+    if not isinstance(args, dict) or not isinstance(expect, dict):
+        _record_problem(problems, "ledger-invalid-probe-shape",
+                        "probe args and expect must be objects", where)
+        return False
+
+    if kind == "path_exists":
+        literal = set(args) == {"path", "kind"}
+        patterned = set(args) == {"glob", "kind"}
+        if not (literal or patterned) or expect != {}:
+            _record_problem(problems, "ledger-invalid-probe-shape",
+                            "path_exists args must carry exactly ('path' or "
+                            "'glob') and 'kind'; expect must be empty", where)
+            return False
+        if args["kind"] not in ("file", "dir", "any"):
+            _record_problem(problems, "ledger-invalid-probe-field",
+                            "path_exists kind must be 'file', 'dir', or 'any'",
+                            f"{where}.args.kind")
+            return False
+        name = "path" if literal else "glob"
+        return _validate_probe_path(
+            args[name], problems, f"{where}.args.{name}", glob=patterned
+        )
+
+    if kind == "content_match":
+        if set(args) != {"path", "pattern"} or not (
+            set(expect) == {"presence"}
+            or set(expect) == {"presence", "count"}
+        ):
+            _record_problem(problems, "ledger-invalid-probe-shape",
+                            "content_match args must carry exactly 'path' and "
+                            "'pattern'; expect must carry 'presence' and optional "
+                            "'count'", where)
+            return False
+        valid = _validate_probe_path(
+            args["path"], problems, f"{where}.args.path"
+        )
+        valid = _validate_pattern(
+            args["pattern"], problems, f"{where}.args.pattern"
+        ) and valid
+        if expect["presence"] not in ("present", "absent"):
+            _record_problem(problems, "ledger-invalid-probe-field",
+                            "content_match presence must be 'present' or 'absent'",
+                            f"{where}.expect.presence")
+            valid = False
+        if "count" in expect and not (
+            isinstance(expect["count"], int)
+            and not isinstance(expect["count"], bool)
+            and expect["count"] >= 0
+        ):
+            _record_problem(problems, "ledger-invalid-probe-field",
+                            "content_match count must be a non-negative integer",
+                            f"{where}.expect.count")
+            valid = False
+        return valid
+
+    if kind == "json_value":
+        if set(args) != {"path", "pointer"} or set(expect) != {"equals"}:
+            _record_problem(problems, "ledger-invalid-probe-shape",
+                            "json_value args must carry exactly 'path' and "
+                            "'pointer'; expect must carry exactly 'equals'", where)
+            return False
+        valid = _validate_probe_path(
+            args["path"], problems, f"{where}.args.path"
+        )
+        pointer = args["pointer"]
+        if not isinstance(pointer, str) or (
+            pointer != "" and not pointer.startswith("/")
+        ) or re.search(r"~(?![01])", pointer):
+            _record_problem(problems, "ledger-invalid-probe-field",
+                            "json_value pointer must be an RFC 6901 pointer",
+                            f"{where}.args.pointer")
+            valid = False
+        return valid
+
+    if kind == "symbol_defined":
+        if set(args) != {"path", "language", "name"} or expect != {}:
+            _record_problem(problems, "ledger-invalid-probe-shape",
+                            "symbol_defined args must carry exactly 'path', "
+                            "'language', and 'name'; expect must be empty", where)
+            return False
+        valid = _validate_probe_path(
+            args["path"], problems, f"{where}.args.path"
+        )
+        if args["language"] != "python":
+            _record_problem(problems, "ledger-invalid-probe-field",
+                            "symbol_defined language must be 'python'",
+                            f"{where}.args.language")
+            valid = False
+        name = args["name"]
+        if not (_one_line(name) and all(
+            part.isidentifier() and not keyword.iskeyword(part)
+            for part in name.split(".")
+        )):
+            _record_problem(problems, "ledger-invalid-probe-field",
+                            "symbol_defined name must be a dotted Python name",
+                            f"{where}.args.name")
+            valid = False
+        return valid
+
+    # tool_probe: its tool declaration and environment are checked at
+    # execution; the persisted contract permits only one bare tool, one safe
+    # introspection flag, and one bounded regular expression.
+    if set(args) != {"tool", "flag", "pattern"} or expect != {}:
+        _record_problem(problems, "ledger-invalid-probe-shape",
+                        "tool_probe args must carry exactly 'tool', 'flag', and "
+                        "'pattern'; expect must be empty", where)
+        return False
+    valid = True
+    if not (_one_line(args["tool"]) and _TOOL.fullmatch(args["tool"])):
+        _record_problem(problems, "ledger-invalid-probe-field",
+                        "tool_probe tool must be one bare executable name",
+                        f"{where}.args.tool")
+        valid = False
+    if args["flag"] not in ("--help", "--version"):
+        _record_problem(problems, "ledger-invalid-probe-field",
+                        "tool_probe flag must be '--help' or '--version'",
+                        f"{where}.args.flag")
+        valid = False
+    return _validate_pattern(
+        args["pattern"], problems, f"{where}.args.pattern"
+    ) and valid
 
 
 def _parse_header(raw, expected_registry_digest, problems, where):
@@ -438,6 +621,7 @@ def _parse_header(raw, expected_registry_digest, problems, where):
 
 
 def _parse_entry(raw, problems, where):
+    problem_count = len(problems)
     if not isinstance(raw, dict):
         _record_problem(problems, "ledger-invalid-entry",
                         "an assertion record must be an object", where)
@@ -469,7 +653,7 @@ def _parse_entry(raw, problems, where):
                         "entry unit must be a sha256 assertion-unit digest",
                         f"{where}.unit")
     assertion_class = raw["class"]
-    if assertion_class not in _OBLIGATIONS:
+    if not isinstance(assertion_class, str) or assertion_class not in _OBLIGATIONS:
         _record_problem(problems, "ledger-invalid-entry",
                         f"entry class must be one of {list(_OBLIGATIONS)}",
                         f"{where}.class")
@@ -491,23 +675,7 @@ def _parse_entry(raw, problems, where):
                         f"{where}.status")
 
     if strategy == STRATEGY_PROBE:
-        probe = raw["probe"]
-        if not isinstance(probe, dict) or set(probe) != {"kind", "args", "expect"}:
-            _record_problem(problems, "ledger-invalid-probe-shape",
-                            "probe must carry exactly 'kind', 'args', and 'expect'",
-                            f"{where}.probe")
-        else:
-            if probe["kind"] not in PROBE_KINDS:
-                _record_problem(problems, "ledger-forbidden-probe-kind",
-                                f"probe kind {probe['kind']!r} is not in the closed "
-                                f"vocabulary {list(PROBE_KINDS)}",
-                                f"{where}.probe.kind")
-            if not isinstance(probe["args"], dict) or not isinstance(
-                probe["expect"], dict
-            ):
-                _record_problem(problems, "ledger-invalid-probe-shape",
-                                "probe args and expect must be objects",
-                                f"{where}.probe")
+        _validate_probe(raw["probe"], problems, f"{where}.probe")
         if assertion_class in (NORMATIVE, RATIONALE):
             _record_problem(problems, "ledger-forbidden-probe-class",
                             "normative and rationale entries may not use probes",
@@ -533,6 +701,12 @@ def _parse_entry(raw, problems, where):
                 _record_problem(problems, "ledger-invalid-tombstone",
                                 "removed.date must be a real YYYY-MM-DD date",
                                 f"{where}.removed.date")
+
+    # Parsing is exhaustive, but invalid data never becomes a partially valid
+    # object.  In particular, no unhashable identity can reach duplicate
+    # detection and no malformed lineage can reach dict() coercion.
+    if len(problems) != problem_count:
+        return None
 
     return LedgerEntry(
         doc=doc, unit=unit, assertion_class=assertion_class,

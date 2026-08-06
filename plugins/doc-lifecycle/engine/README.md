@@ -372,6 +372,22 @@ Normative and rationale entries cannot carry probes. `probe` and `deps` require 
 shape, duplicate identity, incompatible ruleset, or a registry digest mismatch invalidates
 the whole ledger. In `sync` mode an absent ledger is `ledger-missing`, never bootstrap.
 
+The nested v1 probe schemas are closed too; an extra or missing field is
+`ledger-invalid-probe-shape`, not ignored data:
+
+| kind | `args` | `expect` |
+|---|---|---|
+| `path_exists` | exactly `path` or `glob`, plus `kind: file\|dir\|any` | `{}` |
+| `content_match` | exactly `path`, `pattern` (a bounded valid regular expression) | exactly `presence: present\|absent`, optionally `count` as a non-negative integer |
+| `json_value` | exactly `path`, RFC 6901 `pointer` | exactly `equals` (any strict JSON value) |
+| `symbol_defined` | exactly `path`, `language: python`, dotted Python `name` | `{}` |
+| `tool_probe` | exactly bare `tool`, `flag: --help\|--version`, bounded valid `pattern` | `{}` |
+
+Every path is a canonical repository-relative data string with no shell syntax; literal paths
+cannot contain glob metacharacters, while a `glob` must contain one. This validates stored
+control data only. Probe execution later re-derives repository-boundary, symlink, dependency,
+and declared-tool authority before opening or running anything.
+
 The consumer's optional `.doc-lifecycle/config.json` has a `sync` section. Missing files,
 sections, and fields use `max_work_order_units: 40`, `max_model_calls: 1`, `max_turns: 40`,
 and `sync_model: "sonnet"`. A present malformed value fails closed. Sibling top-level
