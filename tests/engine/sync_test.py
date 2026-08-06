@@ -442,15 +442,191 @@ class LedgerRefusals(SyncRepoTestCase):
         self.assertEqual(ledger.entries[-1].status, "tombstone")
         self.assertEqual(plan_sync(repo, AS_OF).status, "clean")
 
-    def test_changed_current_unit_set_fails_closed_until_comparison_slice(self):
+    def test_changed_current_unit_set_becomes_new_and_removed_identities(self):
         repo = self.sync_repo()
         self.write(repo, "docs/architecture.md",
                    "# Architecture\n\nThe service changed.\n")
 
         result = plan_sync(repo, AS_OF)
 
-        self.assertEqual(codes(result), ["sync-ledger-unit-set-changed"])
-        self.assertNotIn("work_order", result.to_dict())
+        payload = result.to_dict()
+        self.assertEqual(result.status, "partial")
+        self.assertEqual(
+            [unit["classification"] for unit in payload["work_order"]["units"]],
+            ["new"],
+        )
+        tombstones = payload["deterministic_results"]["tombstone_candidates"]
+        self.assertEqual(
+            [(item["classification"], item["disposition"])
+             for item in tombstones],
+            [("removed", "tombstone-candidate")],
+        )
+
+
+class LedgerComparison(SyncRepoTestCase):
+    def test_new_unit_enters_order_while_sibling_is_carried_with_lineage(self):
+        repo = self.sync_repo()
+        self.write(repo, "docs/architecture.md", (
+            "# Architecture\n\nThe service is stable. A new claim needs review.\n"
+        ))
+
+        payload = plan_sync(repo, AS_OF).to_dict()
+
+        carried = payload["deterministic_results"]["unchanged"]
+        self.assertEqual(len(carried), 1)
+        self.assertEqual(carried[0]["classification"], "unchanged")
+        self.assertIn("normalized content", carried[0]["reason"])
+        self.assertEqual(carried[0]["originating_lineage"]["report_digest"],
+                         "a" * 64)
+        order = payload["work_order"]["units"]
+        self.assertEqual(len(order), 1)
+        self.assertEqual(order[0]["classification"], "new")
+        self.assertEqual(order[0]["text"], "A new claim needs review.")
+
+    def test_deleted_unit_is_an_explicit_tombstone_candidate(self):
+        repo = self.sync_repo()
+        self.write(repo, "docs/architecture.md", "# Architecture\n")
+
+        payload = plan_sync(repo, AS_OF).to_dict()
+
+        self.assertEqual(payload["work_order"]["units"], [])
+        candidate = payload["deterministic_results"][
+            "tombstone_candidates"
+        ][0]
+        self.assertEqual(candidate["classification"], "removed")
+        self.assertEqual(candidate["disposition"], "tombstone-candidate")
+        self.assertEqual(candidate["originating_lineage"]["commit"], "b" * 40)
+
+    def test_rewrap_retains_identity_and_spends_no_judgment(self):
+        repo = self.sync_repo()
+        self.write(repo, "docs/architecture.md", (
+            "# Architecture\n\nThe service is\nstable.\n"
+        ))
+
+        payload = plan_sync(repo, AS_OF).to_dict()
+
+        self.assertEqual(payload["work_order"]["units"], [])
+        self.assertEqual(
+            [item["classification"]
+             for item in payload["deterministic_results"]["unchanged"]],
+            ["unchanged"],
+        )
+        self.assertEqual(
+            payload["deterministic_results"]["tombstone_candidates"], [],
+        )
+
+    def test_identical_text_in_two_documents_is_independently_strategized(self):
+        repo = self.repo({
+            **FILES,
+            "docs/copy.md": "# Copy\n\nThe service is stable.\n",
+        })
+        records = self.ledger_records(repo)
+        records[0]["covered"] = ["docs/architecture.md", "docs/copy.md"]
+        copy = dict(records[1])
+        copy["doc"] = "docs/copy.md"
+        copy["strategy"] = "reconcile-only"
+        records.append(copy)
+        self.write_ledger(repo, records)
+
+        payload = plan_sync(repo, AS_OF).to_dict()
+
+        self.assertEqual(payload["work_order"]["units"], [])
+        carried = payload["deterministic_results"]["unchanged"]
+        self.assertEqual(
+            [(item["doc"], item["strategy"]) for item in carried],
+            [("docs/architecture.md", "on-change"),
+             ("docs/copy.md", "reconcile-only")],
+        )
+        self.assertEqual(carried[0]["unit"], carried[1]["unit"])
+        self.assertNotEqual(carried[0]["reason"], carried[1]["reason"])
+
+    def test_changed_and_vanished_deps_escalate_only_their_entries(self):
+        files = dict(FILES)
+        files["docs/architecture.md"] = (
+            "# Architecture\n\nFirst claim. Second claim. Third claim.\n"
+        )
+        files.update({
+            "src/first.txt": "first\n",
+            "src/second.txt": "second\n",
+            "src/third.txt": "third\n",
+        })
+        repo = self.repo(files)
+        records = self.ledger_records(repo)
+        units = [unit for unit in segment_document(
+            repo, "docs/architecture.md"
+        ).units if unit.assertion_capable]
+        entries = []
+        for unit, path in zip(units, (
+                "src/first.txt", "src/second.txt", "src/third.txt")):
+            entry = dict(records[1])
+            entry["unit"] = unit.digest
+            entry["strategy"] = "deps"
+            with open(os.path.join(repo, path), "rb") as fh:
+                digest = hashlib.sha256(fh.read()).hexdigest()
+            entry["deps"] = [{"path": path, "digest": digest}]
+            entries.append(entry)
+        self.write_ledger(repo, [records[0], *entries])
+        self.write(repo, "src/first.txt", "changed\n")
+        os.remove(os.path.join(repo, "src/second.txt"))
+
+        payload = plan_sync(repo, AS_OF).to_dict()
+
+        order = payload["work_order"]["units"]
+        self.assertEqual([item["text"] for item in order],
+                         ["First claim.", "Second claim."])
+        self.assertEqual(
+            [item["dependency_changes"][0]["change"] for item in order],
+            ["changed", "disappeared"],
+        )
+        carried = payload["deterministic_results"]["unchanged"]
+        self.assertEqual(len(carried), 1)
+        self.assertEqual(carried[0]["unit"], units[2].digest)
+        self.assertIn("every declared dependency digest", carried[0]["reason"])
+
+    def test_header_uncovered_document_never_enters_the_work_order(self):
+        repo = self.repo({
+            **FILES,
+            "docs/copy.md": "# Copy\n\nThis is deliberately uncovered.\n",
+        })
+        records = self.ledger_records(repo)
+        records[0]["uncovered"] = ["docs/copy.md"]
+        self.write_ledger(repo, records)
+
+        payload = plan_sync(repo, AS_OF).to_dict()
+
+        self.assertEqual(payload["work_order"]["units"], [])
+        self.assertEqual(
+            payload["deterministic_results"]["declared_uncovered"],
+            ["docs/copy.md"],
+        )
+        uncovered = payload["deterministic_results"][
+            "declared_uncovered_units"
+        ]
+        self.assertEqual(uncovered[0]["doc"], "docs/copy.md")
+        self.assertEqual(uncovered[0]["classification"], "declared-uncovered")
+        self.assertEqual(len(uncovered[0]["units"]), 1)
+
+    def test_over_cap_is_a_repeatable_typed_stop_naming_every_unit(self):
+        repo = self.sync_repo(json.dumps({
+            "sync": {"max_work_order_units": 1},
+        }))
+        self.write(repo, "docs/architecture.md", (
+            "# Architecture\n\n"
+            "The service is stable. First new claim. Second new claim.\n"
+        ))
+        new_units = [unit.digest for unit in segment_document(
+            repo, "docs/architecture.md"
+        ).units if unit.assertion_capable][1:]
+
+        first = plan_sync(repo, AS_OF)
+        second = plan_sync(repo, AS_OF)
+
+        self.assertIsInstance(first, Invalid)
+        self.assertEqual(first.to_dict(), second.to_dict())
+        self.assertEqual(codes(first), ["sync-work-order-over-budget"])
+        self.assertNotIn("work_order", first.to_dict())
+        for unit in new_units:
+            self.assertIn(unit, first.problems[0].message)
 
 
 class ModeAndClockContract(SyncRepoTestCase):

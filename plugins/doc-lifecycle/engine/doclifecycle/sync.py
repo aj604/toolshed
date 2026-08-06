@@ -1,11 +1,10 @@
-"""Incremental-sync planning: the accepted ledger and its zero-work seam.
+"""Incremental-sync planning: compare the accepted ledger to the repository.
 
 This module owns the durable assertion-ledger contract and the first complete
-path through phase 1: an unchanged covered unit set produces deterministic
-results and an empty judgment work order.  The accepted ledger is only ever
-read.  Changed-unit comparison and probe execution deliberately remain later
-extensions of this seam; until they exist, either condition fails closed
-instead of being mistaken for a clean run.
+path through phase 1: assertion identities are compared document-by-document,
+safe reuse is explained, and only units needing judgment enter the bounded
+work order.  The accepted ledger is only ever read.  Probe execution remains a
+later extension of this seam; ledger comparison never invokes a model.
 """
 
 import datetime
@@ -17,7 +16,7 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from . import ARTIFACT_SCHEMA_VERSION, RULESET_VERSION
-from .digest import sha256_bytes, sha256_canonical
+from .digest import sha256_bytes, sha256_canonical, sha256_file
 from .drift import OBLIGATION_ANCHOR, _audit_anchor, plan_drift_audit
 from .finding import FACTUAL, NORMATIVE, RATIONALE
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
@@ -798,7 +797,7 @@ def load_assertion_ledger(repo_root, expected_registry_digest=None,
 
 
 def _current_units(repo_root, drift_plan, registry_path):
-    documents, problems = [], []
+    documents, details, problems = [], {}, []
     for document in drift_plan.documents:
         if document.obligation == OBLIGATION_ANCHOR:
             continue
@@ -806,51 +805,171 @@ def _current_units(repo_root, drift_plan, registry_path):
         if isinstance(segmented, Invalid):
             problems.extend(segmented.problems)
             continue
+        capable = [unit for unit in segmented.units if unit.assertion_capable]
         documents.append({
             "doc": document.path,
-            "units": [unit.digest for unit in segmented.units
-                      if unit.assertion_capable],
+            "units": [unit.digest for unit in capable],
         })
+        details[document.path] = tuple(capable)
     if problems:
-        return None, Invalid(tuple(problems))
-    return documents, None
+        return None, None, Invalid(tuple(problems))
+    return documents, details, None
 
 
-def _comparison_problem(ledger, current):
-    living = {document["doc"] for document in current}
-    declared = set(ledger.header.covered) | set(ledger.header.uncovered)
-    if living != declared:
-        return Problem(
-            code="sync-ledger-coverage-mismatch",
-            message=("the ledger's covered/uncovered document partition does not "
-                     "match the current living-document inventory; changed-corpus "
-                     "comparison is not implemented by this tracer-bullet slice"),
-            location=ledger.path,
-        )
+def _entry_ref(entry):
+    return {"doc": entry.doc, "unit": entry.unit}
 
-    current_by_doc = {item["doc"]: item["units"] for item in current}
+
+def _unit_ref(doc, unit):
+    return {
+        "doc": doc,
+        "unit": unit.digest,
+        "kind": unit.kind,
+        "text": unit.text,
+        "ordinal": unit.ordinal,
+        "line": unit.line,
+        "end_line": unit.end_line,
+    }
+
+
+def _dependency_changes(repo_root, entry):
+    """Return deterministic observations for deps that moved or disappeared.
+
+    Dependency paths are already canonical repository-relative strings by the
+    ledger validator.  Comparison still refuses to follow a symlink: a path
+    that no longer names a regular repository file is an unavailable dep and
+    therefore escalates only its owning entry.
+    """
+    changes = []
+    for dependency in entry.raw["deps"]:
+        path = dependency["path"]
+        absolute = os.path.join(repo_root, path)
+        observed = None
+        current, aliased = repo_root, False
+        for component in path.split("/"):
+            current = os.path.join(current, component)
+            if os.path.islink(current):
+                aliased = True
+                break
+        if not aliased and os.path.isfile(absolute):
+            try:
+                observed = sha256_file(absolute)
+            except OSError:
+                observed = None
+        if observed == dependency["digest"]:
+            continue
+        changes.append({
+            "path": path,
+            "expected_digest": dependency["digest"],
+            "observed_digest": observed,
+            "change": "disappeared" if observed is None else "changed",
+        })
+    return changes
+
+
+def _carried_result(entry):
+    reasons = {
+        STRATEGY_DEPS: (
+            "unit identity and every declared dependency digest are unchanged"
+        ),
+        STRATEGY_ON_CHANGE: "unit identity and normalized content are unchanged",
+        STRATEGY_RECONCILE_ONLY: (
+            "unit identity is unchanged and its strategy defers review to explicit "
+            "reconciliation"
+        ),
+        STRATEGY_PROBE: (
+            "unit identity and its deterministic probe assignment are unchanged"
+        ),
+    }
+    return {
+        **_entry_ref(entry),
+        "classification": "unchanged",
+        "strategy": entry.strategy,
+        "coverage_source": "carried",
+        "reason": reasons[entry.strategy],
+        "originating_lineage": dict(entry.lineage),
+    }
+
+
+def _compare_units(repo_root, ledger, current, details):
+    """Classify current and accepted identities without mutating either input."""
+    covered = set(ledger.header.covered)
     active_by_doc = {doc: [] for doc in ledger.header.covered}
     for entry in ledger.entries:
         if entry.status != "active":
             continue
         if entry.doc not in active_by_doc:
-            return Problem(
+            return [], [], [], [], Problem(
                 code="sync-ledger-active-entry-outside-coverage",
                 message=(f"active entry {entry.doc!r} + {entry.unit} is not in "
                          "the header's covered documents"),
                 location=ledger.path,
             )
-        active_by_doc[entry.doc].append(entry.unit)
-    for doc in ledger.header.covered:
-        if active_by_doc[doc] != current_by_doc[doc]:
-            return Problem(
-                code="sync-ledger-unit-set-changed",
-                message=(f"the current assertion-unit identities in {doc!r} do not "
-                         "match its accepted ledger entries; changed-unit comparison "
-                         "belongs to the next phase-1 slice"),
-                location=doc,
-            )
-    return None
+        active_by_doc[entry.doc].append(entry)
+
+    current_by_doc = {item["doc"]: item["units"] for item in current}
+    carried, work, tombstones, uncovered = [], [], [], []
+    for doc in sorted(current_by_doc):
+        if doc not in covered:
+            uncovered.append({
+                "doc": doc,
+                "classification": "declared-uncovered",
+                "units": [unit.digest for unit in details[doc]],
+            })
+            continue
+        accepted = {entry.unit: entry for entry in active_by_doc[doc]}
+        for unit in details[doc]:
+            entry = accepted.get(unit.digest)
+            if entry is None:
+                work.append({
+                    **_unit_ref(doc, unit),
+                    "classification": "new",
+                    "reason": (
+                        "no active ledger entry has this document-scoped identity"
+                    ),
+                })
+                continue
+            if entry.strategy == STRATEGY_DEPS:
+                changes = _dependency_changes(repo_root, entry)
+                if changes:
+                    work.append({
+                        **_unit_ref(doc, unit),
+                        "classification": "unchanged",
+                        "strategy": entry.strategy,
+                        "reason": "declared-dependency-changed",
+                        "dependency_changes": changes,
+                        "originating_lineage": dict(entry.lineage),
+                    })
+                    continue
+            carried.append(_carried_result(entry))
+
+    for doc in sorted(active_by_doc):
+        present = set(current_by_doc.get(doc, ()))
+        for entry in active_by_doc[doc]:
+            if entry.unit not in present:
+                tombstones.append({
+                    **_entry_ref(entry),
+                    "classification": "removed",
+                    "disposition": "tombstone-candidate",
+                    "reason": "the active identity is absent from its covered document",
+                    "originating_lineage": dict(entry.lineage),
+                })
+
+    work.sort(key=lambda item: (item["doc"], item["ordinal"], item["unit"]))
+    return carried, work, tombstones, uncovered, None
+
+
+def _over_budget(work, budget, config_path):
+    if len(work) <= budget.max_work_order_units:
+        return None
+    names = ", ".join(f"{item['doc']} + {item['unit']}" for item in work)
+    return Invalid((Problem(
+        code="sync-work-order-over-budget",
+        message=(f"{len(work)} units require judgment, exceeding "
+                 f"max_work_order_units={budget.max_work_order_units}; affected "
+                 f"units: {names}"),
+        location=f"{config_path}:sync.max_work_order_units",
+    ),))
 
 
 def _anchor_results(repo_root, drift_plan, registry_path):
@@ -934,12 +1053,19 @@ def plan_sync(repo_root, as_of, mode=MODE_SYNC,
     drift_plan = plan_drift_audit(repo_root, registry_path=registry_path)
     if isinstance(drift_plan, Invalid):
         return drift_plan
-    current, problem = _current_units(repo_root, drift_plan, registry_path)
+    current, details, problem = _current_units(
+        repo_root, drift_plan, registry_path
+    )
     if problem is not None:
         return problem
-    mismatch = _comparison_problem(ledger, current)
-    if mismatch is not None:
-        return Invalid((mismatch,))
+    carried, work, tombstones, uncovered, comparison_problem = _compare_units(
+        repo_root, ledger, current, details
+    )
+    if comparison_problem is not None:
+        return Invalid((comparison_problem,))
+    over_budget = _over_budget(work, budget, config_path)
+    if over_budget is not None:
+        return over_budget
 
     unit_set_digest = sha256_canonical({
         "schema_version": ARTIFACT_SCHEMA_VERSION,
@@ -954,7 +1080,7 @@ def plan_sync(repo_root, as_of, mode=MODE_SYNC,
         session_id = "s-" + sha256_canonical(core_binding)[:24]
     if chunk_id is None:
         chunk_id = "c-" + sha256_canonical({
-            "mode": mode, "unit_set_digest": unit_set_digest, "units": [],
+            "mode": mode, "unit_set_digest": unit_set_digest, "units": work,
         })[:24]
 
     anchor_checks, gaps = _anchor_results(repo_root, drift_plan, registry_path)
@@ -966,11 +1092,12 @@ def plan_sync(repo_root, as_of, mode=MODE_SYNC,
         finding for check in anchor_checks for finding in check["findings"]
     ]
     result_payload = {
-        "unchanged": [
-            {"doc": entry.doc, "unit": entry.unit, "strategy": entry.strategy}
-            for entry in ledger.entries if entry.status == "active"
-        ],
-        "declared_uncovered": list(ledger.header.uncovered),
+        "unchanged": carried,
+        "tombstone_candidates": tombstones,
+        "declared_uncovered": sorted(
+            set(ledger.header.uncovered) | {item["doc"] for item in uncovered}
+        ),
+        "declared_uncovered_units": uncovered,
         "narrative_checks": anchor_checks,
         "excluded": [entry.to_dict() for entry in drift_plan.excluded],
         "inventory_findings": inventory_findings,
@@ -980,7 +1107,7 @@ def plan_sync(repo_root, as_of, mode=MODE_SYNC,
         "digest": sha256_canonical(result_payload), **result_payload,
     }
     status = (
-        STATE_PARTIAL if gaps
+        STATE_PARTIAL if gaps or work
         else STATE_FINDINGS if inventory_findings or anchor_findings
         else STATE_CLEAN
     )
@@ -988,7 +1115,7 @@ def plan_sync(repo_root, as_of, mode=MODE_SYNC,
         mode=mode, session_id=session_id, chunk_id=chunk_id,
         total_chunk_count=total_chunk_count, ledger_digest=ledger.digest,
         inventory_digest=inventory.digest, unit_set_digest=unit_set_digest,
-        budget=budget,
+        budget=budget, units=tuple(work),
     )
     return SyncPlan(
         status=status, mode=mode, as_of=as_of,
