@@ -24,13 +24,14 @@ repository document.
 |---|---|
 | `doclifecycle/registry.py` | registry parsing, validation, classification, glob matching, `without_rules()`, registry digest |
 | `doclifecycle/inventory.py` | `build_inventory()`, `load_registry()`, the closed-world walk, document/inventory digests |
-| `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, `repository_relative_problem()`, `write_target_problem()`, the canonical path form and target classes |
+| `doclifecycle/paths.py` | `authorize_path()`, `classify_target()`, `repository_relative_problem()`, `repository_read_problem()`, `write_target_problem()`, the canonical path form and target classes |
 | `doclifecycle/segment.py` | `segment_text()`, `segment_document()`, the unit kinds and unit digests |
 | `doclifecycle/finding.py` | `build_finding()`, `record_classifications()`, finding digests, the assertion classes |
 | `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
 | `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, `audit_bloat()`, `load_bloat_verdicts()`, the chunk cache seam |
 | `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, `load_verdicts()`, the verdicts and anchor checks |
 | `doclifecycle/sync.py` | `plan_sync()`, `load_assertion_ledger()`, `load_sync_budget()`, the accepted-ledger and digest-bound judgment-work-order contracts |
+| `doclifecycle/probes.py` | `execute_probe()`, the validated closed probe vocabulary, dependency evidence boundary, observations, and declared-tool execution |
 | `doclifecycle/migrate.py` | `draft_registry()`, `dry_run_migration()`, the legacy-install inference and the migration contract |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
@@ -385,9 +386,9 @@ The nested v1 probe schemas are closed too; an extra or missing field is
 | `tool_probe` | exactly bare `tool`, `flag: --help\|--version`, bounded valid `pattern` | `{}` |
 
 Every path is a canonical repository-relative data string with no shell syntax; literal paths
-cannot contain glob metacharacters, while a `glob` must contain one. This validates stored
-control data only. Probe execution later re-derives repository-boundary, symlink, dependency,
-and declared-tool authority before opening or running anything.
+cannot contain glob metacharacters, while a `glob` must contain one. Before opening or running
+anything, probe execution revalidates this shape, asks `paths.py` to establish repository and
+symlink safety, and treats the entry's exact `deps` paths as its evidence boundary.
 
 The consumer's optional `.doc-lifecycle/config.json` has a `sync` section. Missing files,
 sections, and fields use `max_work_order_units: 40`, `max_model_calls: 1`, `max_turns: 40`,
@@ -435,9 +436,12 @@ The work order carries `session_id`, `chunk_id`, and `total_chunk_count`, plus t
 }
 ```
 
-New identities and unchanged `deps` identities whose dependencies moved appear in deterministic
-document/unit order in `work_order.units`, with current text and location. Removed identities
-appear in `tombstone_candidates`, never as unexplained disappearances. If the complete order is
+New identities, unchanged `deps` identities whose dependencies moved, and probe identities that
+fail or receive a typed execution refusal appear in deterministic document/unit order in
+`work_order.units`, with current text and location. A passing probe instead contributes fresh
+`coverage_source: probe` evidence with resolved/matched values and current dependency digests.
+Removed identities appear in `tombstone_candidates`, never as unexplained disappearances. If
+the complete order is
 larger than `max_work_order_units`, planning returns the typed
 `sync-work-order-over-budget` refusal naming every affected `(doc, unit)` and emits no work
 order. Every refusal is `Invalid`, whose wire form has typed `problems` and no `work_order`.

@@ -3,8 +3,9 @@
 This module owns the durable assertion-ledger contract and the first complete
 path through phase 1: assertion identities are compared document-by-document,
 safe reuse is explained, and only units needing judgment enter the bounded
-work order.  The accepted ledger is only ever read.  Probe execution remains a
-later extension of this seam; ledger comparison never invokes a model.
+work order.  The accepted ledger is only ever read.  Unchanged probe entries
+are re-executed with fresh deterministic evidence; comparison never invokes a
+model.
 """
 
 import datetime
@@ -21,6 +22,7 @@ from .drift import OBLIGATION_ANCHOR, _audit_anchor, plan_drift_audit
 from .finding import FACTUAL, NORMATIVE, RATIONALE
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .paths import repository_relative_problem
+from .probes import PROBE_KINDS, execute_probe
 from .results import (
     STATE_CLEAN,
     STATE_FINDINGS,
@@ -58,13 +60,6 @@ STRATEGIES = (
 )
 
 PROVENANCES = ("judged", "heuristic", "seeded")
-PROBE_KINDS = (
-    "path_exists",
-    "content_match",
-    "json_value",
-    "symbol_defined",
-    "tool_probe",
-)
 STATUSES = ("active", "tombstone")
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -867,7 +862,7 @@ def _dependency_changes(repo_root, entry):
     return changes
 
 
-def _carried_result(entry):
+def _carried_result(entry, probe_outcome=None):
     reasons = {
         STRATEGY_DEPS: (
             "unit identity and every declared dependency digest are unchanged"
@@ -881,14 +876,22 @@ def _carried_result(entry):
             "unit identity and its deterministic probe assignment are unchanged"
         ),
     }
-    return {
+    result = {
         **_entry_ref(entry),
         "classification": "unchanged",
         "strategy": entry.strategy,
-        "coverage_source": "carried",
+        "coverage_source": "probe" if probe_outcome is not None else "carried",
         "reason": reasons[entry.strategy],
         "originating_lineage": dict(entry.lineage),
     }
+    if probe_outcome is not None:
+        result.pop("originating_lineage")
+        result["reason"] = "deterministic probe passed with fresh observed evidence"
+        result["probe"] = {
+            "kind": entry.raw["probe"]["kind"],
+            "observed": dict(probe_outcome.observed),
+        }
+    return result
 
 
 def _compare_units(repo_root, ledger, current, details):
@@ -941,6 +944,39 @@ def _compare_units(repo_root, ledger, current, details):
                         "originating_lineage": dict(entry.lineage),
                     })
                     continue
+            if entry.strategy == STRATEGY_PROBE:
+                outcome = execute_probe(
+                    repo_root, entry.raw["probe"], entry.raw["deps"]
+                )
+                if outcome.problem is not None:
+                    work.append({
+                        **_unit_ref(doc, unit),
+                        "classification": "unchanged",
+                        "strategy": entry.strategy,
+                        "reason": "deterministic-probe-refused",
+                        "probe_problem": {
+                            "code": outcome.problem.code,
+                            "message": outcome.problem.message,
+                            "location": outcome.problem.location,
+                        },
+                        "originating_lineage": dict(entry.lineage),
+                    })
+                    continue
+                if not outcome.passed:
+                    work.append({
+                        **_unit_ref(doc, unit),
+                        "classification": "unchanged",
+                        "strategy": entry.strategy,
+                        "reason": "deterministic-probe-failed",
+                        "probe": {
+                            "kind": entry.raw["probe"]["kind"],
+                            "observed": dict(outcome.observed),
+                        },
+                        "originating_lineage": dict(entry.lineage),
+                    })
+                    continue
+                carried.append(_carried_result(entry, outcome))
+                continue
             carried.append(_carried_result(entry))
 
     for doc in sorted(active_by_doc):

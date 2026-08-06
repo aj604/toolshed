@@ -469,6 +469,85 @@ def repository_relative_problem(path):
     return _spelling_problem(path)
 
 
+def repository_read_problem(path, *, repo_root):
+    """Why a repository-relative evidence path may not be read, or ``None``.
+
+    Read authorization is intentionally owned beside write authorization.  A
+    probe may inspect source, configuration, or documentation, so it does not
+    apply the applier's target-class/root policy; it does apply the same path
+    spelling, filesystem identity, and alias rules.  Missing leaves are safe
+    to *ask about* (``path_exists`` needs that answer), while every existing
+    component must be the canonically named, non-symlinked repository entry.
+    """
+    fault = _spelling_problem(path)
+    if fault:
+        code, reason = fault
+        return Problem(code=code, message=f"{path!r} {reason}", location=path)
+    if not os.path.isdir(repo_root):
+        return Problem(
+            code="repo-root-missing",
+            message=f"the repository root {repo_root!r} is not a directory",
+            location=repo_root,
+        )
+
+    current = repo_root
+    components = path.split("/")
+    for index, name in enumerate(components):
+        parent, current = current, os.path.join(current, name)
+        so_far = "/".join(components[: index + 1])
+        folded = _folded_entry(parent, name)
+        if folded:
+            code, entry = folded
+            if code == "path-unreadable":
+                message = (
+                    f"the directory holding {so_far!r} cannot be listed, so "
+                    "its filesystem identity cannot be established"
+                )
+            else:
+                message = (
+                    f"{so_far!r} differs from the existing entry {entry!r} "
+                    "only by case or Unicode normalization"
+                )
+            return Problem(code=code, message=message, location=so_far)
+        if os.path.islink(current):
+            return Problem(
+                code="symlinked-path",
+                message=(f"{so_far!r} is a symlink — evidence reads never "
+                         "follow aliases inside or outside the repository"),
+                location=so_far,
+            )
+        if not os.path.lexists(current):
+            return None
+        if index != len(components) - 1 and not os.path.isdir(current):
+            return Problem(
+                code="path-not-a-directory",
+                message=f"{so_far!r} is not a directory",
+                location=so_far,
+            )
+
+    try:
+        info = os.stat(current)
+    except OSError as exc:
+        return Problem(
+            code="path-unreadable", message=f"cannot inspect {path!r}: {exc}",
+            location=path,
+        )
+    if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+        return Problem(
+            code="path-special-file",
+            message=f"{path!r} is neither a regular file nor a directory",
+            location=path,
+        )
+    if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
+        return Problem(
+            code="path-hardlinked",
+            message=(f"{path!r} has {info.st_nlink} hard links — its content "
+                     "does not have one repository identity"),
+            location=path,
+        )
+    return None
+
+
 def write_target_problem(path):
     """Why `path` may not be named as a write target, or None.
 
