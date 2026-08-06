@@ -1,0 +1,350 @@
+{
+  "status": "partial",
+  "schema_version": 1,
+  "lineage": {
+    "repository": "origin:github.com/aj604/toolshed",
+    "base_commit": "32b65fcac8c6a7616d7e260983ae04e862674013",
+    "audit_mode": "full",
+    "inventory_digest": "de526cc8a55155b562ae0e36bb2e99676a58a77ab85b0a245b7f62db43f4d445",
+    "audit_config_digest": "51ef262b3c06fedee82ca46b5714a102da8a84cc52c08f194b9b534b5fbe365e",
+    "registry_digest": "c9a6c7b809679ff2c18a26de544d9f2d0b15c404821098c66286a7cd6ef05bc8",
+    "ruleset_version": 10,
+    "plugin_version": "0.44.3",
+    "evidence_boundary": {
+      "sources": [
+        "**"
+      ],
+      "excluded": [],
+      "commands": []
+    }
+  },
+  "records": [
+    {
+      "id": "B1",
+      "digest": "05461e49ce4462f63f7def84dd7d480555c418cf86d6c4d7e7c2014d0a47e665",
+      "code": "CONDENSE",
+      "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+      "units": [
+        "0fe27516a3a9b0768787904a8ff9c3ff650e9473c3b0dd10006ac7afa37b43a1",
+        "53d8b6c02eba9de072f3db8a0511344dacc58c69889b8f216500a66d9401580e",
+        "77b9bd5edaac08103cb704557d653ee7c85c47930035db0326fc762b1307a4bb",
+        "89de8fde545d430f772d1b9f0f534197717719d526de826f8159fbcb114a1321",
+        "d58ca1797582313b8ac2aa268ab622564b3037713591b528b2cfd3b801ee669b",
+        "eae2a555ba1fdbfbe2934f77b5be4cb07b2a957981ff66f48adf9ac4f440633a"
+      ],
+      "verdict": "CONDENSE",
+      "evidence": "SKILL.md's \"## The contract\" section (lines 160-175) restates facts output-contract.md already states canonically: the ten-key field list and six-value verdict enum duplicate output-contract.md's \"A verdict carries only these ten keys, all optional except as ruled below: id, verdict, path, units, evidence, destination, proposal, status, scope, sample\" plus its verdict-field row; the refused-fields sentence is near-verbatim to output-contract.md's \"Fields a verdict may never carry: files, members, occurrences, contention. A bulk finding's members are enumerated from the index, never asserted by the model\"; and the DISTILL destination/retire-only-distillation rule duplicates output-contract.md's destination row (\"DISTILL: optional, and a path nobody has written yet ... absent means a retire-only distillation\"). SKILL.md's very next sentence after this passage reads \"Field rules, the worked example, and the chunk-result seam shape: output-contract.md\", naming that file as the field rules' one home, so this passage duplicates the doc it explicitly defers to one sentence later.",
+      "duplicate_search": {
+        "scope": "repository",
+        "index_digest": "8f2c2e3cadcadca86540085a487ec7865a9011a39fc87770d0d1e2ddfaf4fb51",
+        "documents_searched": 45,
+        "here": [
+          {
+            "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+            "ordinal": 32,
+            "line": 172,
+            "end_line": 175
+          },
+          {
+            "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+            "ordinal": 30,
+            "line": 168,
+            "end_line": 170
+          },
+          {
+            "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+            "ordinal": 28,
+            "line": 164,
+            "end_line": 164
+          },
+          {
+            "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+            "ordinal": 27,
+            "line": 160,
+            "end_line": 163
+          },
+          {
+            "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+            "ordinal": 29,
+            "line": 165,
+            "end_line": 167
+          },
+          {
+            "path": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+            "ordinal": 31,
+            "line": 170,
+            "end_line": 172
+          }
+        ],
+        "elsewhere": [],
+        "occurrence_count": 6
+      },
+      "destination": null,
+      "proposal": "Verdicts are `CUT`/`CONDENSE`/`EXTRACT-AND-MOVE`/`MERGE-DOC`/`RETIRE-DOC`/`DISTILL`; the assembler authors the envelope's `completion`, chunk executors author only `verdicts`.",
+      "status": null
+    }
+  ],
+  "incomplete": [
+    {
+      "scope": "CLAUDE.md",
+      "reason": "bloat-chunk-missing: planned chunk c-aa28b3d4104e191b did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "CONTEXT.md",
+      "reason": "bloat-chunk-missing: planned chunk c-aa28b3d4104e191b did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "README.md",
+      "reason": "bloat-chunk-missing: planned chunk c-aa28b3d4104e191b did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/decisions.md",
+      "reason": "bloat-chunk-missing: planned chunk c-11fdf2927c452d8c did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-05-marketing-overhaul-design.md",
+      "reason": "bloat-chunk-missing: planned chunk c-21b59ff75b63249a did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md",
+      "reason": "bloat-chunk-missing: planned chunk c-21b59ff75b63249a did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-plan.md",
+      "reason": "bloat-chunk-missing: planned chunk c-343cd82c2e263447 did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-07-bloat-scale-hardening-design.md",
+      "reason": "bloat-chunk-missing: planned chunk c-343cd82c2e263447 did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md",
+      "reason": "bloat-chunk-missing: planned chunk c-b957ded3cebece09 did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-11-docs-ab-experiment.md",
+      "reason": "bloat-chunk-missing: planned chunk c-b957ded3cebece09 did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md",
+      "reason": "bloat-chunk-missing: planned chunk c-b957ded3cebece09 did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-26-shadow-parity-gate.md",
+      "reason": "bloat-chunk-missing: planned chunk c-c923e00c3d6e3c1a did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md",
+      "reason": "bloat-chunk-missing: planned chunk c-c923e00c3d6e3c1a did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-07-27-shadow-parity-gate-rerun.md",
+      "reason": "bloat-chunk-missing: planned chunk c-39e1633b4d245180 did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-08-02-assertion-ledger-bootstrap-phase-b.md",
+      "reason": "bloat-chunk-missing: planned chunk c-d83ccb33fdc8098a did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/plans/2026-08-02-assertion-ledger-incremental-sync-phase-a.md",
+      "reason": "bloat-chunk-missing: planned chunk c-d83ccb33fdc8098a did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "docs/superpowers/specs/2026-07-07-doc-sync-self-upgrade-design.md",
+      "reason": "bloat-chunk-missing: planned chunk c-50fbb3ff72963c22 did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/agents/doc-distiller.md",
+      "reason": "bloat-chunk-missing: planned chunk c-4a54ec8014778ba2 did not produce a valid result: result file was not produced"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/agents/llm-doc-writer.md",
+      "reason": "bloat-chunk-missing: planned chunk c-4a54ec8014778ba2 did not produce a valid result: result file was not produced"
+    }
+  ],
+  "digest": "8cc5d4db86878e87f7dd5fcf8de37c020dd8b9a861c3041173d5e60d42ab93f4",
+  "examined": [
+    {
+      "scope": "docs/doc-scope.md",
+      "chunk": "c-a65891afde66246d",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "docs/design-rationale.md",
+      "chunk": "c-d5a9e2b613d742d3",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "docs/agents/domain.md",
+      "chunk": "c-3328325ca26cd02e",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "docs/agents/issue-tracker.md",
+      "chunk": "c-3328325ca26cd02e",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "docs/agents/triage-labels.md",
+      "chunk": "c-3328325ca26cd02e",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "docs/guides/auditing-doc-bloat.md",
+      "chunk": "c-49f0257ce019b8d7",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "docs/guides/building-skills-test-first.md",
+      "chunk": "c-49f0257ce019b8d7",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "docs/guides/principles.md",
+      "chunk": "c-49f0257ce019b8d7",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "docs/guides/scheduling-doc-sync.md",
+      "chunk": "c-49f0257ce019b8d7",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "docs/guides/starting-docs-from-scratch.md",
+      "chunk": "c-49f0257ce019b8d7",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/engine/README.md",
+      "chunk": "c-a5bd9433e33d3859",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+      "chunk": "c-8e71127373e1ab87",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md",
+      "chunk": "c-8e71127373e1ab87",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+      "chunk": "c-9adf257d63fcc710",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+      "chunk": "c-9adf257d63fcc710",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/planning-artifacts.md",
+      "chunk": "c-70a98162c38b6bfa",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/verdict-lenses.md",
+      "chunk": "c-70a98162c38b6bfa",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md",
+      "chunk": "c-767eb602e998816d",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md",
+      "chunk": "c-767eb602e998816d",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/fixing-docs/SKILL.md",
+      "chunk": "c-1cbbc8c2ff9fd4a1",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/growing-docs/SKILL.md",
+      "chunk": "c-d019db1f0a70d1d3",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+      "chunk": "c-dc2f6ea9d701c71a",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/writing-docs/SKILL.md",
+      "chunk": "c-bcf4dd5e8db17750",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/writing-docs/agent-context.md",
+      "chunk": "c-bcf4dd5e8db17750",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/writing-docs/readme.md",
+      "chunk": "c-bcf4dd5e8db17750",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    },
+    {
+      "scope": "plugins/doc-lifecycle/skills/writing-docs/runbooks.md",
+      "chunk": "c-bcf4dd5e8db17750",
+      "plan_digest": "6d8ca6e5cb1085cca1afdc0232688d811a73b6c4034bf2c2f4565331ed6dee2c"
+    }
+  ],
+  "scope": {
+    "basis": "the completion artifact partitions the context index into content-addressed chunks",
+    "coverage": "whole-inventory",
+    "documents": [
+      "CLAUDE.md",
+      "CONTEXT.md",
+      "README.md",
+      "docs/agents/domain.md",
+      "docs/agents/issue-tracker.md",
+      "docs/agents/triage-labels.md",
+      "docs/decisions.md",
+      "docs/design-rationale.md",
+      "docs/doc-scope.md",
+      "docs/guides/auditing-doc-bloat.md",
+      "docs/guides/building-skills-test-first.md",
+      "docs/guides/principles.md",
+      "docs/guides/scheduling-doc-sync.md",
+      "docs/guides/starting-docs-from-scratch.md",
+      "docs/plans/2026-07-05-marketing-overhaul-design.md",
+      "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-design.md",
+      "docs/plans/2026-07-06-detecting-doc-bloat-rearchitecture-plan.md",
+      "docs/plans/2026-07-07-bloat-scale-hardening-design.md",
+      "docs/plans/2026-07-09-bloat-distill-lane-fanout-design.md",
+      "docs/plans/2026-07-11-docs-ab-experiment.md",
+      "docs/plans/2026-07-12-review-findings-growth-and-lifecycle-design.md",
+      "docs/plans/2026-07-26-shadow-parity-gate.md",
+      "docs/plans/2026-07-27-shadow-parity-gate-rerun-addendum.md",
+      "docs/plans/2026-07-27-shadow-parity-gate-rerun.md",
+      "docs/plans/2026-08-02-assertion-ledger-bootstrap-phase-b.md",
+      "docs/plans/2026-08-02-assertion-ledger-incremental-sync-phase-a.md",
+      "docs/superpowers/specs/2026-07-07-doc-sync-self-upgrade-design.md",
+      "plugins/doc-lifecycle/agents/doc-distiller.md",
+      "plugins/doc-lifecycle/agents/llm-doc-writer.md",
+      "plugins/doc-lifecycle/engine/README.md",
+      "plugins/doc-lifecycle/skills/bootstrapping-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/bootstrapping-docs/repo-shape.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/output-contract.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/planning-artifacts.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-bloat/references/verdict-lenses.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-drift/SKILL.md",
+      "plugins/doc-lifecycle/skills/detecting-doc-drift/output-contract.md",
+      "plugins/doc-lifecycle/skills/fixing-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/growing-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/scheduling-doc-sync/SKILL.md",
+      "plugins/doc-lifecycle/skills/writing-docs/SKILL.md",
+      "plugins/doc-lifecycle/skills/writing-docs/agent-context.md",
+      "plugins/doc-lifecycle/skills/writing-docs/readme.md",
+      "plugins/doc-lifecycle/skills/writing-docs/runbooks.md"
+    ],
+    "excluded": []
+  }
+}

@@ -1,0 +1,1470 @@
+{
+  "runs": [
+    {
+      "run_id": 31063129773,
+      "conclusion": "success",
+      "createdAt": "2026-08-06T01:34:33Z",
+      "event": "workflow_dispatch",
+      "headSha": "32b65fcac8c6a7616d7e260983ae04e862674013",
+      "jobs": [
+        {
+          "completedAt": "2026-08-06T01:36:21Z",
+          "conclusion": "success",
+          "databaseId": 92495099029,
+          "name": "ci",
+          "startedAt": "2026-08-06T01:34:36Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-06T01:34:38Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-06T01:34:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:34:39Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-08-06T01:34:38Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:34:39Z",
+              "conclusion": "skipped",
+              "name": "Require version bump when plugin content changes",
+              "number": 3,
+              "startedAt": "2026-08-06T01:34:39Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:35:25Z",
+              "conclusion": "success",
+              "name": "Unit tests",
+              "number": 4,
+              "startedAt": "2026-08-06T01:34:39Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:36:07Z",
+              "conclusion": "success",
+              "name": "Engine tests",
+              "number": 5,
+              "startedAt": "2026-08-06T01:35:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:36:08Z",
+              "conclusion": "success",
+              "name": "Release manifest guard",
+              "number": 6,
+              "startedAt": "2026-08-06T01:36:07Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:36:20Z",
+              "conclusion": "success",
+              "name": "Validate plugin manifests",
+              "number": 7,
+              "startedAt": "2026-08-06T01:36:08Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:36:20Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 14,
+              "startedAt": "2026-08-06T01:36:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:36:20Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 15,
+              "startedAt": "2026-08-06T01:36:20Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063129773/job/92495099029"
+        },
+        {
+          "completedAt": "2026-08-06T01:36:38Z",
+          "conclusion": "success",
+          "databaseId": 92495370992,
+          "name": "release",
+          "startedAt": "2026-08-06T01:36:30Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-06T01:36:32Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-06T01:36:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:36:34Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@v4",
+              "number": 2,
+              "startedAt": "2026-08-06T01:36:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:36:35Z",
+              "conclusion": "success",
+              "name": "Tag and release if version is new",
+              "number": 3,
+              "startedAt": "2026-08-06T01:36:34Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:36:35Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@v4",
+              "number": 6,
+              "startedAt": "2026-08-06T01:36:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:36:35Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 7,
+              "startedAt": "2026-08-06T01:36:35Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063129773/job/92495370992"
+        }
+      ],
+      "name": "ci",
+      "startedAt": "2026-08-06T01:34:33Z",
+      "status": "completed",
+      "updatedAt": "2026-08-06T01:36:38Z",
+      "url": "https://github.com/aj604/toolshed/actions/runs/31063129773"
+    },
+    {
+      "run_id": 31063266048,
+      "conclusion": "success",
+      "createdAt": "2026-08-06T01:37:21Z",
+      "event": "workflow_dispatch",
+      "headSha": "32b65fcac8c6a7616d7e260983ae04e862674013",
+      "jobs": [
+        {
+          "completedAt": "2026-08-06T01:45:53Z",
+          "conclusion": "success",
+          "databaseId": 92495522547,
+          "name": "audit",
+          "startedAt": "2026-08-06T01:37:25Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-06T01:37:27Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-06T01:37:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:37:27Z",
+              "conclusion": "success",
+              "name": "Resolve the out-of-tree artifact root",
+              "number": 2,
+              "startedAt": "2026-08-06T01:37:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:37:28Z",
+              "conclusion": "success",
+              "name": "Checkout",
+              "number": 3,
+              "startedAt": "2026-08-06T01:37:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:37:28Z",
+              "conclusion": "success",
+              "name": "Pin plugin marketplace",
+              "number": 4,
+              "startedAt": "2026-08-06T01:37:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:37:28Z",
+              "conclusion": "success",
+              "name": "Plan the audit scope (deterministic — no model)",
+              "number": 5,
+              "startedAt": "2026-08-06T01:37:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:49Z",
+              "conclusion": "success",
+              "name": "Audit documentation drift (headless, full corpus)",
+              "number": 6,
+              "startedAt": "2026-08-06T01:37:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:49Z",
+              "conclusion": "success",
+              "name": "Extract cost/turn observability (best-effort — never gates the run)",
+              "number": 7,
+              "startedAt": "2026-08-06T01:45:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:49Z",
+              "conclusion": "success",
+              "name": "Verify repository integrity before assembly",
+              "number": 8,
+              "startedAt": "2026-08-06T01:45:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:49Z",
+              "conclusion": "success",
+              "name": "Run the drift audit (engine's public CLI)",
+              "number": 9,
+              "startedAt": "2026-08-06T01:45:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:50Z",
+              "conclusion": "success",
+              "name": "Upload report artifact",
+              "number": 10,
+              "startedAt": "2026-08-06T01:45:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:51Z",
+              "conclusion": "success",
+              "name": "Upload cost artifact",
+              "number": 11,
+              "startedAt": "2026-08-06T01:45:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:51Z",
+              "conclusion": "success",
+              "name": "Upload integrity verdict",
+              "number": 12,
+              "startedAt": "2026-08-06T01:45:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:51Z",
+              "conclusion": "success",
+              "name": "Post Audit documentation drift (headless, full corpus)",
+              "number": 23,
+              "startedAt": "2026-08-06T01:45:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:52Z",
+              "conclusion": "success",
+              "name": "Post Checkout",
+              "number": 24,
+              "startedAt": "2026-08-06T01:45:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:52Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 25,
+              "startedAt": "2026-08-06T01:45:52Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063266048/job/92495522547"
+        },
+        {
+          "completedAt": "2026-08-06T01:46:00Z",
+          "conclusion": "success",
+          "databaseId": 92496768184,
+          "name": "publish",
+          "startedAt": "2026-08-06T01:45:55Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-06T01:45:56Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-06T01:45:55Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:56Z",
+              "conclusion": "success",
+              "name": "Resolve the out-of-tree artifact root",
+              "number": 2,
+              "startedAt": "2026-08-06T01:45:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:57Z",
+              "conclusion": "success",
+              "name": "Checkout",
+              "number": 3,
+              "startedAt": "2026-08-06T01:45:56Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:57Z",
+              "conclusion": "success",
+              "name": "Download report artifact",
+              "number": 4,
+              "startedAt": "2026-08-06T01:45:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:58Z",
+              "conclusion": "success",
+              "name": "Download cost artifact",
+              "number": 5,
+              "startedAt": "2026-08-06T01:45:57Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:58Z",
+              "conclusion": "success",
+              "name": "Download integrity verdict",
+              "number": 6,
+              "startedAt": "2026-08-06T01:45:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:58Z",
+              "conclusion": "success",
+              "name": "Re-validate freshness before publishing",
+              "number": 7,
+              "startedAt": "2026-08-06T01:45:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:58Z",
+              "conclusion": "success",
+              "name": "Render job summary",
+              "number": 8,
+              "startedAt": "2026-08-06T01:45:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:59Z",
+              "conclusion": "success",
+              "name": "Post Checkout",
+              "number": 16,
+              "startedAt": "2026-08-06T01:45:58Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:45:59Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 17,
+              "startedAt": "2026-08-06T01:45:59Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063266048/job/92496768184"
+        }
+      ],
+      "name": "doc-audit",
+      "startedAt": "2026-08-06T01:37:21Z",
+      "status": "completed",
+      "updatedAt": "2026-08-06T01:46:01Z",
+      "url": "https://github.com/aj604/toolshed/actions/runs/31063266048"
+    },
+    {
+      "run_id": 31063268796,
+      "conclusion": "success",
+      "createdAt": "2026-08-06T01:37:25Z",
+      "event": "workflow_dispatch",
+      "headSha": "32b65fcac8c6a7616d7e260983ae04e862674013",
+      "jobs": [
+        {
+          "completedAt": "2026-08-06T02:27:34Z",
+          "conclusion": "success",
+          "databaseId": 92495531909,
+          "name": "audit",
+          "startedAt": "2026-08-06T01:37:34Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-06T01:37:37Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-06T01:37:35Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:37:37Z",
+              "conclusion": "success",
+              "name": "Resolve the out-of-tree artifact root",
+              "number": 2,
+              "startedAt": "2026-08-06T01:37:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:37:38Z",
+              "conclusion": "success",
+              "name": "Checkout",
+              "number": 3,
+              "startedAt": "2026-08-06T01:37:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:37:39Z",
+              "conclusion": "success",
+              "name": "Pin plugin marketplace",
+              "number": 4,
+              "startedAt": "2026-08-06T01:37:38Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:37:40Z",
+              "conclusion": "success",
+              "name": "Preflight registry and plan the public bloat audit",
+              "number": 5,
+              "startedAt": "2026-08-06T01:37:39Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:37:50Z",
+              "conclusion": "success",
+              "name": "Render trusted read-only coordinator prompt",
+              "number": 6,
+              "startedAt": "2026-08-06T01:37:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:25:02Z",
+              "conclusion": "success",
+              "name": "Dispatch bounded bloat workers",
+              "number": 7,
+              "startedAt": "2026-08-06T01:37:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:25:02Z",
+              "conclusion": "success",
+              "name": "Preserve first-pass execution telemetry",
+              "number": 8,
+              "startedAt": "2026-08-06T02:25:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:25:10Z",
+              "conclusion": "success",
+              "name": "Validate worker returns and select retries",
+              "number": 9,
+              "startedAt": "2026-08-06T02:25:02Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:25Z",
+              "conclusion": "success",
+              "name": "Retry invalid bloat chunks once",
+              "number": 10,
+              "startedAt": "2026-08-06T02:25:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:25Z",
+              "conclusion": "success",
+              "name": "Preserve retry execution telemetry",
+              "number": 11,
+              "startedAt": "2026-08-06T02:27:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:28Z",
+              "conclusion": "success",
+              "name": "Validate retry returns",
+              "number": 12,
+              "startedAt": "2026-08-06T02:27:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:28Z",
+              "conclusion": "success",
+              "name": "Extract cost and turn observability",
+              "number": 13,
+              "startedAt": "2026-08-06T02:27:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:28Z",
+              "conclusion": "success",
+              "name": "Verify repository integrity before assembly",
+              "number": 14,
+              "startedAt": "2026-08-06T02:27:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:28Z",
+              "conclusion": "success",
+              "name": "Assemble chunk completion evidence",
+              "number": 15,
+              "startedAt": "2026-08-06T02:27:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:29Z",
+              "conclusion": "success",
+              "name": "Run the public bloat audit",
+              "number": 16,
+              "startedAt": "2026-08-06T02:27:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:29Z",
+              "conclusion": "success",
+              "name": "Upload bloat report",
+              "number": 17,
+              "startedAt": "2026-08-06T02:27:29Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:30Z",
+              "conclusion": "success",
+              "name": "Upload completion evidence",
+              "number": 18,
+              "startedAt": "2026-08-06T02:27:29Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:31Z",
+              "conclusion": "success",
+              "name": "Upload cost artifact",
+              "number": 19,
+              "startedAt": "2026-08-06T02:27:30Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:32Z",
+              "conclusion": "success",
+              "name": "Upload integrity verdict",
+              "number": 20,
+              "startedAt": "2026-08-06T02:27:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:32Z",
+              "conclusion": "success",
+              "name": "Post Retry invalid bloat chunks once",
+              "number": 38,
+              "startedAt": "2026-08-06T02:27:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:32Z",
+              "conclusion": "success",
+              "name": "Post Dispatch bounded bloat workers",
+              "number": 39,
+              "startedAt": "2026-08-06T02:27:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:32Z",
+              "conclusion": "success",
+              "name": "Post Checkout",
+              "number": 40,
+              "startedAt": "2026-08-06T02:27:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:32Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 41,
+              "startedAt": "2026-08-06T02:27:32Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063268796/job/92495531909"
+        },
+        {
+          "completedAt": "2026-08-06T02:27:54Z",
+          "conclusion": "success",
+          "databaseId": 92502735591,
+          "name": "publish",
+          "startedAt": "2026-08-06T02:27:43Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-06T02:27:46Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-06T02:27:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:46Z",
+              "conclusion": "success",
+              "name": "Resolve the out-of-tree artifact root",
+              "number": 2,
+              "startedAt": "2026-08-06T02:27:46Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:47Z",
+              "conclusion": "success",
+              "name": "Checkout",
+              "number": 3,
+              "startedAt": "2026-08-06T02:27:46Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:48Z",
+              "conclusion": "success",
+              "name": "Download bloat report",
+              "number": 4,
+              "startedAt": "2026-08-06T02:27:47Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:49Z",
+              "conclusion": "success",
+              "name": "Download cost artifact",
+              "number": 5,
+              "startedAt": "2026-08-06T02:27:48Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:50Z",
+              "conclusion": "success",
+              "name": "Download integrity verdict",
+              "number": 6,
+              "startedAt": "2026-08-06T02:27:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:51Z",
+              "conclusion": "success",
+              "name": "Re-validate freshness before publishing",
+              "number": 7,
+              "startedAt": "2026-08-06T02:27:50Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:51Z",
+              "conclusion": "success",
+              "name": "Render typed bloat summary",
+              "number": 8,
+              "startedAt": "2026-08-06T02:27:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:51Z",
+              "conclusion": "success",
+              "name": "Post Checkout",
+              "number": 16,
+              "startedAt": "2026-08-06T02:27:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T02:27:51Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 17,
+              "startedAt": "2026-08-06T02:27:51Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063268796/job/92502735591"
+        }
+      ],
+      "name": "doc-bloat-audit",
+      "startedAt": "2026-08-06T01:37:25Z",
+      "status": "completed",
+      "updatedAt": "2026-08-06T02:27:55Z",
+      "url": "https://github.com/aj604/toolshed/actions/runs/31063268796"
+    },
+    {
+      "run_id": 31063678415,
+      "conclusion": "skipped",
+      "createdAt": "2026-08-06T01:46:03Z",
+      "event": "workflow_run",
+      "headSha": "32b65fcac8c6a7616d7e260983ae04e862674013",
+      "jobs": [
+        {
+          "completedAt": "2026-08-06T01:46:07Z",
+          "conclusion": "skipped",
+          "databaseId": 92496801816,
+          "name": "revalidate",
+          "startedAt": "2026-08-06T01:46:07Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063678415/job/92496801816"
+        },
+        {
+          "completedAt": "2026-08-06T01:46:07Z",
+          "conclusion": "skipped",
+          "databaseId": 92496802067,
+          "name": "plan",
+          "startedAt": "2026-08-06T01:46:07Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063678415/job/92496802067"
+        },
+        {
+          "completedAt": "2026-08-06T01:46:07Z",
+          "conclusion": "skipped",
+          "databaseId": 92496802258,
+          "name": "apply",
+          "startedAt": "2026-08-06T01:46:07Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063678415/job/92496802258"
+        }
+      ],
+      "name": "doc-policy-apply",
+      "startedAt": "2026-08-06T01:46:03Z",
+      "status": "completed",
+      "updatedAt": "2026-08-06T01:46:07Z",
+      "url": "https://github.com/aj604/toolshed/actions/runs/31063678415"
+    },
+    {
+      "run_id": 31063772739,
+      "conclusion": "success",
+      "createdAt": "2026-08-06T01:48:00Z",
+      "event": "workflow_dispatch",
+      "headSha": "32b65fcac8c6a7616d7e260983ae04e862674013",
+      "jobs": [
+        {
+          "completedAt": "2026-08-06T01:48:18Z",
+          "conclusion": "success",
+          "databaseId": 92497079282,
+          "name": "revalidate",
+          "startedAt": "2026-08-06T01:48:09Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-06T01:48:11Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-06T01:48:10Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:12Z",
+              "conclusion": "success",
+              "name": "Checkout the requested base",
+              "number": 2,
+              "startedAt": "2026-08-06T01:48:11Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:12Z",
+              "conclusion": "success",
+              "name": "Validate the dispatched report run id",
+              "number": 3,
+              "startedAt": "2026-08-06T01:48:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:13Z",
+              "conclusion": "success",
+              "name": "Bind the report run to the doc-audit lane",
+              "number": 4,
+              "startedAt": "2026-08-06T01:48:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:13Z",
+              "conclusion": "success",
+              "name": "Download the report being approved",
+              "number": 5,
+              "startedAt": "2026-08-06T01:48:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:13Z",
+              "conclusion": "success",
+              "name": "Bind the artifact to the dispatched report digest",
+              "number": 6,
+              "startedAt": "2026-08-06T01:48:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:13Z",
+              "conclusion": "success",
+              "name": "Derive the current audit configuration digest (no model)",
+              "number": 7,
+              "startedAt": "2026-08-06T01:48:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:14Z",
+              "conclusion": "success",
+              "name": "Revalidate the report against the requested base",
+              "number": 8,
+              "startedAt": "2026-08-06T01:48:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:14Z",
+              "conclusion": "success",
+              "name": "Turn the dispatched record subset into argv",
+              "number": 9,
+              "startedAt": "2026-08-06T01:48:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:14Z",
+              "conclusion": "success",
+              "name": "Mint the approval set",
+              "number": 10,
+              "startedAt": "2026-08-06T01:48:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:14Z",
+              "conclusion": "success",
+              "name": "Publish the approval digest to the credentialed job",
+              "number": 11,
+              "startedAt": "2026-08-06T01:48:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:14Z",
+              "conclusion": "success",
+              "name": "Render the approval summary and trailers",
+              "number": 12,
+              "startedAt": "2026-08-06T01:48:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:14Z",
+              "conclusion": "success",
+              "name": "Derive the branch name from the approval digest",
+              "number": 13,
+              "startedAt": "2026-08-06T01:48:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:14Z",
+              "conclusion": "success",
+              "name": "Flatten the report into the approval bundle root",
+              "number": 14,
+              "startedAt": "2026-08-06T01:48:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:15Z",
+              "conclusion": "success",
+              "name": "Upload the approval bundle",
+              "number": 15,
+              "startedAt": "2026-08-06T01:48:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:15Z",
+              "conclusion": "success",
+              "name": "Post Checkout the requested base",
+              "number": 30,
+              "startedAt": "2026-08-06T01:48:15Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:15Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 31,
+              "startedAt": "2026-08-06T01:48:15Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063772739/job/92497079282"
+        },
+        {
+          "completedAt": "2026-08-06T01:51:16Z",
+          "conclusion": "success",
+          "databaseId": 92497121143,
+          "name": "plan",
+          "startedAt": "2026-08-06T01:48:22Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-06T01:48:25Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-06T01:48:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:27Z",
+              "conclusion": "success",
+              "name": "Checkout the requested base",
+              "number": 2,
+              "startedAt": "2026-08-06T01:48:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:28Z",
+              "conclusion": "success",
+              "name": "Pin plugin marketplace",
+              "number": 3,
+              "startedAt": "2026-08-06T01:48:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:48:29Z",
+              "conclusion": "success",
+              "name": "Download the approval bundle",
+              "number": 4,
+              "startedAt": "2026-08-06T01:48:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:11Z",
+              "conclusion": "success",
+              "name": "Author the edit plan (headless)",
+              "number": 5,
+              "startedAt": "2026-08-06T01:48:29Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:12Z",
+              "conclusion": "success",
+              "name": "Upload the edit plan",
+              "number": 6,
+              "startedAt": "2026-08-06T01:51:11Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:13Z",
+              "conclusion": "success",
+              "name": "Post Author the edit plan (headless)",
+              "number": 11,
+              "startedAt": "2026-08-06T01:51:12Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:13Z",
+              "conclusion": "success",
+              "name": "Post Checkout the requested base",
+              "number": 12,
+              "startedAt": "2026-08-06T01:51:13Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:13Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 13,
+              "startedAt": "2026-08-06T01:51:13Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063772739/job/92497121143"
+        },
+        {
+          "completedAt": "2026-08-06T01:51:34Z",
+          "conclusion": "success",
+          "databaseId": 92497538564,
+          "name": "apply",
+          "startedAt": "2026-08-06T01:51:18Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-06T01:51:21Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-06T01:51:19Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:23Z",
+              "conclusion": "success",
+              "name": "Checkout the requested base",
+              "number": 2,
+              "startedAt": "2026-08-06T01:51:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:24Z",
+              "conclusion": "success",
+              "name": "Download the approval bundle",
+              "number": 3,
+              "startedAt": "2026-08-06T01:51:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:25Z",
+              "conclusion": "success",
+              "name": "Download the edit plan",
+              "number": 4,
+              "startedAt": "2026-08-06T01:51:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:25Z",
+              "conclusion": "success",
+              "name": "Apply the plan (deterministic engine — no model, no shell)",
+              "number": 5,
+              "startedAt": "2026-08-06T01:51:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:25Z",
+              "conclusion": "success",
+              "name": "Derive the staged path list from the verified apply result",
+              "number": 6,
+              "startedAt": "2026-08-06T01:51:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:25Z",
+              "conclusion": "success",
+              "name": "Stage exactly those paths",
+              "number": 7,
+              "startedAt": "2026-08-06T01:51:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:25Z",
+              "conclusion": "success",
+              "name": "Verify every staged blob against the certified postimages",
+              "number": 8,
+              "startedAt": "2026-08-06T01:51:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:25Z",
+              "conclusion": "success",
+              "name": "Render the commit message, pull-request title, and body",
+              "number": 9,
+              "startedAt": "2026-08-06T01:51:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:26Z",
+              "conclusion": "success",
+              "name": "Commit the verified change",
+              "number": 10,
+              "startedAt": "2026-08-06T01:51:25Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:26Z",
+              "conclusion": "success",
+              "name": "Verify the commit tree against the certified postimages",
+              "number": 11,
+              "startedAt": "2026-08-06T01:51:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:26Z",
+              "conclusion": "success",
+              "name": "Read what the remote holds at the derived branch",
+              "number": 12,
+              "startedAt": "2026-08-06T01:51:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:26Z",
+              "conclusion": "success",
+              "name": "Verify an existing derived branch is this run's own result",
+              "number": 13,
+              "startedAt": "2026-08-06T01:51:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:27Z",
+              "conclusion": "success",
+              "name": "Push the verified commit, or reuse the branch already holding it",
+              "number": 14,
+              "startedAt": "2026-08-06T01:51:26Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:31Z",
+              "conclusion": "success",
+              "name": "Open the pull request, or state the one already open",
+              "number": 15,
+              "startedAt": "2026-08-06T01:51:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:31Z",
+              "conclusion": "success",
+              "name": "Post Checkout the requested base",
+              "number": 30,
+              "startedAt": "2026-08-06T01:51:31Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-06T01:51:31Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 31,
+              "startedAt": "2026-08-06T01:51:31Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/31063772739/job/92497538564"
+        }
+      ],
+      "name": "doc-apply",
+      "startedAt": "2026-08-06T01:48:00Z",
+      "status": "completed",
+      "updatedAt": "2026-08-06T01:51:35Z",
+      "url": "https://github.com/aj604/toolshed/actions/runs/31063772739"
+    },
+    {
+      "run_id": 30733255025,
+      "conclusion": "failure",
+      "createdAt": "2026-08-02T04:57:29Z",
+      "event": "workflow_run",
+      "headSha": "5ef1471df810df79726285d94104df3dde678faa",
+      "jobs": [
+        {
+          "completedAt": "2026-08-02T04:57:39Z",
+          "conclusion": "failure",
+          "databaseId": 91457155812,
+          "name": "revalidate",
+          "startedAt": "2026-08-02T04:57:31Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-02T04:57:34Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-02T04:57:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:36Z",
+              "conclusion": "success",
+              "name": "Checkout the current default branch",
+              "number": 2,
+              "startedAt": "2026-08-02T04:57:34Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:36Z",
+              "conclusion": "success",
+              "name": "Check whether this consumer configured autonomous minting",
+              "number": 3,
+              "startedAt": "2026-08-02T04:57:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "success",
+              "name": "Download the completed audit run's report",
+              "number": 4,
+              "startedAt": "2026-08-02T04:57:36Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "success",
+              "name": "Derive the current audit configuration digest",
+              "number": 5,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "failure",
+              "name": "Revalidate the report against the current default branch",
+              "number": 6,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "skipped",
+              "name": "Evaluate the standing auto-apply policy",
+              "number": 7,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "skipped",
+              "name": "Mint the policy approval set",
+              "number": 8,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "skipped",
+              "name": "Publish the approval digest to the credentialed job",
+              "number": 9,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "skipped",
+              "name": "Render the approval summary and trailers",
+              "number": 10,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "skipped",
+              "name": "Derive the branch name from the approval digest",
+              "number": 11,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "skipped",
+              "name": "Flatten the report into the approval bundle root",
+              "number": 12,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "skipped",
+              "name": "Upload the policy approval bundle",
+              "number": 13,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "success",
+              "name": "Post Checkout the current default branch",
+              "number": 26,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-02T04:57:37Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 27,
+              "startedAt": "2026-08-02T04:57:37Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/30733255025/job/91457155812"
+        },
+        {
+          "completedAt": "2026-08-02T04:57:39Z",
+          "conclusion": "skipped",
+          "databaseId": 91457167459,
+          "name": "plan",
+          "startedAt": "2026-08-02T04:57:40Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/aj604/toolshed/actions/runs/30733255025/job/91457167459"
+        },
+        {
+          "completedAt": "2026-08-02T04:57:40Z",
+          "conclusion": "skipped",
+          "databaseId": 91457167718,
+          "name": "apply",
+          "startedAt": "2026-08-02T04:57:40Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/aj604/toolshed/actions/runs/30733255025/job/91457167718"
+        }
+      ],
+      "name": "doc-policy-apply",
+      "startedAt": "2026-08-02T04:57:29Z",
+      "status": "completed",
+      "updatedAt": "2026-08-02T04:57:40Z",
+      "url": "https://github.com/aj604/toolshed/actions/runs/30733255025"
+    },
+    {
+      "run_id": 30685672021,
+      "conclusion": "failure",
+      "createdAt": "2026-08-01T05:21:14Z",
+      "event": "workflow_run",
+      "headSha": "5ef1471df810df79726285d94104df3dde678faa",
+      "jobs": [
+        {
+          "completedAt": "2026-08-01T05:21:27Z",
+          "conclusion": "failure",
+          "databaseId": 91330819097,
+          "name": "revalidate",
+          "startedAt": "2026-08-01T05:21:17Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-08-01T05:21:20Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-08-01T05:21:18Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:22Z",
+              "conclusion": "success",
+              "name": "Checkout the current default branch",
+              "number": 2,
+              "startedAt": "2026-08-01T05:21:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:22Z",
+              "conclusion": "success",
+              "name": "Check whether this consumer configured autonomous minting",
+              "number": 3,
+              "startedAt": "2026-08-01T05:21:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:23Z",
+              "conclusion": "success",
+              "name": "Download the completed audit run's report",
+              "number": 4,
+              "startedAt": "2026-08-01T05:21:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:23Z",
+              "conclusion": "success",
+              "name": "Derive the current audit configuration digest",
+              "number": 5,
+              "startedAt": "2026-08-01T05:21:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "failure",
+              "name": "Revalidate the report against the current default branch",
+              "number": 6,
+              "startedAt": "2026-08-01T05:21:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "skipped",
+              "name": "Evaluate the standing auto-apply policy",
+              "number": 7,
+              "startedAt": "2026-08-01T05:21:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "skipped",
+              "name": "Mint the policy approval set",
+              "number": 8,
+              "startedAt": "2026-08-01T05:21:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "skipped",
+              "name": "Publish the approval digest to the credentialed job",
+              "number": 9,
+              "startedAt": "2026-08-01T05:21:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "skipped",
+              "name": "Render the approval summary and trailers",
+              "number": 10,
+              "startedAt": "2026-08-01T05:21:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "skipped",
+              "name": "Derive the branch name from the approval digest",
+              "number": 11,
+              "startedAt": "2026-08-01T05:21:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "skipped",
+              "name": "Flatten the report into the approval bundle root",
+              "number": 12,
+              "startedAt": "2026-08-01T05:21:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "skipped",
+              "name": "Upload the policy approval bundle",
+              "number": 13,
+              "startedAt": "2026-08-01T05:21:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "success",
+              "name": "Post Checkout the current default branch",
+              "number": 26,
+              "startedAt": "2026-08-01T05:21:24Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-08-01T05:21:24Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 27,
+              "startedAt": "2026-08-01T05:21:24Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/aj604/toolshed/actions/runs/30685672021/job/91330819097"
+        },
+        {
+          "completedAt": "2026-08-01T05:21:27Z",
+          "conclusion": "skipped",
+          "databaseId": 91330838600,
+          "name": "plan",
+          "startedAt": "2026-08-01T05:21:27Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/aj604/toolshed/actions/runs/30685672021/job/91330838600"
+        },
+        {
+          "completedAt": "2026-08-01T05:21:27Z",
+          "conclusion": "skipped",
+          "databaseId": 91330839044,
+          "name": "apply",
+          "startedAt": "2026-08-01T05:21:28Z",
+          "status": "completed",
+          "steps": [],
+          "url": "https://github.com/aj604/toolshed/actions/runs/30685672021/job/91330839044"
+        }
+      ],
+      "name": "doc-policy-apply",
+      "startedAt": "2026-08-01T05:21:14Z",
+      "status": "completed",
+      "updatedAt": "2026-08-01T05:21:28Z",
+      "url": "https://github.com/aj604/toolshed/actions/runs/30685672021"
+    }
+  ],
+  "release": {
+    "isDraft": false,
+    "isPrerelease": false,
+    "name": "doc-lifecycle v0.46.10",
+    "publishedAt": "2026-08-06T01:36:35Z",
+    "tagName": "v0.46.10",
+    "targetCommitish": "32b65fcac8c6a7616d7e260983ae04e862674013",
+    "url": "https://github.com/aj604/toolshed/releases/tag/v0.46.10"
+  }
+}
