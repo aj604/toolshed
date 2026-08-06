@@ -48,6 +48,19 @@ FIELDS = (
 )
 REQUIRED_FIELDS = ("status", "schema_version", "lineage")
 
+# Reports have their own schema evolution, just as approval sets do. Version 1
+# is the existing contract and stays readable byte-for-byte; version 2 adds the
+# unit-level coverage proof incremental sync needs. The engine-wide artifact
+# version remains 1 for inventory, plans, and the other artifacts that did not
+# change with it.
+LEGACY_REPORT_SCHEMA_VERSION = ARTIFACT_SCHEMA_VERSION
+REPORT_SCHEMA_VERSION = 2
+SUPPORTED_REPORT_SCHEMA_VERSIONS = (
+    LEGACY_REPORT_SCHEMA_VERSION, REPORT_SCHEMA_VERSION,
+)
+EXTENDED_FIELDS = FIELDS + ("coverage",)
+EXTENDED_REQUIRED_FIELDS = REQUIRED_FIELDS + ("coverage",)
+
 # The states a report payload may carry. A producing run declares one of
 # `DECLARABLE_STATES`; `stale` additionally reads back in, because a validator
 # emits it and a pipeline that persists a verdict must be able to re-check the
@@ -271,6 +284,19 @@ SCOPE_WHOLE_INVENTORY = "whole-inventory"
 SCOPE_DECLARED_ONLY = "declared-only"
 SCOPE_COVERAGES = (SCOPE_WHOLE_INVENTORY, SCOPE_DECLARED_ONLY)
 
+# Unit coverage says whether an answer was obtained in this run or safely
+# reused. This is separate from `scope.coverage`, which accounts for documents
+# in the inventory; `full-reconciliation` is the stronger claim that every
+# covered unit was reconciled as part of a full-corpus run.
+COVERAGE_INCREMENTAL = "incremental"
+COVERAGE_FULL_RECONCILIATION = "full-reconciliation"
+COVERAGE_MODES = (COVERAGE_INCREMENTAL, COVERAGE_FULL_RECONCILIATION)
+
+COVERAGE_JUDGED = "judged"
+COVERAGE_PROBE = "probe"
+COVERAGE_CARRIED = "carried"
+COVERAGE_SOURCES = (COVERAGE_JUDGED, COVERAGE_PROBE, COVERAGE_CARRIED)
+
 # Why a document was left out of the declared scope, a second closed
 # vocabulary beside `coverage`. `reason` stays prose for a reader; `code` is
 # what a validator can act on, for the same reason `coverage` is a token
@@ -456,6 +482,49 @@ class Examined:
 
 
 @dataclass(frozen=True)
+class CoverageLineage:
+    """The report and commit a carried unit was established under."""
+
+    report_digest: str
+    commit: str
+
+    def to_dict(self):
+        return {"report_digest": self.report_digest, "commit": self.commit}
+
+
+@dataclass(frozen=True)
+class UnitCoverage:
+    """How one document-bound deterministic unit was covered."""
+
+    path: str
+    unit: str
+    source: str
+    probe: Optional[dict] = None
+    reason: Optional[str] = None
+    lineage: Optional[CoverageLineage] = None
+
+    def to_dict(self):
+        payload = {"path": self.path, "unit": self.unit, "source": self.source}
+        if self.source == COVERAGE_PROBE:
+            payload["probe"] = dict(self.probe)
+        elif self.source == COVERAGE_CARRIED:
+            payload["reason"] = self.reason
+            payload["lineage"] = self.lineage.to_dict()
+        return payload
+
+
+@dataclass(frozen=True)
+class Coverage:
+    """The reconciliation level and provenance of every covered unit."""
+
+    mode: str
+    units: Tuple[UnitCoverage, ...]
+
+    def to_dict(self):
+        return {"mode": self.mode, "units": [unit.to_dict() for unit in self.units]}
+
+
+@dataclass(frozen=True)
 class StaleReason:
     """One lineage field that no longer matches the repository.
 
@@ -482,6 +551,7 @@ class Report:
     """A validated report. Rendering and application accept nothing else."""
 
     status: str
+    schema_version: int
     lineage: Lineage
     records: Tuple[Record, ...]
     incomplete: Tuple[Incomplete, ...]
@@ -489,11 +559,12 @@ class Report:
     stale_reasons: Tuple[StaleReason, ...] = ()
     scope: Optional[Scope] = None
     examined: Tuple[Examined, ...] = ()
+    coverage: Optional[Coverage] = None
 
     def to_dict(self):
         payload = {
             "status": self.status,
-            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "schema_version": self.schema_version,
             "lineage": self.lineage.to_dict(),
             "records": [r.to_dict() for r in self.records],
             "incomplete": [i.to_dict() for i in self.incomplete],
@@ -506,6 +577,8 @@ class Report:
             payload["examined"] = [e.to_dict() for e in self.examined]
         if self.scope is not None:
             payload["scope"] = self.scope.to_dict()
+        if self.coverage is not None:
+            payload["coverage"] = self.coverage.to_dict()
         if self.status == STATE_STALE:
             payload["stale_reasons"] = [r.to_dict() for r in self.stale_reasons]
         return payload
@@ -587,7 +660,8 @@ def lineage_digest(lineage):
 DIGEST_MISMATCH = "report-digest-mismatch"
 
 
-def _content_digest(lineage, records, incomplete, scope=None, examined=()):
+def _content_digest(schema_version, lineage, records, incomplete, scope=None,
+                    examined=(), coverage=None):
     """The report's identity: what it says, not what a validator concluded.
 
     Excludes the result state and the stale reasons, so the same report keeps
@@ -605,7 +679,7 @@ def _content_digest(lineage, records, incomplete, scope=None, examined=()):
     existed — adding them re-keys nothing that did not use them.
     """
     payload = {
-        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "lineage": lineage.to_dict(),
         "records": [r.to_dict() for r in records],
         "incomplete": [i.to_dict() for i in incomplete],
@@ -614,6 +688,8 @@ def _content_digest(lineage, records, incomplete, scope=None, examined=()):
         payload["scope"] = scope.to_dict()
     if examined:
         payload["examined"] = [e.to_dict() for e in examined]
+    if coverage is not None:
+        payload["coverage"] = coverage.to_dict()
     return sha256_canonical(payload)
 
 
@@ -1095,6 +1171,178 @@ def _examined(raw, bad, declared):
     return entries if ok else None
 
 
+def _coverage(raw, bad, audit_mode):
+    """Parse version 2's unit-level coverage proof, exhaustively."""
+    if not isinstance(raw, dict) or set(raw) != {"mode", "units"}:
+        bad("report-invalid-coverage",
+            "coverage must be an object with exactly 'mode' and 'units' — "
+            "the mode bounds the reconciliation claim and the units enumerate "
+            "how each answer was obtained",
+            "coverage")
+        return None
+
+    ok = True
+    mode = raw["mode"]
+    if mode not in COVERAGE_MODES:
+        bad("report-invalid-coverage",
+            f"coverage.mode {mode!r} is not a coverage mode — it is one of "
+            f"{list(COVERAGE_MODES)}",
+            "coverage.mode")
+        ok = False
+    elif audit_mode == "incremental" and mode != COVERAGE_INCREMENTAL:
+        bad("report-incremental-reconciliation-coverage",
+            "an incremental report cannot claim full-corpus reconciliation "
+            "coverage — it only proves the units this incremental run names",
+            "coverage.mode")
+        ok = False
+    elif mode == COVERAGE_FULL_RECONCILIATION and audit_mode != "full":
+        bad("report-invalid-coverage",
+            "full-reconciliation coverage requires lineage.audit_mode 'full'; "
+            f"this report declares {audit_mode!r}",
+            "coverage.mode")
+        ok = False
+    elif mode == COVERAGE_INCREMENTAL and audit_mode == "full":
+        bad("report-invalid-coverage",
+            "lineage.audit_mode 'full' contradicts incremental unit coverage",
+            "coverage.mode")
+        ok = False
+
+    units = raw["units"]
+    if not isinstance(units, list):
+        bad("report-invalid-coverage",
+            "coverage.units must be a list of document-bound unit coverage "
+            "entries",
+            "coverage.units")
+        return None
+
+    entries, seen = [], set()
+    base_fields = {"path", "unit", "source"}
+    for index, entry in enumerate(units):
+        where = f"coverage.units[{index}]"
+        if not isinstance(entry, dict):
+            bad("report-invalid-coverage",
+                f"coverage.units[{index}] must be an object", where)
+            ok = False
+            continue
+
+        source = entry.get("source")
+        if source not in COVERAGE_SOURCES:
+            bad("report-unknown-coverage-source",
+                f"coverage source {source!r} is not one of "
+                f"{list(COVERAGE_SOURCES)} — a reader cannot infer how this "
+                "unit was covered",
+                f"{where}.source")
+            ok = False
+            continue
+
+        expected_fields = set(base_fields)
+        if source == COVERAGE_PROBE:
+            expected_fields.add("probe")
+        elif source == COVERAGE_CARRIED:
+            expected_fields.update(("reason", "lineage"))
+        if set(entry) != expected_fields:
+            bad("report-invalid-coverage-source",
+                f"a {source!r} coverage entry must carry exactly "
+                f"{sorted(expected_fields)}",
+                where)
+            ok = False
+            continue
+
+        path, unit = entry["path"], entry["unit"]
+        valid = True
+        if not _printable(path):
+            bad("report-invalid-coverage",
+                f"coverage.units[{index}].path must be a non-empty "
+                "single-line repository-relative document path",
+                f"{where}.path")
+            valid = False
+        if not (isinstance(unit, str) and DIGEST.fullmatch(unit)):
+            bad("report-invalid-coverage",
+                f"coverage.units[{index}].unit must be a deterministic sha256 "
+                "unit identity",
+                f"{where}.unit")
+            valid = False
+
+        if valid:
+            key = (path, unit)
+            if key in seen:
+                bad("report-duplicate-coverage",
+                    f"coverage names unit {unit} in {path!r} twice — one unit "
+                    "cannot have two coverage sources",
+                    where)
+                valid = False
+            else:
+                seen.add(key)
+
+        probe = reason = lineage = None
+        if source == COVERAGE_PROBE:
+            probe = entry["probe"]
+            if not isinstance(probe, dict) or set(probe) != {"kind", "observed"}:
+                bad("report-invalid-probe-coverage",
+                    f"coverage.units[{index}].probe must carry exactly 'kind' "
+                    "and 'observed' — a probe result without its observation "
+                    "is not evidence",
+                    f"{where}.probe")
+                valid = False
+            else:
+                too_deep, nonfinite = _scan(probe["observed"])
+                if not _printable(probe["kind"]):
+                    bad("report-invalid-probe-coverage",
+                        f"coverage.units[{index}].probe.kind must name the "
+                        "probe that ran",
+                        f"{where}.probe.kind")
+                    valid = False
+                if probe["observed"] is None or too_deep or nonfinite:
+                    bad("report-invalid-probe-coverage",
+                        f"coverage.units[{index}].probe.observed must attach "
+                        "finite, bounded observed evidence",
+                        f"{where}.probe.observed")
+                    valid = False
+        elif source == COVERAGE_CARRIED:
+            reason = entry["reason"]
+            raw_lineage = entry["lineage"]
+            if not _printable(reason):
+                bad("report-invalid-carried-coverage",
+                    f"coverage.units[{index}].reason must say why reuse was "
+                    "safe",
+                    f"{where}.reason")
+                valid = False
+            if not isinstance(raw_lineage, dict) or set(raw_lineage) != {
+                "report_digest", "commit",
+            }:
+                bad("report-invalid-carried-coverage",
+                    f"coverage.units[{index}].lineage must carry exactly the "
+                    "originating 'report_digest' and 'commit'",
+                    f"{where}.lineage")
+                valid = False
+            else:
+                report_digest = raw_lineage["report_digest"]
+                commit = raw_lineage["commit"]
+                if not (
+                    isinstance(report_digest, str)
+                    and DIGEST.fullmatch(report_digest)
+                    and isinstance(commit, str)
+                    and COMMIT.fullmatch(commit)
+                ):
+                    bad("report-invalid-carried-coverage",
+                        f"coverage.units[{index}].lineage must name a sha256 "
+                        "report digest and a full lowercase git commit id",
+                        f"{where}.lineage")
+                    valid = False
+                else:
+                    lineage = CoverageLineage(report_digest, commit)
+
+        if valid:
+            entries.append(UnitCoverage(
+                path=path, unit=unit, source=source,
+                probe=dict(probe) if probe is not None else None,
+                reason=reason, lineage=lineage,
+            ))
+        else:
+            ok = False
+    return Coverage(mode=mode, units=tuple(entries)) if ok else None
+
+
 def _scope_summary(paths, limit=5):
     """A bounded, one-line, injection-proof rendering of a path list.
 
@@ -1433,24 +1681,30 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
             ),
         ),))
 
-    for name in REQUIRED_FIELDS:
+    version = payload.get("schema_version")
+    extended = version == REPORT_SCHEMA_VERSION and _whole_number(version)
+    fields = EXTENDED_FIELDS if extended else FIELDS
+    required_fields = EXTENDED_REQUIRED_FIELDS if extended else REQUIRED_FIELDS
+
+    for name in required_fields:
         if name not in payload:
             bad("report-missing-field", f"the report is missing '{name}'", name)
     for name in payload:
-        if name not in FIELDS:
+        if name not in fields:
             bad("report-unknown-field",
-                f"unexpected field {name!r} — a report carries {list(FIELDS)}",
+                f"unexpected field {name!r} — a schema version {version!r} "
+                f"report carries {list(fields)}",
                 name)
 
-    version = payload.get("schema_version")
     # Type-guarded, not just compared: `True == 1` and `1.0 == 1` in Python, and
     # neither is the integer a schema version is.
     if "schema_version" in payload and not (
-        _whole_number(version) and version == ARTIFACT_SCHEMA_VERSION
+        _whole_number(version) and version in SUPPORTED_REPORT_SCHEMA_VERSIONS
     ):
         bad("report-schema-version",
             f"report schema_version {version!r} is not supported; this engine "
-            f"reads integer version {ARTIFACT_SCHEMA_VERSION}. Migrate the "
+            f"reads integer versions {list(SUPPORTED_REPORT_SCHEMA_VERSIONS)}. "
+            f"Migrate the "
             f"report rather than guessing at the meaning of a shape it does "
             f"not know.",
             "schema_version")
@@ -1466,6 +1720,13 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     examined = _examined(
         payload.get("examined", []), bad,
         set(scope.documents) if scope is not None else None,
+    )
+    coverage = (
+        _coverage(
+            payload["coverage"], bad,
+            lineage.audit_mode if lineage is not None else None,
+        )
+        if extended and "coverage" in payload else None
     )
 
     status = payload.get("status")
@@ -1499,7 +1760,9 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
 
     records, incomplete, carried = tuple(records), tuple(incomplete), tuple(carried)
     examined = tuple(examined)
-    digest = _content_digest(lineage, records, incomplete, scope, examined)
+    digest = _content_digest(
+        version, lineage, records, incomplete, scope, examined, coverage,
+    )
     declared_digest = payload.get("digest")
     if declared_digest is not None and declared_digest != digest:
         return Invalid((Problem(
@@ -1516,9 +1779,9 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
         # Structural only: a carried stale verdict stands, because nothing here
         # can disprove it, and keeping it is the fail-closed direction.
         return Report(
-            status=status, lineage=lineage, records=records,
+            status=status, schema_version=version, lineage=lineage, records=records,
             incomplete=incomplete, digest=digest, stale_reasons=carried,
-            scope=scope, examined=examined,
+            scope=scope, examined=examined, coverage=coverage,
         )
 
     current, inventory, problems = _current_state(repo_root, registry_path,
@@ -1552,16 +1815,18 @@ def validate_report(payload, repo_root=None, registry_path=DEFAULT_REGISTRY_PATH
     )
     if reasons:
         return Report(
-            status=STATE_STALE, lineage=lineage, records=records,
+            status=STATE_STALE, schema_version=version, lineage=lineage,
+            records=records,
             incomplete=incomplete, digest=digest, stale_reasons=reasons,
-            scope=scope, examined=examined,
+            scope=scope, examined=examined, coverage=coverage,
         )
     # Every comparable field matches, and every carried reason was re-checked,
     # so the verdict is cleared and the state follows from the content again.
     return Report(
-        status=state_from_content(records, incomplete), lineage=lineage,
+        status=state_from_content(records, incomplete), schema_version=version,
+        lineage=lineage,
         records=records, incomplete=incomplete, digest=digest, scope=scope,
-        examined=examined,
+        examined=examined, coverage=coverage,
     )
 
 

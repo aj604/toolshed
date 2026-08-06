@@ -34,6 +34,10 @@ from doclifecycle.finding import finding_digest  # noqa: E402
 from doclifecycle.render import render_report  # noqa: E402
 from doclifecycle.report import (  # noqa: E402
     AUDIT_MODES,
+    COVERAGE_FULL_RECONCILIATION,
+    COVERAGE_INCREMENTAL,
+    LEGACY_REPORT_SCHEMA_VERSION,
+    REPORT_SCHEMA_VERSION,
     EXCLUSION_PLANNING_KIND,
     EXCLUSION_UNAFFECTED_BY_RANGE,
     MAX_NESTING,
@@ -80,6 +84,10 @@ RECORD = {
     "path": "docs/architecture.md",
 }
 
+UNIT_A = "3" * 64
+UNIT_B = "4" * 64
+UNIT_C = "5" * 64
+
 
 def lineage_payload(**overrides):
     """A structurally valid lineage; overrides swap one field at a time."""
@@ -110,6 +118,23 @@ def report_payload(status=STATE_FINDINGS, lineage=None, records=None,
     }
     payload.update(overrides)
     return payload
+
+
+def coverage_payload(mode=COVERAGE_INCREMENTAL, units=None):
+    """A valid v2 coverage block with all three source variants."""
+    if units is None:
+        units = [
+            {"path": "docs/architecture.md", "unit": UNIT_A,
+             "source": "judged"},
+            {"path": "docs/architecture.md", "unit": UNIT_B,
+             "source": "probe",
+             "probe": {"kind": "path_exists",
+                       "observed": {"path": "src/app.py", "kind": "file"}}},
+            {"path": "docs/architecture.md", "unit": UNIT_C,
+             "source": "carried", "reason": "declared dependencies unchanged",
+             "lineage": {"report_digest": "6" * 64, "commit": "7" * 40}},
+        ]
+    return {"mode": mode, "units": units}
 
 
 def codes(result):
@@ -224,7 +249,7 @@ class ValidReports(unittest.TestCase):
 class SchemaVersion(unittest.TestCase):
     def test_a_future_schema_version_is_rejected_never_guessed(self):
         result = validate_report(
-            report_payload(schema_version=ARTIFACT_SCHEMA_VERSION + 1)
+            report_payload(schema_version=REPORT_SCHEMA_VERSION + 1)
         )
 
         self.assertIsInstance(result, Invalid)
@@ -250,6 +275,128 @@ class SchemaVersion(unittest.TestCase):
                 result = validate_report(report_payload(schema_version=version))
 
                 self.assertEqual(codes(result), ["report-schema-version"])
+
+    def test_the_existing_report_schema_stays_readable_and_round_trips_as_v1(self):
+        payload = report_payload(schema_version=LEGACY_REPORT_SCHEMA_VERSION)
+
+        result = validate_report(payload)
+
+        self.assertIsInstance(result, Report)
+        self.assertEqual(result.schema_version, LEGACY_REPORT_SCHEMA_VERSION)
+        self.assertEqual(result.to_dict()["schema_version"], 1)
+        self.assertNotIn("coverage", result.to_dict())
+
+    def test_the_v1_contract_does_not_retrofit_the_extension(self):
+        result = validate_report(report_payload(
+            schema_version=LEGACY_REPORT_SCHEMA_VERSION,
+            coverage=coverage_payload(),
+        ))
+
+        self.assertEqual(codes(result), ["report-unknown-field"])
+
+
+class VersionedUnitCoverage(unittest.TestCase):
+    def extended_report(self, **overrides):
+        payload = report_payload(
+            schema_version=REPORT_SCHEMA_VERSION,
+            lineage=lineage_payload(audit_mode="incremental"),
+            coverage=coverage_payload(),
+        )
+        payload.update(overrides)
+        return payload
+
+    def test_all_three_coverage_sources_validate_and_round_trip(self):
+        result = validate_report(self.extended_report())
+
+        self.assertIsInstance(result, Report, result)
+        self.assertEqual(result.schema_version, REPORT_SCHEMA_VERSION)
+        self.assertEqual(result.to_dict()["coverage"], coverage_payload())
+
+    def test_coverage_is_part_of_the_v2_report_digest(self):
+        changed = coverage_payload()
+        changed["units"][2]["reason"] = "the unit's on-change inputs did not move"
+
+        self.assertNotEqual(
+            validate_report(self.extended_report()).digest,
+            validate_report(self.extended_report(coverage=changed)).digest,
+        )
+
+    def test_v2_requires_the_extension_instead_of_guessing_v1_semantics(self):
+        payload = self.extended_report()
+        del payload["coverage"]
+
+        self.assertEqual(codes(validate_report(payload)), ["report-missing-field"])
+
+    def test_unknown_source_fails_closed_with_a_typed_problem(self):
+        coverage = coverage_payload()
+        coverage["units"][0]["source"] = "cached"
+
+        result = validate_report(self.extended_report(coverage=coverage))
+
+        self.assertEqual(codes(result), ["report-unknown-coverage-source"])
+
+    def test_probe_without_observed_evidence_fails_closed(self):
+        coverage = coverage_payload()
+        coverage["units"][1]["probe"] = {"kind": "path_exists"}
+
+        result = validate_report(self.extended_report(coverage=coverage))
+
+        self.assertEqual(codes(result), ["report-invalid-probe-coverage"])
+
+    def test_carried_without_reason_and_originating_lineage_fails_closed(self):
+        coverage = coverage_payload()
+        coverage["units"][2] = {
+            "path": "docs/architecture.md", "unit": UNIT_C,
+            "source": "carried",
+        }
+
+        result = validate_report(self.extended_report(coverage=coverage))
+
+        self.assertEqual(codes(result), ["report-invalid-coverage-source"])
+
+    def test_carried_lineage_requires_both_report_digest_and_commit(self):
+        coverage = coverage_payload()
+        del coverage["units"][2]["lineage"]["commit"]
+
+        result = validate_report(self.extended_report(coverage=coverage))
+
+        self.assertEqual(codes(result), ["report-invalid-carried-coverage"])
+
+    def test_a_clean_incremental_report_claims_only_incremental_coverage(self):
+        payload = self.extended_report(
+            status=STATE_CLEAN,
+            records=[],
+            scope={
+                "basis": "documents affected by the requested commit range",
+                "coverage": SCOPE_DECLARED_ONLY,
+                "documents": ["docs/architecture.md"],
+                "excluded": [],
+            },
+        )
+
+        result = validate_report(payload)
+
+        self.assertIsInstance(result, Report, result)
+        self.assertEqual(result.status, STATE_CLEAN)
+        self.assertEqual(result.coverage.mode, COVERAGE_INCREMENTAL)
+        self.assertEqual(result.scope.coverage, SCOPE_DECLARED_ONLY)
+
+    def test_incremental_lineage_cannot_claim_full_reconciliation(self):
+        result = validate_report(self.extended_report(
+            coverage=coverage_payload(mode=COVERAGE_FULL_RECONCILIATION),
+        ))
+
+        self.assertEqual(
+            codes(result), ["report-incremental-reconciliation-coverage"]
+        )
+
+    def test_a_full_run_can_declare_full_reconciliation(self):
+        result = validate_report(self.extended_report(
+            lineage=lineage_payload(audit_mode="full"),
+            coverage=coverage_payload(mode=COVERAGE_FULL_RECONCILIATION),
+        ))
+
+        self.assertIsInstance(result, Report, result)
 
 
 class LineageFields(unittest.TestCase):
@@ -1098,6 +1245,19 @@ class LoadReport(GitRepoTestCase):
             load_report(os.path.join(repo, "report.json")).to_dict(),
             validate_report(payload).to_dict(),
         )
+
+    def test_it_loads_the_versioned_unit_coverage_extension(self):
+        payload = report_payload(
+            schema_version=REPORT_SCHEMA_VERSION,
+            lineage=lineage_payload(audit_mode="incremental"),
+            coverage=coverage_payload(),
+        )
+        repo = self.repo({"report.json": json.dumps(payload)})
+
+        result = load_report(os.path.join(repo, "report.json"))
+
+        self.assertIsInstance(result, Report, result)
+        self.assertEqual(result.to_dict()["coverage"], coverage_payload())
 
     def test_an_unparseable_report_file_is_invalid(self):
         repo = self.repo({"report.json": "{ not json"})
