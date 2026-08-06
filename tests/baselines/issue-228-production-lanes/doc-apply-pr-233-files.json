@@ -1,0 +1,14 @@
+[
+  {
+    "sha": "aa04e67498993054a768892ec680bf3ec76ae7bc",
+    "filename": "docs/guides/auditing-doc-bloat.md",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2,
+    "blob_url": "https://github.com/aj604/toolshed/blob/af2738f3675ae6dea8076b1c4ded772c356b41b0/docs%2Fguides%2Fauditing-doc-bloat.md",
+    "raw_url": "https://github.com/aj604/toolshed/raw/af2738f3675ae6dea8076b1c4ded772c356b41b0/docs%2Fguides%2Fauditing-doc-bloat.md",
+    "contents_url": "https://api.github.com/repos/aj604/toolshed/contents/docs%2Fguides%2Fauditing-doc-bloat.md?ref=af2738f3675ae6dea8076b1c4ded772c356b41b0",
+    "patch": "@@ -1,6 +1,6 @@\n # Auditing and fixing bloat with `detecting-doc-bloat` and `fixing-docs`\n \n-> As of 2026-07-30 (doc-lifecycle 0.45.0, engine verdict and scheduled-audit contracts; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/engine/doclifecycle/bloat.py`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat-audit.yml`)\n+> As of 2026-08-05 (doc-lifecycle 0.46.10, engine verdict and scheduled-audit contracts; `plugins/doc-lifecycle/skills/detecting-doc-bloat/SKILL.md`, `plugins/doc-lifecycle/engine/doclifecycle/bloat.py`, `plugins/doc-lifecycle/skills/fixing-docs/SKILL.md`, `plugins/doc-lifecycle/skills/scheduling-doc-sync/doc-bloat-audit.yml`)\n \n **You should already have:** the plugin installed and [the principles](principles.md)\n read — especially §3, because this loop *is* the propose → approve → apply contract."
+  }
+]
