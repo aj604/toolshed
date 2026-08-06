@@ -30,7 +30,7 @@ repository document.
 | `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
 | `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, `audit_bloat()`, `load_bloat_verdicts()`, the chunk cache seam |
 | `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, `load_verdicts()`, the verdicts and anchor checks |
-| `doclifecycle/sync.py` | `plan_sync()`, `load_assertion_ledger()`, `load_sync_budget()`, the accepted-ledger and digest-bound judgment-work-order contracts |
+| `doclifecycle/sync.py` | `plan_sync()`, `accept_sync_judgments()`, `load_assertion_ledger()`, `load_sync_budget()`, the accepted-ledger, digest-bound judgment-work-order, fake-adapter, and proposed-ledger contracts |
 | `doclifecycle/probes.py` | `execute_probe()`, the validated closed probe vocabulary, dependency evidence boundary, observations, and declared-tool execution |
 | `doclifecycle/migrate.py` | `draft_registry()`, `dry_run_migration()`, the legacy-install inference and the migration contract |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
@@ -405,6 +405,8 @@ here.
 
 ```bash
 python3 -m doclifecycle sync-plan --repo . --as-of 2026-08-06
+python3 -m doclifecycle sync-accept --repo . --as-of 2026-08-06 \
+  --work-order work-order.json --judgments judgments.json
 ```
 
 `--as-of` is mandatory: artifact content never reads the wall clock. The closed mode
@@ -427,11 +429,13 @@ The work order carries `session_id`, `chunk_id`, and `total_chunk_count`, plus t
 
 ```json
 {
+  "as_of": "2026-08-06",
   "bindings": {
     "ledger_digest": "<sha256 of accepted JSONL bytes>",
     "inventory_digest": "<sha256>",
     "unit_set_digest": "<sha256>",
-    "budget_digest": "<sha256>"
+    "budget_digest": "<sha256>",
+    "deterministic_results_digest": "<sha256>"
   },
   "budget": {
     "max_work_order_units": 40,
@@ -453,6 +457,29 @@ larger than `max_work_order_units`, planning returns the typed
 `sync-work-order-over-budget` refusal naming every affected `(doc, unit)` and emits no work
 order. Every refusal is `Invalid`, whose wire form has typed `problems` and no `work_order`.
 `plan_sync()` accepts no judgment callback or model adapter, so phase 1 cannot do model work.
+
+`accept_sync_judgments()` is phase 2's only external judgment seam. It regenerates phase 1
+against the current repository and refuses changed binding digests, a spliced unit list, or an
+unexpected orchestration session/chunk before interpreting any answer. Judgment envelopes bind
+the same session, chunk, and configured model tier. Each unit answer then passes the existing
+drift-verdict/classification and evidence-boundary validators; its proposed ledger strategy
+passes the ledger validator; and a proposed probe is authorized and executed through the probe
+engine. Normative and rationale classifications cannot propose probes. Dependency digests must
+equal bytes the engine read through its no-follow handles — model text never becomes stored
+control data merely because it has the right JSON shape.
+
+An `ok` envelope may cover all or only some requested units. Missing units are enumerated in a
+`partial` schema-v2 incremental report; a `denied` envelope does the same with its denial reason.
+Neither outcome can invoke an adapter or widen the work order. An empty order plus the empty
+envelope goes through this same function and emits a validated clean incremental report.
+`FakeJudgmentAdapter` supplies named valid, unasked-unit, malformed, partial, and denied returns
+for zero-model tests and records exactly how many non-empty work orders were requested.
+
+On success phase 2 returns `(report, proposed_ledger)`. The proposal contains deterministic
+JSONL records plus additions, supersedes, and tombstones, and a digest over the whole proposal.
+Fresh entries carry provenance and lineage including the bound model; all dates come from
+`--as-of`. The accepted `.doc-lifecycle/assertion-ledger.jsonl` is never opened for writing —
+promotion of `proposed_ledger.jsonl` remains a separate human-reviewed act.
 
 ## Report contract
 
