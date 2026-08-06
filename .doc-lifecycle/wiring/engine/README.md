@@ -13,9 +13,10 @@ never keep it — ignored, or outside the repository. Both are named below; noth
 package opens a file for writing.
 
 Current surface: the registry parser, the document inventory, path authorization, the report
-contract, the lineage-keyed cache, the segmenter, finding identity, the context index, the
-bloat lane, the drift audit, the migration door, reconciliation, approval sets, and the
-applier — the only component that writes a repository document.
+contract, the assertion ledger and incremental-sync planner, the lineage-keyed cache, the
+segmenter, finding identity, the context index, the bloat lane, the drift audit, the migration
+door, reconciliation, approval sets, and the applier — the only component that writes a
+repository document.
 
 ## Modules
 
@@ -29,6 +30,7 @@ applier — the only component that writes a repository document.
 | `doclifecycle/context.py` | `build_context_index()`, occurrences, ownership, the index and per-document context digests |
 | `doclifecycle/bloat.py` | `plan_chunks()`, `plan_repository_chunks()`, `merge_contention()`, `enumerate_scope()`, `record_verdicts()`, `audit_bloat()`, `load_bloat_verdicts()`, the chunk cache seam |
 | `doclifecycle/drift.py` | `plan_drift_audit()`, `audit_drift()`, `load_verdicts()`, the verdicts and anchor checks |
+| `doclifecycle/sync.py` | `plan_sync()`, `load_assertion_ledger()`, `load_sync_budget()`, the accepted-ledger and digest-bound judgment-work-order contracts |
 | `doclifecycle/migrate.py` | `draft_registry()`, `dry_run_migration()`, the legacy-install inference and the migration contract |
 | `doclifecycle/report.py` | `validate_report()`, `load_report()`, `current_lineage()`, `parse_lineage()`, `parse_stale_reasons()`, `compare_lineage()`, `state_from_content()`, the declared scope and recorded coverage, lineage and report digests |
 | `doclifecycle/reconcile.py` | `reconcile()`, the four relation kinds, the three group dispositions, group and reconciliation digests |
@@ -346,6 +348,87 @@ from doclifecycle.segment import segment_document, segment_text
 segment_text("Fees are 2%.\n")                   # → Segmentation; pure and model-free
 segment_document(".", "docs/architecture.md")    # → Segmentation or Invalid
 ```
+
+## Assertion ledger and sync plan
+
+`.doc-lifecycle/assertion-ledger.jsonl` is reviewed repository state, read-only to the
+engine. Line 1 is the schema-1 header; the remaining lines are assertion records ordered by
+document path and unit order. Entry identity is `(doc, unit)`, so identical prose in two
+documents remains independently auditable. A tombstone retains every last-active field and
+adds its removal commit and date.
+
+```json
+{"record":"ledger-header","schema":1,"ruleset":10,"registry_digest":"<sha256>","plugin_version":"0.46.12","established":{"report_digest":"<sha256>","commit":"<commit>","date":"2026-08-06"},"covered":["docs/architecture.md"],"uncovered":[]}
+{"record":"assertion","doc":"docs/architecture.md","unit":"<sha256>","class":"factual","obligation":"evidence","strategy":"on-change","provenance":"judged","lineage":{"report_digest":"<sha256>","commit":"<commit>","plugin_version":"0.46.12","model":"sonnet","date":"2026-08-06"},"status":"active"}
+```
+
+The closed strategies are `probe`, `deps`, `on-change`, and `reconcile-only`; provenance is
+`judged`, `heuristic`, or `seeded`. A probe record additionally carries exactly
+`{"kind", "args", "expect"}` plus non-empty dependency records. The kind is one of
+`path_exists`, `content_match`, `json_value`, `symbol_defined`, and `tool_probe`.
+Normative and rationale entries cannot carry probes. `probe` and `deps` require `deps`;
+`on-change` and `reconcile-only` forbid them. Every entry carries lineage including `model`
+(`null` when no model produced it). Unknown schema or probe vocabulary, malformed record
+shape, duplicate identity, incompatible ruleset, or a registry digest mismatch invalidates
+the whole ledger. In `sync` mode an absent ledger is `ledger-missing`, never bootstrap.
+
+The nested v1 probe schemas are closed too; an extra or missing field is
+`ledger-invalid-probe-shape`, not ignored data:
+
+| kind | `args` | `expect` |
+|---|---|---|
+| `path_exists` | exactly `path` or `glob`, plus `kind: file\|dir\|any` | `{}` |
+| `content_match` | exactly `path`, `pattern` (a bounded valid regular expression) | exactly `presence: present\|absent`, optionally `count` as a non-negative integer |
+| `json_value` | exactly `path`, RFC 6901 `pointer` | exactly `equals` (any strict JSON value) |
+| `symbol_defined` | exactly `path`, `language: python`, dotted Python `name` | `{}` |
+| `tool_probe` | exactly bare `tool`, `flag: --help\|--version`, bounded valid `pattern` | `{}` |
+
+Every path is a canonical repository-relative data string with no shell syntax; literal paths
+cannot contain glob metacharacters, while a `glob` must contain one. This validates stored
+control data only. Probe execution later re-derives repository-boundary, symlink, dependency,
+and declared-tool authority before opening or running anything.
+
+The consumer's optional `.doc-lifecycle/config.json` has a `sync` section. Missing files,
+sections, and fields use `max_work_order_units: 40`, `max_model_calls: 1`, `max_turns: 40`,
+and `sync_model: "sonnet"`. A present malformed value fails closed. Sibling top-level
+sections belong to their own phases and are preserved conceptually rather than interpreted
+here.
+
+```bash
+python3 -m doclifecycle sync-plan --repo . --as-of 2026-08-06
+```
+
+`--as-of` is mandatory: artifact content never reads the wall clock. The closed mode
+vocabulary is `sync | bootstrap | reconcile`; the latter two are recognized typed
+not-yet-implemented refusals in this slice, and an unknown spelling is a usage error on the
+command seam. An unchanged compatible ledger produces `status: "clean"`, deterministic
+results (including the existing narrative-anchor checks and planning-kind exclusions), and
+an empty judgment work order. The empty array means no model step exists.
+
+The work order carries `session_id`, `chunk_id`, and `total_chunk_count`, plus these bindings:
+
+```json
+{
+  "bindings": {
+    "ledger_digest": "<sha256 of accepted JSONL bytes>",
+    "inventory_digest": "<sha256>",
+    "unit_set_digest": "<sha256>",
+    "budget_digest": "<sha256>"
+  },
+  "budget": {
+    "max_work_order_units": 40,
+    "max_model_calls": 1,
+    "max_turns": 40,
+    "sync_model": "sonnet"
+  },
+  "units": []
+}
+```
+
+Every refusal is `Invalid`, whose wire form has typed `problems` and no `work_order`.
+`plan_sync()` accepts no judgment callback or model adapter, so phase 1 cannot do model work.
+This tracer-bullet slice fails closed when a covered unit set differs; the changed-unit
+comparison and non-empty bounded work orders extend this seam rather than widening a refusal.
 
 ## Report contract
 
