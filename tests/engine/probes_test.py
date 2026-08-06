@@ -178,6 +178,42 @@ class ProbeVocabulary(RepoTestCase):
         self.assertEqual(outcome.problem.code, "probe-malformed-args")
         run.assert_not_called()
 
+    def test_high_match_count_stops_at_evidence_sentinel(self):
+        text = "x" * (4 * 1024 * 1024)
+        repo = self.repo_with({"source.txt": text})
+        outcome = execute_probe(repo, {
+            "kind": "content_match",
+            "args": {"path": "source.txt", "pattern": "."},
+            "expect": {"presence": "present"},
+        }, self.dep("source.txt", text))
+
+        self.assertEqual(outcome.problem.code, "probe-evidence-over-bound")
+
+    def test_dependencies_must_be_unique_and_path_sorted_before_reads(self):
+        repo = self.repo_with({"a.txt": "a\n", "z.txt": "z\n"})
+        probe = {
+            "kind": "path_exists",
+            "args": {"path": "z.txt", "kind": "file"},
+            "expect": {},
+        }
+        cases = (
+            [
+                {"path": "z.txt", "digest": digest("z\n")},
+                {"path": "a.txt", "digest": digest("a\n")},
+            ],
+            [
+                {"path": "z.txt", "digest": digest("z\n")},
+                {"path": "z.txt", "digest": digest("z\n")},
+            ],
+        )
+        for deps in cases:
+            with self.subTest(deps=deps), mock.patch.object(
+                    RepositoryReadHandle, "read_bytes",
+                    side_effect=AssertionError("unordered deps reached reads")):
+                outcome = execute_probe(repo, probe, deps)
+
+            self.assertEqual(outcome.problem.code, "probe-malformed-deps")
+
     def test_json_pointer_equality_is_strict_and_decodes_escaped_tokens(self):
         text = '{"a/b":{"~key":[1,true]}}\n'
         repo = self.repo_with({"value.json": text})

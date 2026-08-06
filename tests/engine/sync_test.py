@@ -767,6 +767,35 @@ class ProbePlanning(SyncRepoTestCase):
                          "probe-tool-version-missing")
         self.assertEqual(payload["deterministic_results"]["unchanged"], [])
 
+    def test_unordered_probe_dependencies_are_typed_work_before_reads(self):
+        repo = self.repo({
+            **FILES,
+            "src/a.py": "a = True\n",
+            "src/z.py": "z = True\n",
+        })
+        records = self.ledger_records(repo)
+        records[1]["strategy"] = "probe"
+        records[1]["probe"] = {
+            "kind": "path_exists",
+            "args": {"path": "src/z.py", "kind": "file"},
+            "expect": {},
+        }
+        records[1]["deps"] = [
+            {"path": "src/z.py", "digest": hashlib.sha256(
+                b"z = True\n").hexdigest()},
+            {"path": "src/a.py", "digest": hashlib.sha256(
+                b"a = True\n").hexdigest()},
+        ]
+        self.write_ledger(repo, records)
+
+        payload = plan_sync(repo, AS_OF).to_dict()
+
+        refusal = payload["work_order"]["units"][0]
+        self.assertEqual(refusal["reason"], "deterministic-probe-refused")
+        self.assertEqual(refusal["probe_problem"]["code"],
+                         "probe-malformed-deps")
+        self.assertEqual(payload["deterministic_results"]["unchanged"], [])
+
 
 class ModeAndClockContract(SyncRepoTestCase):
     def test_bootstrap_and_reconcile_are_typed_unimplemented_refusals(self):

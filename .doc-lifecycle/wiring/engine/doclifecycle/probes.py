@@ -1,6 +1,7 @@
 """Closed, read-only deterministic probes used by incremental sync."""
 
 import ast
+import itertools
 import json
 import keyword
 import math
@@ -301,7 +302,7 @@ def _dependency_paths(deps):
             "probe-malformed-deps", "a probe requires non-empty dependencies",
             "deps",
         )
-    paths = []
+    paths, prior = [], None
     for index, dep in enumerate(deps):
         if not isinstance(dep, dict) or set(dep) != {"path", "digest"} or not (
                 isinstance(dep.get("path"), str)
@@ -314,7 +315,14 @@ def _dependency_paths(deps):
         fault = _path_shape(path)
         if fault is not None:
             return None, fault
+        if prior is not None and path <= prior:
+            return None, Problem(
+                "probe-malformed-deps",
+                "probe dependencies must be unique and ordered by path",
+                f"deps[{index}].path",
+            )
         paths.append(path)
+        prior = path
     return tuple(paths), None
 
 
@@ -460,12 +468,15 @@ def execute_probe(repo_root, probe, deps,
             if data is None:
                 raise OSError(f"{args['path']!r} is not a regular file")
             text = data.decode("utf-8")
-            found = [match.group(0) for match in compiled.finditer(text)]
-            if len(found) > _MAX_MATCH_EVIDENCE:
+            matches = list(itertools.islice(
+                compiled.finditer(text), _MAX_MATCH_EVIDENCE + 1
+            ))
+            if len(matches) > _MAX_MATCH_EVIDENCE:
                 return _problem(
                     "probe-evidence-over-bound",
                     "too many regex matches to record",
                 )
+            found = [match.group(0) for match in matches]
             count = len(found)
             passed = ((expect["presence"] == "present" and count > 0)
                       or (expect["presence"] == "absent" and count == 0))
