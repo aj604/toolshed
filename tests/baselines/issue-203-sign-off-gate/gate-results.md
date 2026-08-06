@@ -269,7 +269,7 @@ test catches that mutation, so the property is covered — but not by the test w
 |---|---|---|
 | Script/workflow suites | `python3 .github/scripts/run-script-suites.py` | 29/29 suites passed |
 | Engine suites | `python3 -m unittest discover -s tests/engine -p '*_test.py'` | 1349 tests, OK |
-| Release-manifest coverage | `python3 .github/scripts/release-manifest.py` | 61 suites wired, every gate criterion covered |
+| Release-manifest coverage | `python3 .github/scripts/release-manifest.py` | 63 suites wired, every gate criterion covered |
 | Release-manifest guard's own suite | `python3 tests/scripts/release-manifest_test.py` | 43 tests, OK |
 | Plugin validation | `claude plugin validate plugins/doc-lifecycle` | Validation passed |
 | Compilation | `python3 -m compileall -q` over engine, wiring, skills, `.github/scripts` | clean |
