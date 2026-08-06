@@ -355,7 +355,8 @@ segment_document(".", "docs/architecture.md")    # → Segmentation or Invalid
 engine. Line 1 is the schema-1 header; the remaining lines are assertion records ordered by
 document path and unit order. Entry identity is `(doc, unit)`, so identical prose in two
 documents remains independently auditable. A tombstone retains every last-active field and
-adds its removal commit and date.
+adds its removal commit and date. Moving or rewrapping normalized prose retains its unit
+identity; editing its content creates a new identity rather than mutating the old one.
 
 ```json
 {"record":"ledger-header","schema":1,"ruleset":10,"registry_digest":"<sha256>","plugin_version":"0.46.12","established":{"report_digest":"<sha256>","commit":"<commit>","date":"2026-08-06"},"covered":["docs/architecture.md"],"uncovered":[]}
@@ -401,9 +402,18 @@ python3 -m doclifecycle sync-plan --repo . --as-of 2026-08-06
 `--as-of` is mandatory: artifact content never reads the wall clock. The closed mode
 vocabulary is `sync | bootstrap | reconcile`; the latter two are recognized typed
 not-yet-implemented refusals in this slice, and an unknown spelling is a usage error on the
-command seam. An unchanged compatible ledger produces `status: "clean"`, deterministic
-results (including the existing narrative-anchor checks and planning-kind exclusions), and
-an empty judgment work order. The empty array means no model step exists.
+command seam. Comparison is occurrence-scoped by `(doc, unit)`: a current identity is
+unchanged, a current identity absent from the ledger is new, and an active ledger identity
+absent from its covered document is a tombstone candidate. Each safe carried result includes
+the strategy-specific reason and originating lineage. `deps` entries carry only while every
+declared file digest matches; a changed or disappeared dependency escalates that entry alone.
+
+Documents outside the header's `covered` set are reported in `declared_uncovered` and their
+units in `declared_uncovered_units`; those units never become new judgment work. This keeps a
+partial bootstrap's gap document-granular. An unchanged compatible ledger produces `status:
+"clean"`, deterministic results (including the existing narrative-anchor checks and
+planning-kind exclusions), and an empty judgment work order. The empty array means no model
+step exists.
 
 The work order carries `session_id`, `chunk_id`, and `total_chunk_count`, plus these bindings:
 
@@ -425,10 +435,13 @@ The work order carries `session_id`, `chunk_id`, and `total_chunk_count`, plus t
 }
 ```
 
-Every refusal is `Invalid`, whose wire form has typed `problems` and no `work_order`.
+New identities and unchanged `deps` identities whose dependencies moved appear in deterministic
+document/unit order in `work_order.units`, with current text and location. Removed identities
+appear in `tombstone_candidates`, never as unexplained disappearances. If the complete order is
+larger than `max_work_order_units`, planning returns the typed
+`sync-work-order-over-budget` refusal naming every affected `(doc, unit)` and emits no work
+order. Every refusal is `Invalid`, whose wire form has typed `problems` and no `work_order`.
 `plan_sync()` accepts no judgment callback or model adapter, so phase 1 cannot do model work.
-This tracer-bullet slice fails closed when a covered unit set differs; the changed-unit
-comparison and non-empty bounded work orders extend this seam rather than widening a refusal.
 
 ## Report contract
 
