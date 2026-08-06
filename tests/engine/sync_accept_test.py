@@ -77,7 +77,7 @@ class EmptyAndComplete(PhaseTwoRepo):
     def test_empty_order_flows_through_phase_two_without_a_request(self):
         repo = self.committed_repo()
         plan = plan_sync(repo, AS_OF)
-        adapter = FakeJudgmentAdapter({"this": "must not be returned"})
+        adapter = FakeJudgmentAdapter.partial()
         before = self.read_bytes(repo)
 
         first = accept_sync_judgments(
@@ -100,13 +100,25 @@ class EmptyAndComplete(PhaseTwoRepo):
         repo = self.committed_repo(changed=True)
         work = plan_sync(repo, AS_OF).work_order.to_dict()
         before = self.read_bytes(repo)
-        result = accept_sync_judgments(
-            repo, work, self.envelope(work, [self.valid_judgment(work["units"][0])]),
-            AS_OF,
+        judgment = self.valid_judgment(work["units"][0])
+        first_adapter = FakeJudgmentAdapter.valid([judgment])
+        first = accept_sync_judgments(
+            repo, work, first_adapter.request(work), AS_OF,
         )
+        self.assertEqual(first_adapter.request_count, 1)
+        self.assertEqual(self.read_bytes(repo), before)
+        second_adapter = FakeJudgmentAdapter.valid([judgment])
+        second = accept_sync_judgments(
+            repo, work, second_adapter.request(work), AS_OF,
+        )
+        self.assertEqual(second_adapter.request_count, 1)
+        self.assertEqual(self.read_bytes(repo), before)
 
-        self.assertNotIsInstance(result, Invalid, result)
-        report, proposal = result
+        self.assertNotIsInstance(first, Invalid, first)
+        report, proposal = first
+        self.assertEqual(report.to_dict(), second[0].to_dict())
+        self.assertEqual(proposal.to_dict(), second[1].to_dict())
+        self.assertEqual(proposal.jsonl, second[1].jsonl)
         self.assertEqual(report.status, "clean")
         addition = proposal.to_dict()["changes"]
         self.assertEqual(len(addition["additions"]), 1)
@@ -124,6 +136,28 @@ class EmptyAndComplete(PhaseTwoRepo):
             ".doc-lifecycle/proposed-ledger.jsonl",
         )
         self.assertNotIsInstance(loaded, Invalid, loaded)
+
+    def test_classification_only_non_assertive_unit_is_valid_without_a_ledger_entry(self):
+        repo = self.committed_repo(changed=True)
+        work = plan_sync(repo, AS_OF).work_order.to_dict()
+        before = self.read_bytes(repo)
+        classification = {
+            "doc": work["units"][0]["doc"],
+            "unit": work["units"][0]["unit"],
+            "assertion_class": "non-assertive",
+        }
+        adapter = FakeJudgmentAdapter.valid([classification])
+
+        report, proposal = accept_sync_judgments(
+            repo, work, adapter.request(work), AS_OF,
+        )
+
+        self.assertEqual(adapter.request_count, 1)
+        self.assertEqual(report.status, "clean")
+        examined = report.to_dict()["examined"][0]["verified"][0]
+        self.assertEqual(examined["assertion_class"], "non-assertive")
+        self.assertEqual(proposal.additions, ())
+        self.assertEqual(self.read_bytes(repo), before)
 
     def test_empty_order_preserves_deterministic_anchor_findings(self):
         repo = self.committed_repo()
@@ -161,17 +195,35 @@ class RefusalsAndPartial(PhaseTwoRepo):
 
     def test_unasked_and_malformed_judgments_fail_closed(self):
         unasked = dict(self.judgment, unit="f" * 64)
+        unasked_adapter = FakeJudgmentAdapter.unasked_unit(unasked)
         self.assert_refused(accept_sync_judgments(
-            self.repo_root, self.work, self.envelope(self.work, [unasked]), AS_OF
+            self.repo_root, self.work, unasked_adapter.request(self.work), AS_OF
         ), "sync-judgment-unasked-unit")
+        self.assertEqual(unasked_adapter.request_count, 1)
         malformed = dict(self.judgment)
         malformed.pop("verdict")
+        malformed_adapter = FakeJudgmentAdapter.malformed(
+            self.envelope(self.work, [malformed])
+        )
         self.assert_refused(accept_sync_judgments(
-            self.repo_root, self.work, self.envelope(self.work, [malformed]), AS_OF
-        ), "sync-judgment-invalid-shape")
+            self.repo_root, self.work, malformed_adapter.request(self.work), AS_OF
+        ), "drift-verdict-invalid-shape")
+        self.assertEqual(malformed_adapter.request_count, 1)
+
+    def test_non_scalar_model_identities_are_typed_not_tracebacks(self):
+        for field in ("doc", "unit"):
+            with self.subTest(field=field):
+                malformed = dict(self.judgment, **{field: []})
+                adapter = FakeJudgmentAdapter.malformed(
+                    self.envelope(self.work, [malformed])
+                )
+                self.assert_refused(accept_sync_judgments(
+                    self.repo_root, self.work, adapter.request(self.work), AS_OF
+                ), "sync-judgment-invalid-identity")
+                self.assertEqual(adapter.request_count, 1)
 
     def test_partial_and_denied_are_partial_without_an_extra_request(self):
-        adapter = FakeJudgmentAdapter(self.envelope(self.work, []))
+        adapter = FakeJudgmentAdapter.partial()
         response = adapter.request(self.work)
         report, _ = accept_sync_judgments(
             self.repo_root, self.work, response, AS_OF
@@ -179,15 +231,16 @@ class RefusalsAndPartial(PhaseTwoRepo):
         self.assertEqual(adapter.request_count, 1)
         self.assertEqual(report.status, "partial")
         self.assertEqual(len(report.incomplete), len(self.work["units"]))
+        self.assertEqual(self.read_bytes(self.repo_root), self.before)
 
-        denied = self.envelope(self.work)
-        denied.pop("judgments")
-        denied.update(status="denied", reason="model service denied the request")
+        denied_adapter = FakeJudgmentAdapter.denied()
         denied_report, _ = accept_sync_judgments(
-            self.repo_root, self.work, denied, AS_OF
+            self.repo_root, self.work, denied_adapter.request(self.work), AS_OF
         )
+        self.assertEqual(denied_adapter.request_count, 1)
         self.assertEqual(denied_report.status, "partial")
         self.assertTrue(all("denied" in item.reason for item in denied_report.incomplete))
+        self.assertEqual(self.read_bytes(self.repo_root), self.before)
 
     def test_stale_binding_wrong_session_and_bad_probe_are_typed(self):
         stale = json.loads(json.dumps(self.work))
@@ -210,6 +263,48 @@ class RefusalsAndPartial(PhaseTwoRepo):
             self.repo_root, self.work,
             self.envelope(self.work, [bad_probe]), AS_OF,
         ), "sync-judgment-probe-refused")
+
+    def test_caller_assigned_orchestration_requires_all_trusted_expectations(self):
+        for field, value, code in (
+            ("session_id", "attacker-session", "sync-wrong-session"),
+            ("chunk_id", "attacker-chunk", "sync-stale-chunk"),
+            ("total_chunk_count", 99, "sync-stale-chunk"),
+        ):
+            with self.subTest(tampered=field):
+                tampered = json.loads(json.dumps(self.work))
+                tampered[field] = value
+                tampered_adapter = FakeJudgmentAdapter.partial()
+                self.assert_refused(accept_sync_judgments(
+                    self.repo_root, tampered,
+                    tampered_adapter.request(tampered), AS_OF,
+                ), code)
+                self.assertEqual(tampered_adapter.request_count, 1)
+
+        custom = plan_sync(
+            self.repo_root, AS_OF, session_id="session-7", chunk_id="chunk-b",
+            total_chunk_count=3,
+        ).work_order.to_dict()
+        untrusted_adapter = FakeJudgmentAdapter.partial()
+        self.assert_refused(accept_sync_judgments(
+            self.repo_root, custom, untrusted_adapter.request(custom), AS_OF,
+        ), "sync-wrong-session")
+        self.assertEqual(untrusted_adapter.request_count, 1)
+
+        trusted_adapter = FakeJudgmentAdapter.partial()
+        report, _ = accept_sync_judgments(
+            self.repo_root, custom, trusted_adapter.request(custom), AS_OF,
+            expected_session_id="session-7", expected_chunk_id="chunk-b",
+            expected_total_chunk_count=3,
+        )
+        self.assertEqual(trusted_adapter.request_count, 1)
+        self.assertEqual(report.status, "partial")
+        self.assertEqual(self.read_bytes(self.repo_root), self.before)
+
+        self.assert_refused(accept_sync_judgments(
+            self.repo_root, custom, FakeJudgmentAdapter.partial().request(custom),
+            AS_OF, expected_session_id="session-7", expected_chunk_id="chunk-b",
+            expected_total_chunk_count=2,
+        ), "sync-wrong-chunk-count")
 
     def test_repository_move_evidence_escape_and_normative_probe_refuse(self):
         self.write(

@@ -322,6 +322,7 @@ def _sync_accept(args):
         registry_path=args.registry, ledger_path=args.ledger,
         config_path=args.config, expected_session_id=args.session_id,
         expected_chunk_id=args.chunk_id,
+        expected_total_chunk_count=args.total_chunk_count,
     )
     if isinstance(accepted, Invalid):
         return accepted
@@ -594,6 +595,13 @@ def _parser():
     sync_accept.add_argument(
         "--chunk-id", default=None,
         help="expected orchestration chunk; a different work order is refused",
+    )
+    sync_accept.add_argument(
+        "--total-chunk-count", type=_chunk_budget_argument, default=None,
+        help=(
+            "trusted expected chunk count for caller-assigned orchestration; "
+            "required with --session-id and --chunk-id for non-default orders"
+        ),
     )
     sync_accept.set_defaults(run=_sync_accept, render=None)
 

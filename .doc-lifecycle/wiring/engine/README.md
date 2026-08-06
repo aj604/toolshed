@@ -460,13 +460,20 @@ order. Every refusal is `Invalid`, whose wire form has typed `problems` and no `
 
 `accept_sync_judgments()` is phase 2's only external judgment seam. It regenerates phase 1
 against the current repository and refuses changed binding digests, a spliced unit list, or an
-unexpected orchestration session/chunk before interpreting any answer. Judgment envelopes bind
-the same session, chunk, and configured model tier. Each unit answer then passes the existing
+unexpected orchestration session/chunk before interpreting any answer. Default session, chunk,
+and count values are rederived independently. A caller-assigned topology is accepted only when
+the library receives all three trusted expected values (the CLI's `--session-id`, `--chunk-id`,
+and `--total-chunk-count`). Judgment envelopes bind the same session, chunk, and configured
+model tier. Each unit answer then passes the existing
 drift-verdict/classification and evidence-boundary validators; its proposed ledger strategy
 passes the ledger validator; and a proposed probe is authorized and executed through the probe
 engine. Normative and rationale classifications cannot propose probes. Dependency digests must
 equal bytes the engine read through its no-follow handles — model text never becomes stored
 control data merely because it has the right JSON shape.
+
+A structurally assertion-capable unit may still be classified `non-assertive`. That valid answer
+is classification-only: it is recorded as judged report coverage, but creates no assertion-ledger
+entry and carries no verdict, evidence, obligation, or reuse strategy.
 
 An `ok` envelope may cover all or only some requested units. Missing units are enumerated in a
 `partial` schema-v2 incremental report; a `denied` envelope does the same with its denial reason.

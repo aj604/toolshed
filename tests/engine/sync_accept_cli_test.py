@@ -20,6 +20,9 @@ AS_OF = "2026-08-06"
 class SyncAcceptCommand(SyncRepoTestCase):
     def fixture(self):
         repo = self.sync_repo()
+        self.write(repo, "docs/architecture.md", (
+            "# Architecture\n\nThe service has a newly judged CLI contract.\n"
+        ))
         subprocess.run(["git", "-C", repo, "init", "-q", "-b", "main"], check=True)
         subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
         subprocess.run([
@@ -27,10 +30,21 @@ class SyncAcceptCommand(SyncRepoTestCase):
             "user.email=t@example.com", "commit", "-q", "-m", "fixture",
         ], check=True)
         work = plan_sync(repo, AS_OF).work_order.to_dict()
+        unit = work["units"][0]
+        judgment = {
+            "doc": unit["doc"], "unit": unit["unit"],
+            "assertion_class": "factual", "verdict": "VERIFIED",
+            "kind": "behavior", "tier": 1,
+            "evidence": {
+                "source": unit["doc"], "line": unit["line"],
+                "observed": "the CLI assertion was checked",
+            },
+            "obligation": "evidence", "strategy": "on-change",
+        }
         judgments = {
             "schema_version": 1, "session_id": work["session_id"],
             "chunk_id": work["chunk_id"], "model": "sonnet",
-            "status": "ok", "judgments": [],
+            "status": "ok", "judgments": [judgment],
         }
         self.write(repo, "tmp/work.json", json.dumps(work))
         self.write(repo, "tmp/judgments.json", json.dumps(judgments))
@@ -51,6 +65,7 @@ class SyncAcceptCommand(SyncRepoTestCase):
         )
 
         self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertTrue(work["units"])
         self.assertEqual(first.stdout, second.stdout)
         self.assertEqual(
             json.loads(first.stdout), SyncAcceptance(report, proposal).to_dict()
@@ -70,6 +85,36 @@ class SyncAcceptCommand(SyncRepoTestCase):
             "sync-work-order-unreadable",
         )
         self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_requires_and_accepts_trusted_custom_chunk_topology(self):
+        repo, _, judgments = self.fixture()
+        work = plan_sync(
+            repo, AS_OF, session_id="session-9", chunk_id="chunk-c",
+            total_chunk_count=4,
+        ).work_order.to_dict()
+        judgments.update(
+            session_id=work["session_id"], chunk_id=work["chunk_id"]
+        )
+        self.write(repo, "tmp/work.json", json.dumps(work))
+        self.write(repo, "tmp/judgments.json", json.dumps(judgments))
+        base = (
+            "sync-accept", "--repo", repo, "--as-of", AS_OF,
+            "--work-order", os.path.join(repo, "tmp/work.json"),
+            "--judgments", os.path.join(repo, "tmp/judgments.json"),
+        )
+
+        refused = run_command(*base)
+        accepted = run_command(
+            *base, "--session-id", "session-9", "--chunk-id", "chunk-c",
+            "--total-chunk-count", "4",
+        )
+
+        self.assertEqual(refused.returncode, 1)
+        self.assertEqual(
+            json.loads(refused.stdout)["problems"][0]["code"],
+            "sync-wrong-session",
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
 
 if __name__ == "__main__":

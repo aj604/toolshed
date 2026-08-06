@@ -22,13 +22,14 @@ from .digest import load_strict_json, sha256_bytes, sha256_canonical, sha256_fil
 from .drift import (
     DEFAULT_EVIDENCE,
     OBLIGATION_ANCHOR,
+    VERDICT_REQUIRED_CLASSES,
     VERDICT_STALE,
     _audit_anchor,
     _validated_verdicts,
     audit_config_digest,
     plan_drift_audit,
 )
-from .finding import FACTUAL, NORMATIVE, RATIONALE, build_finding
+from .finding import FACTUAL, NON_ASSERTIVE, NORMATIVE, RATIONALE, build_finding
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .paths import repository_relative_problem
 from .probes import PROBE_KINDS, execute_probe
@@ -1399,7 +1400,9 @@ def _validate_work_order_shape(raw):
     return None
 
 
-def _binding_refusal(raw, fresh, expected_session_id, expected_chunk_id):
+def _expected_orchestration_refusal(raw, expected_session_id, expected_chunk_id,
+                                    expected_total_chunk_count):
+    """Compare caller-supplied trusted topology before any repository replan."""
     if expected_session_id is not None and raw["session_id"] != expected_session_id:
         return _invalid(
             "sync-wrong-session",
@@ -1414,6 +1417,21 @@ def _binding_refusal(raw, fresh, expected_session_id, expected_chunk_id):
             f"{expected_chunk_id!r}",
             "work_order.chunk_id",
         )
+    if (
+        expected_total_chunk_count is not None
+        and raw["total_chunk_count"] != expected_total_chunk_count
+    ):
+        return _invalid(
+            "sync-wrong-chunk-count",
+            f"work order declares {raw['total_chunk_count']} chunks, not the "
+            f"trusted expected count {expected_total_chunk_count}",
+            "work_order.total_chunk_count",
+        )
+    return None
+
+
+def _binding_refusal(raw, fresh, expected_session_id, expected_chunk_id,
+                     expected_total_chunk_count):
     expected = fresh.work_order.to_dict()
     for name in sorted(_BINDING_FIELDS):
         if raw["bindings"][name] != expected["bindings"][name]:
@@ -1422,9 +1440,34 @@ def _binding_refusal(raw, fresh, expected_session_id, expected_chunk_id):
                 f"work-order {name} no longer matches the current repository",
                 f"work_order.bindings.{name}",
             )
-    # The digests bind current state; this exact comparison also
-    # refuses a spliced or edited unit list under otherwise current bindings.
-    for name in ("mode", "total_chunk_count", "budget", "units"):
+    # Default identifiers and a single chunk are independently derived. Any
+    # caller-assigned orchestration values need all three trusted expectations;
+    # otherwise an untrusted order could bless its own session topology.
+    orchestration = (
+        raw["session_id"], raw["chunk_id"], raw["total_chunk_count"]
+    )
+    derived = (
+        expected["session_id"], expected["chunk_id"],
+        expected["total_chunk_count"],
+    )
+    if orchestration != derived and None in (
+        expected_session_id, expected_chunk_id, expected_total_chunk_count,
+    ):
+        code = (
+            "sync-wrong-session"
+            if raw["session_id"] != expected["session_id"]
+            else "sync-stale-chunk"
+        )
+        return _invalid(
+            code,
+            "a caller-assigned session, chunk, or chunk count requires trusted "
+            "expected_session_id, expected_chunk_id, and "
+            "expected_total_chunk_count values",
+            "work_order",
+        )
+    # The digests bind current state; this exact comparison also refuses a
+    # spliced or edited unit list under otherwise current bindings.
+    for name in ("mode", "budget", "units"):
         if raw[name] != expected[name]:
             return _invalid(
                 "sync-stale-chunk",
@@ -1653,7 +1696,8 @@ def accept_sync_judgments(repo_root, work_order, judgments, as_of,
                           registry_path=DEFAULT_REGISTRY_PATH,
                           ledger_path=DEFAULT_LEDGER_PATH,
                           config_path=DEFAULT_CONFIG_PATH,
-                          expected_session_id=None, expected_chunk_id=None):
+                          expected_session_id=None, expected_chunk_id=None,
+                          expected_total_chunk_count=None):
     """Validate phase-2 model output and return ``(report, proposed ledger)``.
 
     An invalid or stale input returns ``Invalid`` and no artifact. Partial and
@@ -1671,16 +1715,21 @@ def accept_sync_judgments(repo_root, work_order, judgments, as_of,
             f"caller-supplied date {raw_work['as_of']!r}",
             "as_of",
         )
+    problem = _expected_orchestration_refusal(
+        raw_work, expected_session_id, expected_chunk_id,
+        expected_total_chunk_count,
+    )
+    if problem is not None:
+        return problem
     fresh = plan_sync(
         repo_root, as_of, mode=raw_work["mode"], registry_path=registry_path,
         ledger_path=ledger_path, config_path=config_path,
-        session_id=raw_work["session_id"], chunk_id=raw_work["chunk_id"],
-        total_chunk_count=raw_work["total_chunk_count"],
     )
     if isinstance(fresh, Invalid):
         return fresh
     problem = _binding_refusal(
-        raw_work, fresh, expected_session_id, expected_chunk_id
+        raw_work, fresh, expected_session_id, expected_chunk_id,
+        expected_total_chunk_count,
     )
     if problem is not None:
         return problem
@@ -1696,7 +1745,21 @@ def accept_sync_judgments(repo_root, work_order, judgments, as_of,
                 "sync-judgment-invalid-shape", "each judgment must be an object",
                 f"judgments.judgments[{index}]",
             )
-        key = (entry.get("doc"), entry.get("unit"))
+        doc, unit = entry.get("doc"), entry.get("unit")
+        path_problem = repository_relative_problem(doc)
+        if path_problem is not None or not _one_line(doc):
+            return _invalid(
+                "sync-judgment-invalid-identity",
+                "judgment.doc must be a canonical repository-relative path",
+                f"judgments.judgments[{index}].doc",
+            )
+        if not (isinstance(unit, str) and _DIGEST.fullmatch(unit)):
+            return _invalid(
+                "sync-judgment-invalid-identity",
+                "judgment.unit must be a lowercase sha256 assertion-unit digest",
+                f"judgments.judgments[{index}].unit",
+            )
+        key = (doc, unit)
         if key not in requested:
             return _invalid(
                 "sync-judgment-unasked-unit",
@@ -1719,7 +1782,7 @@ def accept_sync_judgments(repo_root, work_order, judgments, as_of,
         return Invalid(tuple(lineage_problems))
     lineage = Lineage(audit_mode="incremental", evidence_boundary=boundary, **state)
     model = raw_work["budget"]["sync_model"]
-    drafts, judged_ledger, verified = [], [], []
+    drafts, judged_ledger, examined_judgments = [], [], []
     for entry in sorted(shaped, key=lambda item: (item["doc"], item["unit"])):
         planned_boundary = requested[(entry["doc"], entry["unit"])][
             "evidence_boundary"
@@ -1730,11 +1793,6 @@ def accept_sync_judgments(repo_root, work_order, judgments, as_of,
                 "the requested unit's evidence boundary is not the bound phase-2 boundary",
                 "work_order.units.evidence_boundary",
             )
-        ledger_record, problem = _validate_strategy(
-            repo_root, entry, model, as_of, state["base_commit"]
-        )
-        if problem is not None:
-            return problem
         segmentation = segment_document(repo_root, entry["doc"], registry_path)
         if isinstance(segmentation, Invalid):
             return segmentation
@@ -1753,8 +1811,31 @@ def accept_sync_judgments(repo_root, work_order, judgments, as_of,
         if verdict_problems:
             return Invalid(tuple(verdict_problems))
         drafts.extend(found)
-        verified.extend((entry["doc"], item) for item in coverage["verified"])
-        judged_ledger.append(ledger_record)
+        examined_judgments.extend(
+            (entry["doc"], item) for item in coverage["verified"]
+        )
+        if entry["assertion_class"] == NON_ASSERTIVE:
+            expected = {"doc", "unit", "assertion_class"}
+            if set(entry) != expected:
+                return _invalid(
+                    "sync-judgment-invalid-shape",
+                    "a non-assertive judgment is classification-only and must "
+                    f"carry exactly {sorted(expected)}",
+                    "judgment",
+                )
+            examined_judgments.append((entry["doc"], {
+                "unit": entry["unit"],
+                "assertion_class": NON_ASSERTIVE,
+                "classification": "classification-only",
+            }))
+            continue
+        if entry["assertion_class"] in VERDICT_REQUIRED_CLASSES:
+            ledger_record, problem = _validate_strategy(
+                repo_root, entry, model, as_of, state["base_commit"]
+            )
+            if problem is not None:
+                return problem
+            judged_ledger.append(ledger_record)
 
     deterministic = fresh.deterministic_results
     coverage_entries, examined_by_doc = [], {}
@@ -1774,7 +1855,7 @@ def accept_sync_judgments(repo_root, work_order, judgments, as_of,
                     "commit": origin["commit"],
                 },
             })
-    for doc, item in verified:
+    for doc, item in examined_judgments:
         examined_by_doc.setdefault(doc, []).append(item)
         coverage_entries.append({
             "path": doc, "unit": item["unit"], "source": "judged",
