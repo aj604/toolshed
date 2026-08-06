@@ -43,6 +43,18 @@ _Avoid_: claim type
 An immutable statement of what was examined and what was found, pinned to the repository state and audit inputs that produced it. Proof of examination, not authority to change anything.
 _Avoid_: findings list, output, results
 
+**Assertion ledger**:
+The reviewed, repository-owned JSONL contract recording each covered living-document assertion occurrence's class, review obligation, sync strategy, dependencies or deterministic probe, provenance, and establishment lineage. Durable input to incremental sync, never a substitute for a report and never a cache entry; the audit engine reads the accepted ledger and may propose a successor, but does not write the accepted file.
+_Avoid_: assertion cache, current report, sync state (unqualified)
+
+**Deterministic probe**:
+A read-only check from the audit engine's closed vocabulary whose validated arguments, expected result, observed evidence, and dependency digests make its answer reproducible without model judgment. A probe that cannot validate or pass creates judgment work; it never silently counts as coverage or runs as a shell command.
+_Avoid_: test (it does not run behavior), command (only one closed probe kind consults a declared tool), heuristic
+
+**Judgment work order**:
+The bounded, immutable set of assertion units phase 1 asks a model to judge, bound by digest to the accepted assertion ledger, current inventory, current unit set, and consumer budget, plus its mode and session/chunk identity. An empty work order means no model step exists; absence or invalidity is a refusal, not permission to widen the run.
+_Avoid_: prompt, task list, audit scope
+
 **Document inventory**:
 The registry's verdict on a repository: every document under the declared roots with its kind, set, and content digest, plus a finding for each document no rule claims. Derived, deterministic, and digested — the inventory digest is part of every report's lineage. Says what exists, never whether it is accurate.
 _Avoid_: file list, corpus (as if it were the inventory), doc index

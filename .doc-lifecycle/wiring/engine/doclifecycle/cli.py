@@ -64,6 +64,13 @@ from .reconcile import reconcile
 from .render import approval_trailers, render_approval_set, render_report
 from .report import Report, load_report
 from .segment import segment_document
+from .sync import (
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_LEDGER_PATH,
+    MODE_SYNC as SYNC_MODE,
+    SYNC_MODES,
+    plan_sync,
+)
 from .results import (
     STATE_CLEAN,
     STATE_FINDINGS,
@@ -470,6 +477,58 @@ def _parser():
     )
     segment.set_defaults(
         run=lambda args: segment_document(args.repo, args.path, args.registry),
+        render=None,
+    )
+
+    sync_plan = commands.add_parser(
+        "sync-plan",
+        help="plan deterministic incremental sync and bounded judgment work",
+        description=(
+            "Read the accepted assertion ledger, current inventory and unit set, "
+            "and the consumer's sync budget; run deterministic phase-1 checks; "
+            "and emit their results plus a digest-bound judgment work order. An "
+            "unchanged compatible ledger produces an empty work order, which "
+            "means no model step exists. Missing or incompatible state fails "
+            "closed and never silently becomes bootstrap."
+        ),
+    )
+    _add_corpus_arguments(sync_plan)
+    sync_plan.add_argument(
+        "--as-of", required=True,
+        help="artifact date supplied by the caller, as YYYY-MM-DD",
+    )
+    sync_plan.add_argument(
+        "--mode", choices=list(SYNC_MODES), default=SYNC_MODE,
+        help=f"sync posture (default: {SYNC_MODE}); only sync is implemented",
+    )
+    sync_plan.add_argument(
+        "--ledger", default=DEFAULT_LEDGER_PATH,
+        help=f"accepted assertion ledger (default: {DEFAULT_LEDGER_PATH})",
+    )
+    sync_plan.add_argument(
+        "--config", default=DEFAULT_CONFIG_PATH,
+        help=f"consumer configuration (default: {DEFAULT_CONFIG_PATH})",
+    )
+    sync_plan.add_argument(
+        "--session-id", default=None,
+        help="bootstrap-session binding; derived deterministically when omitted",
+    )
+    sync_plan.add_argument(
+        "--chunk-id", default=None,
+        help="chunk binding; content-addressed and derived when omitted",
+    )
+    sync_plan.add_argument(
+        "--total-chunk-count", type=_chunk_budget_argument, default=1,
+        help="total chunks in the bound session (default: 1)",
+    )
+    sync_plan.set_defaults(
+        run=lambda args: plan_sync(
+            args.repo, args.as_of, mode=args.mode,
+            registry_path=args.registry, ledger_path=args.ledger,
+            config_path=args.config, session_id=args.session_id,
+            chunk_id=args.chunk_id,
+            total_chunk_count=args.total_chunk_count,
+        ),
         render=None,
     )
 
