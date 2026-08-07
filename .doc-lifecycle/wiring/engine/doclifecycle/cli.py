@@ -69,6 +69,9 @@ from .sync import (
     DEFAULT_LEDGER_PATH,
     MODE_SYNC as SYNC_MODE,
     SYNC_MODES,
+    SyncAcceptance,
+    accept_sync_judgments,
+    load_sync_input,
     plan_sync,
 )
 from .results import (
@@ -307,6 +310,26 @@ def _add_corpus_arguments(command):
     )
 
 
+def _sync_accept(args):
+    work_order = load_sync_input(args.work_order, "work-order")
+    if isinstance(work_order, Invalid):
+        return work_order
+    judgments = load_sync_input(args.judgments, "judgments")
+    if isinstance(judgments, Invalid):
+        return judgments
+    accepted = accept_sync_judgments(
+        args.repo, work_order, judgments, args.as_of,
+        registry_path=args.registry, ledger_path=args.ledger,
+        config_path=args.config, expected_session_id=args.session_id,
+        expected_chunk_id=args.chunk_id,
+        expected_total_chunk_count=args.total_chunk_count,
+    )
+    if isinstance(accepted, Invalid):
+        return accepted
+    report, proposed = accepted
+    return SyncAcceptance(report, proposed)
+
+
 def _add_policy_arguments(command):
     """The report, the repository, and where the auto-apply policy lives."""
     command.add_argument(
@@ -531,6 +554,56 @@ def _parser():
         ),
         render=None,
     )
+
+    sync_accept = commands.add_parser(
+        "sync-accept",
+        help="validate bounded sync judgments and propose the next ledger",
+        description=(
+            "Revalidate a phase-1 work order against the current repository, "
+            "accept only judgments for its requested units through the drift, "
+            "evidence, strategy, and probe validators, and emit a validated "
+            "incremental report plus a content-digested proposed ledger. The "
+            "accepted ledger is read-only. Partial and denied returns stay "
+            "partial and never trigger a wider run."
+        ),
+    )
+    _add_corpus_arguments(sync_accept)
+    sync_accept.add_argument(
+        "--as-of", required=True,
+        help="artifact date supplied by the caller, as YYYY-MM-DD",
+    )
+    sync_accept.add_argument(
+        "--work-order", required=True,
+        help="phase-1 work-order JSON file",
+    )
+    sync_accept.add_argument(
+        "--judgments", required=True,
+        help="model judgment-envelope JSON file (an empty envelope is valid)",
+    )
+    sync_accept.add_argument(
+        "--ledger", default=DEFAULT_LEDGER_PATH,
+        help=f"accepted assertion ledger (default: {DEFAULT_LEDGER_PATH})",
+    )
+    sync_accept.add_argument(
+        "--config", default=DEFAULT_CONFIG_PATH,
+        help=f"consumer configuration (default: {DEFAULT_CONFIG_PATH})",
+    )
+    sync_accept.add_argument(
+        "--session-id", default=None,
+        help="expected orchestration session; a different work order is refused",
+    )
+    sync_accept.add_argument(
+        "--chunk-id", default=None,
+        help="expected orchestration chunk; a different work order is refused",
+    )
+    sync_accept.add_argument(
+        "--total-chunk-count", type=_chunk_budget_argument, default=None,
+        help=(
+            "trusted expected chunk count for caller-assigned orchestration; "
+            "required with --session-id and --chunk-id for non-default orders"
+        ),
+    )
+    sync_accept.set_defaults(run=_sync_accept, render=None)
 
     context = commands.add_parser(
         "context-index",
@@ -980,8 +1053,9 @@ def _explain(result):
         # first and a payload second.
         for reason in getattr(result, "stale_reasons", ()):
             print(f"{reason.code}: {reason.message}", file=sys.stderr)
-        if isinstance(result, Report) and result.status == STATE_PARTIAL:
-            for entry in result.incomplete:
+        report = result.report if isinstance(result, SyncAcceptance) else result
+        if isinstance(report, Report) and report.status == STATE_PARTIAL:
+            for entry in report.incomplete:
                 print(
                     f"not-examined: {entry.scope} — {entry.reason}",
                     file=sys.stderr,

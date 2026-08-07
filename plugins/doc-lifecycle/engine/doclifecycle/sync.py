@@ -1,11 +1,12 @@
-"""Incremental-sync planning: compare the accepted ledger to the repository.
+"""The two-phase incremental-sync protocol and read-only ledger contract.
 
 This module owns the durable assertion-ledger contract and the first complete
 path through phase 1: assertion identities are compared document-by-document,
 safe reuse is explained, and only units needing judgment enter the bounded
-work order.  The accepted ledger is only ever read.  Unchanged probe entries
-are re-executed with fresh deterministic evidence; comparison never invokes a
-model.
+work order. Phase 2 revalidates that order and untrusted model judgments before
+emitting a schema-v2 report and proposed next ledger. The accepted ledger is
+only ever read. Unchanged probe entries and model-proposed probes are executed
+with fresh deterministic evidence; neither phase invokes a model itself.
 """
 
 import datetime
@@ -16,13 +17,38 @@ import re
 from dataclasses import dataclass
 from typing import Tuple
 
-from . import ARTIFACT_SCHEMA_VERSION, RULESET_VERSION
-from .digest import sha256_bytes, sha256_canonical, sha256_file
-from .drift import OBLIGATION_ANCHOR, _audit_anchor, plan_drift_audit
-from .finding import FACTUAL, NORMATIVE, RATIONALE
+from . import ARTIFACT_SCHEMA_VERSION, PLUGIN_VERSION, RULESET_VERSION
+from .digest import (
+    canonical,
+    load_strict_json,
+    sha256_bytes,
+    sha256_canonical,
+    sha256_file,
+)
+from .drift import (
+    DEFAULT_EVIDENCE,
+    OBLIGATION_ANCHOR,
+    VERDICT_REQUIRED_CLASSES,
+    VERDICT_STALE,
+    _audit_anchor,
+    _validated_verdicts,
+    audit_config_digest,
+    plan_drift_audit,
+)
+from .finding import FACTUAL, NON_ASSERTIVE, NORMATIVE, RATIONALE, build_finding
 from .inventory import DEFAULT_REGISTRY_PATH, build_inventory
 from .paths import repository_relative_problem
 from .probes import PROBE_KINDS, execute_probe
+from .report import (
+    COVERAGE_INCREMENTAL,
+    REPORT_SCHEMA_VERSION,
+    SCOPE_DECLARED_ONLY,
+    EvidenceBoundary,
+    Lineage,
+    current_lineage,
+    state_from_content,
+    validate_report,
+)
 from .results import (
     STATE_CLEAN,
     STATE_FINDINGS,
@@ -30,10 +56,12 @@ from .results import (
     Invalid,
     Problem,
 )
-from .segment import segment_document
+from .segment import Segmentation, segment_document
 
 LEDGER_SCHEMA_VERSION = 1
 WORK_ORDER_SCHEMA_VERSION = 1
+JUDGMENT_SCHEMA_VERSION = 1
+PROPOSED_LEDGER_SCHEMA_VERSION = 1
 
 DEFAULT_LEDGER_PATH = ".doc-lifecycle/assertion-ledger.jsonl"
 DEFAULT_CONFIG_PATH = ".doc-lifecycle/config.json"
@@ -109,6 +137,10 @@ def _whole_positive(value):
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _whole_nonnegative(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _reject_constant(name):
     raise ValueError(f"{name} is not JSON")
 
@@ -168,6 +200,7 @@ class AssertionLedger:
 @dataclass(frozen=True)
 class JudgmentWorkOrder:
     mode: str
+    as_of: str
     session_id: str
     chunk_id: str
     total_chunk_count: int
@@ -175,12 +208,14 @@ class JudgmentWorkOrder:
     inventory_digest: str
     unit_set_digest: str
     budget: SyncBudget
+    deterministic_results_digest: str
     units: Tuple[dict, ...] = ()
 
     def to_dict(self):
         return {
             "schema_version": WORK_ORDER_SCHEMA_VERSION,
             "mode": self.mode,
+            "as_of": self.as_of,
             "session_id": self.session_id,
             "chunk_id": self.chunk_id,
             "total_chunk_count": self.total_chunk_count,
@@ -189,6 +224,7 @@ class JudgmentWorkOrder:
                 "inventory_digest": self.inventory_digest,
                 "unit_set_digest": self.unit_set_digest,
                 "budget_digest": self.budget.digest,
+                "deterministic_results_digest": self.deterministic_results_digest,
             },
             "budget": self.budget.to_dict(),
             "units": [dict(unit) for unit in self.units],
@@ -212,6 +248,125 @@ class SyncPlan:
             "deterministic_results": dict(self.deterministic_results),
             "work_order": self.work_order.to_dict(),
         }
+
+
+@dataclass(frozen=True)
+class ProposedLedger:
+    """A content-addressed candidate for human review, never an accepted write."""
+
+    as_of: str
+    records: Tuple[dict, ...]
+    additions: Tuple[dict, ...]
+    supersedes: Tuple[dict, ...]
+    tombstones: Tuple[dict, ...]
+    digest: str
+
+    def to_dict(self):
+        return {
+            "schema_version": PROPOSED_LEDGER_SCHEMA_VERSION,
+            "as_of": self.as_of,
+            "records": [dict(record) for record in self.records],
+            "changes": {
+                "additions": [dict(item) for item in self.additions],
+                "supersedes": [dict(item) for item in self.supersedes],
+                "tombstones": [dict(item) for item in self.tombstones],
+            },
+            "digest": self.digest,
+        }
+
+    @property
+    def jsonl(self):
+        """The exact accepted-ledger bytes this proposal represents."""
+        return "".join(
+            json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+            for record in self.records
+        )
+
+
+@dataclass(frozen=True)
+class SyncAcceptance:
+    """CLI wire envelope for the library's report/proposal pair."""
+
+    report: object
+    proposed_ledger: ProposedLedger
+
+    @property
+    def status(self):
+        return self.report.status
+
+    def to_dict(self):
+        return {
+            "status": self.status,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "report": self.report.to_dict(),
+            "proposed_ledger": self.proposed_ledger.to_dict(),
+        }
+
+
+class FakeJudgmentAdapter:
+    """Zero-model adapter used to exercise the one external judgment seam.
+
+    ``response`` may be any payload, including malformed or denied output.
+    Empty work orders deliberately make no request and return an empty valid
+    envelope, which lets tests prove the zero-cost path without a sideline.
+    """
+
+    def __init__(self, response=None):
+        self.response = response
+        self.request_count = 0
+
+    @staticmethod
+    def _ok(work, judgments):
+        return {
+            "schema_version": JUDGMENT_SCHEMA_VERSION,
+            "session_id": work["session_id"], "chunk_id": work["chunk_id"],
+            "model": work["budget"]["sync_model"], "status": "ok",
+            "judgments": list(judgments),
+        }
+
+    @classmethod
+    def valid(cls, judgments):
+        return cls(lambda work: cls._ok(work, judgments))
+
+    @classmethod
+    def partial(cls, judgments=()):
+        return cls(lambda work: cls._ok(work, judgments))
+
+    @classmethod
+    def unasked_unit(cls, judgment):
+        return cls(lambda work: cls._ok(work, (judgment,)))
+
+    @classmethod
+    def malformed(cls, value=None):
+        return cls({"malformed": True} if value is None else value)
+
+    @classmethod
+    def denied(cls, reason="model service denied the request"):
+        return cls(lambda work: {
+            "schema_version": JUDGMENT_SCHEMA_VERSION,
+            "session_id": work["session_id"], "chunk_id": work["chunk_id"],
+            "model": work["budget"]["sync_model"], "status": "denied",
+            "reason": reason,
+        })
+
+    def request(self, work_order):
+        raw = (work_order.to_dict() if isinstance(work_order, JudgmentWorkOrder)
+               else work_order)
+        if not raw.get("units"):
+            return self._ok(raw, ())
+        self.request_count += 1
+        return self.response(raw) if callable(self.response) else self.response
+
+
+def load_sync_input(path, kind):
+    """Strict JSON reader for the two untrusted phase-2 CLI inputs."""
+    payload, problem = load_strict_json(
+        path,
+        unreadable_code=f"sync-{kind}-unreadable",
+        unparseable_code=f"sync-{kind}-unparseable",
+        nesting_code=f"sync-{kind}-nesting-too-deep",
+    )
+    return Invalid((problem,)) if problem is not None else payload
 
 
 def load_sync_budget(repo_root, config_path=DEFAULT_CONFIG_PATH):
@@ -830,6 +985,11 @@ def _unit_ref(doc, unit):
         "ordinal": unit.ordinal,
         "line": unit.line,
         "end_line": unit.end_line,
+        "evidence_boundary": {
+            "sources": list(DEFAULT_EVIDENCE),
+            "excluded": [],
+            "commands": [],
+        },
     }
 
 
@@ -1154,12 +1314,708 @@ def plan_sync(repo_root, as_of, mode=MODE_SYNC,
         else STATE_CLEAN
     )
     work_order = JudgmentWorkOrder(
-        mode=mode, session_id=session_id, chunk_id=chunk_id,
+        mode=mode, as_of=as_of, session_id=session_id, chunk_id=chunk_id,
         total_chunk_count=total_chunk_count, ledger_digest=ledger.digest,
         inventory_digest=inventory.digest, unit_set_digest=unit_set_digest,
-        budget=budget, units=tuple(work),
+        budget=budget,
+        deterministic_results_digest=deterministic_results["digest"],
+        units=tuple(work),
     )
     return SyncPlan(
         status=status, mode=mode, as_of=as_of,
         deterministic_results=deterministic_results, work_order=work_order,
     )
+
+
+_WORK_ORDER_FIELDS = {
+    "schema_version", "mode", "as_of", "session_id", "chunk_id",
+    "total_chunk_count", "bindings", "budget", "units",
+}
+_BINDING_FIELDS = {
+    "ledger_digest", "inventory_digest", "unit_set_digest", "budget_digest",
+    "deterministic_results_digest",
+}
+_JUDGMENT_ENVELOPE_FIELDS = {
+    "schema_version", "session_id", "chunk_id", "model", "status",
+    "judgments",
+}
+_DENIED_ENVELOPE_FIELDS = {
+    "schema_version", "session_id", "chunk_id", "model", "status", "reason",
+}
+_VERDICT_FIELDS = {
+    "unit", "assertion_class", "verdict", "kind", "tier", "evidence",
+    "obligation", "fix",
+}
+
+
+def _invalid(code, message, location=None):
+    return Invalid((Problem(code=code, message=message, location=location),))
+
+
+def _work_order_payload(value):
+    return value.to_dict() if isinstance(value, JudgmentWorkOrder) else value
+
+
+def _validate_work_order_shape(raw):
+    """Parse no control data: establish only that phase 1's wire shape exists."""
+    if not isinstance(raw, dict) or set(raw) != _WORK_ORDER_FIELDS:
+        return _invalid(
+            "sync-work-order-invalid-shape",
+            f"a work order must carry exactly {sorted(_WORK_ORDER_FIELDS)}",
+            "work_order",
+        )
+    if raw.get("schema_version") != WORK_ORDER_SCHEMA_VERSION:
+        return _invalid(
+            "sync-work-order-invalid-schema",
+            f"work-order schema {raw.get('schema_version')!r} is not supported",
+            "work_order.schema_version",
+        )
+    if not _date(raw.get("as_of")):
+        return _invalid(
+            "sync-work-order-invalid-as-of",
+            "work-order as_of must be a real YYYY-MM-DD date",
+            "work_order.as_of",
+        )
+    if not isinstance(raw.get("bindings"), dict) or (
+        set(raw["bindings"]) != _BINDING_FIELDS
+    ):
+        return _invalid(
+            "sync-work-order-invalid-shape",
+            f"work-order bindings must carry exactly {sorted(_BINDING_FIELDS)}",
+            "work_order.bindings",
+        )
+    if not isinstance(raw.get("units"), list):
+        return _invalid(
+            "sync-work-order-invalid-shape", "work-order units must be a list",
+            "work_order.units",
+        )
+    if not _whole_positive(raw.get("total_chunk_count")):
+        return _invalid(
+            "sync-work-order-invalid-chunk-count",
+            "work-order total_chunk_count must be a positive non-boolean integer",
+            "work_order.total_chunk_count",
+        )
+    for index, unit in enumerate(raw["units"]):
+        if not isinstance(unit, dict):
+            return _invalid(
+                "sync-work-order-invalid-unit-metadata",
+                "each work-order unit must be an object",
+                f"work_order.units[{index}]",
+            )
+        numeric_fields = (
+            ("ordinal", _whole_nonnegative, "non-negative"),
+            ("line", _whole_positive, "positive"),
+            ("end_line", _whole_positive, "positive"),
+        )
+        for name, validator, bound in numeric_fields:
+            if not validator(unit.get(name)):
+                return _invalid(
+                    "sync-work-order-invalid-unit-metadata",
+                    f"work-order unit {name} must be a {bound} non-boolean integer",
+                    f"work_order.units[{index}].{name}",
+                )
+    if not (_one_line(raw.get("session_id")) and _one_line(raw.get("chunk_id"))):
+        return _invalid(
+            "sync-work-order-invalid-shape",
+            "work-order session_id and chunk_id must be non-empty single-line strings",
+            "work_order",
+        )
+    budget = raw.get("budget")
+    if not isinstance(budget, dict) or set(budget) != set(SyncBudget().to_dict()):
+        return _invalid(
+            "sync-work-order-invalid-shape", "work-order budget has the wrong shape",
+            "work_order.budget",
+        )
+    if raw["bindings"]["budget_digest"] != sha256_canonical(budget):
+        return _invalid(
+            "sync-stale-budget-binding",
+            "the work-order budget no longer matches its binding digest",
+            "work_order.bindings.budget_digest",
+        )
+    return None
+
+
+def _expected_orchestration_refusal(raw, expected_session_id, expected_chunk_id,
+                                    expected_total_chunk_count):
+    """Compare caller-supplied trusted topology before any repository replan."""
+    if (
+        expected_total_chunk_count is not None
+        and not _whole_positive(expected_total_chunk_count)
+    ):
+        return _invalid(
+            "sync-invalid-expected-binding",
+            "expected_total_chunk_count must be a positive non-boolean integer",
+            "expected_total_chunk_count",
+        )
+    if expected_session_id is not None and raw["session_id"] != expected_session_id:
+        return _invalid(
+            "sync-wrong-session",
+            f"work order belongs to session {raw['session_id']!r}, not "
+            f"{expected_session_id!r}",
+            "work_order.session_id",
+        )
+    if expected_chunk_id is not None and raw["chunk_id"] != expected_chunk_id:
+        return _invalid(
+            "sync-wrong-chunk",
+            f"work order belongs to chunk {raw['chunk_id']!r}, not "
+            f"{expected_chunk_id!r}",
+            "work_order.chunk_id",
+        )
+    if (
+        expected_total_chunk_count is not None
+        and raw["total_chunk_count"] != expected_total_chunk_count
+    ):
+        return _invalid(
+            "sync-wrong-chunk-count",
+            f"work order declares {raw['total_chunk_count']} chunks, not the "
+            f"trusted expected count {expected_total_chunk_count}",
+            "work_order.total_chunk_count",
+        )
+    return None
+
+
+def _binding_refusal(raw, fresh, expected_session_id, expected_chunk_id,
+                     expected_total_chunk_count):
+    expected = fresh.work_order.to_dict()
+    for name in sorted(_BINDING_FIELDS):
+        if raw["bindings"][name] != expected["bindings"][name]:
+            return _invalid(
+                "sync-stale-binding",
+                f"work-order {name} no longer matches the current repository",
+                f"work_order.bindings.{name}",
+            )
+    # Default identifiers and a single chunk are independently derived. Any
+    # caller-assigned orchestration values need all three trusted expectations;
+    # otherwise an untrusted order could bless its own session topology.
+    orchestration = (
+        raw["session_id"], raw["chunk_id"], raw["total_chunk_count"]
+    )
+    derived = (
+        expected["session_id"], expected["chunk_id"],
+        expected["total_chunk_count"],
+    )
+    if orchestration != derived and None in (
+        expected_session_id, expected_chunk_id, expected_total_chunk_count,
+    ):
+        code = (
+            "sync-wrong-session"
+            if raw["session_id"] != expected["session_id"]
+            else "sync-stale-chunk"
+        )
+        return _invalid(
+            code,
+            "a caller-assigned session, chunk, or chunk count requires trusted "
+            "expected_session_id, expected_chunk_id, and "
+            "expected_total_chunk_count values",
+            "work_order",
+        )
+    # The digests bind current state; this exact comparison also refuses a
+    # spliced or edited unit list under otherwise current bindings.
+    for name in ("mode", "budget", "units"):
+        try:
+            exact = canonical(raw[name]) == canonical(expected[name])
+        except (TypeError, ValueError, RecursionError):
+            return _invalid(
+                "sync-work-order-invalid-shape",
+                f"work-order {name} must be strict, bounded JSON data",
+                f"work_order.{name}",
+            )
+        if not exact:
+            return _invalid(
+                "sync-stale-chunk",
+                f"work-order {name} is not the phase-1 chunk for these bindings",
+                f"work_order.{name}",
+            )
+    return None
+
+
+def _judgment_envelope(raw, work):
+    if not isinstance(raw, dict):
+        return None, _invalid(
+            "sync-judgments-invalid-shape", "judgments must be an object",
+            "judgments",
+        )
+    status = raw.get("status")
+    expected = (_DENIED_ENVELOPE_FIELDS if status == "denied"
+                else _JUDGMENT_ENVELOPE_FIELDS)
+    if set(raw) != expected or raw.get("schema_version") != JUDGMENT_SCHEMA_VERSION:
+        return None, _invalid(
+            "sync-judgments-invalid-shape",
+            f"a {status!r} judgment envelope must carry exactly {sorted(expected)} "
+            f"at integer schema {JUDGMENT_SCHEMA_VERSION}",
+            "judgments",
+        )
+    for name in ("session_id", "chunk_id"):
+        if raw.get(name) != work[name]:
+            return None, _invalid(
+                f"sync-judgments-wrong-{name.replace('_id', '')}",
+                f"judgments bind to {name} {raw.get(name)!r}, not {work[name]!r}",
+                f"judgments.{name}",
+            )
+    if raw.get("model") != work["budget"]["sync_model"]:
+        return None, _invalid(
+            "sync-judgments-wrong-model",
+            "judgments do not name the model tier bound into the work order",
+            "judgments.model",
+        )
+    if status == "denied":
+        if not _one_line(raw.get("reason")):
+            return None, _invalid(
+                "sync-judgments-invalid-shape",
+                "a denied judgment set must carry a non-empty single-line reason",
+                "judgments.reason",
+            )
+        return (), None
+    if status != "ok" or not isinstance(raw.get("judgments"), list):
+        return None, _invalid(
+            "sync-judgments-invalid-shape",
+            "judgment status must be 'ok' with a judgments list, or 'denied'",
+            "judgments.status",
+        )
+    return tuple(raw["judgments"]), None
+
+
+def _strategy_fields(strategy):
+    fields = {"doc", "strategy"} | _VERDICT_FIELDS
+    fields.discard("fix")
+    if strategy == STRATEGY_PROBE:
+        fields.update(("probe", "deps"))
+    elif strategy == STRATEGY_DEPS:
+        fields.add("deps")
+    return fields
+
+
+def _validate_strategy(repo_root, judgment, model, as_of, report_commit):
+    """Return the exact ledger record data, through the ledger/probe owners."""
+    strategy = judgment.get("strategy")
+    expected = _strategy_fields(strategy)
+    if judgment.get("verdict") == VERDICT_STALE:
+        expected.add("fix")
+    if strategy not in STRATEGIES or set(judgment) != expected:
+        return None, _invalid(
+            "sync-judgment-invalid-shape",
+            f"a {strategy!r} judgment must carry exactly {sorted(expected)}",
+            "judgment",
+        )
+    raw = {
+        "record": "assertion", "doc": judgment["doc"],
+        "unit": judgment["unit"], "class": judgment["assertion_class"],
+        "obligation": judgment["obligation"], "strategy": strategy,
+        "provenance": "judged",
+        "lineage": {
+            "report_digest": "0" * 64, "commit": report_commit,
+            "plugin_version": PLUGIN_VERSION,
+            "model": model, "date": as_of,
+        },
+        "status": "active",
+    }
+    for name in ("probe", "deps"):
+        if name in judgment:
+            raw[name] = judgment[name]
+    problems = []
+    _parse_entry(raw, problems, "judgment.strategy")
+    if problems:
+        return None, Invalid(tuple(problems))
+    if strategy == STRATEGY_PROBE:
+        outcome = execute_probe(repo_root, raw["probe"], raw["deps"])
+        if outcome.problem is not None:
+            return None, _invalid(
+                "sync-judgment-probe-refused", outcome.problem.message,
+                outcome.problem.location,
+            )
+        if not outcome.passed:
+            return None, _invalid(
+                "sync-judgment-probe-failed",
+                "a proposed probe must establish the judgment when accepted",
+                "judgment.probe",
+            )
+        observed = outcome.observed.get("dependencies", [])
+        if observed != raw["deps"]:
+            return None, _invalid(
+                "sync-judgment-stale-dependencies",
+                "proposed probe dependency digests do not match bytes read by the engine",
+                "judgment.deps",
+            )
+    elif strategy == STRATEGY_DEPS:
+        # A harmless path-existence probe delegates dependency authorization,
+        # symlink confinement and bounded reads to ticket 4's single owner.
+        first = raw["deps"][0]["path"] if raw.get("deps") else None
+        outcome = execute_probe(repo_root, {
+            "kind": "path_exists", "args": {"path": first, "kind": "any"},
+            "expect": {},
+        }, raw.get("deps"))
+        if outcome.problem is not None:
+            return None, _invalid(
+                "sync-judgment-deps-refused", outcome.problem.message,
+                outcome.problem.location,
+            )
+        if outcome.observed.get("dependencies") != raw["deps"]:
+            return None, _invalid(
+                "sync-judgment-stale-dependencies",
+                "proposed dependency digests do not match bytes read by the engine",
+                "judgment.deps",
+            )
+    return raw, None
+
+
+def _single_unit_segmentation(segmentation, unit):
+    return Segmentation(
+        status=segmentation.status, units=(unit,),
+        document_digest=segmentation.document_digest,
+        digest=sha256_canonical({"source": segmentation.digest, "unit": unit.digest}),
+        path=segmentation.path, kind=segmentation.kind,
+    )
+
+
+def _proposal(ledger, report, report_commit, as_of, deterministic,
+              judged_records):
+    active = {(entry.doc, entry.unit): entry for entry in ledger.entries
+              if entry.status == "active"}
+    tombstone_keys = {
+        (item["doc"], item["unit"])
+        for item in deterministic["tombstone_candidates"]
+    }
+    judged_by_key = {
+        (record["doc"], record["unit"]): record for record in judged_records
+    }
+    covered_keys = {
+        (item["doc"], item["unit"])
+        for item in deterministic["unchanged"]
+    }
+    records, additions, tombstones = [], [], []
+    header = {
+        "record": "ledger-header", "schema": LEDGER_SCHEMA_VERSION,
+        "ruleset": RULESET_VERSION,
+        "registry_digest": ledger.header.registry_digest,
+        "plugin_version": PLUGIN_VERSION,
+        "established": {
+            "report_digest": report.digest, "commit": report_commit, "date": as_of,
+        },
+        "covered": list(ledger.header.covered),
+        "uncovered": list(ledger.header.uncovered),
+    }
+    records.append(header)
+    for entry in ledger.entries:
+        key = (entry.doc, entry.unit)
+        if key in judged_by_key:
+            continue
+        raw = dict(entry.raw)
+        if key in tombstone_keys and entry.status == "active":
+            raw["status"] = "tombstone"
+            raw["removed"] = {"commit": report_commit, "date": as_of}
+            tombstones.append({"doc": entry.doc, "unit": entry.unit})
+        if key in covered_keys or key in tombstone_keys:
+            lineage = dict(raw["lineage"])
+            lineage.update({
+                "report_digest": report.digest, "commit": report_commit,
+                "plugin_version": header["plugin_version"], "date": as_of,
+            })
+            raw["lineage"] = lineage
+        records.append(raw)
+    for key in sorted(judged_by_key):
+        raw = dict(judged_by_key[key])
+        raw["lineage"] = dict(raw["lineage"], report_digest=report.digest)
+        records.append(raw)
+        if key not in active:
+            additions.append({"doc": key[0], "unit": key[1]})
+    records = [records[0], *sorted(records[1:], key=lambda r: (
+        r["doc"], r["unit"], 0 if r["status"] == "active" else 1
+    ))]
+    supersedes = []
+    for addition in additions:
+        for tombstone in tombstones:
+            if addition["doc"] == tombstone["doc"]:
+                supersedes.append({
+                    "doc": addition["doc"], "unit": addition["unit"],
+                    "supersedes": tombstone["unit"],
+                })
+    content = {
+        "schema_version": PROPOSED_LEDGER_SCHEMA_VERSION, "as_of": as_of,
+        "records": records,
+        "changes": {
+            "additions": additions, "supersedes": supersedes,
+            "tombstones": tombstones,
+        },
+    }
+    return ProposedLedger(
+        as_of=as_of, records=tuple(records), additions=tuple(additions),
+        supersedes=tuple(supersedes), tombstones=tuple(tombstones),
+        digest=sha256_canonical(content),
+    )
+
+
+def accept_sync_judgments(repo_root, work_order, judgments, as_of,
+                          registry_path=DEFAULT_REGISTRY_PATH,
+                          ledger_path=DEFAULT_LEDGER_PATH,
+                          config_path=DEFAULT_CONFIG_PATH,
+                          expected_session_id=None, expected_chunk_id=None,
+                          expected_total_chunk_count=None):
+    """Validate phase-2 model output and return ``(report, proposed ledger)``.
+
+    An invalid or stale input returns ``Invalid`` and no artifact. Partial and
+    denied model outcomes are valid reports with explicit unexamined units.
+    This function has no callback and can never widen into another model run.
+    """
+    raw_work = _work_order_payload(work_order)
+    problem = _validate_work_order_shape(raw_work)
+    if problem is not None:
+        return problem
+    if as_of != raw_work["as_of"]:
+        return _invalid(
+            "sync-as-of-mismatch",
+            f"phase 2 as_of {as_of!r} does not match the work order's "
+            f"caller-supplied date {raw_work['as_of']!r}",
+            "as_of",
+        )
+    problem = _expected_orchestration_refusal(
+        raw_work, expected_session_id, expected_chunk_id,
+        expected_total_chunk_count,
+    )
+    if problem is not None:
+        return problem
+    fresh = plan_sync(
+        repo_root, as_of, mode=raw_work["mode"], registry_path=registry_path,
+        ledger_path=ledger_path, config_path=config_path,
+    )
+    if isinstance(fresh, Invalid):
+        return fresh
+    problem = _binding_refusal(
+        raw_work, fresh, expected_session_id, expected_chunk_id,
+        expected_total_chunk_count,
+    )
+    if problem is not None:
+        return problem
+    entries, problem = _judgment_envelope(judgments, raw_work)
+    if problem is not None:
+        return problem
+
+    requested = {(item["doc"], item["unit"]): item for item in raw_work["units"]}
+    seen, shaped = set(), []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            return _invalid(
+                "sync-judgment-invalid-shape", "each judgment must be an object",
+                f"judgments.judgments[{index}]",
+            )
+        doc, unit = entry.get("doc"), entry.get("unit")
+        path_problem = repository_relative_problem(doc)
+        if path_problem is not None or not _one_line(doc):
+            return _invalid(
+                "sync-judgment-invalid-identity",
+                "judgment.doc must be a canonical repository-relative path",
+                f"judgments.judgments[{index}].doc",
+            )
+        if not (isinstance(unit, str) and _DIGEST.fullmatch(unit)):
+            return _invalid(
+                "sync-judgment-invalid-identity",
+                "judgment.unit must be a lowercase sha256 assertion-unit digest",
+                f"judgments.judgments[{index}].unit",
+            )
+        key = (doc, unit)
+        if key not in requested:
+            return _invalid(
+                "sync-judgment-unasked-unit",
+                f"judgment names {key!r}, which this work order never requested",
+                f"judgments.judgments[{index}]",
+            )
+        if key in seen:
+            return _invalid(
+                "sync-judgment-duplicate-unit", "a requested unit was judged twice",
+                f"judgments.judgments[{index}]",
+            )
+        seen.add(key)
+        shaped.append(entry)
+
+    boundary = EvidenceBoundary(tuple(DEFAULT_EVIDENCE), (), ())
+    state, lineage_problems = current_lineage(
+        repo_root, registry_path, audit_config_digest(boundary)
+    )
+    if lineage_problems:
+        return Invalid(tuple(lineage_problems))
+    lineage = Lineage(audit_mode="incremental", evidence_boundary=boundary, **state)
+    model = raw_work["budget"]["sync_model"]
+    drafts, judged_ledger, examined_judgments = [], [], []
+    for entry in sorted(shaped, key=lambda item: (item["doc"], item["unit"])):
+        planned_boundary = requested[(entry["doc"], entry["unit"])][
+            "evidence_boundary"
+        ]
+        if planned_boundary != boundary.to_dict():
+            return _invalid(
+                "sync-judgment-evidence-boundary-mismatch",
+                "the requested unit's evidence boundary is not the bound phase-2 boundary",
+                "work_order.units.evidence_boundary",
+            )
+        segmentation = segment_document(repo_root, entry["doc"], registry_path)
+        if isinstance(segmentation, Invalid):
+            return segmentation
+        unit = next((unit for unit in segmentation.units
+                     if unit.digest == entry["unit"]), None)
+        if unit is None:
+            return _invalid(
+                "sync-stale-unit", "the judged unit is no longer in its document",
+                entry["doc"],
+            )
+        verdict = {name: entry[name] for name in _VERDICT_FIELDS if name in entry}
+        found, coverage, verdict_problems = _validated_verdicts(
+            _single_unit_segmentation(segmentation, unit), [verdict], boundary,
+            entry["doc"],
+        )
+        if verdict_problems:
+            return Invalid(tuple(verdict_problems))
+        drafts.extend(found)
+        examined_judgments.extend(
+            (entry["doc"], item) for item in coverage["verified"]
+        )
+        if entry["assertion_class"] == NON_ASSERTIVE:
+            expected = {"doc", "unit", "assertion_class"}
+            if set(entry) != expected:
+                return _invalid(
+                    "sync-judgment-invalid-shape",
+                    "a non-assertive judgment is classification-only and must "
+                    f"carry exactly {sorted(expected)}",
+                    "judgment",
+                )
+            examined_judgments.append((entry["doc"], {
+                "unit": entry["unit"],
+                "assertion_class": NON_ASSERTIVE,
+                "classification": "classification-only",
+            }))
+            continue
+        if entry["assertion_class"] in VERDICT_REQUIRED_CLASSES:
+            ledger_record, problem = _validate_strategy(
+                repo_root, entry, model, as_of, state["base_commit"]
+            )
+            if problem is not None:
+                return problem
+            judged_ledger.append(ledger_record)
+
+    deterministic = fresh.deterministic_results
+    coverage_entries, examined_by_doc = [], {}
+    for item in deterministic["unchanged"]:
+        examined_by_doc.setdefault(item["doc"], []).append({"unit": item["unit"]})
+        if item["coverage_source"] == "probe":
+            coverage_entries.append({
+                "path": item["doc"], "unit": item["unit"], "source": "probe",
+                "probe": item["probe"],
+            })
+        else:
+            origin = item["originating_lineage"]
+            coverage_entries.append({
+                "path": item["doc"], "unit": item["unit"], "source": "carried",
+                "reason": item["reason"], "lineage": {
+                    "report_digest": origin["report_digest"],
+                    "commit": origin["commit"],
+                },
+            })
+    for doc, item in examined_judgments:
+        examined_by_doc.setdefault(doc, []).append(item)
+        coverage_entries.append({
+            "path": doc, "unit": item["unit"], "source": "judged",
+        })
+
+    records = []
+    deterministic_findings = [
+        finding
+        for check in deterministic["narrative_checks"]
+        for finding in check["findings"]
+    ]
+    record_number = 1
+    for spec in deterministic_findings:
+        extra = {
+            name: value for name, value in spec.items()
+            if name not in {"code", "path", "units"}
+        }
+        finding = build_finding(
+            lineage, spec["code"], spec["path"], spec["units"],
+            f"SYNC-{record_number:03d}", extra,
+        )
+        if isinstance(finding, Invalid):
+            return finding
+        records.append(finding.to_record())
+        for unit in spec["units"]:
+            coverage_entries.append({
+                "path": spec["path"], "unit": unit, "source": "probe",
+                "probe": {
+                    "kind": "narrative_anchor",
+                    "observed": {"finding": spec["code"]},
+                },
+            })
+        record_number += 1
+    for draft in drafts:
+        finding = build_finding(
+            lineage, draft.code, draft.path, draft.units,
+            f"SYNC-{record_number:03d}", draft.extra,
+        )
+        if isinstance(finding, Invalid):
+            return finding
+        records.append(finding.to_record())
+        for unit in draft.units:
+            coverage_entries.append({
+                "path": draft.path, "unit": unit, "source": "judged",
+            })
+        record_number += 1
+
+    unexamined = sorted(set(requested) - seen)
+    denial_reason = (
+        judgments.get("reason") if judgments.get("status") == "denied" else None
+    )
+    incomplete = [{
+        "scope": f"{doc} + {unit}",
+        "reason": denial_reason or (
+            "the bounded work order received no judgment for this unit"
+        ),
+    } for doc, unit in unexamined]
+    # Deterministic inventory gaps stay gaps; they never become a model request.
+    incomplete.extend(deterministic["incomplete"])
+    incomplete.extend({
+        "scope": finding["path"],
+        "reason": (
+            f"the inventory reported {finding['code']}, so this document's "
+            "assertion obligation could not be established"
+        ),
+    } for finding in deterministic["inventory_findings"])
+    examined = [{
+        "scope": doc,
+        "verified": sorted(items, key=lambda item: item["unit"]),
+    } for doc, items in sorted(examined_by_doc.items())]
+    scope_docs = sorted(
+        {item["doc"] for item in deterministic["unchanged"]}
+        | {doc for doc, _ in requested}
+        | {check["path"] for check in deterministic["narrative_checks"]}
+        | {finding["path"] for finding in deterministic["inventory_findings"]}
+    )
+    report = validate_report({
+        "status": state_from_content(records, incomplete),
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "lineage": lineage.to_dict(),
+        "records": records,
+        "examined": examined,
+        "incomplete": incomplete,
+        "scope": {
+            "basis": "the digest-bound incremental sync work order",
+            "coverage": SCOPE_DECLARED_ONLY,
+            "documents": scope_docs,
+            "excluded": [],
+        },
+        "coverage": {
+            "mode": COVERAGE_INCREMENTAL,
+            "units": sorted(coverage_entries, key=lambda item: (
+                item["path"], item["unit"]
+            )),
+        },
+    }, registry_path=registry_path)
+    if isinstance(report, Invalid):
+        return report
+    inventory = build_inventory(repo_root, registry_path)
+    if isinstance(inventory, Invalid):
+        return inventory
+    ledger = load_assertion_ledger(
+        repo_root, inventory.registry_digest, ledger_path
+    )
+    if isinstance(ledger, Invalid):
+        return ledger
+    proposed = _proposal(
+        ledger, report, state["base_commit"], as_of, deterministic,
+        judged_ledger,
+    )
+    return report, proposed
