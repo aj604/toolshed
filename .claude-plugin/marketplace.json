@@ -1,15 +1,9 @@
 {
   "name": "toolshed",
-  "description": "A personal Claude Code plugin marketplace. Ships doc-lifecycle: stop agents from acting on stale docs — evidence-backed drift detection, surgical fixes.",
+  "description": "A personal Claude Code plugin marketplace. Currently publishes nothing; the doc-lifecycle plugin is paused and its source is retained for later repair.",
   "owner": {
     "name": "Avery Jones",
     "email": "avery.jones.nyc@gmail.com"
   },
-  "plugins": [
-    {
-      "name": "doc-lifecycle",
-      "source": "./plugins/doc-lifecycle",
-      "description": "Stop agents from acting on stale docs. Write README/CLAUDE.md/runbooks as checkable claims, grow the doc set only on demand signals, audit against the code with evidence-backed verdicts, and land fixes surgically — bootstrap → write → grow → detect → fix → schedule."
-    }
-  ]
+  "plugins": []
 }

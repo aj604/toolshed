@@ -271,14 +271,6 @@ class TheScheduledLanesWriteBehaviourIsStated(unittest.TestCase):
             if name.startswith("doc-") and name.endswith(".yml"))
         self.assertEqual(installed, self.lane_templates())
 
-    def test_the_top_readme_counts_the_lanes_it_runs(self):
-        # The count is prose; the templates are the fact behind it.
-        counts = {3: "three", 4: "four", 5: "five", 6: "six"}
-        word = counts[len(self.lane_templates())]
-        text = flat(TOP_README)
-        self.assertIn(f"the {word} this repo now runs on itself", text)
-        self.assertIn("auto-apply-policy.json", text)
-
     def test_no_guide_says_the_schedule_authors_nothing(self):
         # The exact sentences that let a consumer read an enabled standing
         # policy as leaving the schedule read-only.
