@@ -75,6 +75,9 @@ class UnchangedSync(SyncRepoTestCase):
             "inventory_digest": inventory.digest,
             "unit_set_digest": expected_unit_set,
             "budget_digest": canonical_digest(payload["work_order"]["budget"]),
+            "deterministic_results_digest": payload[
+                "deterministic_results"
+            ]["digest"],
         })
         self.assertEqual(len(payload["deterministic_results"]["unchanged"]), 1)
 
