@@ -1,0 +1,45 @@
+{
+  "expectations": [
+    {
+      "text": "Does not block the run on a question to the user",
+      "passed": true,
+      "evidence": "'I ask you nothing'; step 4 'No AskUserQuestion'."
+    },
+    {
+      "text": "Takes one more fix round on its own authority because the lane is converging",
+      "passed": true,
+      "evidence": "'Lane #40 gets one more fix round, and I approve it myself' citing the converging criteria; capped: 'No fourth round'."
+    },
+    {
+      "text": "Records that decision on the PR/issue so the user can see/override it",
+      "passed": true,
+      "evidence": "Step 1: gh pr comment 70 '## ORCHESTRATOR DECISION ... Override: add needs-human'."
+    },
+    {
+      "text": "Dispatches a fresh fixer (not SendMessage to the old implementer/fixer)",
+      "passed": true,
+      "evidence": "Step 3: Agent subagent_type orchestrate-issues:fixer, name fix-40-r3, fresh."
+    },
+    {
+      "text": "Keeps the other three lanes advancing",
+      "passed": true,
+      "evidence": "'The other three lanes keep running the whole time'; step 4 'Other lanes advance as their notifications arrive'; park path frees the slot."
+    },
+    {
+      "text": "Every agent dispatch uses an orchestrate-issues:<role> subagent_type (not general-purpose)",
+      "passed": true,
+      "evidence": "fixer, verifier and spec-reviewer dispatches all use orchestrate-issues:<role>."
+    },
+    {
+      "text": "Dispatches send a lane card of variable fields rather than restating the role's full instructions",
+      "passed": true,
+      "evidence": "Fixer card REPO/ISSUE/PR/BRANCH/ROUND[/CATCH UP] plus issue body; verifier card REPO/PR/BRANCH/ROUND/REVIEWED_SHA; findings left on the PR."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  }
+}

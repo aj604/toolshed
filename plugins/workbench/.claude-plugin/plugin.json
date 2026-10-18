@@ -1,0 +1,21 @@
+{
+  "name": "workbench",
+  "version": "0.1.0",
+  "description": "An SDLC toolkit for Claude Code. Ships orchestrate-issues: drive a GitHub issue dependency graph to completion with background agents (implementer, spec reviewer, fixer and more), one worktree and one reviewed PR per issue.",
+  "license": "MIT",
+  "homepage": "https://github.com/aj604/toolshed",
+  "repository": "https://github.com/aj604/toolshed",
+  "keywords": [
+    "sdlc",
+    "github",
+    "issues",
+    "orchestration",
+    "subagents",
+    "worktrees",
+    "code-review"
+  ],
+  "author": {
+    "name": "Avery Jones",
+    "email": "avery.jones.nyc@gmail.com"
+  }
+}

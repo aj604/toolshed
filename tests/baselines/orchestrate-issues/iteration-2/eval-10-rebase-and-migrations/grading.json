@@ -1,0 +1,50 @@
+{
+  "expectations": [
+    {
+      "text": "Does not dispatch a separate rebase agent for #60 and does not re-review it",
+      "passed": true,
+      "evidence": "'It needs no rebase agent and no new review.' Step 5 lands it directly."
+    },
+    {
+      "text": "Updates #60's branch once right before merge (e.g. gh pr update-branch)",
+      "passed": true,
+      "evidence": "Step 5: gh pr update-branch 60, ready, background checks, merge."
+    },
+    {
+      "text": "Folds #32's rebase into the fixer brief rather than a separate rebase agent",
+      "passed": true,
+      "evidence": "fix-32-r1 card carries 'CATCH UP: main'; 'won't send a separate rebase'. The fixer agent merges the base in (no rebase, no force-push)."
+    },
+    {
+      "text": "Reserves distinct migration numbers for #31 and #33 (or plans a single renumber at merge time)",
+      "passed": true,
+      "evidence": "#31 -> 0020 via a one-line SendMessage mid-flight correction; #33 card 'RESERVED: migration 0021 (0020 is reserved for #31)'; shifts both if #60 adds a migration."
+    },
+    {
+      "text": "Watches CI in the background rather than foreground",
+      "passed": true,
+      "evidence": "gh pr checks 60 --watch --interval 60 --fail-fast '# run_in_background: true'."
+    },
+    {
+      "text": "Prunes or cleans up the merged lane's worktrees after merging",
+      "passed": true,
+      "evidence": "Step 6: git worktree list / remove --force <#30 lane paths> / prune, df -h."
+    },
+    {
+      "text": "Every agent dispatch uses an orchestrate-issues:<role> subagent_type (not general-purpose)",
+      "passed": true,
+      "evidence": "fixer, premise-checker, implementer, spec-reviewer and rebaser dispatches all name orchestrate-issues:<role>; rebase-31 is referred to as 'a rebaser'. No general-purpose."
+    },
+    {
+      "text": "Dispatches send a lane card of variable fields rather than restating the role's full instructions",
+      "passed": true,
+      "evidence": "Fixer, premise and implementer cards follow the lane-cards templates (variable fields, verbatim body, CLAIMS, RESERVED/FENCE). The rebaser gets only a RENUMBER line."
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  }
+}
