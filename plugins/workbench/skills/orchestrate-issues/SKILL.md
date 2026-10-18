@@ -408,7 +408,7 @@ an implementer that is still working to tell it so — let it finish and open it
 PR. Then rebase **only when it's needed, and at most once per cause**:
 
 - **A real conflict, or a merge underneath that changed code this lane calls**,
-  before review: dispatch `orchestrate-issues:rebaser` first (`name: "rebase-<n>"`,
+  before review: dispatch `workbench:rebaser` first (`name: "rebase-<n>"`,
   card in `references/lane-cards.md`), so the
   reviewer judges the diff that will actually merge.
 - **A fix round is pending anyway**: don't dispatch a separate rebase — tell the
@@ -457,7 +457,7 @@ They drift: the function moved, the mechanism was never there, or the file
 lives only on an unmerged branch. A confident false premise makes an implementer
 build, and you find out at review, having paid for the whole lane.
 
-So extract the issue's claims and dispatch `orchestrate-issues:premise-checker`
+So extract the issue's claims and dispatch `workbench:premise-checker`
 with them (card in `references/lane-cards.md`). Hand it the claims, not the
 repo: a check that has to sweep the tree to find its own subject is no longer
 well defined. In past runs about a third of checks found a claim materially
@@ -492,7 +492,7 @@ stop-before-you-run-out rule do its job.
 implementer has to know the issue is wrong on that point, or it will follow
 the original wording.
 
-**Dispatch** `orchestrate-issues:implementer` with `run_in_background: true`,
+**Dispatch** `workbench:implementer` with `run_in_background: true`,
 `isolation: "worktree"`, and `name: "impl-<n>"`. Send its lane card from
 `references/lane-cards.md`, with the full issue body inlined. The agent
 already knows the rest: whole-suite runs, self-mutation, a criteria walk
@@ -522,7 +522,7 @@ at `gh pr ready`, so budget the CI wait after review rather than alongside it.
 
 ## Step 4 — Spec review
 
-When an implementer reports back, dispatch `orchestrate-issues:spec-reviewer`:
+When an implementer reports back, dispatch `workbench:spec-reviewer`:
 `run_in_background: true`, `isolation: "worktree"`, `name: "review-<n>-r1"`.
 The worktree is what makes mutation testing and whole-suite runs possible. The
 agent checks the PR out detached and holds no Write tool. It answers a **spec**
@@ -558,7 +558,7 @@ but nits. FOLLOW-UPs ride along to your end-of-run report.
 
 ### On `CHANGES_REQUIRED`
 
-Dispatch a **fresh** `orchestrate-issues:fixer`: `run_in_background: true`,
+Dispatch a **fresh** `workbench:fixer`: `run_in_background: true`,
 `isolation: "worktree"`, `name: "fix-<n>-r<k>"`, with the model chosen by
 `KIND`. Point it at the issue and the PR, and it reads the findings off the PR
 itself. If the base moved underneath the lane, add `CATCH UP: <base>` to the
@@ -573,7 +573,7 @@ delete the other worktree, because you don't know what is still running in it.
 **Match the re-check to what the fix changed.** The fixer returns
 `FILES: tests-only | production`. When the round's BLOCKING findings were all
 test gaps and the fix really is tests-only (confirm with the compare call in
-`references/lane-cards.md`), dispatch `orchestrate-issues:verifier` to re-run
+`references/lane-cards.md`), dispatch `workbench:verifier` to re-run
 the mutations instead of a full re-review. Anything that touched production
 code gets a **fresh** `spec-reviewer` at `review-<n>-r<k+1>`. It reads the
 whole thread, including any finding the fixer disputed, which it rules on.
@@ -646,7 +646,7 @@ and both misreadings are expensive. Before dispatching anyone at red CI that
 isn't plainly this PR's fault, follow the protocol in
 `references/troubleshooting.md` (*Flaky and broken gates*): rerun is not a
 fresh sample, update-branch is; a second strike gets a read-only
-`orchestrate-issues:ci-diagnostic`, not a fixer; and a broken gate is repaired
+`workbench:ci-diagnostic`, not a fixer; and a broken gate is repaired
 as its own reviewed node — never merged over, skipped, or bypassed.
 
 With `ask` authority, leave the PR ready-for-review, report it, and treat that

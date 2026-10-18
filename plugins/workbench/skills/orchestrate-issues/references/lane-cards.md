@@ -12,13 +12,13 @@ lane* in SKILL.md).
 
 | Role | `subagent_type` | Default model | `isolation` | `name` | Can edit? |
 |---|---|---|---|---|---|
-| Implementer | `orchestrate-issues:implementer` | opus | `worktree` | `impl-<n>` | yes |
-| Spec reviewer | `orchestrate-issues:spec-reviewer` | opus | `worktree` | `review-<n>-r<k>` | mutations only (no Write) |
-| Fixer | `orchestrate-issues:fixer` | opus | `worktree` | `fix-<n>-r<k>` | yes |
-| Premise check | `orchestrate-issues:premise-checker` | sonnet | — | `premise-<n>` | no (read-only tools) |
-| CI diagnostic | `orchestrate-issues:ci-diagnostic` | sonnet | — | `diag-<n>` | no (read-only tools) |
-| Rebase | `orchestrate-issues:rebaser` | sonnet | `worktree` | `rebase-<n>` | yes |
-| Verifier | `orchestrate-issues:verifier` | sonnet | `worktree` | `verify-<n>-r<k>` | mutations only (no Write) |
+| Implementer | `workbench:implementer` | opus | `worktree` | `impl-<n>` | yes |
+| Spec reviewer | `workbench:spec-reviewer` | opus | `worktree` | `review-<n>-r<k>` | mutations only (no Write) |
+| Fixer | `workbench:fixer` | opus | `worktree` | `fix-<n>-r<k>` | yes |
+| Premise check | `workbench:premise-checker` | sonnet | — | `premise-<n>` | no (read-only tools) |
+| CI diagnostic | `workbench:ci-diagnostic` | sonnet | — | `diag-<n>` | no (read-only tools) |
+| Rebase | `workbench:rebaser` | sonnet | `worktree` | `rebase-<n>` | yes |
+| Verifier | `workbench:verifier` | sonnet | `worktree` | `verify-<n>-r<k>` | mutations only (no Write) |
 
 The read-only roles hold no Edit or Write tool, so "read-only" is enforced,
 not just requested. Bash remains, because they need `gh` and `git`. The two

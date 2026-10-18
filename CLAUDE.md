@@ -118,10 +118,11 @@ into no lane and no CI step: `assets/demo/make_cast.py` (the README demo's gener
   root**: `/plugin marketplace add <owner>/<repo>` only finds `marketplace.json` there.
 - `plugins/doc-lifecycle/` — paused and unpublished (#241). `.claude-plugin/plugin.json` is its
   manifest; `skills/`, `agents/`, and `engine/` hold its contents.
-- `plugins/orchestrate-issues/` — the published plugin: one skill (`skills/orchestrate-issues/`,
-  the orchestrator) plus the seven role agents it dispatches (`agents/`). The CI version guard
+- `plugins/workbench/` — the published plugin, an SDLC toolkit. Today it holds one skill
+  (`skills/orchestrate-issues/`, the issue-graph orchestrator) plus the seven role agents it
+  dispatches (`agents/`, namespaced `workbench:<role>`). New SDLC skills and agents go here. The CI version guard
   covers `plugins/doc-lifecycle/` only; bump this plugin's `plugin.json` by hand when its content
-  changes. Its evals and frontier test live in `tests/baselines/orchestrate-issues/`.
+  changes. orchestrate-issues' evals and frontier test live in `tests/baselines/orchestrate-issues/`.
 - `.doc-lifecycle/` — this repo's own install of the plugin (#133). Judgment files and
   `installed-version` at the root are hand-edited; `wiring/` is regenerated wholesale by the
   upgrade lane, so an edit there is reverted on the next upgrade; `state/` is machine-written.

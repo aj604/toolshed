@@ -1,15 +1,15 @@
 {
   "name": "toolshed",
-  "description": "A personal Claude Code plugin marketplace. Publishes orchestrate-issues (drive a GitHub issue dependency graph to completion with background agents). The doc-lifecycle plugin is paused; its source is retained for later repair.",
+  "description": "A personal Claude Code plugin marketplace. Publishes workbench, an SDLC toolkit (first tool: orchestrate-issues, which drives a GitHub issue dependency graph to completion with background agents). The doc-lifecycle plugin is paused; its source is retained for later repair.",
   "owner": {
     "name": "Avery Jones",
     "email": "avery.jones.nyc@gmail.com"
   },
   "plugins": [
     {
-      "name": "orchestrate-issues",
-      "source": "./plugins/orchestrate-issues",
-      "description": "Drive a GitHub issue dependency graph to completion with background agents: dispatch an implementer per unblocked issue into its own worktree, spec-review each PR, land it, and re-query as merges open new edges."
+      "name": "workbench",
+      "source": "./plugins/workbench",
+      "description": "An SDLC toolkit for Claude Code. First tool: orchestrate-issues, which drives a GitHub issue dependency graph to completion with background agents, one worktree and one reviewed PR per issue."
     }
   ]
 }

@@ -13,7 +13,7 @@ order, and don't improvise past a step:
    failure there is not independent evidence, however deterministic it looks.
 2. **Move the commit to get a fresh sample.** `gh pr update-branch` creates a
    new merge commit and CI runs against genuinely new state.
-3. **Second strike on a fresh commit → dispatch `orchestrate-issues:ci-diagnostic`, not a fixer.**
+3. **Second strike on a fresh commit → dispatch `workbench:ci-diagnostic`, not a fixer.**
    Read-only, one question: what is failing, and could this diff cause it? A
    fixer dispatched here starts changing code before anyone knows whether the
    code is wrong.

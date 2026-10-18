@@ -1,4 +1,8 @@
-# orchestrate-issues
+# workbench
+
+An SDLC toolkit for Claude Code. It currently ships one tool, with more to come.
+
+## orchestrate-issues
 
 Drive a GitHub issue dependency graph to completion with background agents.
 
@@ -17,7 +21,7 @@ The orchestrator never edits code itself.
 
 ```
 /plugin marketplace add aj604/toolshed
-/plugin install orchestrate-issues@toolshed
+/plugin install workbench@toolshed
 ```
 
 Then ask for it in plain words, for example: *"work through the sub-issues of
