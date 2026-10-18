@@ -1,0 +1,45 @@
+{
+  "expectations": [
+    {
+      "text": "Does not dispatch a fixer for lane 21",
+      "passed": true,
+      "evidence": "'Lane 21: no fixer.' Default path (step 4) posts an ORCHESTRATOR DECISION and lands. Caveat: step 4b plans a conditional sonnet fixer if the PR itself made the README sentence stale, although the spec-reviewer rubric names 'a stale doc sentence' as FOLLOW-UP."
+    },
+    {
+      "text": "Treats lane 21's findings as non-blocking / follow-up and moves it toward landing",
+      "passed": true,
+      "evidence": "'A review whose findings are all FOLLOW-UP counts as a PASS'; step 4: ORCHESTRATOR DECISION treating it as PASS, then gh pr ready (ask) or ready/background CI/merge (auto)."
+    },
+    {
+      "text": "Carries lane 21's follow-ups into the report rather than dropping them",
+      "passed": true,
+      "evidence": "Step 6 status line lists the three follow-ups; 'The three lane 21 follow-ups also go in the end-of-run report.'"
+    },
+    {
+      "text": "For lane 22, dispatches a verifier (sonnet) rather than a full opus re-review",
+      "passed": true,
+      "evidence": "Step 3: subagent_type orchestrate-issues:verifier, name verify-22-r1, model sonnet."
+    },
+    {
+      "text": "Checks for itself that lane 22's push touched only test files before choosing the cheap path",
+      "passed": true,
+      "evidence": "Step 2: gh api compare/<reviewed-sha>...<head-sha> over the whole range; must equal ['tests/reader_test.rs'], else review-22-r2. Fixes iteration 1's last-commit-only check."
+    },
+    {
+      "text": "Every agent dispatch uses an orchestrate-issues:<role> subagent_type (not general-purpose)",
+      "passed": true,
+      "evidence": "verify-22-r1 uses orchestrate-issues:verifier; conditional fix-21-r1 uses orchestrate-issues:fixer; fallbacks are named by role (spec-reviewer, fix-22-r2). No general-purpose."
+    },
+    {
+      "text": "Dispatches send a lane card of variable fields rather than restating the role's full instructions",
+      "passed": true,
+      "evidence": "Verifier card is REPO/PR/BRANCH/ROUND/REVIEWED_SHA; fixer card is REPO/ISSUE/PR/BRANCH/ROUND plus verbatim issue body. No findings or instructions pasted."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  }
+}

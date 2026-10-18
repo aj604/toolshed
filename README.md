@@ -1,7 +1,7 @@
 > [!WARNING]
 > **Deprecated for now.** `doc-lifecycle` is paused and unpublished: the marketplace manifest lists no plugins, so the install commands below do nothing until work resumes. The skills can consume a large amount of context when they fan out, and that needs fixing before this is handed to anyone. Work will be picked up at a later date; the source and docs stay as they are. If you installed an earlier version, `/plugin uninstall doc-lifecycle@toolshed`.
 
-> **Repository structure:** `toolshed` is the Claude Code marketplace; [`doc-lifecycle`](plugins/doc-lifecycle/) is the plugin it currently publishes. The repository and install commands use the marketplace name.
+> **Repository structure:** `toolshed` is the Claude Code marketplace. It currently publishes [`orchestrate-issues`](plugins/orchestrate-issues/) (`/plugin install orchestrate-issues@toolshed`); the rest of this README describes the paused [`doc-lifecycle`](plugins/doc-lifecycle/) plugin.
 
 <p align="center">
   <img src="assets/social-card.png" alt="doc-lifecycle — Reference docs as checkable claims." width="720">

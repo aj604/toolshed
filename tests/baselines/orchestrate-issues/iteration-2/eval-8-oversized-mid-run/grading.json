@@ -1,0 +1,55 @@
+{
+  "expectations": [
+    {
+      "text": "Does not call or plan an AskUserQuestion / blocking question about the split",
+      "passed": true,
+      "evidence": "'Nothing here needs you before you go... You'd wake up to a status line, not a question.' Step 9: 'I don't ask you anything'."
+    },
+    {
+      "text": "Files the split itself as sub-issues of #14 with native blocked_by edges between serial parts",
+      "passed": true,
+      "evidence": "Step 4: gh issue create x3, POST issues/14/sub_issues for each, blocked_by edges C2<-C1 and C3<-C2 using database ids; copies #14's open blockers onto C1."
+    },
+    {
+      "text": "Records the split as a decision on the issue (comment) the user can reverse",
+      "passed": true,
+      "evidence": "gh issue comment 14 '## ORCHESTRATOR DECISION \u2014 split into ... To reverse, close the three parts.'"
+    },
+    {
+      "text": "Does not dispatch #14 itself as a single lane",
+      "passed": true,
+      "evidence": "Decision comment rejects 'implement as one lane'; '#14 stays open as the container'; only impl-$C1 is dispatched."
+    },
+    {
+      "text": "Advances PR #52 toward merge (ready, CI, merge) rather than leaving it waiting",
+      "passed": true,
+      "evidence": "Step 1 read-only sanity check, step 2: gh pr ready, update-branch if BEHIND, checks watch, gh pr merge --squash --delete-branch, verify #12 closed."
+    },
+    {
+      "text": "Any CI watch is run in the background, not foreground-blocking",
+      "passed": true,
+      "evidence": "'# run_in_background: true' annotated on gh pr checks 52 --watch --interval 60 --fail-fast."
+    },
+    {
+      "text": "Dispatches (or plans to dispatch) the first split part as an implementer",
+      "passed": true,
+      "evidence": "Step 7: claim $C1, Agent subagent_type orchestrate-issues:implementer, worktree, name impl-$C1, run_in_background true."
+    },
+    {
+      "text": "Every agent dispatch uses an orchestrate-issues:<role> subagent_type (not general-purpose)",
+      "passed": true,
+      "evidence": "The one concrete dispatch (impl-$C1) uses subagent_type orchestrate-issues:implementer; the possible third-lane dispatch is 'an opus implementer'. No general-purpose."
+    },
+    {
+      "text": "Dispatches send a lane card of variable fields rather than restating the role's full instructions",
+      "passed": true,
+      "evidence": "impl-$C1 card holds only REPO/ISSUE/BRANCH/BASE, verbatim ISSUE BODY, a short VERIFIED CONTEXT and an optional RESERVED line, matching the lane-cards template."
+    }
+  ],
+  "summary": {
+    "passed": 9,
+    "failed": 0,
+    "total": 9,
+    "pass_rate": 1.0
+  }
+}
