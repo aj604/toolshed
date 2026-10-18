@@ -39,9 +39,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # The doc pipelines open PRs as a bot; without this the review refuses to run
-          # on them ("Workflow initiated by non-human actor"). Two bots author them:
-          # github-actions (gh pr create off GITHUB_TOKEN) and claude (when the run
+          # Without this the review refuses to run on bot-authored PRs ("Workflow
+          # initiated by non-human actor"). Two bots can author them here:
+          # github-actions (gh pr create off GITHUB_TOKEN) and claude (when a run
           # authenticates via the Claude GitHub App). List the specific bots rather than
           # '*' to keep others (e.g. dependabot) out.
           allowed_bots: 'github-actions,claude'

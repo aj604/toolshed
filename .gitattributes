@@ -1,9 +1,9 @@
 # This is a Claude Code plugin marketplace — almost entirely Markdown.
 # GitHub's Linguist excludes "prose" (Markdown) from the language bar by
-# default, which left only the lone validate-drift-output.py helper and made
-# the repo read as a Python project. Count Markdown so the bar reflects reality.
+# default, which would leave only the Python scripts and make the repo read as
+# a Python project. Count Markdown so the bar reflects reality.
 *.md linguist-detectable=true
 
-# Keep test fixtures and the helper's unit test out of the language stats —
-# they're support code (sample repos + a test harness), not the published product.
+# Keep skill-test records out of the language stats — they're eval evidence,
+# not the published product.
 tests/** linguist-vendored

@@ -1,6 +1,6 @@
 {
   "name": "toolshed",
-  "description": "A personal Claude Code plugin marketplace. Publishes workbench, an SDLC toolkit (first tool: orchestrate-issues, which drives a GitHub issue dependency graph to completion with background agents). The doc-lifecycle plugin is paused; its source is retained for later repair.",
+  "description": "A personal Claude Code plugin marketplace. Publishes workbench, an SDLC toolkit (first tool: orchestrate-issues, which drives a GitHub issue dependency graph to completion with background agents).",
   "owner": {
     "name": "Avery Jones",
     "email": "avery.jones.nyc@gmail.com"
