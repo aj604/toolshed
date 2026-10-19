@@ -67,11 +67,36 @@ def remote_branches(repo: str) -> list[str]:
     return [b for b in proc.stdout.split("\n") if BRANCH_RE.match(b.strip())]
 
 
+PRS_QUERY = """
+query($owner: String!, $name: String!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(first: 100, after: $endCursor, states: [OPEN, CLOSED, MERGED]) {
+      nodes { number title headRefName baseRefName isDraft state url mergedAt reviewDecision }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
+
 def pull_requests(repo: str) -> list[dict]:
-    """Open and merged PRs, keyed later by head branch."""
-    return gh(["pr", "list", "--repo", repo, "--state", "all", "--limit", "200",
-               "--json", ("number,title,headRefName,baseRefName,isDraft,state,"
-                          "url,mergedAt,reviewDecision")]) or []
+    """Every PR in the repo, keyed later by head branch.
+
+    Paginated rather than capped: a merged round whose branch was deleted is
+    known only through its PR, so a PR past any fixed limit is a lost round.
+    Like `remote_branches`, `--paginate --jq` emits one JSON object per line.
+    """
+    owner, _, name = repo.partition("/")
+    proc = subprocess.run(
+        ["gh", "api", "graphql", "--paginate", "-f", f"query={PRS_QUERY}",
+         "-F", f"owner={owner}", "-F", f"name={name}",
+         "--jq", ".data.repository.pullRequests.nodes[]"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        print(f"could not list pull requests: {proc.stderr.strip()}", file=sys.stderr)
+        raise SystemExit(1)
+    return [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
 
 
 def build(repo: str, only_lane: str | None) -> dict:
@@ -86,7 +111,8 @@ def build(repo: str, only_lane: str | None) -> dict:
                 or (pr["state"] == prior["state"] and pr["number"] > prior["number"]):
             prs_by_head[head] = pr
 
-    branches = set(remote_branches(repo)) | set(prs_by_head)
+    pushed = set(remote_branches(repo))
+    branches = pushed | set(prs_by_head)
     lanes: dict[str, list[dict]] = {}
     for branch in branches:
         m = BRANCH_RE.match(branch)
@@ -99,7 +125,7 @@ def build(repo: str, only_lane: str | None) -> dict:
         lanes.setdefault(slug, []).append({
             "round": int(m.group("round")),
             "branch": branch,
-            "pushed": branch in branches,
+            "pushed": branch in pushed,
             "pr": None if pr is None else {
                 "number": pr["number"],
                 "url": pr["url"],
@@ -118,8 +144,18 @@ def build(repo: str, only_lane: str | None) -> dict:
     for slug, rounds in sorted(lanes.items()):
         rounds.sort(key=lambda r: r["round"])
         numbers = [r["round"] for r in rounds]
+        by_round = {r["round"]: r for r in rounds}
         for r in rounds:
-            expected = base_default if r["round"] == 1 else f"lane/{slug}/r{r['round'] - 1}"
+            below = by_round.get(r["round"] - 1)
+            below_merged = bool(below and below["pr"] and below["pr"]["merged"])
+            if r["round"] == 1:
+                expected = base_default
+            elif below_merged:
+                # Merging and deleting the round below retargets this PR onto
+                # that round's own base (references/stacking.md).
+                expected = below["expected_base"]
+            else:
+                expected = f"lane/{slug}/r{r['round'] - 1}"
             r["expected_base"] = expected
             pr = r["pr"]
             if pr is None:
@@ -128,7 +164,12 @@ def build(repo: str, only_lane: str | None) -> dict:
                     f"{slug} r{r['round']}: branch exists but no pull request — "
                     "the implementer pushed and died, or never opened one")
                 continue
-            if pr["base"] != expected:
+            if below_merged and pr["base"] == below["branch"]:
+                problems.append(
+                    f"{slug} r{r['round']}: PR #{pr['number']} still targets "
+                    f"{below['branch']}, which merged — delete that branch so GitHub "
+                    f"retargets this PR onto {expected}")
+            elif pr["base"] != expected:
                 problems.append(
                     f"{slug} r{r['round']}: PR #{pr['number']} is based on "
                     f"{pr['base']}, expected {expected} — the stack is broken and "
@@ -155,7 +196,8 @@ def build(repo: str, only_lane: str | None) -> dict:
             "depth": max(numbers),
             "tip_branch": tip["branch"],
             "next_round": max(numbers) + 1,
-            "next_base": tip["branch"],
+            "next_base": tip["expected_base"] if tip["pr"] and tip["pr"]["merged"]
+                         else tip["branch"],
         }
 
     out["problems"] = problems
