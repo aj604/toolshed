@@ -3,3 +3,6 @@ __pycache__/
 
 # skill-creator eval workspaces (run outputs, not repo content)
 skill-workspaces/
+
+# skills
+.agents/*

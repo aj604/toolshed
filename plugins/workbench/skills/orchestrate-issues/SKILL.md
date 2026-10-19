@@ -209,6 +209,25 @@ The trap is that the tracker repo is right there in your `gh` commands and *feel
 like the working repo. It isn't. Issues and code being the same repo is a common
 case, not a safe default.
 
+**Check the default branch still holds what the graph builds on.** The issues
+and their edges were written against the repo as it was; the default branch
+kept moving. Fetch it and skim what landed since the open in-scope issues were
+filed — and what your checkout hasn't seen yet:
+
+```bash
+git fetch origin
+git log --oneline HEAD..origin/<default>                          # what this checkout is missing
+git log --oneline --since="<oldest open issue's createdAt>" origin/<default>
+```
+
+You're looking for a merge that removed, renamed, or rewrote the area the graph
+targets. One like that makes every remaining node's plan moot, and per-issue
+premise checks catch it only if they run before you plan — which, on a run that
+starts by planning, they don't. This holds just as much for a narrow request
+("get #N moving"): it names one node, but that node's blockers and target code
+are still the premise. If the ground moved, that is the first thing the user
+hears, ahead of any plan or contract.
+
 **Read the graph.** One command, and it is the only graph query you need:
 
 ```bash
@@ -295,24 +314,16 @@ you can undo:
 Confirming `auto` once authorizes merges **for this run's scope only**. A new
 scope needs a new yes.
 
-**Before granting yourself `auto`, read what actually guards the branch.** A
-merge authority the machine will refuse is worth knowing about before five lanes
-are in flight, not after:
-
-```bash
-gh api "repos/OWNER/REPO/rules/branches/$(gh repo view OWNER/REPO --jq .defaultBranchRef.name -q .)" \
-  --jq '[.[] | {type, ruleset: .ruleset_id}]'
-gh repo view OWNER/REPO --json visibility,defaultBranchRef
-```
-
-Two things to carry out of that:
+**Before granting yourself `auto`, read what actually guards the branch** (the
+commands are in `references/github-recipes.md`, *Branch protection*). A merge
+authority the machine will refuse is worth knowing about before five lanes are
+in flight, not after. Two things to carry out of that:
 
 - **`auto` never includes bypassing.** It authorizes `gh pr merge` through the
-  front door and nothing else. It does **not** authorize `--admin`, editing a
-  ruleset, adding a bypass actor, or changing any repo setting to make a merge
-  go through — even when your token would let you, and *especially* then. A merge
-  the protection refuses is a merge that escalates to the human. An unattended
-  loop that can disable its own safety rail doesn't have one.
+  front door and nothing else — not `--admin`, not a ruleset edit or bypass
+  actor, not a repo setting changed to let a merge through, even when your token
+  would let you. A merge the protection refuses escalates to the human. An
+  unattended loop that can disable its own safety rail doesn't have one.
 - **Blast radius scales the caution.** A public repo, a repo with other people's
   active work, or a default branch that ships on merge all mean a bad merge is
   visible and expensive. Say so when you propose `auto`, and name what you'd

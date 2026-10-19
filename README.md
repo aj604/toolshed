@@ -11,7 +11,7 @@ A personal [Claude Code](https://code.claude.com/docs/en/plugins) plugin marketp
 
 | Plugin | What it is |
 |---|---|
-| [`workbench`](plugins/workbench/) | An SDLC toolkit. First tool: `orchestrate-issues`, which drives a GitHub issue dependency graph to completion with background agents, one worktree and one reviewed PR per issue. |
+| [`workbench`](plugins/workbench/) | An SDLC toolkit: `orchestrate-issues` (drive a GitHub issue dependency graph to completion with background agents), `enhance` (pick and ship one autonomous improvement), `incremental-enhancement-lanes` (parallel stacks of improvement PRs for human review), and `commit-to-pr` (commit, push, and open or update a PR). Its workflows use git and the GitHub CLI; the lane helper also requires Python 3.10+. |
 
 ## Retired: doc-lifecycle
 

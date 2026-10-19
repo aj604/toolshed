@@ -2,7 +2,8 @@
 
 This repo is a **Claude Code plugin marketplace**, not an application. It publishes one plugin,
 `workbench` (`plugins/workbench/`). The plugin's only executable code is
-`plugins/workbench/skills/orchestrate-issues/scripts/frontier.py` (`python3`, stdlib-only).
+`plugins/workbench/skills/orchestrate-issues/scripts/frontier.py` and
+`plugins/workbench/skills/incremental-enhancement-lanes/scripts/lanes.py` (`python3`, stdlib-only).
 
 ## Layout
 
@@ -13,6 +14,10 @@ This repo is a **Claude Code plugin marketplace**, not an application. It publis
 - `tests/baselines/orchestrate-issues/` — skill-creator eval records for `orchestrate-issues`
   (`evals.json`, `iteration-N/` runs, a run analysis) plus `test_frontier.py`, an unasserting
   smoke harness that takes `frontier.py`'s path as its argument. Not published, not run by CI.
+- `tests/baselines/workbench-import/` — eval and packaging records for the `enhance`,
+  `incremental-enhancement-lanes`, and `commit-to-pr` skills. `tests/scripts/workbench-helpers_test.py`
+  exercises `lanes.py` offline (`python3 tests/scripts/workbench-helpers_test.py`). Neither is
+  published or run by CI.
 - `.github/workflows/` — `ci.yml` (version guard, script compile, `claude plugin validate .`),
   `claude.yml` (`@claude` mentions), `claude-code-review.yml` (PR review).
 

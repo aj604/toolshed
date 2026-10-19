@@ -1,0 +1,6 @@
+$ python3 tests/scripts/workbench-helpers_test.py
+...
+----------------------------------------------------------------------
+Ran 3 tests in 1.541s
+
+OK
