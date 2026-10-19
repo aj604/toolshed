@@ -1,7 +1,17 @@
 > [!WARNING]
-> **Deprecated for now.** `doc-lifecycle` is paused and unpublished: the marketplace manifest lists no plugins, so the install commands below do nothing until work resumes. The skills can consume a large amount of context when they fan out, and that needs fixing before this is handed to anyone. Work will be picked up at a later date; the source and docs stay as they are. If you installed an earlier version, `/plugin uninstall doc-lifecycle@toolshed`.
+> **Deprecated for now.** `doc-lifecycle` is paused and unpublished: the marketplace manifest lists only `workbench`, so the doc-lifecycle install command below is unavailable until work resumes. The skills can consume a large amount of context when they fan out, and that needs fixing before this is handed to anyone. Work will be picked up at a later date; the source and docs stay as they are. If you installed an earlier version, `/plugin uninstall doc-lifecycle@toolshed`.
 
 > **Repository structure:** `toolshed` is the Claude Code marketplace. It currently publishes [`workbench`](plugins/workbench/), an SDLC toolkit (`/plugin install workbench@toolshed`); the rest of this README describes the paused [`doc-lifecycle`](plugins/doc-lifecycle/) plugin.
+
+Workbench includes four skills:
+
+- `/workbench:orchestrate-issues` — implement a GitHub issue dependency graph with agents.
+- `/workbench:enhance` — pick and ship one autonomous improvement.
+- `/workbench:incremental-enhancement-lanes` — build parallel stacks of improvements for human review.
+- `/workbench:commit-to-pr` — commit changes, push a branch, and open or update a PR.
+
+Workbench bundles its skill dependencies. Its workflows use git and GitHub CLI;
+the lane helper also requires Python 3.10+.
 
 <p align="center">
   <img src="assets/social-card.png" alt="doc-lifecycle — Reference docs as checkable claims." width="720">

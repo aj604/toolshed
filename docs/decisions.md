@@ -1397,7 +1397,7 @@
   per-record-type guidance as internal routing; `references/apply-discipline.md` is superseded by
   the applier contract", and "`doc-distiller` emits edit plans … instead of writing files."
 - Decided: the merge is a consequence of the applier (#69), not a cleanup — after minting, both
-  bodies are the same flow (mint approval set → edit plan → applier → present the staged diff),
+  bodies are the same flow (mint approval set → edit plan → applier → present the working-tree diff),
   and the record's finding code routes the remedy inside one skill via `RECORD_REMEDIES`.
 - Decided (discipline is enforced, not restated): `references/apply-discipline.md` is deleted
   rather than repointed. Its five rules each have a mechanical owner now — the approval set is the

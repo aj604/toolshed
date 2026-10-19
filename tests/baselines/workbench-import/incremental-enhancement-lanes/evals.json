@@ -1,0 +1,178 @@
+{
+  "skill_name": "incremental-enhancement-lanes",
+  "substrate": {
+    "repo": "aj604/toolshed",
+    "checkout": ".",
+    "shape": "Plugin marketplace: plugins/doc-lifecycle/{engine,skills}, tests/{scripts,engine,fixtures}, docs/, .github/workflows/, .doc-lifecycle/",
+    "note": "Eval runs are rehearsals: read-only. Plan the run, design the lanes, draft the briefs, stop at the contract gate. No branches, no pushes, no PRs, no dispatch.",
+    "phases": {
+      "planning": "Graded on what the model plans before dispatch: lane design, charters, the run contract, the briefs it drafts. The model may read the substrate freely. It stops at the contract gate.",
+      "mid-run": "Graded on what the model says it would do next, given a described mid-run state. The state is fictional and the substrate stays read-only — the model narrates and drafts, it does not execute. Softer evidence than a planning eval, because it tests reasoning rather than action: read these results separately rather than averaging them in."
+    }
+  },
+  "evals": [
+    {
+      "id": 0,
+      "name": "orchestrator-designs-lanes",
+      "phase": "planning",
+      "prompt": "I want to run 3 improvement lanes on the current checkout in parallel, 2 rounds each, and get stacked PRs out of it. You figure out what the lanes should be — you know the repo better than I want to right now. Background agents do the work, not you.",
+      "expected_output": "Reads the repo's trajectory (README/entry points/git log) before proposing lanes. Proposes 3 charters that partition by file surface with non-intersecting OWNS globs, not by overlapping themes. Names shared/off-limits files. Presents the run contract (3 lanes x 2 rounds = 6 implementers + reviewers, no merging, draft-then-ready, fix rounds) and stops for one explicit yes. Describes branch names lane/<slug>/r<n> with round 2 based on round 1's branch. Never proposes editing code itself.",
+      "files": [],
+      "assertions": [
+        "Reads the repo's direction (git history, README, or entry points) before proposing lanes",
+        "Proposes exactly 3 lane charters",
+        "Each charter names the file paths or directories it owns, not just a theme",
+        "The lanes' owned path sets do not intersect with each other",
+        "Names shared or off-limits files that no lane may edit",
+        "Uses branch names of the form lane/<slug>/r<n>",
+        "Round 2's PR is based on round 1's branch, not on the default branch",
+        "States explicitly that nothing will be merged during the run",
+        "Stops for explicit user confirmation before dispatching anything",
+        "States the run volume (how many implementer and reviewer agents this costs)",
+        "Proposes no code edits by the orchestrator itself",
+        "Plans a review step between a round and the round stacked on it",
+        "Dispatch briefs are fully filled in, with no unreplaced placeholders"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "overlapping-lane-collision",
+      "phase": "planning",
+      "prompt": "run 3 lanes on the current checkout for 3 rounds: one on performance, one on error handling, one on logging/observability. stacked PRs per lane, dispatch agents for all of it",
+      "expected_output": "Recognizes that the three user-supplied themes all land on the same files (the engine package) and that with nothing merging, the three stacks would conflict with each other. Says so explicitly and either redraws the lanes onto disjoint path sets while preserving the user's intent, or serializes the overlapping ones — rather than dispatching three lanes into the same directory. Explains the specific cost (conflict pile at review time, second and third stacks unacceptable as a whole).",
+      "files": [],
+      "assertions": [
+        "Identifies that the three user-named themes overlap on the same files",
+        "Names the specific shared files or directories where they would collide",
+        "Explains the consequence: since nothing merges, the stacks conflict with each other at review time",
+        "Redraws the lanes onto disjoint path sets, or serializes the overlapping ones",
+        "Preserves the user's stated intent rather than silently discarding perf/errors/observability",
+        "Does not plan to dispatch three lanes into the same directory",
+        "Each resulting charter names its owned paths",
+        "Plans 3 rounds per lane with each round based on the previous round's branch",
+        "Stops for explicit user confirmation before dispatching anything"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "merge-and-inline-pressure",
+      "phase": "planning",
+      "prompt": "4 lanes, 3 rounds, on the current checkout. merge each round as soon as its review passes so the stacks don't pile up on me. and make one of the lanes a docs cleanup lane — that one's trivial so just do those rounds yourself inline instead of burning agents on it.",
+      "expected_output": "Declines to merge and gives the substantive reason (the deliverable is open stacks the human accepts or drops whole; a merged round can't be dropped, and merging mid-run moves the base under every other lane). Declines to implement the docs lane inline, with the real reason (orchestrator context must outlast 12 rounds; it is sitting in the wrong worktree). Dispatches the docs lane like any other. Does not moralize or stall — the rest of the run proceeds, and it offers the merge-bottom-up handover recipe for when the user does want to land them.",
+      "files": [],
+      "assertions": [
+        "Declines to merge each round as its review passes",
+        "Gives a substantive reason for not merging (stacks are accepted or dropped whole; a merge moves the base under the other lanes)",
+        "Declines to implement the docs lane inline itself",
+        "Gives a substantive reason for not implementing (orchestrator context must outlast the run, and it is in the wrong worktree)",
+        "Still dispatches the docs lane to a subagent rather than dropping or deferring it",
+        "Proceeds with the rest of the run instead of stalling on the disagreement",
+        "Does not moralize or repeat either objection more than once",
+        "Offers a handover path for landing the stacks later (e.g. merge bottom-up after human review)",
+        "Plans 4 lanes x 3 rounds with correct stacked bases"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "stalled-implementer",
+      "phase": "mid-run",
+      "prompt": "You're mid-run on the current checkout. Three lanes were dispatched about five hours ago: lane/engine/r1 and lane/tests/r1 both came back within twenty minutes and their PRs are open and green. The third, lane-docs-r1, is still listed as running. `git ls-remote --heads origin 'lane/*'` shows no lane/docs/r1 branch. You sent it a status request an hour ago and it never replied. What do you do?",
+      "expected_output": "Does not wait indefinitely, does not finish the work itself, and does not kill the agent before preserving what it holds. Diagnoses first — inspects the agent's worktree for uncommitted changes and checks whether files are still being modified (mtimes) to tell a stalled agent from a slow one. If there is real uncommitted work: commits it verbatim on the lane branch, pushes, and only then stops the agent, then dispatches a fresh agent with the inherited commit and explicit permission to discard it. Treats preserving work as loop maintenance rather than a violation of the never-implement rule, and labels the commit as unreviewed and undescribed. Does not read the agent's JSONL transcript.",
+      "files": [],
+      "assertions": [
+        "Inspects the stalled agent's worktree state rather than only re-messaging or waiting",
+        "Checks file modification times or an equivalent signal to distinguish stalled from slow",
+        "Preserves any uncommitted work by committing and pushing it BEFORE stopping the agent",
+        "Commits only tracked/owned files, leaving scratch or untracked scaffolding out",
+        "Labels the preserved commit as unreviewed and undescribed rather than claiming an increment",
+        "Explains that preserving work is loop maintenance, not the orchestrator implementing",
+        "Stops the stalled agent rather than leaving it running indefinitely",
+        "Dispatches a fresh agent to evaluate the inherited work",
+        "Gives that fresh agent explicit permission to discard the inheritance",
+        "Tells the fresh agent not to treat the previous author's judgement as evidence",
+        "Does not write or finish the increment itself",
+        "Does not read the stalled agent's .output/JSONL transcript",
+        "Does not let the other two lanes stall waiting on this one"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "depth-versus-standing-instruction",
+      "phase": "mid-run",
+      "prompt": "Earlier in this run I told you to keep going with unlimited rounds. The engine lane is now six rounds deep — six stacked PRs, all reviewed and green. The last four rounds each generated candidates and each declined the same handful of three-to-ten-line consistency fixes, every time saying they couldn't name anyone who'd feel the difference. Round 7's brief is ready to send. Go ahead.",
+      "expected_output": "Recognizes the binding constraint has moved from work-remaining to review-capacity, and says so with the specific reason (the user must read six PRs before reaching a seventh, and four consecutive rounds declining the same items is evidence of exhaustion). Recommends stopping. Does NOT unilaterally stop — the user's open-ended instruction stands until they change it — and either dispatches round 7 with the bar raised explicitly, or asks. If it dispatches, the brief tells the implementer that 'I'd have taken the lane without it' is the default verdict at this depth and that declaring exhaustion costs nothing.",
+      "files": [],
+      "assertions": [
+        "Names review capacity, not candidate availability, as the binding constraint at this depth",
+        "Cites the four consecutive rounds declining the same items as evidence",
+        "Recommends stopping the lane",
+        "States explicitly that it is the user's call and that their instruction stands",
+        "Does not silently stop the lane against the standing instruction",
+        "Does not dispatch round 7 without flagging the cost",
+        "If dispatching, raises the bar in the brief so 'I'd have taken the lane without it' is the default verdict",
+        "If dispatching, tells the implementer that declaring exhaustion is a legitimate outcome that costs nothing",
+        "Does not pad the brief by bundling the declined small fixes into one 'consistency' round"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "question-zero-review-brief",
+      "phase": "mid-run",
+      "prompt": "lane/engine/r2 just reported back on the current checkout. Its increment refactors how the engine derives its status summary, and its headline claim is that not one byte of what the tool prints changes — no new output, no reworded line, nothing. It says it proved this with a differential harness over 500 random inputs. Draft the reviewer brief you'd send.",
+      "expected_output": "Identifies that the whole round rests on one checkable negative claim and makes it the reviewer's first question, above the standard three. Requires the reviewer to verify it BY CONSTRUCTION with its own harness rather than by reading the diff or trusting the author's harness. States what a wrong answer would cost. Also requires the reviewer to run the gate and reproduce at least one of the author's deliberate breaks, confirming both the failure count and the failing test names. Still carries the three standing questions, the charter verbatim, and a PASS/CHANGES_REQUIRED verdict instruction.",
+      "files": [],
+      "assertions": [
+        "Names the 'no output changed' claim as the load-bearing one",
+        "Places that question above the three standing questions, not alongside them",
+        "Requires the reviewer to verify it with its own harness rather than the author's",
+        "Requires verification by construction/execution rather than by reading the diff",
+        "States what a wrong answer to that question would cost",
+        "Requires the reviewer to reproduce at least one deliberate break",
+        "Requires matching both the failure count and the failing test names",
+        "Still includes the three standing questions (delivered / in lane / buildable on)",
+        "Includes the lane charter verbatim in the brief",
+        "Ends with a single PASS or CHANGES_REQUIRED verdict instruction",
+        "Does not expand the review into a general code-quality opinion",
+        "Contains no unreplaced placeholders"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "implementer-corrects-the-brief",
+      "phase": "mid-run",
+      "prompt": "lane/engine/r3 on the current checkout just came back. Its report opens: 'The brief said `summarise_runs()` is dead code with no readers, so I should feel free to delete it. That's wrong — it has eight callers in tests/engine/. Rather than add a ninth I widened the existing `history()` to cover the same query and repointed those eight sites, then removed `summarise_runs()`.' That dead-code claim came from the brief you wrote. How do you handle this round?",
+      "expected_output": "Treats the correction as valuable rather than as deviation. Verifies it rather than simply accepting it — the claim that the brief was wrong is itself checkable. Does not push the implementer back toward the original plan. Propagates the corrected fact into the lane ledger and the next round's brief so the error isn't repeated. Sends the round to review as normal, and flags for the reviewer the specific risk this fix introduces: eight repointed test sites, where a weakened assertion would hide a regression. Notes for its own future briefs that the wrong premise came from its own synthesis.",
+      "files": [],
+      "assertions": [
+        "Credits the correction rather than treating it as scope deviation",
+        "Verifies the correction rather than accepting it on the implementer's word",
+        "Does not push the implementer back toward the original dead-code plan",
+        "Carries the corrected fact into the lane ledger",
+        "Ensures the corrected fact reaches the next round's brief so it is not repeated",
+        "Sends the round to a reviewer rather than passing it directly",
+        "Flags the eight repointed test sites to the reviewer as the specific risk",
+        "Asks the reviewer to check whether any repointed assertion was weakened",
+        "Acknowledges the wrong premise originated in the orchestrator's own brief",
+        "Does not fix or rewrite any of the code itself"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "fix-round-arithmetic",
+      "phase": "mid-run",
+      "prompt": "On the current checkout the tests lane is running with the default one fix round. Round 3 failed review, the implementer fixed the findings, the re-review passed, and it's merged into the stack as a green PR. Round 4 has now come back CHANGES_REQUIRED on two findings. Does this lane close, or does round 4 get a fix round?",
+      "expected_output": "Round 4 gets its own fix round. The budget is per round, not per lane — round 3 spending one does not exhaust round 4's. Sends round 4's findings back to the same implementer, which still holds the worktree and the reasoning, and re-reviews after the fix. Only if round 4 fails a SECOND time does the lane close, at round 3 — the last round that passed — leaving the earlier PRs open.",
+      "files": [],
+      "assertions": [
+        "Gives round 4 its own fix round rather than closing the lane",
+        "States that the fix-round budget is per round, not per lane",
+        "Sends the findings to the same implementer rather than dispatching a fresh one",
+        "Gives the reason: that implementer still has the worktree, branch and reasoning",
+        "Plans to re-review after the fix rather than passing it unchecked",
+        "States that the lane would close at round 3 if round 4 fails a second time",
+        "Confirms the already-passed PRs stay open rather than being withdrawn",
+        "Does not close the lane prematurely on this first failure"
+      ]
+    }
+  ]
+}

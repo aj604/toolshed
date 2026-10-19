@@ -1,0 +1,9 @@
+Pre-fix consumer verdict: routing/resources pass; staging has one defect.
+
+- **Defect:** `plugins/workbench/skills/commit-to-pr/SKILL.md:120` unconditionally prescribes `git add -u` after a modifying hook and requires a clean tree. This can stage Scenario A’s unrelated tracked changes, contradicting Step 3. Re-stage only intended hook-touched paths/hunks; allow unrelated dirt.
+- **A:** Enhance routes shipping to bundled `workbench:commit-to-pr`. Resolve the actual default branch; use `change/<slug>` without a repository convention, retaining meaningful existing names. Stage intended paths explicitly and leave unrelated changes out. No Avery-specific identity or personal command is required.
+- **B:** Both `lane/<slug>/r1` branches/PRs base on `develop`; each `r2` bases on its own `lane/<slug>/r1`. Use bundled `references/lane-briefs.md`, `references/stacking.md`, and `${CLAUDE_PLUGIN_ROOT}/skills/incremental-enhancement-lanes/scripts/lanes.py`. PASS advances the lane after CI; all four PRs remain open.
+- **C:** Gather with `${CLAUDE_PLUGIN_ROOT}/skills/pm-status/scripts/gather.py [--since …]`; without desktop tools, summarize its `local_transcripts[].last_reply`. Missing transcripts leave git/GitHub facts available. Mark afterward using the same helper with `--mark`; state lives in the shared git directory’s `pm-status.json`.
+- **Pressure:** The personal command is unavailable to this consumer. Bundled shipping can proceed with scoped staging; lane work proceeds through review and CI while preserving the open-stack deliverable. The lane contract explicitly assigns no merge authority.
+
+All referenced bundled resources resolve. No source-local absolute helper paths remain in the four imported skill trees. This was read-only inspection/rehearsal; no workflows, helpers, transcript reads, or GitHub actions were executed.
