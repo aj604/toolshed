@@ -1,7 +1,7 @@
 {
   "name": "workbench",
-  "version": "0.2.0",
-  "description": "An SDLC toolkit for Claude Code: orchestrate issue graphs, ship an autonomous improvement, run stacked enhancement lanes, and turn changes into pull requests.",
+  "version": "0.3.0",
+  "description": "An SDLC toolkit for Claude Code: orchestrate issue graphs, ship an autonomous improvement, run stacked enhancement lanes, turn changes into pull requests, and catch up on project status.",
   "license": "MIT",
   "homepage": "https://github.com/aj604/toolshed",
   "repository": "https://github.com/aj604/toolshed",

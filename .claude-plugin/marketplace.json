@@ -1,6 +1,6 @@
 {
   "name": "toolshed",
-  "description": "A personal Claude Code plugin marketplace. Publishes workbench, an SDLC toolkit for issue orchestration, enhancements, and pull requests.",
+  "description": "A personal Claude Code plugin marketplace. Publishes workbench, an SDLC toolkit for issue orchestration, enhancements, pull requests, and status checks.",
   "owner": {
     "name": "Avery Jones",
     "email": "avery.jones.nyc@gmail.com"
@@ -9,7 +9,7 @@
     {
       "name": "workbench",
       "source": "./plugins/workbench",
-      "description": "An SDLC toolkit for Claude Code. First tool: orchestrate-issues, which drives a GitHub issue dependency graph to completion with background agents, one worktree and one reviewed PR per issue."
+      "description": "An SDLC toolkit for Claude Code. Orchestrate issue graphs with agents, ship autonomous enhancements, run stacked enhancement lanes, open PRs, and get project status reports."
     }
   ]
 }
