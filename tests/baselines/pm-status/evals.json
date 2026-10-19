@@ -14,11 +14,14 @@
     "A verdict of at most two sentences and 40 words sits between the heading and the first bucket",
     "Report has at most 3 plain-text pictures in fenced code blocks (aligned list, tree, step sequence, or diff), at least one when the data holds a stack, an epic, or a multi-step top action, and no Mermaid or HTML",
     "Pictures keep what each item does: no picture row is a bare PR/issue number without a description",
-    "Next up has 2-6 numbered items, each with a reason; only the first may be a step sequence; every other item is one source line under 25 words with no nested bullets; cleanup sits on one unnumbered Cleanup line",
+    "Next up has 2-6 numbered items, each with a reason; only the first may be a step sequence; every other item is one source line of at most 25 words with no nested bullets; cleanup sits on one unnumbered Cleanup line",
     "Every Next up item names a concrete PR/issue number, branch, or session",
     "Report is 70 lines or fewer",
-    "Report mentions the outcome of at least one dispatched session",
-    "Stacked milestone PRs are grouped (not one bullet per sub-PR) and merged-to-stack vs merged-to-main is distinguished"
+    "Report gives the outcome of at least one dispatched session, or, when no session source shows the work, says so and gives how that work ended from the PR trail",
+    "Stacked milestone PRs are grouped (not one bullet per sub-PR) and merged-to-stack vs merged-to-main is distinguished",
+    "Each Needs-you bullet is at most two sentences and 40 words after its bold lead-in",
+    "No Next-up reason restates the problem from its Needs-you bullet; it says why the item ranks there or what it unlocks",
+    "The report is the final message of the run: no tool call and no closing text follow it (the --mark call comes before it)"
    ]
   },
   {
@@ -34,11 +37,14 @@
     "A verdict of at most two sentences and 40 words sits between the heading and the first bucket",
     "Report has at most 3 plain-text pictures in fenced code blocks (aligned list, tree, step sequence, or diff), at least one when the data holds a stack, an epic, or a multi-step top action, and no Mermaid or HTML",
     "Pictures keep what each item does: no picture row is a bare PR/issue number without a description",
-    "Next up has 2-6 numbered items, each with a reason; only the first may be a step sequence; every other item is one source line under 25 words with no nested bullets; cleanup sits on one unnumbered Cleanup line",
+    "Next up has 2-6 numbered items, each with a reason; only the first may be a step sequence; every other item is one source line of at most 25 words with no nested bullets; cleanup sits on one unnumbered Cleanup line",
     "Every Next up item names a concrete PR/issue number, branch, or session",
     "Report is 70 lines or fewer",
-    "Report mentions the outcome of at least one dispatched session",
-    "Open PRs are each classified by state (CI/review/draft)"
+    "Report gives the outcome of at least one dispatched session, or, when no session source shows the work, says so and gives how that work ended from the PR trail",
+    "Open PRs are each classified by state (CI/review/draft)",
+    "Each Needs-you bullet is at most two sentences and 40 words after its bold lead-in",
+    "No Next-up reason restates the problem from its Needs-you bullet; it says why the item ranks there or what it unlocks",
+    "The report is the final message of the run: no tool call and no closing text follow it (the --mark call comes before it)"
    ]
   },
   {
@@ -54,11 +60,14 @@
     "A verdict of at most two sentences and 40 words sits between the heading and the first bucket",
     "Report has at most 3 plain-text pictures in fenced code blocks (aligned list, tree, step sequence, or diff), at least one when the data holds a stack, an epic, or a multi-step top action, and no Mermaid or HTML",
     "Pictures keep what each item does: no picture row is a bare PR/issue number without a description",
-    "Next up has 2-6 numbered items, each with a reason; only the first may be a step sequence; every other item is one source line under 25 words with no nested bullets; cleanup sits on one unnumbered Cleanup line",
+    "Next up has 2-6 numbered items, each with a reason; only the first may be a step sequence; every other item is one source line of at most 25 words with no nested bullets; cleanup sits on one unnumbered Cleanup line",
     "Every Next up item names a concrete PR/issue number, branch, or session",
     "Report is 70 lines or fewer",
-    "Report mentions the outcome of at least one dispatched session",
-    "Report does not list more than 10 worktrees individually; stale worktrees are summarized"
+    "Report gives the outcome of at least one dispatched session, or, when no session source shows the work, says so and gives how that work ended from the PR trail",
+    "Report does not list more than 10 worktrees individually; stale worktrees are summarized",
+    "Each Needs-you bullet is at most two sentences and 40 words after its bold lead-in",
+    "No Next-up reason restates the problem from its Needs-you bullet; it says why the item ranks there or what it unlocks",
+    "The report is the final message of the run: no tool call and no closing text follow it (the --mark call comes before it)"
    ]
   }
  ]

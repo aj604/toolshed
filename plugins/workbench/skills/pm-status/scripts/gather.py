@@ -7,7 +7,7 @@ writing the last-run timestamp and that snapshot.
 
 Usage:
   gather.py [--since 24h|3d|2026-10-01T09:00] [--repo PATH]
-  gather.py --mark            # record "now" as the last run (call after reporting)
+  gather.py --mark            # record "now" as the last run (call right before replying with the report)
 """
 import argparse
 import json

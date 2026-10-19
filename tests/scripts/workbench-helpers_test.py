@@ -431,5 +431,77 @@ else:
         self.assertIsNone(self.gather([self.issue(5)])["frontier_changes"])
 
 
+class PmStatusCheckReport(unittest.TestCase):
+    """check_report.py against small drafted reports."""
+
+    GOOD = """## shop: since last run (Oct 17 → now)
+
+Main is green and #12 is ready to merge.
+
+**Landed on main**
+- #10 retry budget for the fetcher
+
+**In flight:** nothing.
+
+**Needs you**
+- **#12 is green and waiting on review.** It unblocks #14, and every day it waits the branch drifts further from main.
+
+**Next up**
+1. **Merge #12:** it frees #14 for the next run (see Needs you).
+2. **Start #15:** ready, unclaimed, and it unblocks #16.
+
+**Cleanup:** 3 worktrees whose branches merged.
+"""
+
+    def check(self, text, facts=None):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        draft = Path(temp.name) / "draft.md"
+        draft.write_text(text)
+        args = [str(draft)]
+        if facts is not None:
+            (Path(temp.name) / "facts.json").write_text(json.dumps(facts))
+            args += ["--facts", str(Path(temp.name) / "facts.json")]
+        path = SKILLS / "pm-status" / "scripts" / "check_report.py"
+        result = subprocess.run([sys.executable, str(path), *args], capture_output=True, text=True)
+        return result.returncode, result.stdout
+
+    def test_a_report_within_every_limit_passes(self):
+        self.assertEqual(self.check(self.GOOD), (0, "ok: within every limit\n"))
+
+    def test_a_three_sentence_verdict_is_flagged(self):
+        code, out = self.check(self.GOOD.replace("ready to merge.", "ready to merge. Nothing broke. Two lanes idle."))
+        self.assertEqual(code, 1)
+        self.assertIn("verdict: 3 sentences", out)
+
+    def test_a_long_needs_you_bullet_is_flagged(self):
+        code, out = self.check(self.GOOD.replace("further from main.", "further from main " + "and more " * 15 + "."))
+        self.assertIn("(Needs you)", out)
+
+    def test_a_next_up_line_over_25_words_is_flagged(self):
+        code, out = self.check(self.GOOD.replace("unblocks #16.", "unblocks #16 " + "and also more " * 6 + "."))
+        self.assertRegex(out, r"line \d+ \(Next up\): \d+ words")
+
+    def test_a_next_up_reason_that_repeats_its_needs_you_bullet_is_flagged(self):
+        code, out = self.check(self.GOOD.replace("it frees #14 for the next run (see Needs you).",
+                                                 "green and waiting on review, the branch drifts from main."))
+        self.assertIn("repeats Needs-you bullet", out)
+
+    def test_a_next_up_action_that_names_nothing_concrete_is_flagged(self):
+        code, out = self.check(self.GOOD.replace("**Start #15:**", "**Delete the old workflows:**"))
+        self.assertIn("names no PR, issue, branch", out)
+
+    def test_cleanup_with_bullets_under_it_is_flagged(self):
+        code, out = self.check(self.GOOD + "- worktree a\n- worktree b\n")
+        self.assertIn("Cleanup is one line", out)
+
+    def test_an_open_pr_without_its_ci_state_is_flagged(self):
+        facts = {"github": {"open": [{"number": 12}, {"number": 30}]}}
+        code, out = self.check(self.GOOD.replace("3 worktrees whose branches merged.",
+                                                 "3 worktrees whose branches merged; PR #30 (target gone)."), facts)
+        self.assertIn("PR #30: open PR shown without its CI state", out)
+        self.assertNotIn("PR #12", out)
+
+
 if __name__ == "__main__":
     unittest.main()
