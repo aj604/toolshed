@@ -2,8 +2,9 @@
 
 This repo is a **Claude Code plugin marketplace**, not an application. It publishes one plugin,
 `workbench` (`plugins/workbench/`). The plugin's only executable code is
-`plugins/workbench/skills/orchestrate-issues/scripts/frontier.py` and
-`plugins/workbench/skills/incremental-enhancement-lanes/scripts/lanes.py` (`python3`, stdlib-only).
+`plugins/workbench/skills/orchestrate-issues/scripts/frontier.py`,
+`plugins/workbench/skills/incremental-enhancement-lanes/scripts/lanes.py` and
+`plugins/workbench/skills/pm-status/scripts/gather.py` (`python3`, stdlib-only).
 
 ## Layout
 
@@ -16,8 +17,10 @@ This repo is a **Claude Code plugin marketplace**, not an application. It publis
   smoke harness that takes `frontier.py`'s path as its argument. Not published, not run by CI.
 - `tests/baselines/workbench-import/` — eval and packaging records for the `enhance`,
   `incremental-enhancement-lanes`, and `commit-to-pr` skills. `tests/scripts/workbench-helpers_test.py`
-  exercises `lanes.py` offline (`python3 tests/scripts/workbench-helpers_test.py`). Neither is
-  published or run by CI.
+  exercises `lanes.py` and `gather.py` offline (`python3 tests/scripts/workbench-helpers_test.py`).
+  Neither is published or run by CI.
+- `tests/baselines/pm-status/` — `evals.json` for `pm-status` plus benchmark summaries. The evals
+  run against private repos, so per-run reports stay out of this public repo.
 - `.github/workflows/` — `ci.yml` (version guard, script compile, `claude plugin validate .`),
   `claude.yml` (`@claude` mentions), `claude-code-review.yml` (PR review).
 

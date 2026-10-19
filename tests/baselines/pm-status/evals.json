@@ -1,0 +1,65 @@
+{
+ "skill_name": "pm-status",
+ "evals": [
+  {
+   "id": 0,
+   "name": "factory-stacked-milestones",
+   "cwd": "~/Repos/factory",
+   "prompt": "/pm-status 3d — I had orchestrate-issues grinding through the ledger milestones, catch me up",
+   "expected_output": "Groups stacked milestone PRs, distinguishes merged-to-main vs merged-to-stack, lists ready frontier issues as next steps",
+   "files": [],
+   "assertions": [
+    "Report has Landed / In flight / Needs you / Next up sections",
+    "Report states the time window it covers",
+    "A verdict of at most two sentences and 40 words sits between the heading and the first bucket",
+    "Report has at most 3 plain-text pictures in fenced code blocks (aligned list, tree, step sequence, or diff), at least one when the data holds a stack, an epic, or a multi-step top action, and no Mermaid or HTML",
+    "Pictures keep what each item does: no picture row is a bare PR/issue number without a description",
+    "Next up has 2-6 numbered items, each with a reason; only the first may be a step sequence; every other item is one source line under 25 words with no nested bullets; cleanup sits on one unnumbered Cleanup line",
+    "Every Next up item names a concrete PR/issue number, branch, or session",
+    "Report is 70 lines or fewer",
+    "Report mentions the outcome of at least one dispatched session",
+    "Stacked milestone PRs are grouped (not one bullet per sub-PR) and merged-to-stack vs merged-to-main is distinguished"
+   ]
+  },
+  {
+   "id": 1,
+   "name": "bucketshop-back-from-break",
+   "cwd": "~/Repos/bucketshop",
+   "prompt": "back from a few days off, what landed in bucketshop and what should I pick up next?",
+   "expected_output": "Landed/in-flight/needs-you/next-up report covering open PRs, sessions, and worktrees",
+   "files": [],
+   "assertions": [
+    "Report has Landed / In flight / Needs you / Next up sections",
+    "Report states the time window it covers",
+    "A verdict of at most two sentences and 40 words sits between the heading and the first bucket",
+    "Report has at most 3 plain-text pictures in fenced code blocks (aligned list, tree, step sequence, or diff), at least one when the data holds a stack, an epic, or a multi-step top action, and no Mermaid or HTML",
+    "Pictures keep what each item does: no picture row is a bare PR/issue number without a description",
+    "Next up has 2-6 numbered items, each with a reason; only the first may be a step sequence; every other item is one source line under 25 words with no nested bullets; cleanup sits on one unnumbered Cleanup line",
+    "Every Next up item names a concrete PR/issue number, branch, or session",
+    "Report is 70 lines or fewer",
+    "Report mentions the outcome of at least one dispatched session",
+    "Open PRs are each classified by state (CI/review/draft)"
+   ]
+  },
+  {
+   "id": 2,
+   "name": "graph-runner-messy",
+   "cwd": "~/Repos/graph-runner",
+   "prompt": "where did all my graph-runner work end up? feels like a mess, i have no idea what's pending",
+   "expected_output": "Cuts through 85 worktrees and stuck PRs; surfaces at-risk work and a short ranked next list without dumping everything",
+   "files": [],
+   "assertions": [
+    "Report has Landed / In flight / Needs you / Next up sections",
+    "Report states the time window it covers",
+    "A verdict of at most two sentences and 40 words sits between the heading and the first bucket",
+    "Report has at most 3 plain-text pictures in fenced code blocks (aligned list, tree, step sequence, or diff), at least one when the data holds a stack, an epic, or a multi-step top action, and no Mermaid or HTML",
+    "Pictures keep what each item does: no picture row is a bare PR/issue number without a description",
+    "Next up has 2-6 numbered items, each with a reason; only the first may be a step sequence; every other item is one source line under 25 words with no nested bullets; cleanup sits on one unnumbered Cleanup line",
+    "Every Next up item names a concrete PR/issue number, branch, or session",
+    "Report is 70 lines or fewer",
+    "Report mentions the outcome of at least one dispatched session",
+    "Report does not list more than 10 worktrees individually; stale worktrees are summarized"
+   ]
+  }
+ ]
+}
