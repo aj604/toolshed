@@ -3,7 +3,9 @@
 Templates for the two subagents this loop dispatches, once per round per lane.
 Fill every `<...>` placeholder before dispatching — a brief with a hole in it
 becomes a background agent asking you questions, which defeats the point of
-running it in the background.
+running it in the background. If a value isn't yours to know yet (no charter on
+record, no PR number), don't invent one: get it, or show the user the brief with
+that gap named. A fabricated charter is worse than a visible hole.
 
 The two levers on brief quality here are different from a spec-driven loop:
 

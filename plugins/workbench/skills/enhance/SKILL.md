@@ -69,10 +69,12 @@ This phase is the whole value of the skill. Implementation is the easy part;
 choosing something the user wouldn't have thought of, that's still right, is
 what's hard. Do it in the main thread so the reasoning is visible.
 
-**Generate at least five candidates, then throw out your first two.** The first
-ideas are always the recorded ones — the TODO, the missing flag, the obvious
-gap. They arrive first because they required no thought. Keep generating past
-them; the interesting candidates come after the well runs dry once.
+**Generate at least five candidates of your own, then throw out your first
+two.** Recorded items — the TODO, the roadmap entry, the open issue — don't
+count toward the five; rejecting them is context, not generation. The first
+ideas of your own are the obvious ones — the missing flag, the visible gap. They
+arrive first because they required no thought. Keep generating past them; the
+interesting candidates come after the well runs dry once.
 
 ### Where forward-driving candidates come from
 
@@ -193,6 +195,12 @@ Dispatch one subagent with the spec. Instruct it to:
   re-check, because by the time you're writing it up it feels like established
   fact. It is also the claim the whole change rests on. Check out the pre-change
   code and record what it actually does, with the same rigour as the after.
+- **Re-run the ordinary path, not just the motivating one.** Before/after on the
+  broken case shows the fix; it doesn't show what changed for everyone else. Run
+  the most common invocation — the README example, the bundled sample input — on
+  old and new code and compare stdout *and* stderr. A new warning that fires on
+  every normal run is a regression in the experience even when every test is
+  green, and it's easy to miss because you were looking at the edge case.
 - **Green tests prove less than they appear to.** A passing test only shows it
   passes against the code you wrote; it doesn't show it would have caught the
   problem. Break the behavior on purpose and confirm the suite notices — revert
@@ -237,11 +245,15 @@ The PR body has to sell an idea the user hasn't had yet. Include:
 - **The insight** — what you noticed that made this worth building. This is the
   most important section. If you can't articulate why this wasn't already
   obvious, you probably picked a backlog item.
-- **Also considered** — two or three rejected candidates, one line each. Converts
+- **Also considered** — two or three of your own rejected candidates (not the
+  backlog items you skipped), one line each. Converts
   an unaudited pick into an auditable one, and lets the user redirect you cheaply
   if you chose wrong.
 - **Assumptions** — every ambiguity you resolved under rule 3
-- **Verification** — the command you ran and what it printed
+- **Verification** — the commands you ran and what they printed, before *and*
+  after, plus the ordinary-path comparison. The before output is the evidence
+  the pick rests on; a reviewer who only sees the after has to take the problem
+  on faith.
 
 ## Report back
 

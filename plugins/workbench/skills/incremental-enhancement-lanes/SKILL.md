@@ -114,7 +114,9 @@ Sanity-check each lane against two questions before proposing it:
 
 - *Is there R rounds of real work here?* A lane with one good idea in it should
   be one round deep, not padded to three. Better to run three lanes at depth 3
-  and one at depth 1 than to force filler.
+  and one at depth 1 than to force filler. If that means proposing fewer rounds
+  (or lanes) than the user asked for, say so in the contract with the reason —
+  the yes they give should be to the run you'll actually do.
 - *Would a maintainer recognize this as a coherent area?* Lanes cut across the
   grain of the codebase produce diffs nobody can review as a unit.
 
@@ -301,8 +303,12 @@ several consecutive rounds declining the *same* small items, each unable to name
 Two things follow. Put the cost in the brief — past ~4 rounds, tell the implementer that *"fine,
 but I'd have taken the lane without it"* is the **default verdict** unless it can beat it, and that
 declaring exhaustion costs nothing. And tell the user plainly that the binding constraint has moved
-from work-remaining to review-capacity, with a recommendation. If they've asked for open-ended
-rounds, that instruction stands until they change it — recommend, don't unilaterally stop, and if
+from work-remaining to review-capacity, with a recommendation that follows from it: once the tell
+is showing, that recommendation is **close the lane at its current depth**. Don't soften it into
+"send one more and stop if it comes back empty" — that spends another review slot to confirm what
+the declining rounds already showed. If they've asked for open-ended rounds, that instruction
+stands until they change it: say the stop recommendation plainly, hold the next dispatch for their
+answer, and if they say continue, send it with the raised bar above. Don't unilaterally stop; if
 you do stop a lane, say it was your call and offer to resume.
 
 A round that clears the bar this late usually does so by correcting a premise rather than by
