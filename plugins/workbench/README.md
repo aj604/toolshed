@@ -47,6 +47,7 @@ Then ask for it in plain words, for example: *"work through the sub-issues of
 | `skills/commit-to-pr/` | Stages, commits, branches, pushes, and opens or updates a PR |
 | `skills/pm-status/` | Status report since the last check: landed, in flight, needs you, next up, drawn as small text pictures |
 | `skills/pm-status/scripts/gather.py` | Collects PRs, default-branch CI, staged stack branches, issues with blockers and sub-issues, worktrees, orphan branches, and sessions as JSON; diffs the issue frontier between runs |
+| `skills/pm-status/scripts/check_report.py` | Checks a drafted report against the skill's limits (verdict, bullet and Next-up length, pictures, Cleanup line, open-PR coverage) before it's shown |
 | `agents/implementer.md` | Builds one issue and opens a draft PR. Mutation-checks its own tests first. |
 | `agents/spec-reviewer.md` | Reviews a PR against its issue and posts BLOCKING/FOLLOW-UP findings on the PR (opus, no Write) |
 | `agents/fixer.md` | Closes BLOCKING findings on an existing PR, starting cold |
