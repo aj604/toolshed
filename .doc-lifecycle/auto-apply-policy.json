@@ -1,9 +1,0 @@
-{
-  "artifact": "auto-apply-policy",
-  "schema_version": 1,
-  "id": "toolshed-mechanical-doc-maintenance",
-  "classes": [
-    "drift-stale-mechanical",
-    "narrative-anchor-refresh"
-  ]
-}

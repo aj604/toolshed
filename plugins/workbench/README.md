@@ -1,6 +1,13 @@
 # workbench
 
-An SDLC toolkit for Claude Code. It currently ships one tool, with more to come.
+An SDLC toolkit for Claude Code. It ships four skills:
+
+- `/workbench:orchestrate-issues` — implement a GitHub issue dependency graph with agents.
+- `/workbench:enhance` — pick and ship one autonomous improvement.
+- `/workbench:incremental-enhancement-lanes` — build parallel stacks of improvements for human review.
+- `/workbench:commit-to-pr` — commit changes, push a branch, and open or update a PR.
+
+Its workflows use git and the GitHub CLI; the lane helper also requires Python 3.10+.
 
 ## orchestrate-issues
 
@@ -33,6 +40,10 @@ Then ask for it in plain words, for example: *"work through the sub-issues of
 |---|---|
 | `skills/orchestrate-issues/` | The orchestrator: run contract, frontier loop, landing, reporting |
 | `skills/orchestrate-issues/scripts/frontier.py` | Reads the graph: ready, in-flight, blocked, split, done, plus cycles and prose-only blockers |
+| `skills/enhance/` | Picks one high-impact improvement, implements and verifies it, opens a PR |
+| `skills/incremental-enhancement-lanes/` | Runs parallel lanes over N rounds, one stacked PR per round, each spec-reviewed |
+| `skills/incremental-enhancement-lanes/scripts/lanes.py` | Reconstructs lane state (branches, PRs, stack bases) from the remote, for resuming and checking claims |
+| `skills/commit-to-pr/` | Stages, commits, branches, pushes, and opens or updates a PR |
 | `agents/implementer.md` | Builds one issue and opens a draft PR. Mutation-checks its own tests first. |
 | `agents/spec-reviewer.md` | Reviews a PR against its issue and posts BLOCKING/FOLLOW-UP findings on the PR (opus, no Write) |
 | `agents/fixer.md` | Closes BLOCKING findings on an existing PR, starting cold |
