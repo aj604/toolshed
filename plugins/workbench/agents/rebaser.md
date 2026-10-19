@@ -33,8 +33,12 @@ what this PR's code *does*, rather than replaying it onto new surroundings,
 that is a semantic resolution. Describe it exactly, because the orchestrator
 uses it to decide whether the PR needs another review.
 
-Run builds and tests in the foreground, and stop anything you started before
-you exit.
+Trim build and test output to the failures (`2>&1 | tail -40`), and stop
+anything you started before you exit. A command that fits in 10 minutes runs
+in the foreground with `timeout: 600000`. A longer one runs as itself with
+Bash `run_in_background: true`, its output going to
+`<scratch>/<issue>-<what>.log`, and then you end your turn. The harness wakes
+you when it exits, so there is nothing to poll.
 
 ## Report
 

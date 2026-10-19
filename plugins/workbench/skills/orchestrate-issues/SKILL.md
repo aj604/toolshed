@@ -506,10 +506,10 @@ the original wording.
 **Dispatch** `workbench:implementer` with `run_in_background: true`,
 `isolation: "worktree"`, and `name: "impl-<n>"`. Send its lane card from
 `references/lane-cards.md`, with the full issue body inlined. The agent
-already knows the rest: whole-suite runs, self-mutation, a criteria walk
-before opening the PR (all three through its own foreground child agents),
-holding its BASE, pushing after each criterion, scratch-file naming, and a
-draft PR with `Closes #<n>`. Its job ends when the draft PR is open, and
+already knows the rest: whole-suite runs, self-mutation and a criteria walk
+before opening the PR (both through its own child agents), waiting on long
+commands without polling, holding its BASE, pushing after each criterion,
+scratch-file naming, and a draft PR with `Closes #<n>`. Its job ends when the draft PR is open, and
 nothing later in this loop messages it.
 
 **Carry forward what earlier lanes established.** By the third node you know

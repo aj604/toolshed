@@ -42,8 +42,8 @@ It may also carry these blocks. Each one overrides your own reading:
    you chose under JUDGEMENT.
 2. **Tests follow the repo's convention.** If the repo tests this kind of
    change, add tests. The WHOLE suite, every package or workspace member and
-   not just the one you touched, passes on your final commit. Run it through a
-   child (see *Keep your context for the code*).
+   not just the one you touched, passes on your final commit (see *Wait on
+   events* for a suite that runs long).
 3. **Prove the tests can fail.** The reviewer will mutate your implementation,
    and a surviving mutation is the most common reason a review fails. Do it
    first. For each acceptance criterion, break the line that delivers it (flip
@@ -79,32 +79,37 @@ It may also carry these blocks. Each one overrides your own reading:
 ## Keep your context for the code
 
 Your context is the lane's budget, and the design and the edits are the only
-work that needs all of it. Test output, waiting, and cold reads don't. Hand
+work that needs all of it. The mutation loop and the cold read don't. Hand
 those to **child agents** and keep only their short return:
 
 | Child | Its job | It returns |
 |---|---|---|
-| Suite run | Run the whole suite at HEAD | `PASS`, or each failing test's name and first error lines |
 | Mutation loop | The breaks in *What done means* 3, one at a time, restoring each | Per criterion and branch: the break, the test that went red, or `SURVIVED` |
 | Criteria walk | *What done means* 4, on the pushed diff | Each gap, with file and identifier, or `none` |
 
 Dispatch each with the Agent tool: `subagent_type: "general-purpose"`,
 `model: "sonnet"`, `run_in_background: false`. Its prompt carries your
-worktree's absolute path, the exact commands to run, and the return format
-above. Run one child at a time. The mutation child edits your source, so
+worktree's absolute path, the exact commands to run (targeted tests, each
+fitting in a foreground command), and the return format above. Run one child
+at a time. The mutation child edits your source, so
 nothing else touches the worktree while it runs, and it hands the worktree
 back with `git status` clean apart from your own work.
 
-Some suites outlast the 10-minute limit on a single command. The child copes
-with that, splitting the run per package or polling a log file, and its
-context absorbs the wait instead of yours.
+## Wait on events
 
-Commands you run yourself are ordinary blocking commands, with the output
-trimmed to what decides your next step: `2>&1 | tail -40`, or the runner's
-failures-only flag. Backgrounding a command wakes the orchestrator with a
-notification that isn't your result. Before you exit, stop anything you
-started that keeps running: a dev server, a test host, a watcher. Apply the
-lane card's `BUILD` instruction if there is one.
+Trim every command's output to what decides your next step:
+`2>&1 | tail -40`, or the runner's failures-only flag. A command that fits in
+10 minutes runs in the foreground with `timeout: 600000`. A longer one, such as
+a slow suite, runs **as itself** with Bash `run_in_background: true`, its
+output going to `<scratch>/<issue>-<what>.log`, and then you end your turn. The
+harness wakes you when it exits, with up to two hours of headroom. That is the
+whole wait: one launch, one wake. A `sleep` or `until` loop spends a turn on
+every check and finds out nothing sooner. The orchestrator sees a one-line
+interim notice while you wait and knows to ignore it.
+
+Before you exit, stop anything you started that keeps running: a dev server,
+a test host, a watcher. Apply the lane card's `BUILD` instruction if there is
+one.
 
 ## Hold your BASE
 

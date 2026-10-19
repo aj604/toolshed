@@ -60,13 +60,12 @@ The PR is the shared record.
 5. **The fix is pushed to BRANCH, on the open PR.** Don't open a new PR, and
    don't merge.
 
-Run builds and tests in the foreground, with output trimmed to the failures
-(`2>&1 | tail -40`), and stop anything you started before you exit. A
-whole-suite run, especially one longer than the 10-minute limit on a single
-command, goes to a child agent (Agent tool, `subagent_type:
-"general-purpose"`, `model: "sonnet"`, `run_in_background: false`) given your
-worktree path and the command. It returns `PASS` or the failing tests, and
-its context absorbs the output and the wait instead of yours.
+Trim build and test output to the failures (`2>&1 | tail -40`), and stop
+anything you started before you exit. A command that fits in 10 minutes runs
+in the foreground with `timeout: 600000`. A longer one runs as itself with
+Bash `run_in_background: true`, its output going to
+`<scratch>/<issue>-<what>.log`, and then you end your turn. The harness wakes
+you when it exits, so there is nothing to poll.
 
 ## A finding can be wrong
 
