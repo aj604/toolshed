@@ -1,0 +1,50 @@
+# CI for the toolshed marketplace (every PR and push to main). The job name `ci`
+# is the required status check on main — keep it.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version guard diffs against the PR base
+      # Installed plugin content must ship under a new version — an unbumped
+      # change means installers keep getting the old copy. Checked per plugin,
+      # for every plugin directory that exists on both sides of the PR.
+      - name: Require version bump when plugin content changes
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          BASE="origin/${{ github.base_ref }}"
+          MB=$(git merge-base "$BASE" HEAD)
+          FAILED=0
+          for dir in plugins/*/; do
+            dir=${dir%/}
+            manifest="$dir/.claude-plugin/plugin.json"
+            git cat-file -e "${MB}:${manifest}" 2>/dev/null || continue   # new plugin
+            [ -n "$(git diff --name-only "$MB" HEAD -- "$dir")" ] || continue
+            BASE_VERSION=$(git show "${MB}:${manifest}" | jq -r .version)
+            HEAD_VERSION=$(jq -r .version "$manifest")
+            if [ "$BASE_VERSION" = "$HEAD_VERSION" ]; then
+              echo "::error file=${manifest}::${dir} changed but version is still ${HEAD_VERSION} — bump it"
+              echo "🛑 **Version guard:** \`${dir}\` changed but version is still \`${HEAD_VERSION}\`." >> "$GITHUB_STEP_SUMMARY"
+              FAILED=1
+            else
+              echo "✅ **Version guard:** \`${dir}\` bumped \`${BASE_VERSION}\` → \`${HEAD_VERSION}\`." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          exit "$FAILED"
+      - name: Compile plugin scripts
+        run: python3 -m compileall -q plugins
+      - name: Validate plugin manifests
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate .
