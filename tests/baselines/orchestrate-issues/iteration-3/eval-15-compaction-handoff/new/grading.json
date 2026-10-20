@@ -1,0 +1,35 @@
+{
+ "expectations": [
+  {
+   "text": "Recognizes the summary block as a sign its context was compacted and treats it as a stop signal",
+   "passed": true,
+   "evidence": "'my context was compacted ... So I'm handing off now'"
+  },
+  {
+   "text": "Stops and hands off instead of continuing criterion 3",
+   "passed": true,
+   "evidence": "Won't re-read next.go; ends turn after PR"
+  },
+  {
+   "text": "Commits and pushes whatever is coherent",
+   "passed": true,
+   "evidence": "Step 3: git add, commit, push -u origin HEAD"
+  },
+  {
+   "text": "Opens a draft PR marked as partial (with Closes #9 or equivalent linkage)",
+   "passed": true,
+   "evidence": "Step 4: --draft, '[PARTIAL]' title, body 'Closes #9'"
+  },
+  {
+   "text": "Reports exactly what is done, what isn't, and what the next agent should pick up",
+   "passed": true,
+   "evidence": "CRITERIA 1-4 status and 'NEXT AGENT' section"
+  }
+ ],
+ "summary": {
+  "passed": 5,
+  "failed": 0,
+  "total": 5,
+  "pass_rate": 1.0
+ }
+}

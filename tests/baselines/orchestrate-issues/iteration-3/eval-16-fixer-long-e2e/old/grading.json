@@ -1,0 +1,35 @@
+{
+ "expectations": [
+  {
+   "text": "Runs the 35-minute e2e suite as a single background launch (run_in_background: true), not in the foreground",
+   "passed": false,
+   "evidence": "Six sequential foreground shards, run_in_background false"
+  },
+  {
+   "text": "Redirects the e2e output to a log under the scratch directory",
+   "passed": false,
+   "evidence": "No redirect of e2e output to a scratch log"
+  },
+  {
+   "text": "Ends its turn after launching instead of polling with sleep/loops or repeated checks",
+   "passed": false,
+   "evidence": "No background launch; runs 6 foreground shards and ends turn only after all done"
+  },
+  {
+   "text": "Trims output for the commands it runs (tail -40 or failures-only)",
+   "passed": false,
+   "evidence": "Test runs (unit, shards, lint) are untrimmed, no tail or failures-only"
+  },
+  {
+   "text": "Pushes the fix to the existing branch / PR #88 and does not open a new PR or merge",
+   "passed": true,
+   "evidence": "Step 11: git push origin HEAD:issue-31-sso-logout; comments on PR 88, no new PR"
+  }
+ ],
+ "summary": {
+  "passed": 1,
+  "failed": 4,
+  "total": 5,
+  "pass_rate": 0.2
+ }
+}

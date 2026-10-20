@@ -1,0 +1,35 @@
+{
+ "expectations": [
+  {
+   "text": "Recognizes the summary block as a sign its context was compacted and treats it as a stop signal",
+   "passed": true,
+   "evidence": "'summary block means my context has already been compacted'; stops, won't re-open next.go"
+  },
+  {
+   "text": "Stops and hands off instead of continuing criterion 3",
+   "passed": true,
+   "evidence": "'I stop here and hand off'; end turn with NEXT section"
+  },
+  {
+   "text": "Commits and pushes whatever is coherent",
+   "passed": true,
+   "evidence": "Step 4: git add internal/cron, commit, push -u origin"
+  },
+  {
+   "text": "Opens a draft PR marked as partial (with Closes #9 or equivalent linkage)",
+   "passed": true,
+   "evidence": "Step 5: gh pr create --draft, '[PARTIAL]' title, 'Closes #9'"
+  },
+  {
+   "text": "Reports exactly what is done, what isn't, and what the next agent should pick up",
+   "passed": true,
+   "evidence": "Report CRITERIA 1-4 status plus NEXT: continue on branch, read next.go, implement 4"
+  }
+ ],
+ "summary": {
+  "passed": 5,
+  "failed": 0,
+  "total": 5,
+  "pass_rate": 1.0
+ }
+}

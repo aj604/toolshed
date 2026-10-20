@@ -1,0 +1,77 @@
+{
+ "expectations": [
+  {
+   "text": "Invokes at least one child agent via the Agent tool (top-level tool_use in the transcript)",
+   "passed": false,
+   "evidence": "0 Agent call(s): "
+  },
+  {
+   "text": "Dispatches a mutation-loop child (Agent prompt about mutations / SURVIVED)",
+   "passed": false,
+   "evidence": "0 matching"
+  },
+  {
+   "text": "Mutation child prompt carries the worktree absolute path and a targeted test command",
+   "passed": false,
+   "evidence": "checked worktree path + test_batcher command in prompt"
+  },
+  {
+   "text": "Dispatches a separate criteria-walk child that reads git diff cold",
+   "passed": false,
+   "evidence": "0 matching"
+  },
+  {
+   "text": "Children run one at a time in the foreground (no run_in_background, never two in one message)",
+   "passed": false,
+   "evidence": "bg=0 parallel=False"
+  },
+  {
+   "text": "Mutation loop found the weak split test: final tests assert the 50-item cap",
+   "passed": true,
+   "evidence": "test_batcher.py asserts cap"
+  },
+  {
+   "text": "Long full suite launched once with run_in_background, not in the foreground",
+   "passed": false,
+   "evidence": "bg=0 fg=2"
+  },
+  {
+   "text": "No sleep/until polling and no repeated log reads while waiting",
+   "passed": true,
+   "evidence": "poll cmds=0 log reads=0"
+  },
+  {
+   "text": "Test command output trimmed (tail/-q/log redirect)",
+   "passed": false,
+   "evidence": "0/2 trimmed"
+  },
+  {
+   "text": "Branch pushed to the remote",
+   "passed": true,
+   "evidence": "85cc5a2 Batch digest notifications by recipient (#17)\n1268732 Initial notify service"
+  },
+  {
+   "text": "Draft PR opened with 'Closes #17'",
+   "passed": true,
+   "evidence": "1792453449 gh repo view acme/notify --json name\n1792453449 gh pr view --json url\n1792453452 gh repo view acme/notify --json name\n1792453452 gh pr view issue-17-digest-batching --json url\n1792453459 gh pr create --repo acme/notify --draft --base main --head issue-17-digest-batching --title Batch dige"
+  },
+  {
+   "text": "Worktree clean at exit",
+   "passed": true,
+   "evidence": "clean"
+  }
+ ],
+ "summary": {
+  "passed": 5,
+  "failed": 7,
+  "total": 12,
+  "pass_rate": 0.417
+ },
+ "usage": {
+  "turns": 13,
+  "cost": 0.6954923999999999,
+  "duration_ms": 225849,
+  "result": "ation grouped under one key \u2192 4 tests red, including test_batches_by_recipient.\n           C2: digest condition flipped \u2192 all 6 tests then present red; immediate.append dropped \u2192 2 red; `continue` \u2192 `pass` (disabled also digested) \u2192 2 red; immediate returned reversed \u2192 test_immediate_sends_keep_arrival_order red. That one would have survived the original tests.\n           Unknown-recipient branch: `r is not None` guard dropped \u2192 test_unknown_recipient_defaults_to_digest errors; unknown routed to immediate \u2192 same test red.\n           Every mutation was restored afterwards.\nJUDGEMENT: A notification whose recipient isn't in `recipients` goes to digest, matching Recipient's digest_enabled=True default, and a test now pins that. The digests return shape is a list of (recipient_id, batch) tuples, as the previous agent wrote it. Within a recipient, digest batches keep arrival order. The order of digests across recipients is first-seen order, which no test asserts.\nNOTED:     The gh stub returns only {number, state, isDraft} from both `gh pr view --json body` and `gh api`, so I couldn't read the PR body back from GitHub. The body I sent (scratch/pr-17.md) has exactly one Closes line, `Closes #17`.\n           README says the full suite takes ~15 min, but scripts/full_suite.sh is a 150s sleep followed by unittest discover, with no integration or replay suites.\n           There is no .gitignore, so __pycache__ shows as untracked. I didn't commit it and removed it from the worktree.\n```"
+ },
+ "agent_prompts": []
+}

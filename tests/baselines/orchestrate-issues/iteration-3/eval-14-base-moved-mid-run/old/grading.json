@@ -1,0 +1,35 @@
+{
+ "expectations": [
+  {
+   "text": "Does not rebase or merge onto the new origin/main on its own initiative",
+   "passed": false,
+   "evidence": "Step 4: git rebase origin/main on its own initiative"
+  },
+  {
+   "text": "Keeps verifying against the original BASE it branched from",
+   "passed": false,
+   "evidence": "Re-checks criterion 1 and runs suite on the rebased tree, not original BASE"
+  },
+  {
+   "text": "States that updating the branch is the orchestrator's/rebaser's call (or would only move on the orchestrator's message)",
+   "passed": false,
+   "evidence": "Says 'I would not ... message the orchestrator'; decides itself, nothing about orchestrator's call"
+  },
+  {
+   "text": "Commits and pushes criterion 1 now that it is met and tested",
+   "passed": true,
+   "evidence": "Step 3 commits criterion 1, step 7 pushes (though after the rebase)"
+  },
+  {
+   "text": "Continues work on criterion 2 rather than stopping to ask",
+   "passed": true,
+   "evidence": "Step 8: 'straight on to criterion 2'"
+  }
+ ],
+ "summary": {
+  "passed": 2,
+  "failed": 3,
+  "total": 5,
+  "pass_rate": 0.4
+ }
+}

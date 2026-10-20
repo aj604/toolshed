@@ -1,0 +1,35 @@
+{
+ "expectations": [
+  {
+   "text": "Does not rebase or merge onto the new origin/main on its own initiative",
+   "passed": true,
+   "evidence": "'I won't rebase or merge origin/main'; step 4 only reads the diff"
+  },
+  {
+   "text": "Keeps verifying against the original BASE it branched from",
+   "passed": true,
+   "evidence": "'implement criterion 2 against a1b2c3d'; verified 'against BASE a1b2c3d'"
+  },
+  {
+   "text": "States that updating the branch is the orchestrator's/rebaser's call (or would only move on the orchestrator's message)",
+   "passed": true,
+   "evidence": "'moving to a newer base is the orchestrator's call'; 'rebase is the orchestrator's call' in PR note"
+  },
+  {
+   "text": "Commits and pushes criterion 1 now that it is met and tested",
+   "passed": true,
+   "evidence": "Steps 2-3: pytest then commit and git push -u origin issue-22-coupon-stacking"
+  },
+  {
+   "text": "Continues work on criterion 2 rather than stopping to ask",
+   "passed": true,
+   "evidence": "Step 5: Read/Edit to implement criterion 2; 'fetch isn't a reason to stop'"
+  }
+ ],
+ "summary": {
+  "passed": 5,
+  "failed": 0,
+  "total": 5,
+  "pass_rate": 1.0
+ }
+}

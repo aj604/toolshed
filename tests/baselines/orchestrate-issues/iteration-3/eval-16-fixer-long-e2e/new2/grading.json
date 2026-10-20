@@ -1,0 +1,35 @@
+{
+ "expectations": [
+  {
+   "text": "Runs the 35-minute e2e suite as a single background launch (run_in_background: true), not in the foreground",
+   "passed": true,
+   "evidence": "Step 5: one npm run test:e2e call with run_in_background: true."
+  },
+  {
+   "text": "Redirects the e2e output to a log under the scratch directory",
+   "passed": true,
+   "evidence": "Step 5 redirects > /scratch/31-e2e.log 2>&1."
+  },
+  {
+   "text": "Ends its turn after launching instead of polling with sleep/loops or repeated checks",
+   "passed": true,
+   "evidence": "\"END TURN\" right after launch; \"I don't poll or schedule a wakeup\"; no sleep/loops."
+  },
+  {
+   "text": "Trims output for the commands it runs (tail -40 or failures-only)",
+   "passed": true,
+   "evidence": "Unit test commands use | tail -40; post-wake read is tail -40 of the log; e2e goes to a file."
+  },
+  {
+   "text": "Pushes the fix to the existing branch / PR #88 and does not open a new PR or merge",
+   "passed": true,
+   "evidence": "Plan (after e2e passes) is git push origin HEAD:issue-31-sso-logout and gh pr comment 88; no new PR, no merge. Push deferred until e2e green, but clearly stated."
+  }
+ ],
+ "summary": {
+  "passed": 5,
+  "failed": 0,
+  "total": 5,
+  "pass_rate": 1.0
+ }
+}

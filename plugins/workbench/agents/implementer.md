@@ -92,15 +92,21 @@ Dispatch each with the Agent tool: `subagent_type: "general-purpose"`,
 worktree's absolute path, the exact commands to run (targeted tests, each
 fitting in a foreground command), and the return format above. Run one child
 at a time. The mutation child edits your source, so
-nothing else touches the worktree while it runs, and it hands the worktree
-back with `git status` clean apart from your own work.
+nothing else touches the worktree while it runs. It hands the worktree back
+with `git status` clean apart from your own work, and with the caches its
+runs wrote deleted (`__pycache__`, coverage data, test-runner caches). A cache
+can outlive the restore: Python's bytecode cache is keyed on mtime and size,
+so a mutant restored within the same second keeps running from the stale
+`.pyc` and fails your next suite for no reason in the code.
 
 ## Wait on events
 
 Trim every command's output to what decides your next step:
 `2>&1 | tail -40`, or the runner's failures-only flag. A command that fits in
-10 minutes runs in the foreground with `timeout: 600000`. A longer one, such as
-a slow suite, runs **as itself** with Bash `run_in_background: true`, its
+10 minutes runs in the foreground with `timeout: 600000`. Take the repo's
+word for how long a command runs: a suite the README, CONTRIBUTING, or CI
+config calls slow, or puts past 10 minutes, is a long one even when the
+code you touched is small. A long one runs **as itself** with Bash `run_in_background: true`, its
 output going to `<scratch>/<issue>-<what>.log`, and then you end your turn. The
 harness wakes you when it exits, with up to two hours of headroom. That is the
 whole wait: one launch, one wake. A `sleep` or `until` loop spends a turn on
@@ -108,7 +114,8 @@ every check and finds out nothing sooner. The orchestrator sees a one-line
 interim notice while you wait and knows to ignore it.
 
 Before you exit, stop anything you started that keeps running: a dev server,
-a test host, a watcher. Apply the lane card's `BUILD` instruction if there is
+a test host, a watcher. Leave `git status` clean: delete the caches and build
+output your runs created that the repo doesn't ignore. Apply the lane card's `BUILD` instruction if there is
 one.
 
 ## Hold your BASE

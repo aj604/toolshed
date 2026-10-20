@@ -178,6 +178,80 @@
         "Dispatches a fresh fixer (not SendMessage to the old implementer/fixer)",
         "Keeps the other three lanes advancing"
       ]
+    },
+    {
+      "id": 14,
+      "name": "base-moved-mid-run",
+      "agent": "implementer",
+      "method": "rehearsal: agent-harness/run-rehearsal.py, graded blind",
+      "prompt": "You are impl-22 in worktree /work/impl-22 (repo acme/shop, Python, `pytest -q` runs in 3 min). BASE: main (you branched from main at a1b2c3d). BRANCH: issue-22-coupon-stacking. You are about two-thirds done: criterion 1 of 2 is implemented and tested, uncommitted. You just ran `git fetch` and see origin/main is now 6 commits ahead of a1b2c3d, including a merged PR from another lane that touches src/cart/pricing.py — a file you are also editing. No message from the orchestrator. What do you do next, up to the point you would end your turn (or keep going if you wouldn't)?",
+      "expected_output": "Holds its BASE: commits and pushes criterion 1, keeps verifying against a1b2c3d, leaves updating the branch to the orchestrator, and carries on with criterion 2.",
+      "files": [],
+      "assertions": [
+        "Does not rebase or merge onto the new origin/main on its own initiative",
+        "Keeps verifying against the original BASE it branched from",
+        "States that updating the branch is the orchestrator's/rebaser's call (or would only move on the orchestrator's message)",
+        "Commits and pushes criterion 1 now that it is met and tested",
+        "Continues work on criterion 2 rather than stopping to ask"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "compaction-handoff",
+      "agent": "implementer",
+      "method": "rehearsal: agent-harness/run-rehearsal.py, graded blind",
+      "prompt": "You are impl-9 in worktree /work/impl-9 (repo acme/sched, Go). Issue #9 has 4 acceptance criteria. Looking back at the conversation, everything before the last few messages appears to you only as a summary block: 'Summary of earlier work: implemented criteria 1-2 in internal/cron/parse.go and internal/cron/next.go with tests; started criterion 3 (timezone handling) in internal/cron/tz.go.' `git diff --stat main...HEAD` plus the working tree shows 430 changed lines across files the issue names. You were about to re-open internal/cron/next.go to recall how you handled DST in criterion 2. What do you do next, up to the point you would end your turn?",
+      "expected_output": "Reads the summary block as compaction and stops: commits and pushes what is coherent, opens a partial draft PR, and reports done / not done / next.",
+      "files": [],
+      "assertions": [
+        "Recognizes the summary block as a sign its context was compacted and treats it as a stop signal",
+        "Stops and hands off instead of continuing criterion 3",
+        "Commits and pushes whatever is coherent",
+        "Opens a draft PR marked as partial (with Closes #9 or equivalent linkage)",
+        "Reports exactly what is done, what isn't, and what the next agent should pick up"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "fixer-long-e2e",
+      "agent": "fixer",
+      "method": "rehearsal: agent-harness/run-rehearsal.py, graded blind",
+      "prompt": "You are fix-31-r2 in worktree /work/fix-31 (repo acme/portal, BRANCH: issue-31-sso-logout, open PR #88). The review comment you must address says: 'Logout does not clear the refresh-token cookie; add a test.' You have made the one-line fix in src/auth/logout.ts and added a unit test; `npm run test:unit -- auth` passes in 20s. The repo's CONTRIBUTING.md says the Playwright e2e suite (`npm run test:e2e`) must pass for any auth change and takes about 35 minutes. Scratch dir: /scratch. What do you do next, up to the point you would end your turn?",
+      "expected_output": "Launches the 35-minute e2e suite once in the background with a scratch log, ends its turn without polling, and pushes to PR #88 only.",
+      "files": [],
+      "assertions": [
+        "Runs the 35-minute e2e suite as a single background launch (run_in_background: true), not in the foreground",
+        "Redirects the e2e output to a log under the scratch directory",
+        "Ends its turn after launching instead of polling with sleep/loops or repeated checks",
+        "Trims output for the commands it runs (tail -40 or failures-only)",
+        "Pushes the fix to the existing branch / PR #88 and does not open a new PR or merge"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "real-implementer-children",
+      "agent": "implementer",
+      "method": "real run: agent-harness/run-impl.sh in substrate-notify, graded from the transcript by agent-harness/grade-real.py",
+      "prompt": "agent-harness/lane-card-17.txt",
+      "expected_output": "Verifies the stopped agent's work, hands the mutation loop and the cold criteria walk to foreground child agents (actual Agent tool calls), strengthens the weak 50-cap test, runs the ~15-minute full suite in the background without polling, pushes, opens a draft PR with Closes #17, and exits with a clean worktree.",
+      "files": [
+        "agent-harness/substrate-notify/"
+      ],
+      "assertions": [
+        "Invokes at least one child agent via the Agent tool (top-level tool_use in the transcript)",
+        "Dispatches a mutation-loop child (Agent prompt about mutations / SURVIVED)",
+        "Mutation child prompt carries the worktree absolute path and a targeted test command",
+        "Dispatches a separate criteria-walk child that reads git diff cold",
+        "Children run one at a time in the foreground (no run_in_background, never two in one message)",
+        "Mutation loop found the weak split test: final tests assert the 50-item cap",
+        "Long full suite launched once with run_in_background, not in the foreground",
+        "No sleep/until polling and no repeated log reads while waiting",
+        "Test command output trimmed (tail/-q/log redirect)",
+        "Branch pushed to the remote",
+        "Draft PR opened with 'Closes #17'",
+        "Worktree clean at exit"
+      ]
     }
-  ]
+  ],
+  "note_agent_evals": "Evals 14-17 test the workbench role agents (implementer, fixer), not the orchestrator. Arms: the agent definitions at a commit, loaded with `claude -p --plugin-dir <plugin> --agent workbench:<role>`. See agent-harness/README.md."
 }

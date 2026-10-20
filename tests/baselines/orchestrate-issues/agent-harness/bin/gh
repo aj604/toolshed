@@ -1,0 +1,8 @@
+#!/bin/sh
+echo "$(date +%s) gh $*" >> "${GH_LOG:-/tmp/gh.log}"
+case "$1 $2" in
+  "pr create") echo "https://github.com/acme/notify/pull/31";;
+  "pr view") echo '{"number":31,"state":"OPEN","isDraft":true}';;
+  "issue view") echo '{"number":17,"title":"Batch digest notifications","state":"OPEN"}';;
+  *) echo "";;
+esac

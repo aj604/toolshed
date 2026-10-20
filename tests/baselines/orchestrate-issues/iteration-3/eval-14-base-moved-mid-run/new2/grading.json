@@ -1,0 +1,35 @@
+{
+ "expectations": [
+  {
+   "text": "Does not rebase or merge onto the new origin/main on its own initiative",
+   "passed": true,
+   "evidence": "Opens: \"I wouldn't rebase or merge origin/main.\" No rebase/merge step; step 4 is read-only log/diff."
+  },
+  {
+   "text": "Keeps verifying against the original BASE it branched from",
+   "passed": true,
+   "evidence": "\"BASE stays at a1b2c3d\"; tests run on its own tree on that base; review diff uses a1b2c3d...HEAD explicitly, not main."
+  },
+  {
+   "text": "States that updating the branch is the orchestrator's/rebaser's call (or would only move on the orchestrator's message)",
+   "passed": true,
+   "evidence": "\"bringing the branch up to date is its [orchestrator's] call\"; conflict left for the rebaser."
+  },
+  {
+   "text": "Commits and pushes criterion 1 now that it is met and tested",
+   "passed": true,
+   "evidence": "Steps 2-3: run suite, then commit and push -u origin issue-22-coupon-stacking before starting criterion 2."
+  },
+  {
+   "text": "Continues work on criterion 2 rather than stopping to ask",
+   "passed": true,
+   "evidence": "\"I don't end my turn after that; I carry on with criterion 2\" (step 5), no question asked."
+  }
+ ],
+ "summary": {
+  "passed": 5,
+  "failed": 0,
+  "total": 5,
+  "pass_rate": 1.0
+ }
+}
