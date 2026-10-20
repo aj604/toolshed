@@ -1,0 +1,80 @@
+{
+ "expectations": [
+  {
+   "text": "Invokes at least one child agent via the Agent tool (top-level tool_use in the transcript)",
+   "passed": true,
+   "evidence": "2 Agent call(s): general-purpose/sonnet/bg=False; general-purpose/sonnet/bg=False"
+  },
+  {
+   "text": "Dispatches a mutation-loop child (Agent prompt about mutations / SURVIVED)",
+   "passed": true,
+   "evidence": "1 matching"
+  },
+  {
+   "text": "Mutation child prompt carries the worktree absolute path and a targeted test command",
+   "passed": true,
+   "evidence": "checked worktree path + test_batcher command in prompt"
+  },
+  {
+   "text": "Dispatches a separate criteria-walk child that reads git diff cold",
+   "passed": true,
+   "evidence": "2 matching"
+  },
+  {
+   "text": "Children run one at a time in the foreground (no run_in_background, never two in one message)",
+   "passed": true,
+   "evidence": "bg=0 parallel=False"
+  },
+  {
+   "text": "Mutation loop found the weak split test: final tests assert the 50-item cap",
+   "passed": true,
+   "evidence": "test_batcher.py asserts cap"
+  },
+  {
+   "text": "Long full suite launched once with run_in_background, not in the foreground",
+   "passed": true,
+   "evidence": "bg=1 fg=0"
+  },
+  {
+   "text": "No sleep/until polling and no repeated log reads while waiting",
+   "passed": true,
+   "evidence": "poll cmds=0 log reads=1"
+  },
+  {
+   "text": "Test command output trimmed (tail/-q/log redirect)",
+   "passed": true,
+   "evidence": "2/2 trimmed"
+  },
+  {
+   "text": "Branch pushed to the remote",
+   "passed": true,
+   "evidence": "740ed5f Batch digest notifications by recipient (#17)\n1268732 Initial notify service"
+  },
+  {
+   "text": "Draft PR opened with 'Closes #17'",
+   "passed": true,
+   "evidence": "1792455086 gh pr view --json url\n1792455104 gh pr view issue-17-digest-batching --json url\n1792455110 gh pr view issue-17-digest-batching --json url\n1792455119 gh pr view issue-17-digest-batching --json url\n1792455134 gh pr view issue-17-digest-batching --json url\n1792455136 gh pr view issue-17-dige"
+  },
+  {
+   "text": "Worktree clean at exit",
+   "passed": true,
+   "evidence": "clean"
+  }
+ ],
+ "summary": {
+  "passed": 12,
+  "failed": 0,
+  "total": 12,
+  "pass_rate": 1.0
+ },
+ "usage": {
+  "turns": 2,
+  "cost": 0.9137657999999999,
+  "duration_ms": 23198,
+  "result": "nt branch: treating unknown as disabled (M6) turned `test_unknown_recipient_defaults_to_digest` red.\n- AC3: `MAX_BATCH` 51 (M7) turned the split and max tests red. `MAX_BATCH` 49 (M8) turned the exactly-50, split and max tests red. Not splitting (M9) turned the split test red. An off-by-one slice (M10) turned the exactly-50 and split tests red. Reversing a batch (M11) turned 3 red.\nJUDGEMENT:\n- A notification whose recipient is missing from `recipients` goes into a digest, because `Recipient.digest_enabled` defaults to `True`. A test pins this.\n- `digests` is a list of `(recipient_id, [notifications])` tuples, ordered by when each recipient first appears. The issue didn't specify the shape, and the test doesn't fix the order of the list.\n- I ran the full suite in the background because the README says it takes about 15 minutes. The script itself sleeps about 2.5 minutes before running the unit tests.\n- I didn't add an empty-input test. The cold review suggested one, but it isn't in the acceptance criteria.\n- I couldn't read the PR body back: the `gh` here is a stub whose `pr view` returns only number, state and draft status. The body file I submitted, `scratch/pr-17.md`, has exactly one `Closes #17` line.\nNOTED:     The repo has no `.gitignore`, so `__pycache__` folders show up as untracked after every test run. `scripts/full_suite.sh` only sleeps and then runs unit discovery; it contains no actual integration or replay suites, despite what it prints and what the README says."
+ },
+ "agent_prompts": [
+  "{\"description\": \"Mutation loop for batcher\", \"subagent_type\": \"general-purpose\", \"model\": \"sonnet\", \"run_in_background\": false, \"prompt\": \"You are running a mutation-testing loop in a git worktree. Worktree (absolute path): <runs>/new2/run-3/work\\n\\nTarget: src/digest/batcher.py (function plan_sends, constant MAX_BATCH). Tests: tests/test_batcher.py.\\nTest command (run from the worktree root, with bytecode caching disabled): \\n  cd <worktree> && PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest tests.test_batcher -q 2>&1 | tail -15\\n\\nAcceptance criteria being protected:\\n1. Digests batch notifications by recipient.\\n2. A recipient with digest disabled gets immediate sends, in arrival order.\\n3. A recipient's batch holds at most 50 items; larger batches split.\\n\\nApply each mutation below ONE AT A TIME: edit the source, run the test command, record which test(s) went red (or SURVIVED), then restore with `git checkout -- src/digest/batcher.py` before the next one. Mutations:\\n M1 (crit 1): group everything under one key, e.g. `grouped[\\\"all\\\"].append(n)` instead of `grouped[n.recipient]`.\\n M2 (crit 1): drop the append into grouped (notifications for digest recipients lost).\\n M3 (crit 2): flip `not r.digest_enabled` to `r.digest_enabled`.\\n M4 (crit 2): reverse immediate on return (`return digests, immediate[::-1]`).\\n M5 (crit 2): remove the `continue` (disabled recipients also land in digests).\\n M6 (crit 2 / unknown-recipient branch): change `r is not None and not r.digest_enabled` to `r is None or not r.digest_enabled`.\\n M7 (crit 3): MAX_BATCH = 51.\\n M8 (crit 3): MAX_BATCH = 49.\\n M9 (crit 3): no split \\u2014 `digests.append((rid, items))` once per recipient instead of the range loop.\\n M10 (crit 3): off-by-one slice `items[i:i + MAX_BATCH - 1]`.\\n M11 (crit 3): sort/reverse items within a batch (`items[i:i + MAX_BATCH][::-1]`).\\n\\nRules: do not edit tests. Do not commit. When finished, ensure `git status --short` in the worktree prints nothing (restore the source; delete any __pycache__ dirs with `find <worktree> -name __pycache__ -type d -prune -exec rm -rf {} +`). Run `git diff --stat` to confirm nothing changed.\\n\\nReturn ONLY a compact table: mutation id | criterion | red test name(s) or SURVIVED. Then one line with final `git status --short` output (should be empty).\"}",
+  "{\"description\": \"Cold criteria walk of diff\", \"subagent_type\": \"general-purpose\", \"model\": \"sonnet\", \"run_in_background\": false, \"prompt\": \"Act as a cold code reviewer. Read-only: do NOT edit, create, or run anything that writes files in the worktree (do not run tests; a separate suite run is in progress there).\\n\\nWorktree: <runs>/new2/run-3/work\\nGet the diff with: git -C <worktree> diff main...HEAD\\nYou may read any file in the worktree (README.md, src/digest/models.py, etc.).\\n\\nThe issue (#17 \\u2014 Batch digest notifications) says:\\n\\\"Digest mode should batch notifications instead of sending each one.\\nAcceptance criteria:\\n1. Digests batch notifications by recipient.\\n2. A recipient with digest disabled gets immediate sends, in arrival order.\\n3. A recipient's batch holds at most 50 items; larger batches split.\\nImplement in `src/digest/batcher.py` as `plan_sends(notifications, recipients) -> (digests, immediate)`.\\\"\\n\\nWalk criterion by criterion. For each, decide whether the CODE (not a description) meets it, and whether a test in the diff pins it. Also look for: the signature/location differing from the spec; a doc (README etc.) the change now contradicts; any original test assertion that was dropped or weakened (compare against main's versions of any modified test files); behaviour on edge cases a reviewer would flag (unknown recipient not in `recipients`, empty input, order of digests).\\n\\nReturn ONLY: a list of gaps, each with file and identifier and one sentence, or the single word `none`. Add at most 3 lines of non-gap observations if notable.\"}"
+ ]
+}

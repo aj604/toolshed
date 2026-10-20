@@ -41,22 +41,26 @@ It may also carry these blocks. Each one overrides your own reading:
    the reading most consistent with the surrounding code, and name the reading
    you chose under JUDGEMENT.
 2. **Tests follow the repo's convention.** If the repo tests this kind of
-   change, add tests. Run the WHOLE suite, every package or workspace member
-   and not just the one you touched, and make it pass.
+   change, add tests. The WHOLE suite, every package or workspace member and
+   not just the one you touched, passes on your final commit (see *Wait on
+   events* for a suite that runs long).
 3. **Prove the tests can fail.** The reviewer will mutate your implementation,
    and a surviving mutation is the most common reason a review fails. Do it
    first. For each acceptance criterion, break the line that delivers it (flip
    the condition, drop the call, return early), confirm a test goes red, then
    restore it. Do the same for each new branch. Where a mutation survives, add
-   the test that kills it.
-4. **Walk the criteria against your diff before opening the PR.** Read
-   `git diff <BASE>...HEAD` cold, as a reviewer would, criterion by criterion.
-   Look for a criterion met in the PR description but not in the code, a doc
-   or ADR the change now contradicts, or an original test assertion you
-   dropped. These are the failures reviewers find most often after surviving
-   mutations.
+   the test that kills it. Each mutation needs only the targeted tests, not the
+   whole suite; hand the loop to a child.
+4. **Walk the criteria against your diff before opening the PR.** A fresh
+   child reads `git diff <BASE>...HEAD` cold, as a reviewer would, criterion
+   by criterion. It is a better judge than you, because it doesn't know what
+   you meant. It looks for a criterion met in the PR description but not in
+   the code, a doc or ADR the change now contradicts, or an original test
+   assertion you dropped. These are the failures reviewers find most often
+   after surviving mutations.
 5. **Match the surrounding code**: its naming, its idiom, its comment
-   density. Read neighbouring files before writing new ones.
+   density. Read neighbouring code before writing new files, in excerpts:
+   grep for the pattern, then read the matching region.
 6. **Commit on BRANCH, push it, and open a DRAFT pull request into BASE**
    whose body contains the line `Closes #<issue>`. Draft is deliberate: CI
    starts now, and the PR won't look ready to a human before it has been
@@ -72,13 +76,61 @@ It may also carry these blocks. Each one overrides your own reading:
 - **Never merge your own PR**, never touch another issue's branch, and stay in
   your worktree.
 
-## Run things in the foreground, and clean up
+## Keep your context for the code
 
-Run builds, tests, and any CI watch as ordinary blocking commands, never in
-the background. A backgrounded command wakes the orchestrator with a
-notification that isn't your result. Before you exit, stop anything you
-started that keeps running: a dev server, a test host, a watcher. Apply the
-lane card's `BUILD` instruction if there is one.
+Your context is the lane's budget, and the design and the edits are the only
+work that needs all of it. The mutation loop and the cold read don't. Hand
+those to **child agents** and keep only their short return:
+
+| Child | Its job | It returns |
+|---|---|---|
+| Mutation loop | The breaks in *What done means* 3, one at a time, restoring each | Per criterion and branch: the break, the test that went red, or `SURVIVED` |
+| Criteria walk | *What done means* 4, on the pushed diff | Each gap, with file and identifier, or `none` |
+
+Dispatch each with the Agent tool: `subagent_type: "general-purpose"`,
+`model: "sonnet"`, `run_in_background: false`. Its prompt carries your
+worktree's absolute path, the exact commands to run (targeted tests, each
+fitting in a foreground command), and the return format above. Run one child
+at a time. The mutation child edits your source, so
+nothing else touches the worktree while it runs. It hands the worktree back
+with `git status` clean apart from your own work, and with the caches its
+runs wrote deleted (`__pycache__`, coverage data, test-runner caches). A cache
+can outlive the restore: Python's bytecode cache is keyed on mtime and size,
+so a mutant restored within the same second keeps running from the stale
+`.pyc` and fails your next suite for no reason in the code.
+
+## Wait on events
+
+Trim every command's output to what decides your next step:
+`set -o pipefail; <cmd> 2>&1 | tail -40`, or the runner's failures-only flag.
+Without `pipefail` the pipe reports `tail`'s exit status, so a failing suite
+looks like a pass. A command that fits in
+10 minutes runs in the foreground with `timeout: 600000`. Take the repo's
+word for how long a command runs: a suite the README, CONTRIBUTING, or CI
+config calls slow, or puts past 10 minutes, is a long one even when the
+code you touched is small. A long one runs **as itself** with Bash `run_in_background: true`, its
+output going to `<scratch>/<issue>-<what>.log`, and then you end your turn. The
+harness wakes you when it exits, with up to two hours of headroom. That is the
+whole wait: one launch, one wake. A `sleep` or `until` loop spends a turn on
+every check and finds out nothing sooner. The orchestrator sees a one-line
+interim notice while you wait and knows to ignore it.
+
+Before you exit, stop anything you started that keeps running: a dev server,
+a test host, a watcher. Leave `git status` clean: delete the caches and build
+output your runs created that the repo doesn't ignore. Apply the lane card's `BUILD` instruction if there is
+one.
+
+## Hold your BASE
+
+Verify against the BASE you branched from, once. Other lanes merge while you
+work, and the base will move. Bringing your branch up to date is the
+orchestrator's call, made after review and done by a rebaser. Move to a new
+base only when the orchestrator messages you to.
+
+## Push as you go
+
+Each time a criterion is met and its tests pass, commit and push. A lane that
+dies mid-run then leaves a branch the next agent can start from.
 
 ## The scratchpad is shared
 
@@ -90,11 +142,14 @@ nothing downstream catches it.
 
 ## Stop before you run out
 
-Stop and hand off rather than pushing on if either of these happens:
+You can't see how much context you have left, so watch for these signs
+instead. Stop and hand off on the first one:
 
-- the change is turning out much bigger than one bounded change, and you are
-  deep in files the issue never named;
-- you are noticeably far into your context.
+- the diff passes ~800 changed lines, or you are editing files the issue
+  never named;
+- your earlier work appears to you only as a summary, meaning your context
+  has been compacted;
+- you are re-reading a file to recover something you had already worked out.
 
 Commit and push whatever is coherent, open the draft PR marked as partial, and
 report exactly what is done, what isn't, and what the next agent should pick

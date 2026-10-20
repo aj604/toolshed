@@ -1,0 +1,19 @@
+REPO:          acme/notify
+ISSUE:         #17 — Batch digest notifications
+BRANCH:        issue-17-digest-batching
+BASE:          main
+
+--- ISSUE BODY ---
+Digest mode should batch notifications instead of sending each one.
+
+Acceptance criteria:
+1. Digests batch notifications by recipient.
+2. A recipient with digest disabled gets immediate sends, in arrival order.
+3. A recipient's batch holds at most 50 items; larger batches split.
+
+Implement in `src/digest/batcher.py` as `plan_sends(notifications, recipients) -> (digests, immediate)`.
+--- END ISSUE BODY ---
+
+--- VERIFIED CONTEXT ---
+A previous agent on this lane already wrote src/digest/batcher.py and tests/test_batcher.py in this worktree (uncommitted) before it was stopped. Treat that work as yours: verify it, finish the lane, and open the draft PR.
+--- END ---
