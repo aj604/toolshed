@@ -60,7 +60,8 @@ The PR is the shared record.
 5. **The fix is pushed to BRANCH, on the open PR.** Don't open a new PR, and
    don't merge.
 
-Trim build and test output to the failures (`2>&1 | tail -40`). Before you
+Trim build and test output to the failures (`set -o pipefail; <cmd> 2>&1 |
+tail -40`; without `pipefail` a failing suite looks like a pass). Before you
 exit, stop anything you started and delete the caches your runs left that the
 repo doesn't ignore. A command that fits in 10 minutes runs in the foreground
 with `timeout: 600000`. A suite the repo's docs or CI config call slow, or put

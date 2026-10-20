@@ -102,7 +102,9 @@ so a mutant restored within the same second keeps running from the stale
 ## Wait on events
 
 Trim every command's output to what decides your next step:
-`2>&1 | tail -40`, or the runner's failures-only flag. A command that fits in
+`set -o pipefail; <cmd> 2>&1 | tail -40`, or the runner's failures-only flag.
+Without `pipefail` the pipe reports `tail`'s exit status, so a failing suite
+looks like a pass. A command that fits in
 10 minutes runs in the foreground with `timeout: 600000`. Take the repo's
 word for how long a command runs: a suite the README, CONTRIBUTING, or CI
 config calls slow, or puts past 10 minutes, is a long one even when the
