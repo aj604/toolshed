@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1280, initial-scale=1">
+  <title>Workbench — social preview</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 1280px; height: 640px; }
+    body { background: #18211f; color: #f5f0e6; font-family: Arial, sans-serif; }
+    .card { width: 1280px; height: 640px; padding: 64px; display: grid; grid-template-columns: 560px 536px; gap: 56px; }
+    .intro { display: flex; flex-direction: column; align-items: flex-start; }
+    .brand { display: flex; align-items: center; gap: 20px; }
+    .mark { width: 64px; height: 64px; }
+    .eyebrow { color: #b7c2bb; font: 16px 'Courier New', monospace; letter-spacing: 2px; }
+    h1 { margin: 54px 0 22px; font-size: 100px; font-weight: 700; letter-spacing: -6px; line-height: 1; }
+    .tagline { margin: 0; font-size: 44px; line-height: 1.16; letter-spacing: -1.5px; }
+    .tagline strong { color: #ff784f; font-weight: 400; }
+    .repo { margin-top: auto; color: #b7c2bb; font: 21px 'Courier New', monospace; }
+    .repo span { color: #ff784f; margin-right: 12px; }
+    .skills { border: 1px solid #3a4943; border-radius: 24px; padding: 28px; background: #202c27; }
+    .skills h2 { margin: 0 0 18px; color: #b7c2bb; font: 14px 'Courier New', monospace; letter-spacing: 2px; }
+    .skill { display: grid; grid-template-columns: 24px 1fr; column-gap: 16px; align-content: center; height: 82px; border-bottom: 1px solid #3a4943; }
+    .skill:last-child { border-bottom: 0; }
+    .number { color: #ff784f; font: 15px 'Courier New', monospace; padding-top: 3px; }
+    .name { font: 18px 'Courier New', monospace; color: #f5f0e6; white-space: nowrap; }
+    .outcome { margin-top: 8px; font-size: 21px; color: #b7c2bb; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <section class="intro" aria-label="Workbench">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true">
+          <path d="M300 394h90l-65 334h-90zm334 0h90l65 334h-90z" fill="#f5f0e6"/>
+          <rect x="294" y="584" width="436" height="64" rx="10" fill="#f5f0e6"/>
+          <rect x="192" y="296" width="640" height="108" rx="24" fill="#ff784f"/>
+        </svg>
+        <div class="eyebrow">CLAUDE CODE PLUGIN</div>
+      </div>
+      <h1>Workbench</h1>
+      <p class="tagline">Put your coding<br><strong>agents to work.</strong></p>
+      <div class="repo"><span>↗</span>github.com/aj604/toolshed</div>
+    </section>
+    <section class="skills" aria-label="Five Workbench skills">
+      <h2>FIVE SKILLS FOR SHIPPING WITH AGENTS</h2>
+      <div class="skill">
+        <div class="number">01</div>
+        <div><div class="name">enhance</div><div class="outcome">One useful improvement</div></div>
+      </div>
+      <div class="skill">
+        <div class="number">02</div>
+        <div><div class="name">orchestrate-issues</div><div class="outcome">An issue graph, unblocked</div></div>
+      </div>
+      <div class="skill">
+        <div class="number">03</div>
+        <div><div class="name">incremental-enhancement-lanes</div><div class="outcome">Parallel stacks for your review</div></div>
+      </div>
+      <div class="skill">
+        <div class="number">04</div>
+        <div><div class="name">commit-to-pr</div><div class="outcome">Your changes, ready for a PR</div></div>
+      </div>
+      <div class="skill">
+        <div class="number">05</div>
+        <div><div class="name">pm-status</div><div class="outcome">What landed. What needs you.</div></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

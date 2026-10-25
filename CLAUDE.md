@@ -1,7 +1,11 @@
 # CLAUDE.md
 
-This repo is a **Claude Code plugin marketplace**, not an application. It publishes one plugin,
-`workbench` (`plugins/workbench/`). The plugin's only executable code is
+This repo builds **Workbench**, a Claude Code plugin with five skills for autonomous
+improvements, GitHub issue orchestration, parallel enhancement lanes, pull requests, and
+project status. `toolshed` is its marketplace name; preserve the install coordinates
+`aj604/toolshed` and `workbench@toolshed` when editing public copy.
+
+The plugin lives in `plugins/workbench/`. Its only executable code is
 `plugins/workbench/skills/orchestrate-issues/scripts/frontier.py`,
 `plugins/workbench/skills/incremental-enhancement-lanes/scripts/lanes.py`,
 `plugins/workbench/skills/pm-status/scripts/gather.py` and
@@ -9,6 +13,8 @@ This repo is a **Claude Code plugin marketplace**, not an application. It publis
 
 ## Layout
 
+- `README.md` — Workbench's public landing page; `plugins/workbench/README.md` is its usage guide.
+- `CONTRIBUTING.md` — contributor setup and validation; `docs/marketing.md` holds launch copy.
 - `.claude-plugin/marketplace.json` — marketplace manifest, lists plugins. **Must stay at repo
   root**: `/plugin marketplace add <owner>/<repo>` only finds `marketplace.json` there.
 - `plugins/workbench/` — `.claude-plugin/plugin.json` is its manifest; `skills/` and `agents/`
@@ -33,17 +39,11 @@ This repo is a **Claude Code plugin marketplace**, not an application. It publis
   to the `plugins` array in `.claude-plugin/marketplace.json`.
 - **Bump the version** in a plugin's `plugin.json` whenever its content changes — CI's version
   guard fails the PR otherwise (`.github/workflows/ci.yml`).
-- **Releases:** none are automated. The bare `vX.Y.Z` tags and Releases belong to the retired
-  `doc-lifecycle` (`v0.1.0` already exists), and installed doc-lifecycle upgrade lanes read the
-  latest Release — tag any future plugin release with a prefix, e.g. `workbench-v0.1.0`.
+- **Releases:** manual; use `workbench-vX.Y.Z` tags and preserve the existing Latest release
+  pointer. Before publishing a release or changing that pointer, read `docs/migration.md`
+  for the legacy upgrade constraint.
 - **Before committing a manifest:** run `claude plugin validate .` (CI runs the same).
 - **Test the marketplace locally:** `/plugin marketplace add /path/to/toolshed` (the repo root).
-
-## History
-
-`doc-lifecycle`, the plugin this marketplace originally shipped, is decommissioned; its source,
-engine, tests, dogfooded `.doc-lifecycle/` install, and lane workflows were removed from `main`.
-Recover any of it from git history — `v0.11.1` is the last release considered working.
 
 ## Agent skills
 

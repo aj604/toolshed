@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">Workbench</title>
+  <rect width="1024" height="1024" fill="#18211f"/>
+  <path d="M300 394h90l-65 334h-90zm334 0h90l65 334h-90z" fill="#f5f0e6"/>
+  <rect x="294" y="584" width="436" height="64" rx="10" fill="#f5f0e6"/>
+  <rect x="192" y="296" width="640" height="108" rx="24" fill="#ff784f"/>
+</svg>
