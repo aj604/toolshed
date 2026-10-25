@@ -1,18 +1,22 @@
 {
   "name": "workbench",
-  "version": "0.3.2",
-  "description": "An SDLC toolkit for Claude Code: orchestrate issue graphs, ship an autonomous improvement, run stacked enhancement lanes, turn changes into pull requests, and catch up on project status.",
+  "version": "0.3.3",
+  "description": "Put your coding agents to work. Five Claude Code skills to ship improvements, orchestrate GitHub issues, build parallel PR stacks, open pull requests, and catch up on what shipped.",
   "license": "MIT",
   "homepage": "https://github.com/aj604/toolshed",
   "repository": "https://github.com/aj604/toolshed",
   "keywords": [
-    "sdlc",
+    "developer-tools",
+    "claude-code",
+    "skills",
     "github",
     "issues",
     "orchestration",
     "subagents",
     "worktrees",
-    "code-review"
+    "code-review",
+    "pull-requests",
+    "project-status"
   ],
   "author": {
     "name": "Avery Jones",
