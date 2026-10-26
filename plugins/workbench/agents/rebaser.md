@@ -39,15 +39,19 @@ exit, stop anything you started and delete the caches your runs left that the
 repo doesn't ignore. A command that fits in 10 minutes runs in the foreground
 with `timeout: 600000`. A suite the repo's docs or CI config call slow, or put
 past 10 minutes, is a longer one: it runs as itself with Bash
-`run_in_background: true`, its output going to `<scratch>/<issue>-<what>.log`,
+`run_in_background: true`, its output going to `<scratch>/<issue>-<what>.log` (outside the
+worktree, where a stray file reads as uncommitted work),
 and then you end your turn. The harness wakes you when it exits, so there is
 nothing to poll.
 
 ## Report
 
 Post a comment on the PR whose first line is `## REBASE`, covering what moved,
-the conflicts you resolved, any renumber, and the suite result. Then return
-only:
+the conflicts you resolved, any renumber, and the suite result. Send it on
+stdin (`gh pr comment <PR> --repo <REPO> --body-file - <<'REBASE_EOF'` …
+`REBASE_EOF`), not through a file: a `rebase-<PR>.md` in your worktree is left
+behind as an untracked file, and the worktree then can't be cleaned up as
+finished. Then return only:
 
 ```
 PUSHED:     <sha> to <BRANCH>   (or: nothing, and why)

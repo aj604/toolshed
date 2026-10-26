@@ -109,7 +109,7 @@ looks like a pass. A command that fits in
 word for how long a command runs: a suite the README, CONTRIBUTING, or CI
 config calls slow, or puts past 10 minutes, is a long one even when the
 code you touched is small. A long one runs **as itself** with Bash `run_in_background: true`, its
-output going to `<scratch>/<issue>-<what>.log`, and then you end your turn. The
+output going to `<scratch>/<issue>-<what>.log` (outside the worktree), and then you end your turn. The
 harness wakes you when it exits, with up to two hours of headroom. That is the
 whole wait: one launch, one wake. A `sleep` or `until` loop spends a turn on
 every check and finds out nothing sooner. The orchestrator sees a one-line
@@ -135,7 +135,10 @@ dies mid-run then leaves a branch the next agent can start from.
 ## The scratchpad is shared
 
 Your worktree is yours; the scratch directory is not. Use filenames that carry
-the issue number (`pr-<n>.md`, not `pr.md`). After you open or edit the PR,
+the issue number (`<n>-suite.log`, not `suite.log`). Send PR bodies and
+comments to `gh` on stdin (`--body-file - <<'PR_EOF'` … `PR_EOF`), not through
+a file: a body file left in your worktree reads as uncommitted work, and the
+worktree can't be cleaned up when the lane lands. After you open or edit the PR,
 read its body back from GitHub and confirm that its only `Closes` line is
 yours. A body clobbered by another agent closes the wrong issue at merge, and
 nothing downstream catches it.

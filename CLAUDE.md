@@ -7,6 +7,7 @@ project status. `toolshed` is its marketplace name; preserve the install coordin
 
 The plugin lives in `plugins/workbench/`. Its only executable code is
 `plugins/workbench/skills/orchestrate-issues/scripts/frontier.py`,
+`plugins/workbench/skills/orchestrate-issues/scripts/prune_worktrees.py`,
 `plugins/workbench/skills/incremental-enhancement-lanes/scripts/lanes.py`,
 `plugins/workbench/skills/pm-status/scripts/gather.py` and
 `plugins/workbench/skills/pm-status/scripts/check_report.py` (`python3`, stdlib-only).
@@ -24,7 +25,7 @@ The plugin lives in `plugins/workbench/`. Its only executable code is
   smoke harness that takes `frontier.py`'s path as its argument. Not published, not run by CI.
 - `tests/baselines/workbench-import/` — eval and packaging records for the `enhance`,
   `incremental-enhancement-lanes`, and `commit-to-pr` skills. `tests/scripts/workbench-helpers_test.py`
-  exercises `lanes.py`, `gather.py` and `check_report.py` offline (`python3 tests/scripts/workbench-helpers_test.py`).
+  exercises `lanes.py`, `gather.py`, `check_report.py` and `prune_worktrees.py` offline (`python3 tests/scripts/workbench-helpers_test.py`).
   Neither is published or run by CI.
 - `tests/baselines/pm-status/` — `evals.json` for `pm-status` plus benchmark summaries. The evals
   run against private repos, so per-run reports stay out of this public repo.

@@ -138,6 +138,7 @@ and Claude Code's agent tools.
 | Component | Role |
 |---|---|
 | `orchestrate-issues/scripts/frontier.py` | Reads issue dependencies and classifies ready, in-flight, blocked, and completed work |
+| `orchestrate-issues/scripts/prune_worktrees.py` | Removes subagent worktrees whose lanes merged or closed, once they hold nothing GitHub lacks |
 | `incremental-enhancement-lanes/scripts/lanes.py` | Reconstructs branches, PRs, and stack bases for resume and verification |
 | `pm-status/scripts/gather.py` | Collects git, GitHub, and local-session facts and compares issue frontiers between runs |
 | `pm-status/scripts/check_report.py` | Checks report structure and open-PR coverage before presenting it |

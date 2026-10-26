@@ -503,5 +503,148 @@ Main is green and #12 is ready to merge.
         self.assertNotIn("PR #12", out)
 
 
+class PruneWorktrees(unittest.TestCase):
+    """prune_worktrees.py against a local origin with refs/pull/*/head and a fake `gh`."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        home = self.root / "home"
+        home.mkdir()
+        self.env = dict(os.environ, HOME=str(home), GIT_CONFIG_NOSYSTEM="1",
+                        GIT_CONFIG_GLOBAL=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                        GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+        self.origin = self.root / "origin.git"
+        self.repo = self.root / "repo"
+        self.git("init", "-q", "--bare", "-b", "main", str(self.origin))
+        self.git("init", "-q", "-b", "main", str(self.repo))
+        (self.repo / "app.txt").write_text("base\n")
+        self.git("-C", self.repo, "add", ".")
+        self.git("-C", self.repo, "commit", "-qm", "init")
+        self.git("-C", self.repo, "remote", "add", "origin", str(self.origin))
+        self.git("-C", self.repo, "push", "-q", "origin", "main")
+        self.git("-C", self.repo, "remote", "set-head", "origin", "main")
+        self.prs = []
+        bindir = self.root / "bin"
+        bindir.mkdir()
+        gh = bindir / "gh"
+        gh.write_text(f"#!{sys.executable}\nDATA = {str(self.root / 'prs.json')!r}\n"
+                      + f"ORIGIN = {str(self.origin)!r}\n" + """
+import json, subprocess, sys
+args = sys.argv[1:]
+prs = json.load(open(DATA))
+if args[:2] == ["repo", "view"]:
+    print("example/project")
+elif args[:2] == ["pr", "list"] and args[args.index("--state") + 1] == "open":
+    print("\\n".join(str(p["number"]) for p in prs if p["state"] == "OPEN"))
+elif args[:2] == ["pr", "list"]:
+    print(json.dumps(prs))
+elif args[0] == "api" and "/commits/" in args[-1]:
+    sha = args[-1].rsplit("/", 1)[1]
+    sys.exit(subprocess.run(["git", "-C", ORIGIN, "cat-file", "-e", sha + "^{commit}"]).returncode)
+else:
+    sys.exit("unexpected gh call: " + repr(args))
+""")
+        gh.chmod(0o755)
+        self.env["PATH"] = str(bindir) + os.pathsep + self.env.get("PATH", "")
+
+    def git(self, *args):
+        return subprocess.run(["git", *map(str, args)], env=self.env, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def worktree(self, name, branch, start="main"):
+        path = self.repo / ".claude/worktrees" / name
+        self.git("-C", self.repo, "worktree", "add", "-q", "-b", branch, path, start)
+        return path
+
+    def commit(self, path, text):
+        (path / "app.txt").write_text(text)
+        self.git("-C", path, "commit", "-qam", text.strip())
+        return self.git("-C", path, "rev-parse", "HEAD")
+
+    def pr(self, number, sha, branch, state, base="main"):
+        self.git("-C", self.origin, "update-ref", f"refs/pull/{number}/head", sha)
+        self.prs.append({"number": number, "state": state, "headRefName": branch, "baseRefName": base})
+
+    def prune(self, *args):
+        (self.root / "prs.json").write_text(json.dumps(self.prs))
+        script = SKILLS / "orchestrate-issues/scripts/prune_worktrees.py"
+        result = subprocess.run([sys.executable, str(script), "--json", *args], cwd=self.repo,
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return {Path(r["path"]).name: r for r in json.loads(result.stdout)}
+
+    def test_removes_only_finished_clean_agent_worktrees(self):
+        # Merged lane, plus the comment note an old reviewer left at its top level.
+        merged = self.worktree("agent-merged", "lane-1")
+        sha = self.commit(merged, "one\n")
+        self.git("-C", merged, "push", "-q", "origin", "lane-1")
+        self.pr(1, sha, "lane-1", "MERGED")
+        (merged / "review-1-r1.md").write_text("## SPEC REVIEW\n")
+        # A PR into a staging branch that already holds lane-1 must not claim it.
+        self.git("-C", self.origin, "branch", "epic", sha)
+        self.pr(4, sha, "epic", "OPEN", base="main")
+        self.pr(5, sha, "epic-next", "OPEN", base="epic")
+
+        opened = self.worktree("agent-open", "lane-2")
+        sha = self.commit(opened, "two\n")
+        self.git("-C", opened, "push", "-q", "origin", "lane-2")
+        self.pr(2, sha, "lane-2", "OPEN")
+
+        dirty = self.worktree("agent-dirty", "lane-3")
+        sha = self.commit(dirty, "three\n")
+        self.git("-C", dirty, "push", "-q", "origin", "lane-3")
+        self.pr(3, sha, "lane-3", "MERGED")
+        (dirty / "app.txt").write_text("half-done\n")
+
+        unpushed = self.worktree("agent-unpushed", "fix-6-r1")
+        self.commit(unpushed, "never pushed\n")
+
+        # The lane was later force-pushed: same change, new sha. The old commit isn't on GitHub.
+        rewritten = self.worktree("agent-rewritten", "fix-7-r1")
+        self.commit(rewritten, "seven\n")
+        self.git("-C", self.repo, "worktree", "add", "-q", "--detach", self.root / "redo", "main")
+        (self.root / "redo/app.txt").write_text("seven\n")
+        self.git("-C", self.root / "redo", "commit", "-qam", "seven, again", "--date=2001-01-01T00:00:00")
+        self.git("-C", self.root / "redo", "push", "-q", "origin", "HEAD:refs/pull/7/head")
+        self.pr(7, self.git("-C", self.root / "redo", "rev-parse", "HEAD"), "lane-7", "CLOSED")
+
+        fresh = self.worktree("agent-fresh", "worktree-agent-fresh")
+        self.worktree("mine", "my-branch")
+        self.git("-C", self.repo, "push", "-q", "origin", "my-branch")
+
+        got = self.prune()
+        self.assertNotIn("mine", got, "only agent-* worktrees are in scope")
+        self.assertEqual(got["agent-merged"]["action"], "remove", got["agent-merged"])
+        self.assertEqual(got["agent-merged"]["prs"], [1, 4], "PR 5 is based on epic, which holds lane-1")
+        self.assertEqual(got["agent-merged"]["notes"], ["review-1-r1.md"])
+        self.assertEqual(got["agent-open"]["action"], "keep")
+        self.assertIn("#2", got["agent-open"]["reason"])
+        self.assertEqual(got["agent-dirty"]["action"], "keep")
+        self.assertIn("app.txt", got["agent-dirty"]["reason"])
+        self.assertEqual(got["agent-unpushed"]["action"], "keep")
+        self.assertIn("never reached GitHub", got["agent-unpushed"]["reason"])
+        self.assertEqual(got["agent-rewritten"]["action"], "remove", got["agent-rewritten"])
+        self.assertEqual(got["agent-rewritten"]["prs"], [7])
+        self.assertEqual(got["agent-fresh"]["action"], "keep", "a just-dispatched agent looks idle-free")
+        self.assertTrue(merged.is_dir(), "a dry run removes nothing")
+
+        self.assertEqual(self.prune("--pr", "7")["agent-merged"]["action"], "keep")
+
+        got = self.prune("--apply", "--idle", "0")
+        self.assertEqual({n for n, r in got.items() if r["action"] == "removed"},
+                         {"agent-merged", "agent-rewritten", "agent-fresh"})
+        for path in (merged, rewritten, fresh):
+            self.assertFalse(path.exists())
+        for path in (opened, dirty, unpushed, self.repo / ".claude/worktrees/mine"):
+            self.assertTrue(path.is_dir())
+        branches = self.git("-C", self.repo, "branch", "--format=%(refname:short)").split()
+        self.assertNotIn("lane-1", branches)
+        self.assertIn("lane-2", branches)
+        self.assertEqual(self.git("-C", self.repo, "for-each-ref", "refs/workbench-prune/"), "",
+                         "the PR-head refs it fetched are cleaned up")
+
+
 if __name__ == "__main__":
     unittest.main()

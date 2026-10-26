@@ -66,7 +66,8 @@ exit, stop anything you started and delete the caches your runs left that the
 repo doesn't ignore. A command that fits in 10 minutes runs in the foreground
 with `timeout: 600000`. A suite the repo's docs or CI config call slow, or put
 past 10 minutes, is a longer one: it runs as itself with Bash
-`run_in_background: true`, its output going to `<scratch>/<issue>-<what>.log`,
+`run_in_background: true`, its output going to `<scratch>/<issue>-<what>.log` (outside the
+worktree, where a stray file reads as uncommitted work),
 and then you end your turn. The harness wakes you when it exits, so there is
 nothing to poll.
 
@@ -86,9 +87,10 @@ finding about how the issue was cut.
 
 ## Post what you did, then return almost nothing
 
-The re-reviewer reads the PR, not you. Write `fix-<ISSUE>-r<ROUND>.md`, since
-the scratch directory is shared, then post it with
-`gh pr comment <PR> --repo <REPO> --body-file fix-<ISSUE>-r<ROUND>.md`.
+The re-reviewer reads the PR, not you. Post on stdin, so no file is left
+behind in your worktree:
+`gh pr comment <PR> --repo <REPO> --body-file - <<'FIX_EOF'` … `FIX_EOF`.
+The quoted delimiter keeps backticks and `$` in the comment literal.
 
 The first line is exactly `## FIX — round <ROUND>`. Then write one line per
 finding, in the reviewer's order:
