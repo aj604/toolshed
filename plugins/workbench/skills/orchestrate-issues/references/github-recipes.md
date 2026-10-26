@@ -50,7 +50,12 @@ Make each child a sub-issue of the oversized issue, and give serial pieces real
 ```bash
 P=<oversized-number>
 C1=$(gh issue create --repo OWNER/REPO --title "<parent title> — part 1: <piece>" \
-       --body-file split-$P-1.md | grep -oE '[0-9]+$')       # body: its criteria + "Part of #$P"
+       --body-file - <<'SPLIT_EOF' | grep -oE '[0-9]+$'
+<its criteria>
+
+Part of #<oversized-number>
+SPLIT_EOF
+)
 gh api --method POST repos/OWNER/REPO/issues/$P/sub_issues \
   -F sub_issue_id=$(gh api repos/OWNER/REPO/issues/$C1 --jq .id)
 # repeat for C2..Cn; then for each serial pair:
@@ -151,10 +156,13 @@ which is what keeps a multi-round lane from growing anyone's context.
 Post (reviewer):
 
 ```bash
-gh pr comment <pr> --repo OWNER/REPO --body-file review-<pr>-r<k>.md
+gh pr comment <pr> --repo OWNER/REPO --body-file - <<'REVIEW_EOF'
+## SPEC REVIEW — round <k> — VERDICT: ...
+REVIEW_EOF
 ```
 
-Use `gh pr comment`. `gh pr review --request-changes` and `--approve` are
+Bodies go on stdin: a body file written in an agent's worktree stays there
+as an untracked file. Use `gh pr comment`. `gh pr review --request-changes` and `--approve` are
 rejected by GitHub on a PR opened by the same account, and every agent in the run
 authenticates as the same account — so a review *event* fails where a plain
 comment succeeds.

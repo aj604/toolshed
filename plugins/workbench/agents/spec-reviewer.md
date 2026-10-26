@@ -110,12 +110,19 @@ conclusion. A finding marked closed is closed only if the code says so.
 
 ## Where your findings go
 
-Post them on the PR. The fixer reads them there, not from you. Write the
-comment to `review-<PR>-r<ROUND>.md` (the scratch directory is shared), then
-post it with
-`gh pr comment <PR> --repo <REPO> --body-file review-<PR>-r<ROUND>.md`. Use a
-plain comment: GitHub refuses review events on a PR opened by the same
-account.
+Post them on the PR. The fixer reads them there, not from you. Send the
+comment on stdin, so no file is left behind in your worktree:
+
+```bash
+gh pr comment <PR> --repo <REPO> --body-file - <<'REVIEW_EOF'
+## SPEC REVIEW — round <ROUND> — VERDICT: ...
+...
+REVIEW_EOF
+```
+
+The quoted delimiter keeps the shell from expanding backticks and `$` in your
+findings. Use a plain comment: GitHub refuses review events on a PR opened by
+the same account.
 
 The first line is exactly:
 

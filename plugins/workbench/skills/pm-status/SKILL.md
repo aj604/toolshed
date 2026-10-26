@@ -46,9 +46,15 @@ From inside the repo (any worktree of it works):
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/pm-status/scripts/gather.py" [--since <window>] > /tmp/pm-status-<repo>.json
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate-issues/scripts/prune_worktrees.py" > /tmp/pm-status-<repo>-prune.txt
 ```
 
-Then read the file. Step 4 checks the report against it. It holds JSON with:
+The second command is a dry run and removes nothing. It lists the subagent
+worktrees (`.claude/worktrees/agent-*`) of finished lanes that can go: clean,
+every commit on GitHub, and their PR merged or closed. Its count goes on the
+Cleanup line (Step 3).
+
+Then read the gather file. Step 4 checks the report against it. It holds JSON with:
 - `repo`: `name` for the heading. `fetched: false` means the fetch failed
   and remote data may be stale, so say so.
 - `window`: the span covered and whether it's "since last run"
@@ -283,6 +289,9 @@ The report, in order:
    local branches already on main; remote branches codex/issue-669 and
    codex/issue-671 (shipped); PR #588 (draft, CI red, target gone)`). An
    open PR keeps its CI and draft state even here, in a short parenthetical.
+   When the prune dry run found worktrees to remove, count them here and
+   give the command that removes them (`41 agent worktrees from finished
+   lanes: prune_worktrees.py --apply`). Run it only when the user says so.
 
 Aim for 70 lines or fewer. A longer report usually means some bucket is
 listing what it should count.

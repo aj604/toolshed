@@ -1,6 +1,6 @@
 {
   "name": "workbench",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Put your coding agents to work. Five Claude Code skills to ship improvements, orchestrate GitHub issues, build parallel PR stacks, open pull requests, and catch up on what shipped.",
   "license": "MIT",
   "homepage": "https://github.com/aj604/toolshed",

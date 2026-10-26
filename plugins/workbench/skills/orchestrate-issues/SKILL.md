@@ -527,6 +527,13 @@ name scratch files by issue number and read their PR body back after opening
 it. Still confirm the body's only `Closes` line before you merge (Step 5). A
 clobbered body closes the *wrong issue*, and review never catches it.
 
+Every PR body and comment, the agents' and yours, goes to `gh` on stdin
+(`--body-file -` with a heredoc), never through a file. A body file written
+by its bare name lands in the current directory, which for an agent is its
+worktree. Past runs left over eighty worktrees whose only change was an
+untracked `review-*.md`, `fix-*.md` or `rebase-*.md` note, and a worktree
+that looks dirty is one nobody dares delete.
+
 **Drafts and CI.** The PR opens as a draft so CI runs while review happens.
 Check once, in preflight, that the repo's workflows run on drafts at all. If
 they skip drafts (`if: ...draft == false`, or a path filter), CI only starts
@@ -620,17 +627,23 @@ default interval drained the API rate limit in one run, and then every `gh` call
 failed.
 
 **After every merge, reclaim the disk.** Each finished lane's worktrees
-(implementer, reviewers, fixers) hold a full checkout and, in compiled
-languages, a full build directory. Remove worktrees whose lanes have merged, and
-any processes they left running (a test server, a watcher), then glance at
-`df -h`. A run that never prunes fills the disk around its fiftieth worktree,
-and then every agent dies at once.
+(implementer, reviewers, fixers, rebasers) hold a full checkout and, in
+compiled languages, a full build directory. A run that never prunes fills the
+disk around its fiftieth worktree, and then every agent dies at once. Pruning
+by hand from `git worktree list` got skipped in every long run on record, and
+one repo reached 144 agent worktrees, so run the script right after the merge
+command, as part of landing:
 
 ```bash
-git worktree list                     # match paths to merged lanes; leave anything still in flight
-git worktree remove --force <path>    # only for lanes whose PR has merged or closed
-git worktree prune
+python3 <skill>/scripts/prune_worktrees.py --apply --pr <pr>
 ```
+
+It removes only `.claude/worktrees/agent-*` worktrees whose HEAD is in that PR,
+and only when they're clean, no process is running inside them, and every
+commit they hold is on GitHub. It prints what it kept and why. A worktree kept
+for uncommitted changes or for commits that never reached GitHub is a lane
+whose agent didn't finish cleanly. Look before you delete it by hand. Then
+glance at `df -h`.
 
 Red CI on a check that is measuring *this PR* is not a review question — it
 goes to a fresh fixer the same way review findings do, and the failing job's
@@ -670,7 +683,15 @@ wants ordering preserved; otherwise free the slot and keep going.
 Between cycles, a status line is enough — which issue landed, what it unblocked,
 what's in flight. Save the detail for the end.
 
-At the end, or on stopping:
+At the end, or on stopping, sweep every finished lane first. That catches
+the worktrees a per-PR prune missed: a reviewer whose lane was force-pushed,
+a lane you parked and then closed.
+
+```bash
+python3 <skill>/scripts/prune_worktrees.py --apply
+```
+
+Then report:
 
 - Issues landed, with PR links
 - What's still open and why (blocked on what / escalated for what)
@@ -679,6 +700,7 @@ At the end, or on stopping:
 - Every `ORCHESTRATOR DECISION` you made under the contract (splits filed, extra
   fix rounds, judgement calls), with links, so the user can reverse any of them
 - FOLLOW-UP findings reviewers left on merged PRs, and follow-up issues filed
+- Worktrees the sweep kept, with its reason for each
 
 **Report only what you actually did.** "Both issues claimed and two lanes
 dispatched" is a claim about the state of GitHub, and it is either true or it is
