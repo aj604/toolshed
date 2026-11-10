@@ -19,6 +19,9 @@ One is removed when all of these hold:
     looks exactly like that.
 
 Its local branch is deleted with it when nothing else has that branch checked out.
+A Cargo build directory outside the worktree (a per-workspace `build-dir` or
+target dir) is deleted with it too, because `git worktree remove` leaves it
+behind; one the main checkout also builds into is shared and stays.
 
 Dry run unless --apply. Usage:
   prune_worktrees.py                  # report what would go
@@ -30,6 +33,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -59,6 +63,19 @@ def worktrees(root):
         key, _, val = line.partition(" ")
         cur[key] = val or True
     return trees
+
+
+def cargo_build_dir(path):
+    """Where Cargo builds this checkout, or None when it isn't a Cargo project."""
+    if not os.path.isfile(os.path.join(path, "Cargo.toml")):
+        return None
+    out = run(["cargo", "metadata", "--format-version", "1", "--no-deps"], cwd=path)
+    try:
+        meta = json.loads(out or "")
+    except ValueError:
+        return None
+    d = meta.get("build_directory") or meta.get("target_directory")
+    return os.path.realpath(d) if d else None
 
 
 def busy_dirs():
@@ -230,13 +247,27 @@ def main():
                      "PR " + ", ".join(f"#{n}" for n in r["prs"] if n not in open_prs) + " merged or closed")
 
         if args.apply:
+            shared = None
             for r in results:
                 if r["action"] != "remove":
                     continue
+                # Ask Cargo before the checkout is gone. A directory inside the worktree goes
+                # with it; one the main checkout also uses is shared (CARGO_TARGET_DIR, a fixed
+                # build-dir) and must stay.
+                build = cargo_build_dir(r["path"])
+                if build:
+                    if shared is None:
+                        shared = cargo_build_dir(root) or ""
+                    inside = (build + os.sep).startswith(os.path.realpath(r["path"]) + os.sep)
+                    if inside or build == shared or not os.path.isdir(build):
+                        build = None
                 if not ok(["git", "worktree", "remove", "--force", r["path"]], cwd=root):
                     r.update(action="keep", reason="git worktree remove failed")
                     continue
                 r["action"] = "removed"
+                if build:
+                    shutil.rmtree(build, ignore_errors=True)
+                    r["build_dir_removed"] = build
                 b = r["branch"]
                 if b and b != default.split("/", 1)[-1] \
                         and checked_out.get(f"refs/heads/{b}") == [r["path"]] \
@@ -256,6 +287,8 @@ def main():
     kept = [r for r in results if r["action"] == "keep" and r["reason"] != "not in --pr"]
     for r in gone:
         extra = f"  (+{len(r['notes'])} note{'s' * (len(r['notes']) != 1)})" if r["notes"] else ""
+        if r.get("build_dir_removed"):
+            extra += f"  (+build dir {r['build_dir_removed']})"
         print(f"{verb:7} {os.path.basename(r['path'])}  {r['branch'] or 'detached'}  {r['reason']}{extra}")
     for r in kept:
         print(f"keep    {os.path.basename(r['path'])}  {r['branch'] or 'detached'}  {r['reason']}")
