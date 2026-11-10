@@ -640,7 +640,10 @@ python3 <skill>/scripts/prune_worktrees.py --apply --pr <pr>
 
 It removes only `.claude/worktrees/agent-*` worktrees whose HEAD is in that PR,
 and only when they're clean, no process is running inside them, and every
-commit they hold is on GitHub. It prints what it kept and why. A worktree kept
+commit they hold is on GitHub. A Cargo build directory kept outside the
+worktree (a per-workspace `build-dir`) survives `git worktree remove`, so the
+script deletes it too, unless the main checkout builds there as well. It prints
+what it kept and why. A worktree kept
 for uncommitted changes or for commits that never reached GitHub is a lane
 whose agent didn't finish cleanly. Look before you delete it by hand. Then
 glance at `df -h`.

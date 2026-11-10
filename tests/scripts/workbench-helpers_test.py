@@ -520,6 +520,8 @@ class PruneWorktrees(unittest.TestCase):
         self.git("init", "-q", "--bare", "-b", "main", str(self.origin))
         self.git("init", "-q", "-b", "main", str(self.repo))
         (self.repo / "app.txt").write_text("base\n")
+        (self.repo / "Cargo.toml").write_text("[package]\nname = \"app\"\n")
+        (self.repo / ".gitignore").write_text("target/\n")
         self.git("-C", self.repo, "add", ".")
         self.git("-C", self.repo, "commit", "-qm", "init")
         self.git("-C", self.repo, "remote", "add", "origin", str(self.origin))
@@ -547,6 +549,19 @@ else:
     sys.exit("unexpected gh call: " + repr(args))
 """)
         gh.chmod(0o755)
+        # Fake cargo: each checkout builds into builds/<its dir name> unless cargo.json maps it.
+        cargo = bindir / "cargo"
+        cargo.write_text(f"#!{sys.executable}\nROOT = {str(self.root)!r}\n" + """
+import json, os
+name = os.path.basename(os.getcwd())
+try:
+    where = json.load(open(os.path.join(ROOT, "cargo.json")))
+except OSError:
+    where = {}
+print(json.dumps({"target_directory": os.path.join(os.getcwd(), "target"),
+                  "build_directory": where.get(name, os.path.join(ROOT, "builds", name))}))
+""")
+        cargo.chmod(0o755)
         self.env["PATH"] = str(bindir) + os.pathsep + self.env.get("PATH", "")
 
     def git(self, *args):
@@ -644,6 +659,35 @@ else:
         self.assertIn("lane-2", branches)
         self.assertEqual(self.git("-C", self.repo, "for-each-ref", "refs/workbench-prune/"), "",
                          "the PR-head refs it fetched are cleaned up")
+
+    def test_deletes_a_removed_worktrees_own_cargo_build_dir_only(self):
+        builds = self.root / "builds"
+        lanes = {}
+        for n, name in enumerate(["agent-own", "agent-shared", "agent-inside", "agent-open"], start=1):
+            path = self.worktree(name, f"lane-{n}")
+            sha = self.commit(path, f"{name}\n")
+            self.git("-C", path, "push", "-q", "origin", f"lane-{n}")
+            self.pr(n, sha, f"lane-{n}", "OPEN" if name == "agent-open" else "MERGED")
+            lanes[name] = path
+        # agent-shared builds where the main checkout does (CARGO_TARGET_DIR); agent-inside
+        # builds inside itself, which the worktree removal already covers.
+        (self.root / "cargo.json").write_text(json.dumps({
+            "agent-shared": str(builds / "repo"),
+            "agent-inside": str(lanes["agent-inside"] / "target")}))
+        for name in ("repo", "agent-own", "agent-open"):
+            (builds / name / "debug").mkdir(parents=True)
+        (lanes["agent-inside"] / "target/debug").mkdir(parents=True)
+
+        got = self.prune("--apply")
+        self.assertEqual(got["agent-own"]["action"], "removed", got["agent-own"])
+        self.assertEqual(got["agent-own"]["build_dir_removed"], str(builds / "agent-own"))
+        self.assertFalse((builds / "agent-own").exists())
+        self.assertEqual(got["agent-shared"]["action"], "removed")
+        self.assertNotIn("build_dir_removed", got["agent-shared"])
+        self.assertTrue((builds / "repo").is_dir(), "a build dir the main checkout uses is shared")
+        self.assertNotIn("build_dir_removed", got["agent-inside"])
+        self.assertEqual(got["agent-open"]["action"], "keep")
+        self.assertTrue((builds / "agent-open").is_dir(), "a kept lane keeps its build")
 
 
 if __name__ == "__main__":
