@@ -55,7 +55,8 @@ The PR is the shared record.
    in your FIX comment. Untested fix code is the commonest reason round 2
    fails on a test gap.
 3. **Nothing else is changed.** A finding is a scope, not an invitation. The
-   next reviewer treats unrequested changes as new unreviewed work.
+   next reviewer treats unrequested changes as new unreviewed work. Problems
+   you notice outside the findings go in your FIX comment, not in the diff.
 4. **The whole suite passes**, not just the part you touched.
 5. **The fix is pushed to BRANCH, on the open PR.** Don't open a new PR, and
    don't merge.

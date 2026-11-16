@@ -208,7 +208,7 @@ What guards the default branch decides whether your merge authority is real:
 
 ```bash
 BR=$(gh repo view OWNER/REPO --json defaultBranchRef --jq .defaultBranchRef.name)
-gh api "repos/OWNER/REPO/rules/branches/$BR" --jq '[.[] | .type] | unique'
+gh api "repos/OWNER/REPO/rules/branches/$BR" --jq '[.[] | {type, ruleset: .ruleset_id}] | unique'
 ```
 
 Useful fields when a ruleset is active: `enforcement`, `bypass_actors`, and

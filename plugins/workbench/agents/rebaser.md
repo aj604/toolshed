@@ -26,6 +26,8 @@ git push origin HEAD:<BRANCH>
 **Merge the base in; don't rebase.** A merge pushes fast-forward, so you
 never force-push a branch that reviewers and the PR thread point at. The PR is
 squash-merged at the end, so the merge commit never reaches the base. If the
+PR will land by rebase-merge or a merge commit and the repo wants linear
+history, say so in what you return; still don't force-push. If the
 push is rejected, someone moved the branch: fetch, merge again, and push.
 
 **Resolve conflicts so both sides' intent survives.** If a resolution changes
