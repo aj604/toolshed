@@ -171,7 +171,7 @@ Every role returns a few lines, never a report, and puts its account on the PR:
 | Role | Returns | You act on |
 |---|---|---|
 | Implementer | PR, BRANCH, SIZE, SUMMARY, CRITERIA, TESTS, MUTATIONS, JUDGEMENT, NOTED | SIZE above ~800 lines, any JUDGEMENT, and claims to put in the reviewer's VERIFY |
-| Spec reviewer / verifier | VERDICT, KIND, POSTED | KIND picks the fixer's model; PASS goes on to landing |
+| Spec reviewer / verifier | VERDICT, KIND, POSTED | KIND picks the fixer's model; PASS goes on to landing; a verifier's CHANGES_REQUIRED goes to a full re-review |
 | Fixer | PUSHED, CLOSED, FILES, TESTS, POSTED | FILES `tests-only` lets you use a verifier instead of a full re-review (confirm with the compare call) |
 | Rebase | PUSHED, RESOLUTION, TESTS | `semantic` needs a re-review; `none` or `mechanical` doesn't |
 | Premise check | claim verdicts, SIZE line, split | MATERIAL WRONG becomes a correction on the card; oversized goes to the split |

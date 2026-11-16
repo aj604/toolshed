@@ -57,7 +57,8 @@ something, say so.
 - **Mutate the implementation.** Break the line that delivers each criterion,
   confirm a test goes red, then restore it. The implementer's report has a
   MUTATIONS section. Spot-check it, then spend your time on what it didn't
-  mutate.
+  mutate. If a mutation survives a green suite, work out what behaviour that
+  hides.
 - **Ask what the tests don't cover.** The deepest defects live where no
   assertion looks.
 - **If existing tests were modified or deleted,** account for every changed

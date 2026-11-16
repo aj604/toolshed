@@ -596,6 +596,9 @@ test gaps and the fix really is tests-only (confirm with the compare call in
 the mutations instead of a full re-review. Anything that touched production
 code gets a **fresh** `spec-reviewer` at `review-<n>-r<k+1>`. It reads the
 whole thread, including any finding the fixer disputed, which it rules on.
+A verifier that returns `CHANGES_REQUIRED` (a mutation survived, or the push
+touched production code) is followed by a full re-review too, not by another
+verifier.
 
 Past the agreed fix-round count, park the lane. Add `needs-human`, post a
 comment linking the PR thread (every round is already on it), free the slot,
@@ -643,7 +646,9 @@ and only when they're clean, no process is running inside them, and every
 commit they hold is on GitHub. A Cargo build directory kept outside the
 worktree (a per-workspace `build-dir`) survives `git worktree remove`, so the
 script deletes it too, unless the main checkout builds there as well. It prints
-what it kept and why. A worktree kept
+what it kept and why. A worktree kept because a process is still running in
+it (a test server, a watcher) needs that process stopped first; then run the
+script again. A worktree kept
 for uncommitted changes or for commits that never reached GitHub is a lane
 whose agent didn't finish cleanly. Look before you delete it by hand. Then
 glance at `df -h`.
