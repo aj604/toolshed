@@ -689,8 +689,12 @@ gh pr merge <pr> --repo OWNER/REPO --squash --delete-branch --match-head-commit 
 **Green means the whole run, on the head you merge.** The watch reporting back
 is a prompt to look, not a verdict. Read the rollup for the current head and
 merge only when every check there has finished `SUCCESS`, `SKIPPED` or
-`NEUTRAL`, the run is the one started for this head after `gh pr ready`, and
-`mergeStateStatus` is `CLEAN`. `UNKNOWN` just after a push means GitHub is
+`NEUTRAL`, the run is for this head and ran the real suites, and
+`mergeStateStatus` is `CLEAN`. Which run that is depends on the triggers
+preflight read: a workflow that listens for `ready_for_review`, or skips its
+suites on drafts, starts the run that counts after `gh pr ready`, so wait for
+that one. A plain `on: pull_request` workflow does not rerun on ready, and its
+draft run for this head is the result. `UNKNOWN` just after a push means GitHub is
 still computing it: read again in a minute. Then merge that SHA with
 `--match-head-commit`, so a push that lands in between fails the merge instead
 of riding along.
@@ -704,13 +708,14 @@ which it is:
   contract settled (Step 3, *Drafts and CI*). Without that answer, the PR
   stays ready and unmerged.
 - *Workflows ran and every job skipped itself by a path filter* (a docs-only
-  diff). That is green, as long as it is the post-ready run for this head.
+  diff). That is green, as long as it is the run that counts for this head.
 
 The merge is always its own command, after you have read that output. Runs
 that chained it (`gh pr ready && gh pr merge`, `<watch>; gh pr merge`) merged
 red five times, each a different way of mistaking "the watch ended" for green:
 
-- `gh pr ready` and `gh pr update-branch` each start a *new* run. A watch
+- `gh pr update-branch` starts a *new* run, and so does `gh pr ready` where a
+  workflow listens for it. A watch
   started straight after one sees the previous run's results and exits 0.
 - A draft's run can skip every real suite. "All checks passed" over a list of
   `skipping` rows, with the real run only just queued, is not green.
