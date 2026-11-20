@@ -1,0 +1,41 @@
+{
+  "expectations": [
+    {
+      "text": "Recognises the current check list (suites skipped on a draft) is not a green run to merge on",
+      "passed": true,
+      "evidence": "Line 5: 'PR #430 is not green yet ... a draft's run: the workflows skip the real suites on drafts'."
+    },
+    {
+      "text": "Runs the CI watch in the background, not foreground",
+      "passed": true,
+      "evidence": "Step 3: '# run_in_background: true' on gh pr checks --watch --interval 60 --fail-fast."
+    },
+    {
+      "text": "After the watch reports, re-reads the check states for the PR's current head before merging",
+      "passed": true,
+      "evidence": "Step 4: gh pr view --json headRefOid,mergeStateStatus,statusCheckRollup after the watch; requires checks belong to headRefOid and started after gh pr ready."
+    },
+    {
+      "text": "Issues gh pr merge as its own command, not chained (&&, ;) after ready, update-branch or the watch",
+      "passed": true,
+      "evidence": "Line 11: 'Each command is its own call. None of them is chained'; the merge is a separate step 5."
+    },
+    {
+      "text": "Pins the merge to the verified head SHA with --match-head-commit",
+      "passed": true,
+      "evidence": "Step 5: gh pr merge ... --match-head-commit <headRefOid from step 4>."
+    },
+    {
+      "text": "Verifies issue #360 closed and closes it manually if not",
+      "passed": true,
+      "evidence": "Lines 88-95: gh issue view 360 --json state, then gh issue close 360 and a re-check."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  },
+  "grader_note": "The grading agent reported 6/6 for this answer but did not write the file; evidence re-derived by the orchestrating session from the response text."
+}

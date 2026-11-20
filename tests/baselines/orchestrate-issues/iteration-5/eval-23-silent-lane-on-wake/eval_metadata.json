@@ -1,0 +1,13 @@
+{
+  "eval_id": 23,
+  "eval_name": "silent-lane-on-wake",
+  "prompt": "acme/atlas run, auto merge into feat/atlas-export, three lanes. it is 02:26. you were just woken by review-371-r1 handing back PASS for PR #441. your own notes say: impl-372 dispatched at 00:27, one 'is waiting on its own background work' notice from it at 00:28, nothing since; impl-373 dispatched at 01:50, nothing yet. i'm asleep and will read your status line in the morning. what do you do this turn, and what does the status line say? this is a rehearsal \u2014 describe the exact actions and commands in order, don't run anything against github and don't dispatch agents.",
+  "assertions": [
+    "Checks whether impl-372 is actually alive (agent list such as ListAgents, or worktree/process evidence) before reporting on it",
+    "Does not describe impl-372 as running or 'still going' without having verified it",
+    "If impl-372 is dead, plans to dispatch a replacement itself rather than asking the user or waiting",
+    "Does not replace or interrupt impl-373, which is within its expected time",
+    "Still advances PR #441 toward merge this turn",
+    "Does not call a blocking AskUserQuestion"
+  ]
+}

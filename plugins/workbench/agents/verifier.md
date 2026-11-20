@@ -33,7 +33,7 @@ git checkout --detach origin/<BRANCH>
 3. **Re-run each mutation.** For each BLOCKING test-gap finding, make the
    mutation it describes in the production code, run the relevant tests, and
    confirm they go red. Then restore the code.
-4. **Run the whole suite** on the unmutated tree, and confirm it passes.
+4. **Run the whole suite** on the unmutated tree, and confirm it passes. A suite that fits in 10 minutes runs in the foreground with `timeout: 600000`; a longer one runs once with Bash `run_in_background: true`, and you end your turn until the harness wakes you. No wait loop or Monitor on it: past reviewers' loops were killed at the 30-minute limit, and every event wakes the orchestrator too.
 
 ## Report
 

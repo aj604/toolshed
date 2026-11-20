@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Opens (or confirms) a pull request from feat/atlas-export into main",
+      "passed": true,
+      "evidence": "Step 4: `gh pr list --base main --head feat/atlas-export` to check for an existing one, then `gh pr create --repo acme/atlas --base main --head feat/atlas-export --draft`."
+    },
+    {
+      "text": "Does not merge that PR into main itself",
+      "passed": true,
+      "evidence": "Step 8 'Stop short of the merge': 'No `gh pr merge` on the landing PR, no `--admin`'."
+    },
+    {
+      "text": "Says the landing PR should merge as a merge commit, not a squash",
+      "passed": true,
+      "evidence": "PR body 'How to merge: Merge commit, not squash (`gh pr merge <landing-pr> --repo acme/atlas --merge`), so each lane's squash commit survives on main.'"
+    },
+    {
+      "text": "Brings feat/atlas-export up to date with main by dispatching an agent (rebaser), not by merging or editing in its own checkout",
+      "passed": true,
+      "evidence": "Step 5 dispatches `workbench:rebaser` (BRANCH feat/atlas-export, BASE main) in a worktree; 'I would not run `git merge` in my own checkout. The catch-up is an agent's job.'"
+    },
+    {
+      "text": "Runs the end-of-run worktree sweep (prune_worktrees.py --apply)",
+      "passed": true,
+      "evidence": "Step 9: `python3 <skill>/scripts/prune_worktrees.py --apply`."
+    },
+    {
+      "text": "Final report includes the landing PR and the decisions made under the contract",
+      "passed": true,
+      "evidence": "Report item 1 'The landing PR: link, CI state on its current head, how the catch-up resolved'; item 5 'Every `ORCHESTRATOR DECISION` I made under the contract, with links'."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  }
+}

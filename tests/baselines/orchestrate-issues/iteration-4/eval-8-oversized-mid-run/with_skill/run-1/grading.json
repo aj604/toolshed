@@ -1,0 +1,45 @@
+{
+  "expectations": [
+    {
+      "text": "Does not call or plan an AskUserQuestion / blocking question about the split",
+      "passed": true,
+      "evidence": "\"I ask no blocking question; anything that needs you parks its own lane\"; split is filed on its own authority: \"I file the split myself instead of waiting for you.\" No AskUserQuestion anywhere."
+    },
+    {
+      "text": "Files the split itself as sub-issues of #14 with native blocked_by edges between serial parts",
+      "passed": true,
+      "evidence": "Creates three issues, POSTs each to `repos/acme/ledger/issues/14/sub_issues`, then POSTs `issues/$C2/dependencies/blocked_by` (by schema) and `issues/$C3/dependencies/blocked_by` (by writer)."
+    },
+    {
+      "text": "Records the split as a decision on the issue (comment) the user can reverse",
+      "passed": true,
+      "evidence": "`gh issue comment 14` with \"## ORCHESTRATOR DECISION — split into ...\" including **Why**, **Alternative** and \"**To reverse:** close the three children and reply here; I'll run #14 as one lane.\""
+    },
+    {
+      "text": "Does not dispatch #14 itself as a single lane",
+      "passed": true,
+      "evidence": "\"I never dispatch #14 as one lane.\" Frontier expectation: \"#14 as `split` (a container, not dispatched)\"."
+    },
+    {
+      "text": "Advances PR #52 toward merge (ready, CI, merge) rather than leaving it waiting",
+      "passed": true,
+      "evidence": "Step 1 `gh pr ready 52` and background checks watch; step 3 reads rollup then `gh pr merge 52 --squash --delete-branch --match-head-commit <headRefOid>`."
+    },
+    {
+      "text": "Any CI watch is run in the background, not foreground-blocking",
+      "passed": true,
+      "evidence": "\"# run_in_background: true — never in the foreground\" on `gh pr checks 52 --watch --interval 60 --fail-fast`; \"I don't wait on the watch; I go straight to step 2.\""
+    },
+    {
+      "text": "Dispatches (or plans to dispatch) the first split part as an implementer",
+      "passed": true,
+      "evidence": "Step 4: `gh issue edit $C1 --add-assignee @me` then Agent call `subagent_type: \"workbench:implementer\"`, `name: \"impl-<C1>\"` with a lane card for part 1 (schema); parts 2 and 3 stay undispatched."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  }
+}

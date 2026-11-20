@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Merges #412 and #413 into feat/atlas-export now, under the authority already granted",
+      "passed": true,
+      "evidence": "'I merge #412 and #413 into `feat/atlas-export` now, without waking you or waiting for a new yes.' 'That authority belongs to the branch, not to the #300 issue list.'"
+    },
+    {
+      "text": "Does not ask the user (blocking question or prose) to re-confirm merge authority for #340's scope",
+      "passed": true,
+      "evidence": "Title 'No question to you'; closing status line 'No open questions.' No decision comment or ask anywhere."
+    },
+    {
+      "text": "Does not leave the PRs waiting at ready-for-review for the user",
+      "passed": true,
+      "evidence": "Both are merged with `gh pr merge 412/413 ... --squash --delete-branch --match-head-commit`; `gh pr ready` runs only if still a draft, as a step toward the merge."
+    },
+    {
+      "text": "Closes #341 and #342 manually (or verifies and closes) since the merge is off the default branch",
+      "passed": true,
+      "evidence": "'`Closes #341` does not fire, because the merge went into a feature branch'; runs `gh issue view`, `gh issue close 341`, re-reads for CLOSED; same for #342."
+    },
+    {
+      "text": "Re-queries the frontier and moves on to #343 after #341 closes",
+      "passed": true,
+      "evidence": "Step 5 'Right after #341 is confirmed closed': `frontier.py --repo acme/atlas --parent 340`, then claims #343 and dispatches `impl-343` with BASE feat/atlas-export."
+    },
+    {
+      "text": "Does not merge anything into main",
+      "passed": true,
+      "evidence": "'What I do not do: merge anything into `main`'. Landing PR: 'I do not merge it.'"
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  }
+}

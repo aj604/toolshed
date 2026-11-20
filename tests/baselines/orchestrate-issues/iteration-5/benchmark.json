@@ -1,0 +1,341 @@
+{
+  "metadata": {
+    "skill_name": "orchestrate-issues",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "claude-fable-5-2",
+    "analyzer_model": "claude-fable-5-2",
+    "timestamp": "2026-11-19T13:32:02Z",
+    "evals_run": [
+      23,
+      24,
+      25
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 23,
+      "configuration": "old_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.5,
+        "passed": 3,
+        "failed": 3,
+        "total": 6,
+        "time_seconds": 35.9,
+        "tokens": 60780,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Checks whether impl-372 is actually alive (agent list such as ListAgents, or worktree/process evidence) before reporting on it",
+          "passed": false,
+          "evidence": "Never consults an agent list, worktree or process. Checks only GitHub: 'I check what survived on GitHub' (frontier, gh pr list, branch commit date); admits 'I can't prove it dead'."
+        },
+        {
+          "text": "Does not describe impl-372 as running or 'still going' without having verified it",
+          "passed": false,
+          "evidence": "Judgment call. Recent-push branch says 'it is alive and pushing per criterion. Leave it alone' and the status line option reads 'branch last pushed HH:MM, still working' - liveness asserted from a push timestamp with no threshold, no agent/worktree check."
+        },
+        {
+          "text": "If impl-372 is dead, plans to dispatch a replacement itself rather than asking the user or waiting",
+          "passed": false,
+          "evidence": "Waits instead of replacing: 'I don't dispatch a second implementer on top of it this turn. Slot stays held ... I re-check at my next wake'. Replacement only 'if the agent then returns nothing'."
+        },
+        {
+          "text": "Does not replace or interrupt impl-373, which is within its expected time",
+          "passed": true,
+          "evidence": "'#373: 36 minutes in, no hand-back expected yet. No action.'"
+        },
+        {
+          "text": "Still advances PR #441 toward merge this turn",
+          "passed": true,
+          "evidence": "Replay/body check, then 'gh pr ready 441' and background 'gh pr checks 441 --watch'; merge on green at next wake."
+        },
+        {
+          "text": "Does not call a blocking AskUserQuestion",
+          "passed": true,
+          "evidence": "'No questions to you; nothing here needs one.' No AskUserQuestion anywhere."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 24,
+      "configuration": "old_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.75,
+        "passed": 3,
+        "failed": 1,
+        "total": 4,
+        "time_seconds": 16.7,
+        "tokens": 56263,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Makes no tool call in response to the notice (no frontier query, no gh call, no SendMessage, no agent list)",
+          "passed": true,
+          "evidence": "'Tool calls: None.' Lists frontier, gh, SendMessage as things it does not do."
+        },
+        {
+          "text": "Output for the turn is one short line or less, not a status report of all lanes",
+          "passed": false,
+          "evidence": "Output line is 19 words: 'Still waiting: impl-380 is on its own background work and hasn't reported. 4 lanes in flight, nothing landed yet.' Over ~15, and carries a lane count plus a 'nothing landed' claim."
+        },
+        {
+          "text": "Does not treat the notice as impl-380's final hand-back (no reviewer dispatched)",
+          "passed": true,
+          "evidence": "'The notification is not a final hand-back'; explicitly does not dispatch workbench:spec-reviewer for #380."
+        },
+        {
+          "text": "Does not message or interrupt impl-380",
+          "passed": true,
+          "evidence": "Does not 'SendMessage impl-380', does not 're-dispatch or replace impl-380'."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 25,
+      "configuration": "old_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.83,
+        "passed": 5,
+        "failed": 1,
+        "total": 6,
+        "time_seconds": 117.2,
+        "tokens": 72421,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Re-reads the skill's instructions (SKILL.md and/or lane-cards.md) before acting, because its context is a summary",
+          "passed": false,
+          "evidence": "Never re-reads SKILL.md or lane-cards.md. Its first step is 'rebuild state from GitHub' ('the summary is a lead, not state, so GitHub gets re-read'); it re-reads state, not the rules."
+        },
+        {
+          "text": "For #450: dispatches a fresh spec-reviewer for the production fix instead of approving it by reading the diff itself",
+          "passed": true,
+          "evidence": "'I don't read the four lines and call it reviewed.' Dispatches workbench:spec-reviewer 'review-385-r2', 'not the r1 reviewer and not the fixer'."
+        },
+        {
+          "text": "For the branch: dispatches a rebaser (or other agent) instead of merging main and resolving the conflict in its own checkout",
+          "passed": true,
+          "evidence": "'A rebaser does it. I don't resolve the CHANGELOG conflict in my checkout.' Dispatches workbench:rebaser 'rebase-landing'."
+        },
+        {
+          "text": "For the README line: does not edit or commit it itself (files an issue and dispatches, or reports it as a follow-up)",
+          "passed": true,
+          "evidence": "'Not edited by me, and not slipped onto #450's fixer or the rebaser'; gh issue create, 'filed and reported, not dispatched'."
+        },
+        {
+          "text": "Dispatches use background, a worktree and a name per lane-cards.md conventions",
+          "passed": true,
+          "evidence": "Both dispatches give name (review-385-r2, rebase-landing), 'isolation: worktree', 'run_in_background: true'. Naming checked only as present, not against lane-cards.md."
+        },
+        {
+          "text": "Does not ask the user a blocking question about any of the three",
+          "passed": true,
+          "evidence": "No question asked; parks or reports instead. Status line: 'Nothing waiting on you yet.'"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 23,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 81.8,
+        "tokens": 73213,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Checks whether impl-372 is actually alive (agent list such as ListAgents, or worktree/process evidence) before reporting on it",
+          "passed": true,
+          "evidence": "'Call ListAgents', then worktree checks: 'find <path> -type f -mmin -30' and 'lsof -a -d cwd', before #441 moves and before the status line."
+        },
+        {
+          "text": "Does not describe impl-372 as running or 'still going' without having verified it",
+          "passed": true,
+          "evidence": "'Hearing nothing is not evidence that it is running.' Two status lines; the alive one cites the check: 'it is running (agent list running, files written in the last 30 min)'."
+        },
+        {
+          "text": "If impl-372 is dead, plans to dispatch a replacement itself rather than asking the user or waiting",
+          "passed": true,
+          "evidence": "'1d. If dead: replace it, don't ask about it.' TaskStop, then dispatch workbench:implementer 'impl-372-b' with the surviving branch state; comments on #372."
+        },
+        {
+          "text": "Does not replace or interrupt impl-373, which is within its expected time",
+          "passed": true,
+          "evidence": "Table marks impl-373 not overdue (36 of 90 min); only confirmed through the same ListAgents call; no stop, message or dispatch."
+        },
+        {
+          "text": "Still advances PR #441 toward merge this turn",
+          "passed": true,
+          "evidence": "'gh pr ready 441' plus background CI watch this turn; 'Merge authority is auto ... lands without asking'; merge on green next wake."
+        },
+        {
+          "text": "Does not call a blocking AskUserQuestion",
+          "passed": true,
+          "evidence": "Status lines end 'No open questions for you'; no AskUserQuestion."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 24,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 16.4,
+        "tokens": 58513,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Makes no tool call in response to the notice (no frontier query, no gh call, no SendMessage, no agent list)",
+          "passed": true,
+          "evidence": "'Tool calls: none.' Note: 'no ListAgents, no frontier query, no gh call, no SendMessage'."
+        },
+        {
+          "text": "Output for the turn is one short line or less, not a status report of all lanes",
+          "passed": true,
+          "evidence": "Output in full is one word: 'waiting'. The rest is marked 'Rehearsal note (not part of the turn)'."
+        },
+        {
+          "text": "Does not treat the notice as impl-380's final hand-back (no reviewer dispatched)",
+          "passed": true,
+          "evidence": "'The notice is not a hand-back ... Nothing to advance.' No reviewer dispatched."
+        },
+        {
+          "text": "Does not message or interrupt impl-380",
+          "passed": true,
+          "evidence": "'no SendMessage to impl-380'; no tool calls at all."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 25,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 102.0,
+        "tokens": 74621,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Re-reads the skill's instructions (SKILL.md and/or lane-cards.md) before acting, because its context is a summary",
+          "passed": true,
+          "evidence": "First step: 'Re-read SKILL.md and references/lane-cards.md. A summary keeps what happened and loses the rules.'"
+        },
+        {
+          "text": "For #450: dispatches a fresh spec-reviewer for the production fix instead of approving it by reading the diff itself",
+          "passed": true,
+          "evidence": "'I don't read the four lines. Ten seconds of reading is not a review'; dispatches workbench:spec-reviewer 'review-385-r2', not the round 1 reviewer."
+        },
+        {
+          "text": "For the branch: dispatches a rebaser (or other agent) instead of merging main and resolving the conflict in its own checkout",
+          "passed": true,
+          "evidence": "'I don't run git merge origin/main in my checkout and don't resolve CHANGELOG.md by hand'; dispatches workbench:rebaser."
+        },
+        {
+          "text": "For the README line: does not edit or commit it itself (files an issue and dispatches, or reports it as a follow-up)",
+          "passed": true,
+          "evidence": "'I don't edit it. One line is still a repo change'; files an issue, 'Don't dispatch it', listed in the report."
+        },
+        {
+          "text": "Dispatches use background, a worktree and a name per lane-cards.md conventions",
+          "passed": true,
+          "evidence": "Both dispatches give name ('review-385-r2', 'rebase-<landing-pr>'), 'run_in_background: true', 'isolation: \"worktree\"'. Naming checked only as present, not against lane-cards.md."
+        },
+        {
+          "text": "Does not ask the user a blocking question about any of the three",
+          "passed": true,
+          "evidence": "'No blocking question. You are away and the run is mid-flight'; assumes defaults instead."
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "old_skill": {
+      "pass_rate": {
+        "mean": 0.6933,
+        "stddev": 0.1721,
+        "min": 0.5,
+        "max": 0.83
+      },
+      "time_seconds": {
+        "mean": 56.6,
+        "stddev": 53.3519,
+        "min": 16.7,
+        "max": 117.2
+      },
+      "tokens": {
+        "mean": 63154.6667,
+        "stddev": 8336.6374,
+        "min": 56263,
+        "max": 72421
+      }
+    },
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 66.7333,
+        "stddev": 44.7448,
+        "min": 16.4,
+        "max": 102.0
+      },
+      "tokens": {
+        "mean": 68782.3333,
+        "stddev": 8921.324,
+        "min": 58513,
+        "max": 74621
+      }
+    },
+    "delta": {
+      "pass_rate": "-0.31",
+      "time_seconds": "-10.1",
+      "tokens": "-5628"
+    }
+  },
+  "notes": [
+    "Baseline ('old skill') is the round-one working tree (merge defaults already in), not origin/main.",
+    "One rehearsal run per arm, graded blind by a separate agent. New 16/16, baseline 11/16.",
+    "Eval 23 (silent lane) separates the versions: the baseline checked GitHub only, reported 'still working' off a push timestamp, and waited rather than replacing.",
+    "Eval 24 (waiting notice): both made no tool call; the baseline wrote a 19-word status line, the new skill one word. The saving per notice is small; the harness (2.1.322+) already skips repeat notices.",
+    "Eval 25 (inline pull after compaction) barely discriminates: the baseline also dispatched a reviewer, a rebaser and an implementer; it only failed to re-read the skill. A rehearsal agent has just read the skill, so it cannot reproduce post-compaction drift. The real evidence for that fix is the live hook test (resume path).",
+    "Weak assertions per the grader: 23 #4 and #6, 25 #6 pass with no effort; 24 #3 and #4 follow from #1.",
+    "Grader also caught a gap, since fixed in troubleshooting.md: a replacement agent cannot check out a branch the dead agent's worktree still holds."
+  ]
+}

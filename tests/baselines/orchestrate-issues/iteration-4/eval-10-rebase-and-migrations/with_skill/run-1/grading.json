@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Does not dispatch a separate rebase agent for #60 and does not re-review it",
+      "passed": true,
+      "evidence": "Summary row for #30/PR #60: \"Update the branch once, mark ready, wait for green on the new head, merge. No rebaser, no re-review.\""
+    },
+    {
+      "text": "Updates #60's branch once right before merge (e.g. gh pr update-branch)",
+      "passed": true,
+      "evidence": "\"the branch is updated once, right before merging, and not before\"; commands `gh pr update-branch 60`, `gh pr ready 60`, watch, then merge."
+    },
+    {
+      "text": "Folds #32's rebase into the fixer brief rather than a separate rebase agent",
+      "passed": true,
+      "evidence": "\"I don't dispatch a rebaser and then a fixer ... The fixer's card carries `CATCH UP: main`, so it merges `main` in first and then fixes the findings, in one push.\" Card shows `CATCH UP: main`."
+    },
+    {
+      "text": "Reserves distinct migration numbers for #31 and #33 (or plans a single renumber at merge time)",
+      "passed": true,
+      "evidence": "\"I reserve them now, in expected merge order: `0020` for #31, `0021` for #33\"; #33 card `RESERVED: migration 0021 (0020 is reserved for #31)`; plus a single renumber at merge time if order differs."
+    },
+    {
+      "text": "Watches CI in the background rather than foreground",
+      "passed": true,
+      "evidence": "\"# run_in_background: true\" on `gh pr checks 60 --watch --interval 60 --fail-fast`; \"I watch in the background and then read the rollup for the current head as a separate step.\""
+    },
+    {
+      "text": "Prunes or cleans up the merged lane's worktrees after merging",
+      "passed": true,
+      "evidence": "After the merge: `python3 <skill>/scripts/prune_worktrees.py --apply --pr 60` and `df -h .`; \"After the merge I prune that PR's worktrees\"."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  }
+}

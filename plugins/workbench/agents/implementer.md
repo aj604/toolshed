@@ -112,7 +112,9 @@ code you touched is small. A long one runs **as itself** with Bash `run_in_backg
 output going to `<scratch>/<issue>-<what>.log` (outside the worktree), and then you end your turn. The
 harness wakes you when it exits, with up to two hours of headroom. That is the
 whole wait: one launch, one wake. A `sleep` or `until` loop spends a turn on
-every check and finds out nothing sooner. The orchestrator sees a one-line
+every check and finds out nothing sooner. A Monitor attached to the same
+command is worse: every event it raises wakes you and the orchestrator, and two
+fixers once sent 37 notices over a single test run. The orchestrator sees a one-line
 interim notice while you wait and knows to ignore it.
 
 Before you exit, stop anything you started that keeps running: a dev server,

@@ -53,8 +53,32 @@ over red" has nothing to say about this, so here is what it means in practice:
   fixer skipped its own `git checkout -B <local> origin/<branch>` step.
   Re-dispatch rather than deleting the other worktree — you don't know what is
   still running in it.
-- **A lane stalls with no notification.** Verify with the frontier query (does
-  the PR exist?) rather than by polling the agent.
+- **A lane goes quiet.** A dead agent sends nothing, so silence looks exactly
+  like work. Past runs reported agents as "still going" for 8 and 18 hours
+  after they had died, one of them 44 seconds after dispatch. Look, in this
+  order:
+  1. *The harness's agent list.* In Claude Code, `ListAgents` shows every
+     agent you spawned as `running`, `completed` or `killed`. An agent that is
+     missing or not `running`, with no hand-back, is dead.
+  2. *Its worktree*, when the list can't say. `git worktree list` maps the
+     lane's branch to a path; then
+     `find <path> -type f -mmin -30 -not -path '*/.git/*' | head -3` shows
+     whether anything was written in the last half hour, and
+     `lsof -a -d cwd -Fn | grep -c <path>` whether a process still runs there.
+     Neither is true of a dead lane.
+  3. *GitHub.* Does the branch have commits? A draft PR?
+
+  A dead lane is replaced, not asked about. Stop the old task by name (that
+  fails harmlessly when it is already gone), then dispatch a fresh agent of
+  the same role as `<name>-b`, telling it what survived: the pushed branch to
+  continue from, or nothing. The dead agent's worktree still holds the branch
+  name, so the replacement checks the pushed branch out under a new local name
+  (`git checkout -B <local> origin/<branch>`, pushing to `HEAD:<branch>`), as
+  fixers do. Uncommitted work in the old worktree is lost to it; if step 2
+  showed any, say where it is. Note the replacement in a comment on the issue.
+  A lane that dies twice the same way is a finding: the job is too big for one
+  agent (split it) or the machine is out of something (see *Every agent fails
+  at once*). Park it rather than dispatching a third.
 - **A node still reads blocked right after you closed its blocker.** GitHub's
   `issue_dependencies_summary` lags the live edge states — sometimes by long
   enough to stall a cycle. `frontier.py` cross-checks the summary against the
@@ -68,7 +92,14 @@ over red" has nothing to say about this, so here is what it means in practice:
   is already in the state you'd be advancing it to, the notification is a
   replay — drop it. GitHub dedupes your actions the same way it survives your
   compaction.
-- **You get compacted mid-run.** GitHub is your state, not your memory.
+- **You get compacted mid-run, or the session restarts.** Re-read SKILL.md and
+  `lane-cards.md` first: a summary keeps what happened and loses the rules,
+  and past runs that skipped this started dispatching unnamed foreground
+  agents with no worktree and writing fixes themselves. The plugin's
+  `SessionStart` hook prints a reminder when this happens. After a restart or
+  resume, every agent and watch you started earlier is gone, whatever your
+  summary says: check each in-flight lane as in *A lane goes quiet*.
+  GitHub is your state, not your memory.
   Re-query the frontier: assignees mark claims, draft PRs mark work in progress,
   merged PRs mark done. The PR comments carry every review round, so you can
   recover which lanes had failed review and how many rounds they had spent.

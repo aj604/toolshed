@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Re-reads the skill's instructions (SKILL.md and/or lane-cards.md) before acting, because its context is a summary",
+      "passed": false,
+      "evidence": "Never re-reads SKILL.md or lane-cards.md. Its first step is 'rebuild state from GitHub' ('the summary is a lead, not state, so GitHub gets re-read'); it re-reads state, not the rules."
+    },
+    {
+      "text": "For #450: dispatches a fresh spec-reviewer for the production fix instead of approving it by reading the diff itself",
+      "passed": true,
+      "evidence": "'I don't read the four lines and call it reviewed.' Dispatches workbench:spec-reviewer 'review-385-r2', 'not the r1 reviewer and not the fixer'."
+    },
+    {
+      "text": "For the branch: dispatches a rebaser (or other agent) instead of merging main and resolving the conflict in its own checkout",
+      "passed": true,
+      "evidence": "'A rebaser does it. I don't resolve the CHANGELOG conflict in my checkout.' Dispatches workbench:rebaser 'rebase-landing'."
+    },
+    {
+      "text": "For the README line: does not edit or commit it itself (files an issue and dispatches, or reports it as a follow-up)",
+      "passed": true,
+      "evidence": "'Not edited by me, and not slipped onto #450's fixer or the rebaser'; gh issue create, 'filed and reported, not dispatched'."
+    },
+    {
+      "text": "Dispatches use background, a worktree and a name per lane-cards.md conventions",
+      "passed": true,
+      "evidence": "Both dispatches give name (review-385-r2, rebase-landing), 'isolation: worktree', 'run_in_background: true'. Naming checked only as present, not against lane-cards.md."
+    },
+    {
+      "text": "Does not ask the user a blocking question about any of the three",
+      "passed": true,
+      "evidence": "No question asked; parks or reports instead. Status line: 'Nothing waiting on you yet.'"
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 1,
+    "total": 6,
+    "pass_rate": 0.83
+  }
+}

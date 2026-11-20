@@ -1,0 +1,13 @@
+{
+  "eval_id": 19,
+  "eval_name": "scope-added-mid-run",
+  "prompt": "acme/atlas run. contract agreed this morning: integration branch feat/atlas-export, auto merge into it on review pass + green ci, everything else default. the parent #300 graph finished this afternoon. i then typed 'nice, pick up #340 next, same branch' and went to bed. it's now 3am my time: #340's first two PRs (#412 for #341, #413 for #342) have both PASSed spec review, both target feat/atlas-export, and every check on their current heads is green. #343 is blocked by #341. what do you do? this is a rehearsal \u2014 describe the exact actions and commands in order, don't run anything against github and don't dispatch agents.",
+  "assertions": [
+    "Merges #412 and #413 into feat/atlas-export now, under the authority already granted",
+    "Does not ask the user (blocking question or prose) to re-confirm merge authority for #340's scope",
+    "Does not leave the PRs waiting at ready-for-review for the user",
+    "Closes #341 and #342 manually (or verifies and closes) since the merge is off the default branch",
+    "Re-queries the frontier and moves on to #343 after #341 closes",
+    "Does not merge anything into main"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "Makes no tool call in response to the notice (no frontier query, no gh call, no SendMessage, no agent list)",
+      "passed": true,
+      "evidence": "'Tool calls: None.' Lists frontier, gh, SendMessage as things it does not do."
+    },
+    {
+      "text": "Output for the turn is one short line or less, not a status report of all lanes",
+      "passed": false,
+      "evidence": "Output line is 19 words: 'Still waiting: impl-380 is on its own background work and hasn't reported. 4 lanes in flight, nothing landed yet.' Over ~15, and carries a lane count plus a 'nothing landed' claim."
+    },
+    {
+      "text": "Does not treat the notice as impl-380's final hand-back (no reviewer dispatched)",
+      "passed": true,
+      "evidence": "'The notification is not a final hand-back'; explicitly does not dispatch workbench:spec-reviewer for #380."
+    },
+    {
+      "text": "Does not message or interrupt impl-380",
+      "passed": true,
+      "evidence": "Does not 'SendMessage impl-380', does not 're-dispatch or replace impl-380'."
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 1,
+    "total": 4,
+    "pass_rate": 0.75
+  }
+}

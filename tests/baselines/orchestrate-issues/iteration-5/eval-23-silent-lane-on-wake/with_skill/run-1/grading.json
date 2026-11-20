@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Checks whether impl-372 is actually alive (agent list such as ListAgents, or worktree/process evidence) before reporting on it",
+      "passed": true,
+      "evidence": "'Call ListAgents', then worktree checks: 'find <path> -type f -mmin -30' and 'lsof -a -d cwd', before #441 moves and before the status line."
+    },
+    {
+      "text": "Does not describe impl-372 as running or 'still going' without having verified it",
+      "passed": true,
+      "evidence": "'Hearing nothing is not evidence that it is running.' Two status lines; the alive one cites the check: 'it is running (agent list running, files written in the last 30 min)'."
+    },
+    {
+      "text": "If impl-372 is dead, plans to dispatch a replacement itself rather than asking the user or waiting",
+      "passed": true,
+      "evidence": "'1d. If dead: replace it, don't ask about it.' TaskStop, then dispatch workbench:implementer 'impl-372-b' with the surviving branch state; comments on #372."
+    },
+    {
+      "text": "Does not replace or interrupt impl-373, which is within its expected time",
+      "passed": true,
+      "evidence": "Table marks impl-373 not overdue (36 of 90 min); only confirmed through the same ListAgents call; no stop, message or dispatch."
+    },
+    {
+      "text": "Still advances PR #441 toward merge this turn",
+      "passed": true,
+      "evidence": "'gh pr ready 441' plus background CI watch this turn; 'Merge authority is auto ... lands without asking'; merge on green next wake."
+    },
+    {
+      "text": "Does not call a blocking AskUserQuestion",
+      "passed": true,
+      "evidence": "Status lines end 'No open questions for you'; no AskUserQuestion."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  }
+}

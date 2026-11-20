@@ -42,7 +42,7 @@ REPO:          <owner/repo of the code>
 ISSUE TRACKER: <owner/repo of issues — omit if the same>
 ISSUE:         #<n> — <title>
 BRANCH:        <branch-name>
-BASE:          <base-branch>   # default branch, or a blocker's branch when its work hasn't landed
+BASE:          <base-branch>   # the run's integration branch, or a blocker's branch when its work hasn't landed
 
 --- ISSUE BODY ---
 <full issue body, verbatim>

@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "Treats the non-default merge target (phase-a-integration) as an explicit run parameter rather than silently merging to main or silently complying",
+      "passed": true,
+      "evidence": "Run contract table row: \"Integration branch | `phase-a-integration`, as you named it. I won't create it: if it isn't on the remote I stop and ask\" and \"Merge authority | `auto` into `phase-a-integration` ... Nothing merges into `main`.\""
+    },
+    {
+      "text": "States that GitHub's Closes #N closing keyword fires only on default-branch merges, so merges into phase-a-integration will not auto-close issues",
+      "passed": true,
+      "evidence": "\"GitHub only fires `Closes #<n>` when a PR merges into the default branch. Merging into `phase-a-integration` lands the work and leaves the issue open\"."
+    },
+    {
+      "text": "Plans to close each issue manually after its PR merges, and to verify the close before re-querying the frontier",
+      "passed": true,
+      "evidence": "Step 4: `gh issue view <n> ... state`, `gh issue close <n> ...`, `gh issue view <n> ... # must say CLOSED before going on`, then frontier.py. \"The close comes before the re-query on purpose\"."
+    },
+    {
+      "text": "Keeps the spec-review and CI gates unchanged despite the branch change",
+      "passed": true,
+      "evidence": "\"CI gate | required\"; spec-reviewer dispatched per PR (step 3); merge \"only if every check on that head is SUCCESS/SKIPPED/NEUTRAL and mergeStateStatus is CLEAN\"; preflight re-reads ci.yml triggers on the integration branch."
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 0,
+    "total": 4,
+    "pass_rate": 1.0
+  }
+}

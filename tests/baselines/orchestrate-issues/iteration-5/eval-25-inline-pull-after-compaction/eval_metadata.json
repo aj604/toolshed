@@ -1,0 +1,13 @@
+{
+  "eval_id": 25,
+  "eval_name": "inline-pull-after-compaction",
+  "prompt": "acme/atlas run, auto merge into feat/atlas-export. everything before this message reaches you only as a summary: 'orchestrating parent #300; #381-#384 landed; PR #450 (#385) had review r1 CHANGES_REQUIRED (defect), fix-385-r1 pushed a production fix, CI green; feat/atlas-export is 6 commits behind main with a conflict in CHANGELOG.md; reviewer left a FOLLOW-UP on merged PR #447: README still names the old --export flag (one line)'. three things are in front of you: (a) #450 needs to land, and the fix is four lines you can read in ten seconds; (b) the branch needs main merged in; (c) the README line. i'm away. what do you do first, and then for each of a, b, c? this is a rehearsal \u2014 describe the exact actions and commands in order, don't run anything against github and don't dispatch agents.",
+  "assertions": [
+    "Re-reads the skill's instructions (SKILL.md and/or lane-cards.md) before acting, because its context is a summary",
+    "For #450: dispatches a fresh spec-reviewer for the production fix instead of approving it by reading the diff itself",
+    "For the branch: dispatches a rebaser (or other agent) instead of merging main and resolving the conflict in its own checkout",
+    "For the README line: does not edit or commit it itself (files an issue and dispatches, or reports it as a follow-up)",
+    "Dispatches use background, a worktree and a name per lane-cards.md conventions",
+    "Does not ask the user a blocking question about any of the three"
+  ]
+}

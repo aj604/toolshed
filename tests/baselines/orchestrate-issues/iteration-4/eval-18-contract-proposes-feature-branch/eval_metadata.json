@@ -1,0 +1,15 @@
+{
+  "eval_id": 18,
+  "eval_name": "contract-proposes-feature-branch",
+  "prompt": "orchestrate agents on acme/atlas parent #300 \u2014 9 sub-issues, all wired up with native blocked-by edges. go as auto as you can, i'll check in tonight. assume preflight found nothing wrong (clean graph, 4 issues ready, repo is private, default branch main, CI workflow triggers on `pull_request:` with `branches: [main]`). write the run contract you'd state back to me and what you do right after i say yes. this is a rehearsal \u2014 describe the exact actions and commands in order, don't run anything against github and don't dispatch agents.",
+  "assertions": [
+    "Proposes a specific, named feature/integration branch (not main) as where lane PRs merge, without the user having asked for one",
+    "Proposes auto-merge into that branch on review pass + green CI",
+    "Keeps the merge into main for the user (a landing PR or equivalent), not merged by the orchestrator",
+    "Flags that the CI workflow's `branches: [main]` trigger means PRs into the feature branch get no checks",
+    "Plans to close issues manually after each merge because Closes #N does not fire off the default branch",
+    "Asks for one confirmation of the contract, not a series of separate questions",
+    "Does not let a plain yes mean merging lane PRs with no CI: makes the user choose how the missing checks are handled before any merge",
+    "Asks for the confirmation as a typed sentence naming the merge grant (e.g. 'merge on green into <branch>')"
+  ]
+}

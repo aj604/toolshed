@@ -1,0 +1,11 @@
+{
+  "eval_id": 24,
+  "eval_name": "waiting-notice",
+  "prompt": "acme/atlas run, four lanes in flight, all dispatched in the last 25 minutes. this notification just arrived and nothing else has: <task-notification><status>completed</status><summary>Agent \"impl-380\" is waiting on its own background work</summary><result>This agent has not reported yet.</result></task-notification>. write exactly what your turn consists of: every tool call and every word of output. this is a rehearsal \u2014 describe the exact actions and commands in order, don't run anything against github and don't dispatch agents.",
+  "assertions": [
+    "Makes no tool call in response to the notice (no frontier query, no gh call, no SendMessage, no agent list)",
+    "Output for the turn is one short line or less, not a status report of all lanes",
+    "Does not treat the notice as impl-380's final hand-back (no reviewer dispatched)",
+    "Does not message or interrupt impl-380"
+  ]
+}

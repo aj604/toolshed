@@ -1,0 +1,13 @@
+{
+  "eval_id": 10,
+  "eval_name": "rebase-and-migrations",
+  "prompt": "acme/ledger run, 3 lanes, auto merge. state: PR #60 (#30) just PASSed review, it's 2 commits behind main, no conflicts. #31 is mid-implementation and adds a db migration. #32's review came back CHANGES_REQUIRED (defect) and main moved under it since it branched \u2014 a merged PR touched the same module. #33 is ready next and also adds a migration. the repo numbers migrations sequentially (migrations/0019_*.sql is the latest on main). what's your plan for each? rehearsal, describe only.",
+  "assertions": [
+    "Does not dispatch a separate rebase agent for #60 and does not re-review it",
+    "Updates #60's branch once right before merge (e.g. gh pr update-branch)",
+    "Folds #32's rebase into the fixer brief rather than a separate rebase agent",
+    "Reserves distinct migration numbers for #31 and #33 (or plans a single renumber at merge time)",
+    "Watches CI in the background rather than foreground",
+    "Prunes or cleans up the merged lane's worktrees after merging"
+  ]
+}

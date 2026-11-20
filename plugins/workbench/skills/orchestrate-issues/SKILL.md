@@ -26,8 +26,10 @@ lane needs a human, or the graph proves it can't finish.
 
 ## The one rule: you never implement
 
-Not one edit to a source file. Not "this one's tiny." Every issue goes to a
-subagent, including the trivial ones.
+Nothing in the repo changes by your hand. No source edit, no doc, no test, no
+commit, no branch merged into another from your checkout. Not "this one's
+tiny." Every change goes to a subagent, including the trivial ones, and every
+change is reviewed by an agent that didn't write it.
 
 This isn't ceremony — it's what makes the loop survive:
 
@@ -44,6 +46,19 @@ This isn't ceremony — it's what makes the loop survive:
 The pull to "just fix this one small thing" is strongest right after a reviewer
 reports a one-line problem. Dispatch a fixer anyway. Which fixer, and why not the
 agent that wrote the code, is the next rule.
+
+Past runs broke this rule in four shapes, each of which felt like housekeeping
+rather than implementing. Each has an agent:
+
+| What you're about to do yourself | Who does it |
+|---|---|
+| Write a doc, a README fix, a follow-up nobody filed | File the issue, then an implementer and a reviewer, like any node |
+| Add the one test a reviewer asked for | A fixer |
+| Merge the default branch into the integration branch, or one branch into another | A rebaser |
+| Read the diff yourself instead of dispatching another review | A reviewer, or a verifier after a tests-only fix |
+
+What stays yours is everything that isn't the repo's content: `gh` calls,
+issues and labels, dispatching, merging PRs through `gh pr merge`.
 
 ## The second rule: one agent, one job
 
@@ -295,24 +310,46 @@ after every merge (Step 5).
 
 **Agree the run contract.** Before the first dispatch, state these back and get
 an explicit yes — the merge authority especially, since merging is not something
-you can undo:
+you can undo. One round: an answer that changes a row ("merge into a feature
+branch") is also the yes for the rest. Fill what it leaves open yourself (name
+the branch, say so) rather than asking again; a second contract question has sat
+unanswered overnight with nothing dispatched.
+
+State the contract in chat and ask for the yes as a typed sentence that names
+the grant: *reply `merge on green into <branch>`, or tell me what to change.*
+The harness's permission check weighs the user's own words, and merges granted
+only by picking a dialog option were later refused, nine hours into an
+unattended run. A typed sentence is the best insurance available, though not a
+guarantee (Step 5 covers a refusal). If the user's request already says it,
+quote it back and don't ask again.
 
 | Parameter | Default | Notes |
 |---|---|---|
 | Concurrency | 3 lanes | How many implementers run at once. |
-| Merge authority | ask | `auto` = merge on review-pass + green CI. `ask` = stop at "PR ready for review". |
-| Merge method | squash, delete branch | |
-| Integration branch | the default branch | Where PRs merge. Ask when the user's request hints at anything but the default branch — a frozen main, a release train, a long-lived feature branch. A non-default target changes Step 5: GitHub fires `Closes #<n>` only on default-branch merges, so every landed node needs a manual close. |
+| Integration branch | a feature branch for this scope | Where lane PRs merge. Use the one the user, the parent issue, or an earlier run on this scope names; otherwise create one off the default branch, named by the repo's convention, and state its name in the contract. The default branch only when the user says so. Off the default branch GitHub never fires `Closes #<n>`, so every landed node needs a manual close (Step 5). |
+| Merge authority | `auto` into the integration branch | `auto` = merge on review-pass + green CI. `ask` = stop at "PR ready for review". Any merge into the default branch is `ask` until the user says otherwise in their own words — that covers a run whose integration branch *is* the default branch, and the landing PR. |
+| Merge method | squash, delete branch | For lane PRs. |
+| Landing | one PR, integration → default, merge commit, user merges | How the finished work reaches the default branch. See *Landing the integration branch* in Step 5. |
 | Fix rounds | 2 | Failed reviews retried this many times, each by a fresh fixer, before the lane parks. A lane that is converging (each round closes real BLOCKING findings, and the remainder is tests-only) may take one more round on your own authority — record it as an orchestrator decision. Past runs asked for that extension every time and got it every time. |
 | Split authority | split and report | When a size check says oversized, you file the split as sub-issues with native dependency edges, following the check's proposed cut, and dispatch the first one. Alternative: `ask`, which parks the lane (not the run) until the user rules. |
 | Judgement calls | apply recommended | Design or contract ambiguities an implementer, reviewer, or you surface mid-run: decide, record as `## ORCHESTRATOR DECISION`, continue. Irreversible or out-of-scope choices still park their lane. |
 | Scope growth | follow-ups filed, not dispatched | New issues created mid-run (by splits, reviews, or the user) — splits of in-scope issues are in scope; anything else is filed and listed in the report unless the user named a cap. |
 | Models | `opus`, `sonnet` by exception | See *Choosing a model for each lane*. Name it here so a later drop to `sonnet` is visibly a decision rather than a drift. |
 | Pipelining | off | `on` = dispatch an issue once every blocker has a *pushed branch*, stacking onto it, instead of waiting for the blocker to close. Faster, but builds on unreviewed code. |
-| CI gate | required if checks exist | Never merge over red checks. |
+| CI gate | required wherever the repo has CI | Never merge over red checks, and never read "no checks ran" as green without knowing why none ran (Step 5, *When no checks ran*). |
 
-Confirming `auto` once authorizes merges **for this run's scope only**. A new
-scope needs a new yes.
+**Why a feature branch is the proposal.** Across recent runs the user asked for
+one in nearly every contract that didn't offer it, and one run that never named
+a branch squash-merged six PRs into a default branch that deploys. A feature
+branch makes unattended merging cheap to grant: nothing ships until the user
+merges the landing PR, and one revert undoes the lot.
+
+**Authority belongs to the branch, not to the issue list.** `auto` into the
+integration branch covers everything this run merges there: the original scope,
+splits you file, and scope the user adds mid-run ("then pick up #679"). Runs
+that re-asked at each new parent left green PRs idle for ten hours at a time,
+for an answer that was "auto" every time. What needs a new yes is a new
+*target*: another branch, or the default branch.
 
 **Before granting yourself `auto`, read what actually guards the branch** (the
 commands are in `references/github-recipes.md`, *Branch protection*). A merge
@@ -353,12 +390,19 @@ escalates:
 2. **Fill lanes.** Dispatch ready issues until `in_flight` hits the concurrency
    cap. Lowest issue number first — earlier issues usually lay groundwork.
 3. **Wait.** Background agents notify you on completion; you don't poll. A
-   notification that isn't a final hand-back — an agent saying it's waiting on
-   its own background build — needs no turn from you; ignore it and keep
-   waiting. Never end a turn with nothing in flight that will wake you: if every
+   notice that an agent "is waiting on its own background work" is not a
+   hand-back: its suite is running, usually for ten minutes or more. The turn
+   it costs you resends your whole context, so spend nothing more on it: no
+   tool call, no status text, at most the word "waiting". It is still that
+   lane's latest sign of life, and the only thing you owe it is the next
+   check: whenever something wakes you, any lane that has been silent longer
+   than its role should take (about 90 minutes for an implementer, 45 for
+   anything else, or 45 since its last waiting notice) gets looked at before
+   you advance anything (`references/troubleshooting.md`, *A lane goes
+   quiet*). Never end a turn with nothing in flight that will wake you: if every
    lane is parked on the human, that is the end of the run, and Step 6 applies.
 4. **Advance** whichever lane reported back (review → land), then go to 1.
-5. **Rebase the survivors.** A merge moves the default branch under every other
+5. **Rebase the survivors.** A merge moves the integration branch under every other
    in-flight lane. See below.
 
 A merge is what opens the next edge, so every landed PR earns a fresh query.
@@ -453,11 +497,11 @@ double-dispatch:
 gh issue edit <n> --repo OWNER/REPO --add-assignee @me
 ```
 
-**Resolve the base branch.** Default branch, unless a blocker's work hasn't
-landed yet — then base on that blocker's branch and target its PR, so the
+**Resolve the base branch.** The integration branch, unless a blocker's work
+hasn't landed yet — then base on that blocker's branch and target its PR, so the
 implementer can actually see the code it depends on. `frontier.py` reports each
 blocker's `open_pr` and `merged_pr`; if every blocker shows `merged_pr`, the
-base is the default branch. Under pipelining this is the normal case rather than
+base is the integration branch. Under pipelining this is the normal case rather than
 the exception.
 
 **Check the issue's premises before you dispatch.** An issue that says "extend
@@ -539,6 +583,24 @@ Check once, in preflight, that the repo's workflows run on drafts at all. If
 they skip drafts (`if: ...draft == false`, or a path filter), CI only starts
 at `gh pr ready`, so budget the CI wait after review rather than alongside it.
 
+Check in the same pass that they run on PRs *targeting the integration branch*.
+A workflow with `on.pull_request.branches: [main]` never starts for a PR into a
+feature branch, and then "no checks reported" means nothing ran, not that the
+repo has no CI. If the triggers exclude the branch, the contract has to settle
+it, because `auto` there would mean merging on review alone and a plain yes
+doesn't grant that. Put the choice in the contract and ask for it by name:
+
+- **The user widens the triggers** (recommended). It is a CI-config change, so
+  it is theirs to make, or to put in scope as a reviewed node they merge.
+- **Trailing CI.** Lane PRs merge on review PASS alone; you open the landing PR
+  as a draft after the first merge, so the default branch's CI runs on the
+  integration branch after each one. The next lane merges only once that run
+  has finished green for the branch's current head; when it goes red you stop
+  merging lanes and send a fixer first. A failure is found one merge late.
+
+Until the user picks, dispatch and review as normal and hold the merges, with
+the PRs left ready.
+
 ## Step 4 — Spec review
 
 When an implementer reports back, dispatch `workbench:spec-reviewer`:
@@ -616,11 +678,50 @@ On `PASS`, with `auto` merge authority:
 ```bash
 gh pr update-branch <pr> --repo OWNER/REPO   # only if behind; do this FIRST, so green means green on the head you merge
 gh pr ready <pr> --repo OWNER/REPO
-# run_in_background: true — skip if the repo has no checks
+# run_in_background: true — skip only where no checks run at all (see "When no checks ran")
 gh pr checks <pr> --repo OWNER/REPO --watch --interval 60 --fail-fast
-# ...then, when that background command reports back green:
-gh pr merge <pr> --repo OWNER/REPO --squash --delete-branch
+# ...then, when that background command reports back, as its own command:
+gh pr view <pr> --repo OWNER/REPO --json headRefOid,mergeStateStatus,statusCheckRollup
+# ...and only if that shows the whole run green, as its own command:
+gh pr merge <pr> --repo OWNER/REPO --squash --delete-branch --match-head-commit <headRefOid>
 ```
+
+**Green means the whole run, on the head you merge.** The watch reporting back
+is a prompt to look, not a verdict. Read the rollup for the current head and
+merge only when every check there has finished `SUCCESS`, `SKIPPED` or
+`NEUTRAL`, the run is the one started for this head after `gh pr ready`, and
+`mergeStateStatus` is `CLEAN`. `UNKNOWN` just after a push means GitHub is
+still computing it: read again in a minute. Then merge that SHA with
+`--match-head-commit`, so a push that lands in between fails the merge instead
+of riding along.
+
+**When no checks ran**, the reason decides, and preflight already told you
+which it is:
+
+- *The repo has no workflow that runs on pull requests.* There is no CI gate.
+  Review PASS is the gate; merge.
+- *Workflows exist but their triggers exclude this branch.* Follow what the
+  contract settled (Step 3, *Drafts and CI*). Without that answer, the PR
+  stays ready and unmerged.
+- *Workflows ran and every job skipped itself by a path filter* (a docs-only
+  diff). That is green, as long as it is the post-ready run for this head.
+
+The merge is always its own command, after you have read that output. Runs
+that chained it (`gh pr ready && gh pr merge`, `<watch>; gh pr merge`) merged
+red five times, each a different way of mistaking "the watch ended" for green:
+
+- `gh pr ready` and `gh pr update-branch` each start a *new* run. A watch
+  started straight after one sees the previous run's results and exits 0.
+- A draft's run can skip every real suite. "All checks passed" over a list of
+  `skipping` rows, with the real run only just queued, is not green.
+- `--fail-fast` exits on the first failure while other checks are still
+  pending. That is a red run, and nothing after it should be a merge.
+- Path-scoped or late-queued jobs can start after the watch has exited.
+
+A check that is red for an outside reason (a rate-limited deploy preview, a
+runner that never picked the job up) is still red. Waiving it is the user's
+call, per check and in their words; park the PR and say which check. Don't
+make it green by another route, such as re-triggering a deploy.
 
 **Never watch CI in the foreground.** A foreground `--watch` blocks you exactly
 like a question does — in one past run for 140 minutes, while finished lanes
@@ -660,10 +761,28 @@ the fixer reads it there, same as a review. Two other kinds of red are not
 fixer work, and misreading them as fixer work is how a merge train stalls —
 see *Flaky and broken gates* below before dispatching anyone.
 
+**A merge the permission system refuses parks that PR, not the run.** The
+harness can deny `gh pr merge` even under an agreed contract. It has denied a
+merge the user picked from a contract dialog, and one they typed. What it
+accepts isn't predictable from here. When it happens:
+
+- Leave the PR ready and green. Keep every other lane moving, and keep
+  dispatching whatever doesn't depend on that merge.
+- Say it in your status line, with the sentence that would unblock it:
+  *"Merge of #<pr> into `<branch>` was denied. Reply `merge on green into
+  <branch>` and I'll land it and everything queued behind it."* A denial that
+  parks the whole graph is the one mid-run case worth ending a turn on.
+- Retry once the user has spoken, with the same command. Reach the merge only
+  through `gh pr merge`: a different route to the same merge is a bypass.
+
+The same goes for any other denied action the user already asked for: report
+the denial and the words that would clear it. Runs that silently handed the
+task back waited nine hours for a reply the user didn't know was needed.
+
 `Closes #<n>` closes the issue on merge **only when the PR merges into the
 default branch**, which is what drops GitHub's `blocked_by` count on everything
-downstream. On an integration branch — or a stacked PR merging into its
-blocker's branch — nothing closes: the work lands, the issue stays open, and
+downstream. On an integration branch — the usual case — or a stacked PR merging
+into its blocker's branch, nothing closes: the work lands, the issue stays open, and
 the frontier keeps everything downstream blocked while reporting nothing wrong.
 So after *every* merge, verify the issue closed; if it didn't, close it
 yourself with a comment naming the PR, and confirm the close **before**
@@ -686,6 +805,32 @@ With `ask` authority, leave the PR ready-for-review, report it, and treat that
 lane as parked. Parked lanes still occupy a concurrency slot only if the user
 wants ordering preserved; otherwise free the slot and keep going.
 
+### Landing the integration branch
+
+A run on a feature branch isn't finished when the frontier says `complete`:
+the work is still one merge away from the default branch, and the user needs
+something to review. Runs that stopped at "all issues closed" left the branch
+with no PR for hours, until the user asked whether it was merged yet.
+
+When the graph completes, or the run stops with work landed, open the landing
+PR — one PR, integration branch into the default branch, ready for review —
+unless one is already open. Its body lists each issue landed with its PR, every
+`ORCHESTRATOR DECISION`, and what is still open. Then:
+
+- **The user merges it.** A merge into the default branch is `ask` unless the
+  user gave it to you in their own words, for this branch.
+- **It lands as a merge commit.** A squash flattens every lane's commit into
+  one, which one run had to revert and redo. If the repo forbids merge commits,
+  say so in the PR body and leave the method to the user.
+- **Catch the branch up if the default branch moved.** A branch that never
+  took the default branch's changes hides work that already landed there; one
+  run rebuilt a feature the default branch already had. Dispatch a
+  `workbench:rebaser` at the landing PR (`BRANCH` the integration branch,
+  `BASE` the default branch), and let CI run on the result before you call the
+  PR ready. Do the same in preflight when the run reuses an integration branch
+  that is already behind: open the landing PR as a draft then, so there is a
+  PR to catch up.
+
 ## Step 6 — Report
 
 Between cycles, a status line is enough — which issue landed, what it unblocked,
@@ -701,6 +846,7 @@ python3 <skill>/scripts/prune_worktrees.py --apply
 
 Then report:
 
+- The landing PR, with its link and CI state, as the first thing the user reads
 - Issues landed, with PR links
 - What's still open and why (blocked on what / escalated for what)
 - Anything a human now owns — every `OWNER DECISION NEEDED`, batched, each with
@@ -716,6 +862,12 @@ a lie you will believe yourself next cycle. The failure is easy to fall into:
 you write the plan, the plan is good, and you narrate it in the past tense
 without having run the commands. Then you resume from your own summary, skip the
 claim step because you "already did it", and dispatch twice onto the same issue.
+
+The same goes for "still running". A lane is running when the agent list
+says so now, not because you dispatched it and heard nothing since. One run
+told the user an implementer was "still going" twice, and carried that through
+a compaction, eighteen hours after the agent had died in its first minute.
+Check before every status line that names a lane as in flight.
 
 The user is away — your report is the only thing standing between them and a
 silent mess. If a step didn't run, say it didn't. If you're unsure whether a
