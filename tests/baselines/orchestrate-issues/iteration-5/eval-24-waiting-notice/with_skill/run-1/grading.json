@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "Makes no tool call in response to the notice (no frontier query, no gh call, no SendMessage, no agent list)",
+      "passed": true,
+      "evidence": "'Tool calls: none.' Note: 'no ListAgents, no frontier query, no gh call, no SendMessage'."
+    },
+    {
+      "text": "Output for the turn is one short line or less, not a status report of all lanes",
+      "passed": true,
+      "evidence": "Output in full is one word: 'waiting'. The rest is marked 'Rehearsal note (not part of the turn)'."
+    },
+    {
+      "text": "Does not treat the notice as impl-380's final hand-back (no reviewer dispatched)",
+      "passed": true,
+      "evidence": "'The notice is not a hand-back ... Nothing to advance.' No reviewer dispatched."
+    },
+    {
+      "text": "Does not message or interrupt impl-380",
+      "passed": true,
+      "evidence": "'no SendMessage to impl-380'; no tool calls at all."
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 0,
+    "total": 4,
+    "pass_rate": 1.0
+  }
+}

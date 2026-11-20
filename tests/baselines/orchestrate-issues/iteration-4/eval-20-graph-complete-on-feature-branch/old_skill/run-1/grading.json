@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Opens (or confirms) a pull request from feat/atlas-export into main",
+      "passed": false,
+      "evidence": "'No PR to `main` opened by me. It isn't a node in the graph. I recommend it below instead.' The `gh pr list --base main` call is a read-only lookup, not a confirmed landing PR."
+    },
+    {
+      "text": "Does not merge that PR into main itself",
+      "passed": true,
+      "evidence": "'No merge of `feat/atlas-export` into `main`.' (Passes because no landing PR exists at all.)"
+    },
+    {
+      "text": "Says the landing PR should merge as a merge commit, not a squash",
+      "passed": false,
+      "evidence": "No merge method for the landing is stated; 'merge commit' and 'squash' never appear in that context."
+    },
+    {
+      "text": "Brings feat/atlas-export up to date with main by dispatching an agent (rebaser), not by merging or editing in its own checkout",
+      "passed": false,
+      "evidence": "'No merge of `main` into `feat/atlas-export`, and no rebaser dispatched for it.' The branch is left 14 commits behind."
+    },
+    {
+      "text": "Runs the end-of-run worktree sweep (prune_worktrees.py --apply)",
+      "passed": true,
+      "evidence": "Step 8: `python3 <skill>/scripts/prune_worktrees.py --apply`."
+    },
+    {
+      "text": "Final report includes the landing PR and the decisions made under the contract",
+      "passed": false,
+      "evidence": "Report lists 'Orchestrator decisions I made under the contract', but there is no landing PR to include; it reports a `needs-human` comment on #300 instead."
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 4,
+    "total": 6,
+    "pass_rate": 0.33
+  }
+}

@@ -53,7 +53,7 @@ Build it, run the probe, or read the library source. Where you cannot check
 something, say so.
 
 - **Run the WHOLE suite,** every package or workspace member, not just the
-  one the diff touched.
+  one the diff touched. A suite that fits in 10 minutes runs in the foreground with `timeout: 600000`; a longer one runs once with Bash `run_in_background: true`, and you end your turn until the harness wakes you. No wait loop or Monitor on it: past reviewers' loops were killed at the 30-minute limit, and every event wakes the orchestrator too.
 - **Mutate the implementation.** Break the line that delivers each criterion,
   confirm a test goes red, then restore it. The implementer's report has a
   MUTATIONS section. Spot-check it, then spend your time on what it didn't

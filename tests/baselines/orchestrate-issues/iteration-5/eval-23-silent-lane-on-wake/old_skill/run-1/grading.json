@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Checks whether impl-372 is actually alive (agent list such as ListAgents, or worktree/process evidence) before reporting on it",
+      "passed": false,
+      "evidence": "Never consults an agent list, worktree or process. Checks only GitHub: 'I check what survived on GitHub' (frontier, gh pr list, branch commit date); admits 'I can't prove it dead'."
+    },
+    {
+      "text": "Does not describe impl-372 as running or 'still going' without having verified it",
+      "passed": false,
+      "evidence": "Judgment call. Recent-push branch says 'it is alive and pushing per criterion. Leave it alone' and the status line option reads 'branch last pushed HH:MM, still working' - liveness asserted from a push timestamp with no threshold, no agent/worktree check."
+    },
+    {
+      "text": "If impl-372 is dead, plans to dispatch a replacement itself rather than asking the user or waiting",
+      "passed": false,
+      "evidence": "Waits instead of replacing: 'I don't dispatch a second implementer on top of it this turn. Slot stays held ... I re-check at my next wake'. Replacement only 'if the agent then returns nothing'."
+    },
+    {
+      "text": "Does not replace or interrupt impl-373, which is within its expected time",
+      "passed": true,
+      "evidence": "'#373: 36 minutes in, no hand-back expected yet. No action.'"
+    },
+    {
+      "text": "Still advances PR #441 toward merge this turn",
+      "passed": true,
+      "evidence": "Replay/body check, then 'gh pr ready 441' and background 'gh pr checks 441 --watch'; merge on green at next wake."
+    },
+    {
+      "text": "Does not call a blocking AskUserQuestion",
+      "passed": true,
+      "evidence": "'No questions to you; nothing here needs one.' No AskUserQuestion anywhere."
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 3,
+    "total": 6,
+    "pass_rate": 0.5
+  }
+}

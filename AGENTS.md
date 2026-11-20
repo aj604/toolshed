@@ -11,6 +11,8 @@ The plugin lives in `plugins/workbench/`. Its only executable code is
 `plugins/workbench/skills/incremental-enhancement-lanes/scripts/lanes.py`,
 `plugins/workbench/skills/pm-status/scripts/gather.py` and
 `plugins/workbench/skills/pm-status/scripts/check_report.py` (`python3`, stdlib-only).
+`plugins/workbench/hooks/hooks.json` holds one `SessionStart` hook: a `printf` that, after a
+compaction or resume, points an `orchestrate-issues` run back at its `SKILL.md`.
 
 ## Layout
 

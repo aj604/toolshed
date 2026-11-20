@@ -1,0 +1,11 @@
+{
+  "eval_id": 4,
+  "eval_name": "integration-branch-close",
+  "prompt": "we're doing the rest of the toolshed #170 graph the same agent-driven way, but heads up: main is frozen for the release, so everything merges into the long-lived branch phase-a-integration instead. same flow otherwise \u2014 dispatch, review, merge, keep the chain moving.",
+  "assertions": [
+    "Treats the non-default merge target (phase-a-integration) as an explicit run parameter rather than silently merging to main or silently complying",
+    "States that GitHub's Closes #N closing keyword fires only on default-branch merges, so merges into phase-a-integration will not auto-close issues",
+    "Plans to close each issue manually after its PR merges, and to verify the close before re-querying the frontier",
+    "Keeps the spec-review and CI gates unchanged despite the branch change"
+  ]
+}

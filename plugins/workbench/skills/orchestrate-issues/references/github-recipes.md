@@ -117,12 +117,17 @@ pending. So a repo with no CI is indistinguishable from a repo with red CI if yo
 only look at the exit code. Read the states instead:
 
 ```bash
-gh pr checks <pr> --repo OWNER/REPO --json name,state 2>/dev/null || echo "[]"
+gh pr checks <pr> --repo OWNER/REPO --json name,state
 ```
 
-An empty array means no CI is configured — proceed to merge. Otherwise merge only
-when every `state` is `SUCCESS` (or `SKIPPED`/`NEUTRAL`); send `FAILURE` to a
-fresh fixer, and let `--watch` settle anything still `PENDING`.
+A failed call tells you nothing, so run it again rather than reading it as empty.
+An empty array means no checks ran for this PR. That is "no CI" only if the
+repo has no workflow that runs on pull requests; if its triggers merely exclude
+this PR's base, see SKILL.md Step 5, *When no checks ran*. Otherwise merge only
+when every `state` is `SUCCESS` (or `SKIPPED`/`NEUTRAL`); send `FAILURE` to a fresh
+fixer, and let `--watch` settle anything still `PENDING`. Read the states again
+for the current head right before `gh pr merge`, as a separate command, and
+pass that SHA to `--match-head-commit` (SKILL.md, Step 5).
 
 One caveat on `--watch` in an unattended run: it is a long-lived foreground
 process, and a background shell chain holding it can get killed by process
@@ -202,12 +207,46 @@ On a non-fast-forward rejection, `git pull --no-rebase origin <branch>` (merge,
 never rebase) and push again. Never force-push a PR branch: the commits you would discard may already
 have been reviewed, and the review comments anchor to them.
 
-## Branch protection — read it before promising `auto`
+## The integration branch
 
-What guards the default branch decides whether your merge authority is real:
+Create it on the remote without touching your checkout, and only if it doesn't
+exist:
 
 ```bash
-BR=$(gh repo view OWNER/REPO --json defaultBranchRef --jq .defaultBranchRef.name)
+git fetch origin
+git ls-remote --exit-code --heads origin <integration-branch> \
+  || git push origin "origin/<default>:refs/heads/<integration-branch>"
+```
+
+Do the repo's workflows run for PRs that target it? Read the triggers:
+
+```bash
+grep -n -A6 'pull_request' .github/workflows/*.y*ml
+```
+
+`pull_request:` with no `branches:` filter runs for every target. A filter that
+omits the integration branch means lane PRs get no checks at all.
+
+The landing PR, when the graph completes:
+
+```bash
+gh pr create --repo OWNER/REPO --base <default> --head <integration-branch> \
+  --title "<scope>: land <integration-branch>" --body-file - <<'BODY'
+<issues landed with their PRs, orchestrator decisions, what is still open>
+BODY
+```
+
+The user merges it with `--merge`, so each lane's squash commit survives on the
+default branch.
+
+## Branch protection — read it before promising `auto`
+
+What guards the branch you merge into decides whether your merge authority is
+real. Read it for the integration branch, and for the default branch the
+landing PR targets:
+
+```bash
+BR=<integration-branch>   # the default branch: gh repo view OWNER/REPO --json defaultBranchRef --jq .defaultBranchRef.name
 gh api "repos/OWNER/REPO/rules/branches/$BR" --jq '[.[] | {type, ruleset: .ruleset_id}] | unique'
 ```
 
@@ -266,5 +305,7 @@ python3 <skill>/scripts/frontier.py --repo OWNER/REPO --parent <n>
 
 `in_flight` with an open draft PR means an implementer was working and may be
 gone; `in_flight` with an assignee and no branch means a claim that never
-started. Both are recoverable by re-dispatching — check with the user first, so
-you don't run a second implementer against a live one.
+started. Both are recoverable by re-dispatching. Find out first whether the
+agent is still alive (`troubleshooting.md`, *A lane goes quiet*), so you don't
+run a second implementer against a live one: after a compaction it may be,
+after a restart it isn't.

@@ -1,0 +1,50 @@
+{
+  "expectations": [
+    {
+      "text": "Proposes a specific, named feature/integration branch (not main) as where lane PRs merge, without the user having asked for one",
+      "passed": false,
+      "evidence": "Contradicted: \"Integration branch | `main` (the default branch) | Every PR targets `main`\". No feature branch is proposed."
+    },
+    {
+      "text": "Proposes auto-merge into that branch on review pass + green CI",
+      "passed": false,
+      "evidence": "Auto-merge on \"spec-review PASS plus green CI\" is proposed, but into `main`; there is no feature branch for it to merge into."
+    },
+    {
+      "text": "Keeps the merge into main for the user (a landing PR or equivalent), not merged by the orchestrator",
+      "passed": false,
+      "evidence": "Contradicted: the orchestrator merges every lane PR into `main` itself (`gh pr merge <pr> --squash --delete-branch`, BASE: main). No landing PR is left for the user."
+    },
+    {
+      "text": "Flags that the CI workflow's `branches: [main]` trigger means PRs into the feature branch get no checks",
+      "passed": false,
+      "evidence": "Not exercised: targets main. It flags the trigger only for stacked PRs under pipelining (\"a PR stacked onto a blocker's branch would get no CI at all\"), never for feature-branch lane PRs, since it proposes none."
+    },
+    {
+      "text": "Plans to close issues manually after each merge because Closes #N does not fire off the default branch",
+      "passed": false,
+      "evidence": "Relies on auto-close: \"Every PR targets `main`, so `Closes #<n>` closes the issue on merge\". Manual close is only a fallback \"If the issue is still open\"; the off-default-branch reason is never given."
+    },
+    {
+      "text": "Asks for one confirmation of the contract, not a series of separate questions",
+      "passed": true,
+      "evidence": "One confirmation: \"Say yes to this contract, and to `auto` merge in particular, and I start.\" No further questions."
+    },
+    {
+      "text": "Does not let a plain yes mean merging lane PRs with no CI: makes the user choose how the missing checks are handled before any merge",
+      "passed": false,
+      "evidence": "Not exercised: targets main, so checks run and a plain yes does not merge without CI, but the answer never identifies missing checks and never makes the user choose how they are handled."
+    },
+    {
+      "text": "Asks for the confirmation as a typed sentence naming the merge grant (e.g. 'merge on green into <branch>')",
+      "passed": false,
+      "evidence": "Asks only for \"yes to this contract, and to `auto` merge in particular\". No typed sentence naming the grant and branch is requested."
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 7,
+    "total": 8,
+    "pass_rate": 0.12
+  }
+}

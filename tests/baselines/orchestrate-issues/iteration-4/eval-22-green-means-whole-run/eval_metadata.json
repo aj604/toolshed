@@ -1,0 +1,13 @@
+{
+  "eval_id": 22,
+  "eval_name": "green-means-whole-run",
+  "prompt": "acme/atlas, auto merge into feat/atlas-export. PR #430 (issue #360) just PASSed spec review. it's still a draft and 3 commits behind feat/atlas-export, no conflicts. `gh pr checks 430` right now shows: lint pass, unit skipping, e2e skipping (the workflows skip the suites on drafts). give me the exact command sequence to land it, and what you look at between commands. this is a rehearsal \u2014 describe the exact actions and commands in order, don't run anything against github and don't dispatch agents.",
+  "assertions": [
+    "Recognises the current check list (suites skipped on a draft) is not a green run to merge on",
+    "Runs the CI watch in the background, not foreground",
+    "After the watch reports, re-reads the check states for the PR's current head before merging",
+    "Issues gh pr merge as its own command, not chained (&&, ;) after ready, update-branch or the watch",
+    "Pins the merge to the verified head SHA with --match-head-commit",
+    "Verifies issue #360 closed and closes it manually if not"
+  ]
+}

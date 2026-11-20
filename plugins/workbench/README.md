@@ -53,7 +53,8 @@ list. The orchestrator agrees a run contract with you, then:
 1. Dispatches an implementer for each ready issue in its own worktree.
 2. Sends each PR to a separate spec reviewer.
 3. Dispatches fixers for blocking findings within the agreed fix budget.
-4. Lands eligible PRs under the agreed merge authority.
+4. Lands eligible PRs on a feature branch under the agreed merge authority, then
+   opens one landing PR into the default branch for you to merge.
 5. Reads the graph again as completed work unblocks the next issues.
 
 The orchestrator coordinates; the agents implement. A lane needing a human

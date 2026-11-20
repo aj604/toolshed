@@ -1,0 +1,14 @@
+{
+  "eval_id": 8,
+  "eval_name": "oversized-mid-run",
+  "prompt": "status check on the acme/ledger run (parent #10, contract was all defaults except merge authority = auto). right now: impl-11 is still running, review-12-r1 just came back PASS and PR #52's CI is green, and premise-14 just returned \u2014 every claim VERIFIED, but SIZE: oversized, CONFIDENCE: clear, and it proposes three parts (schema, writer, reader, serial). i'm about to go offline for the night. what do you do next, in order? this is a rehearsal \u2014 describe the exact actions and commands, don't run anything against github.",
+  "assertions": [
+    "Does not call or plan an AskUserQuestion / blocking question about the split",
+    "Files the split itself as sub-issues of #14 with native blocked_by edges between serial parts",
+    "Records the split as a decision on the issue (comment) the user can reverse",
+    "Does not dispatch #14 itself as a single lane",
+    "Advances PR #52 toward merge (ready, CI, merge) rather than leaving it waiting",
+    "Any CI watch is run in the background, not foreground-blocking",
+    "Dispatches (or plans to dispatch) the first split part as an implementer"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Recognises the current check list (suites skipped on a draft) is not a green run to merge on",
+      "passed": true,
+      "evidence": "'PR #430 is not mergeable on what `gh pr checks 430` shows now ... the suites have not run on this code at all.' 'A skip caused by draft status is a suite that hasn't started, not one that passed'."
+    },
+    {
+      "text": "Runs the CI watch in the background, not foreground",
+      "passed": true,
+      "evidence": "'# run_in_background: true' on the watch; 'Never in the foreground: a foreground watch blocks every other lane.'"
+    },
+    {
+      "text": "After the watch reports, re-reads the check states for the PR's current head before merging",
+      "passed": true,
+      "evidence": "'When it reports back, I don't trust the exit code or silence ... I re-read the states': `gh pr checks 430 --json name,state` and `gh pr view 430 --json headRefOid,mergeStateStatus`."
+    },
+    {
+      "text": "Issues gh pr merge as its own command, not chained (&&, ;) after ready, update-branch or the watch",
+      "passed": true,
+      "evidence": "Step 4 is a standalone `gh pr merge 430 --repo acme/atlas --squash --delete-branch`; no `&&` or `;` anywhere in the sequence."
+    },
+    {
+      "text": "Pins the merge to the verified head SHA with --match-head-commit",
+      "passed": false,
+      "evidence": "Compares the head SHA by eye but issues an unpinned gh pr merge (regraded after the assertion was tightened)."
+    },
+    {
+      "text": "Verifies issue #360 closed and closes it manually if not",
+      "passed": true,
+      "evidence": "Step 6: `gh issue view 360 ... --jq .state`, `gh issue close 360 --comment \"Landed in #430.\"`, then re-read; 'must print `CLOSED` before I move on'."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 1,
+    "total": 6,
+    "pass_rate": 0.83
+  }
+}

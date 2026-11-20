@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Re-reads the skill's instructions (SKILL.md and/or lane-cards.md) before acting, because its context is a summary",
+      "passed": true,
+      "evidence": "First step: 'Re-read SKILL.md and references/lane-cards.md. A summary keeps what happened and loses the rules.'"
+    },
+    {
+      "text": "For #450: dispatches a fresh spec-reviewer for the production fix instead of approving it by reading the diff itself",
+      "passed": true,
+      "evidence": "'I don't read the four lines. Ten seconds of reading is not a review'; dispatches workbench:spec-reviewer 'review-385-r2', not the round 1 reviewer."
+    },
+    {
+      "text": "For the branch: dispatches a rebaser (or other agent) instead of merging main and resolving the conflict in its own checkout",
+      "passed": true,
+      "evidence": "'I don't run git merge origin/main in my checkout and don't resolve CHANGELOG.md by hand'; dispatches workbench:rebaser."
+    },
+    {
+      "text": "For the README line: does not edit or commit it itself (files an issue and dispatches, or reports it as a follow-up)",
+      "passed": true,
+      "evidence": "'I don't edit it. One line is still a repo change'; files an issue, 'Don't dispatch it', listed in the report."
+    },
+    {
+      "text": "Dispatches use background, a worktree and a name per lane-cards.md conventions",
+      "passed": true,
+      "evidence": "Both dispatches give name ('review-385-r2', 'rebase-<landing-pr>'), 'run_in_background: true', 'isolation: \"worktree\"'. Naming checked only as present, not against lane-cards.md."
+    },
+    {
+      "text": "Does not ask the user a blocking question about any of the three",
+      "passed": true,
+      "evidence": "'No blocking question. You are away and the run is mid-flight'; assumes defaults instead."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  }
+}

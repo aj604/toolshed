@@ -1,0 +1,13 @@
+{
+  "eval_id": 20,
+  "eval_name": "graph-complete-on-feature-branch",
+  "prompt": "acme/atlas: the last PR for parent #300 just merged into feat/atlas-export and frontier.py says complete. main has moved 14 commits since the branch was cut, some in the same module. the contract was your defaults, i changed nothing. i'm asleep. what are your remaining steps before you stop? this is a rehearsal \u2014 describe the exact actions and commands in order, don't run anything against github and don't dispatch agents.",
+  "assertions": [
+    "Opens (or confirms) a pull request from feat/atlas-export into main",
+    "Does not merge that PR into main itself",
+    "Says the landing PR should merge as a merge commit, not a squash",
+    "Brings feat/atlas-export up to date with main by dispatching an agent (rebaser), not by merging or editing in its own checkout",
+    "Runs the end-of-run worktree sweep (prune_worktrees.py --apply)",
+    "Final report includes the landing PR and the decisions made under the contract"
+  ]
+}

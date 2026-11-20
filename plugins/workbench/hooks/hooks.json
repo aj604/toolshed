@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s\\n' \"Workbench: if this session is running the orchestrate-issues skill, its rules did not survive this compaction or resume. Before your next action, re-read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrate-issues/SKILL.md and references/lane-cards.md beside it. You dispatch agents; you do not edit, commit, or review a diff yourself. Agents and watches you started before a resume are gone: check every in-flight lane before you call it running. If this session is not an orchestrate-issues run, ignore this note.\""
+          }
+        ]
+      }
+    ]
+  }
+}

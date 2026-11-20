@@ -44,7 +44,8 @@ past 10 minutes, is a longer one: it runs as itself with Bash
 `run_in_background: true`, its output going to `<scratch>/<issue>-<what>.log` (outside the
 worktree, where a stray file reads as uncommitted work),
 and then you end your turn. The harness wakes you when it exits, so there is
-nothing to poll.
+nothing to poll, and nothing to attach a Monitor or wait loop to: each event
+from one wakes you and the orchestrator again.
 
 ## Report
 
